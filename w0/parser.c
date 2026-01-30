@@ -294,6 +294,33 @@ static Node* parse_primary(Parser* parser) {
     }
 
     if (match(parser, TOK_IDENT)) {
+        // Check for qualified enum value: EnumName::ValueName
+        if (check(parser, TOK_COLON_COLON)) {
+            Token enum_name = token;
+            advance(parser); // consume ::
+            Token value_name = parser->current;
+            consume(parser, TOK_IDENT, "Expected enum value name after '::'");
+
+            Node* node = node_new(NODE_ENUM_VALUE, enum_name.line, enum_name.column);
+            if (!node) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
+            node->as.enum_value.enum_name = copy_token_string(&enum_name);
+            if (!node->as.enum_value.enum_name) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
+            node->as.enum_value.enum_name_length = enum_name.length;
+            node->as.enum_value.value_name       = copy_token_string(&value_name);
+            if (!node->as.enum_value.value_name) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
+            node->as.enum_value.value_name_length = value_name.length;
+            return node;
+        }
+
         Node* node = node_new(NODE_IDENT, token.line, token.column);
         if (!node) {
             error(parser, "Out of memory");

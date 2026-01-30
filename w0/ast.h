@@ -20,6 +20,7 @@ typedef enum {
     NODE_ASSIGN,
     NODE_STRUCT_INIT,
     NODE_FIELD_INIT,
+    NODE_ENUM_VALUE,
 
     // Statements
     NODE_EXPR_STMT,
@@ -135,6 +136,14 @@ struct Node {
             int   name_length;
             Node* value;
         } field_init;
+
+        // Enum value access: EnumName::ValueName
+        struct {
+            char* enum_name;
+            int   enum_name_length;
+            char* value_name;
+            int   value_name_length;
+        } enum_value;
 
         // Expression statement
         struct {

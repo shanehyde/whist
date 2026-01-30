@@ -8,6 +8,6 @@ enum Color {
 
 func main(): i32 {
     var c: Color;
-    c = Red;
+    c = Color::Red;
     return 0;
 }

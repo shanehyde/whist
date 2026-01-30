@@ -249,6 +249,12 @@ void print_ast(Node* node, int depth) {
         printf("Ident: %.*s\n", node->as.ident.length, node->as.ident.name);
         break;
 
+    case NODE_ENUM_VALUE:
+        printf("EnumValue: %.*s::%.*s\n", node->as.enum_value.enum_name_length,
+               node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
+               node->as.enum_value.value_name);
+        break;
+
     default:
         printf("Unknown node type: %d\n", node->type);
         break;

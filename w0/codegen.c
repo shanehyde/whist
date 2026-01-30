@@ -273,6 +273,11 @@ static void emit_expr(CodeGen* gen, Node* node) {
         emit(gen, "%.*s", node->as.ident.length, node->as.ident.name);
         break;
 
+    case NODE_ENUM_VALUE:
+        // Emit just the value name - C enums use unqualified names
+        emit(gen, "%.*s", node->as.enum_value.value_name_length, node->as.enum_value.value_name);
+        break;
+
     case NODE_BINARY:
         emit(gen, "(");
         emit_expr(gen, node->as.binary.left);

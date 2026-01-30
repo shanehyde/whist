@@ -46,6 +46,10 @@ void node_free(Node* node) {
     case NODE_IDENT:
         free(node->as.ident.name);
         break;
+    case NODE_ENUM_VALUE:
+        free(node->as.enum_value.enum_name);
+        free(node->as.enum_value.value_name);
+        break;
     case NODE_BINARY:
         node_free(node->as.binary.left);
         node_free(node->as.binary.right);

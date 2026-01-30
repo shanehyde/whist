@@ -296,7 +296,7 @@ Token lexer_next(Lexer* lexer) {
     case ';':
         return make_token(lexer, TOK_SEMICOLON);
     case ':':
-        return make_token(lexer, TOK_COLON);
+        return make_token(lexer, match(lexer, ':') ? TOK_COLON_COLON : TOK_COLON);
     case ',':
         return make_token(lexer, TOK_COMMA);
     case '.':
@@ -494,6 +494,8 @@ const char* token_type_name(TokenType type) {
         return "SEMICOLON";
     case TOK_COLON:
         return "COLON";
+    case TOK_COLON_COLON:
+        return "COLON_COLON";
     case TOK_COMMA:
         return "COMMA";
     case TOK_DOT:

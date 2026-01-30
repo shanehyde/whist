@@ -31,7 +31,6 @@ static char* read_file(const char* path) {
     return buffer;
 }
 
-
 int main(int argc, char** argv) {
     char*       source;
     int         free_source    = 0;

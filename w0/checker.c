@@ -291,6 +291,36 @@ static Type* check_expr(Checker* checker, Node* node) {
         return sym->type;
     }
 
+    case NODE_ENUM_VALUE: {
+        // Look up the enum type
+        Symbol* sym = checker_lookup(checker, node->as.enum_value.enum_name);
+        if (!sym || sym->kind != SYM_TYPE) {
+            error(checker, node->line, node->column, "Unknown enum '%s'",
+                  node->as.enum_value.enum_name);
+            return type_error;
+        }
+        Type* enum_type = sym->type;
+        if (enum_type->kind != TYPE_ENUM) {
+            error(checker, node->line, node->column, "'%s' is not an enum",
+                  node->as.enum_value.enum_name);
+            return type_error;
+        }
+        // Check that the value exists in the enum
+        int found = 0;
+        for (int i = 0; i < enum_type->as.enm.value_count; i++) {
+            if (strcmp(enum_type->as.enm.value_names[i], node->as.enum_value.value_name) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            error(checker, node->line, node->column, "'%s' is not a value of enum '%s'",
+                  node->as.enum_value.value_name, node->as.enum_value.enum_name);
+            return type_error;
+        }
+        return enum_type;
+    }
+
     case NODE_BINARY: {
         Type* left  = check_expr(checker, node->as.binary.left);
         Type* right = check_expr(checker, node->as.binary.right);
@@ -903,11 +933,8 @@ static void check_decl(Checker* checker, Node* node) {
         for (int i = 0; i < value_count; i++) {
             Node* val                        = node->as.enum_decl.values.nodes[i];
             enum_type->as.enm.value_names[i] = strdup(val->as.ident.name);
-
-            Symbol* sym = checker_define(checker, val->as.ident.name, SYM_ENUM_VALUE, enum_type);
-            if (!sym) {
-                error(checker, val->line, val->column, "Redefinition of '%s'", val->as.ident.name);
-            }
+            // Note: enum values are NOT registered in scope - they must be accessed via
+            // EnumName::ValueName
         }
         break;
     }

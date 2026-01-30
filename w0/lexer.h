@@ -72,17 +72,18 @@ typedef enum {
     TOK_ARROW,       // ->
 
     // Punctuation
-    TOK_LPAREN,    // (
-    TOK_RPAREN,    // )
-    TOK_LBRACE,    // {
-    TOK_RBRACE,    // }
-    TOK_LBRACKET,  // [
-    TOK_RBRACKET,  // ]
-    TOK_SEMICOLON, // ;
-    TOK_COLON,     // :
-    TOK_COMMA,     // ,
-    TOK_DOT,       // .
-    TOK_DOT_DOT,   // ..
+    TOK_LPAREN,      // (
+    TOK_RPAREN,      // )
+    TOK_LBRACE,      // {
+    TOK_RBRACE,      // }
+    TOK_LBRACKET,    // [
+    TOK_RBRACKET,    // ]
+    TOK_SEMICOLON,   // ;
+    TOK_COLON,       // :
+    TOK_COLON_COLON, // ::
+    TOK_COMMA,       // ,
+    TOK_DOT,         // .
+    TOK_DOT_DOT,     // ..
 
     // Error
     TOK_ERROR
