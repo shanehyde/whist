@@ -37,7 +37,7 @@ test: $(TARGET)
 			passed=$$((passed + 1)); \
 		else \
 			echo " \033[1;31m✗ FAIL\033[0m"; \
-			$(TARGET) --check "$$f" 2>&1 | while IFS= read -r line; do echo "  \033[31m$$line\033[0m"; done; \
+			$(TARGET) --check "$$f" 2>&1 | sed 's/^/  \033[31m/' | sed 's/$$/\033[0m/'; \
 			failed=$$((failed + 1)); \
 		fi; \
 	done; \
@@ -68,7 +68,7 @@ test: $(TARGET)
 			else \
 				echo " \033[1;31m✗ FAIL (no error message)\033[0m"; \
 				echo "  \033[33mExpected: $$expected_error\033[0m"; \
-				echo "$$output" | while IFS= read -r line; do echo "  \033[31m$$line\033[0m"; done; \
+				echo "$$output" | sed 's/^/  \033[31m/' | sed 's/$$/\033[0m/'; \
 				error_failed=$$((error_failed + 1)); \
 			fi; \
 		fi; \
@@ -131,7 +131,7 @@ test-valid: $(TARGET)
 			passed=$$((passed + 1)); \
 		else \
 			echo " \033[1;31m✗ FAIL\033[0m"; \
-			$(TARGET) --check "$$f" 2>&1 | while IFS= read -r line; do echo "  \033[31m$$line\033[0m"; done; \
+			$(TARGET) --check "$$f" 2>&1 | sed 's/^/  \033[31m/' | sed 's/$$/\033[0m/'; \
 			failed=$$((failed + 1)); \
 		fi; \
 	done; \
@@ -164,7 +164,7 @@ test-errors: $(TARGET)
 			else \
 				echo " \033[1;31m✗ FAIL (no error message)\033[0m"; \
 				echo "  \033[33mExpected: $$expected_error\033[0m"; \
-				echo "$$output" | while IFS= read -r line; do echo "  \033[31m$$line\033[0m"; done; \
+				echo "$$output" | sed 's/^/  \033[31m/' | sed 's/$$/\033[0m/'; \
 				error_failed=$$((error_failed + 1)); \
 			fi; \
 		fi; \
