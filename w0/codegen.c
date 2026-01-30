@@ -522,6 +522,26 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         emit(gen, "}\n");
         break;
 
+    case NODE_FOREACH:
+        emit_indent(gen);
+        // Generate: for (int64_t var = start; var < end; var++) {
+        emit(gen, "for (int64_t %s = ", node->as.foreach_stmt.var_name);
+        emit_expr(gen, node->as.foreach_stmt.start);
+        emit(gen, "; %s < ", node->as.foreach_stmt.var_name);
+        emit_expr(gen, node->as.foreach_stmt.end);
+        emit(gen, "; %s++) {\n", node->as.foreach_stmt.var_name);
+        gen->indent++;
+        if (node->as.foreach_stmt.body->type == NODE_BLOCK) {
+            for (int i = 0; i < node->as.foreach_stmt.body->as.block.stmts.count; i++) {
+                emit_stmt(gen, node->as.foreach_stmt.body->as.block.stmts.nodes[i]);
+            }
+        } else {
+            emit_stmt(gen, node->as.foreach_stmt.body);
+        }
+        gen->indent--;
+        emit_indent(gen);
+        emit(gen, "}\n");
+        break;
     case NODE_RETURN:
         emit_indent(gen);
         emit(gen, "return");

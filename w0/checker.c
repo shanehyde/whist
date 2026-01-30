@@ -721,6 +721,38 @@ static void check_stmt(Checker* checker, Node* node) {
         break;
     }
 
+    case NODE_FOREACH: {
+        checker_push_scope(checker); // New scope for loop variable
+
+        // Check that start and end are integers
+        Type* start_type = check_expr(checker, node->as.foreach_stmt.start);
+        Type* end_type   = check_expr(checker, node->as.foreach_stmt.end);
+
+        if (start_type->kind != TYPE_INT64 && start_type->kind != TYPE_ERROR) {
+            error(checker, node->as.foreach_stmt.start->line, node->as.foreach_stmt.start->column,
+                  "Foreach range start must be int, got '%s'", type_name(start_type));
+        }
+
+        if (end_type->kind != TYPE_INT64 && end_type->kind != TYPE_ERROR) {
+            error(checker, node->as.foreach_stmt.end->line, node->as.foreach_stmt.end->column,
+                  "Foreach range end must be int, got '%s'", type_name(end_type));
+        }
+
+        // Add the loop variable as an int64
+        Symbol* sym = checker_define(checker, node->as.foreach_stmt.var_name, SYM_VAR, type_int64);
+        if (!sym) {
+            error(checker, node->line, node->column, "Variable '%s' already declared in this scope",
+                  node->as.foreach_stmt.var_name);
+        }
+
+        int was_in_loop  = checker->in_loop;
+        checker->in_loop = 1;
+        check_stmt(checker, node->as.foreach_stmt.body);
+        checker->in_loop = was_in_loop;
+
+        checker_pop_scope(checker);
+        break;
+    }
     case NODE_RETURN: {
         Type* expected = checker->current_func_return;
         if (!expected) {

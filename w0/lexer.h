@@ -19,6 +19,7 @@ typedef enum {
     TOK_ELSE,
     TOK_WHILE,
     TOK_FOR,
+    TOK_FOREACH,
     TOK_RETURN,
     TOK_BREAK,
     TOK_CONTINUE,
@@ -29,6 +30,7 @@ typedef enum {
     TOK_CONST,
     TOK_TRUE,
     TOK_FALSE,
+    TOK_IN,
     TOK_NULL,
 
     // Operators
@@ -78,6 +80,7 @@ typedef enum {
     TOK_COLON,     // :
     TOK_COMMA,     // ,
     TOK_DOT,       // .
+    TOK_DOT_DOT,   // ..
 
     // Error
     TOK_ERROR

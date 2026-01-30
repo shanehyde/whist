@@ -28,6 +28,7 @@ typedef enum {
     NODE_IF,
     NODE_WHILE,
     NODE_FOR,
+    NODE_FOREACH,
     NODE_RETURN,
     NODE_BREAK,
     NODE_CONTINUE,
@@ -174,6 +175,15 @@ struct Node {
             Node* post;
             Node* body;
         } for_stmt;
+
+        // Foreach statement
+        struct {
+            char* var_name;
+            int   var_name_length;
+            Node* start;
+            Node* end;
+            Node* body;
+        } foreach_stmt;
 
         // Return statement
         struct {

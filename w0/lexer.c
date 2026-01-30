@@ -148,14 +148,26 @@ static TokenType identifier_type(Lexer* lexer) {
             case 'a':
                 return check_keyword(start, length, "alse", 4, TOK_FALSE);
             case 'o':
-                return check_keyword(start, length, "or", 2, TOK_FOR);
+                if (length > 2 && start[2] == 'r') {
+                    if (length == 3) {
+                        return TOK_FOR;
+                    } else if (length == 7) {
+                        return check_keyword(start, length, "oreach", 6, TOK_FOREACH);
+                    }
+                }
+                break;
             case 'u':
                 return check_keyword(start, length, "unc", 3, TOK_FUNC);
             }
         }
         break;
     case 'i':
-        return check_keyword(start, length, "f", 1, TOK_IF);
+        if (length == 1) {
+            return check_keyword(start, length, "f", 1, TOK_IF);
+        } else if (length == 2) {
+            return check_keyword(start, length, "n", 1, TOK_IN);
+        }
+        break;
     case 'n':
         return check_keyword(start, length, "ull", 3, TOK_NULL);
     case 'r':
@@ -296,7 +308,7 @@ Token lexer_next(Lexer* lexer) {
     case ',':
         return make_token(lexer, TOK_COMMA);
     case '.':
-        return make_token(lexer, TOK_DOT);
+        return make_token(lexer, match(lexer, '.') ? TOK_DOT_DOT : TOK_DOT);
     case '~':
         return make_token(lexer, TOK_TILDE);
     case '^':
@@ -380,6 +392,8 @@ const char* token_type_name(TokenType type) {
         return "WHILE";
     case TOK_FOR:
         return "FOR";
+    case TOK_FOREACH:
+        return "FOREACH";
     case TOK_RETURN:
         return "RETURN";
     case TOK_BREAK:
@@ -392,6 +406,8 @@ const char* token_type_name(TokenType type) {
         return "ENUM";
     case TOK_FUNC:
         return "FUNC";
+    case TOK_IN:
+        return "IN";
     case TOK_VAR:
         return "VAR";
     case TOK_CONST:
@@ -486,6 +502,8 @@ const char* token_type_name(TokenType type) {
         return "COMMA";
     case TOK_DOT:
         return "DOT";
+    case TOK_DOT_DOT:
+        return "DOT_DOT";
     case TOK_ERROR:
         return "ERROR";
     }

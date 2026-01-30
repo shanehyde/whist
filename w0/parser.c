@@ -8,6 +8,7 @@ static Node* parse_declaration(Parser* parser);
 static Node* parse_statement(Parser* parser);
 static Node* parse_expression(Parser* parser);
 static Node* parse_type(Parser* parser);
+static Node* parse_foreach_stmt(Parser* parser);
 static Node* parse_struct_init(Parser* parser);
 
 static void advance(Parser* parser) {
@@ -200,6 +201,7 @@ static Node* parse_primary(Parser* parser) {
     return NULL;
 }
 
+static Node* parse_foreach_stmt(Parser* parser);
 static Node* parse_struct_init(Parser* parser) {
     Token start = parser->previous;
     Node* node  = node_new(NODE_STRUCT_INIT, start.line, start.column);
@@ -606,6 +608,9 @@ static Node* parse_statement(Parser* parser) {
     if (match(parser, TOK_FOR)) {
         return parse_for_stmt(parser);
     }
+    if (match(parser, TOK_FOREACH)) {
+        return parse_foreach_stmt(parser);
+    }
     if (match(parser, TOK_RETURN)) {
         return parse_return_stmt(parser);
     }
@@ -772,6 +777,44 @@ void parser_init(Parser* parser, const char* source) {
     parser->panic_mode   = 0;
     parser->error_msg[0] = '\0';
     advance(parser); // Prime the parser
+}
+
+static Node* parse_foreach_stmt(Parser* parser) {
+    Token token = parser->previous;
+    consume(parser, TOK_LPAREN, "Expected '(' after 'foreach'");
+
+    // Parse: var identifier
+    consume(parser, TOK_VAR, "Expected 'var' in foreach loop");
+    consume(parser, TOK_IDENT, "Expected identifier after 'var'");
+
+    Token var_token = parser->previous;
+    char* var_name  = malloc(var_token.length + 1);
+    memcpy(var_name, var_token.start, var_token.length);
+    var_name[var_token.length] = '\0';
+
+    // Parse: in
+    consume(parser, TOK_IN, "Expected 'in' after foreach variable");
+
+    // Parse: start expression
+    Node* start = parse_expression(parser);
+
+    // Parse: ..
+    consume(parser, TOK_DOT_DOT, "Expected '..' in range expression");
+
+    // Parse: end expression
+    Node* end = parse_expression(parser);
+
+    consume(parser, TOK_RPAREN, "Expected ')' after foreach clauses");
+    consume(parser, TOK_LBRACE, "Expected '{' after foreach clauses");
+    Node* body = parse_block(parser);
+
+    Node* node                            = node_new(NODE_FOREACH, token.line, token.column);
+    node->as.foreach_stmt.var_name        = var_name;
+    node->as.foreach_stmt.var_name_length = var_token.length;
+    node->as.foreach_stmt.start           = start;
+    node->as.foreach_stmt.end             = end;
+    node->as.foreach_stmt.body            = body;
+    return node;
 }
 
 Node* parser_parse(Parser* parser) {
