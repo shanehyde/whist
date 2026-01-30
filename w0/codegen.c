@@ -194,6 +194,10 @@ static const char* assign_op_str(TokenType op) {
         return "|=";
     case TOK_CARET_EQ:
         return "^=";
+    case TOK_LT_LT_EQ:
+        return "<<=";
+    case TOK_GT_GT_EQ:
+        return ">>=";
     default:
         return "=";
     }

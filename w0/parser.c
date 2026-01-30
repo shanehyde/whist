@@ -13,7 +13,20 @@ static Node* parse_struct_init(Parser* parser);
 
 static void advance(Parser* parser) {
     parser->previous = parser->current;
-    parser->current  = lexer_next(&parser->lexer);
+
+    for (;;) {
+        parser->current = lexer_next(&parser->lexer);
+        if (parser->current.type != TOK_ERROR)
+            break;
+
+        // Report lexer error - the start field contains the error message
+        if (!parser->panic_mode) {
+            parser->panic_mode = 1;
+            parser->had_error  = 1;
+            fprintf(stderr, "[line %d:%d] Error: %.*s\n", parser->current.line,
+                    parser->current.column, (int)parser->current.length, parser->current.start);
+        }
+    }
 }
 
 static int check(Parser* parser, TokenType type) {
@@ -392,6 +405,8 @@ static int is_assign_op(TokenType type) {
     case TOK_AMP_EQ:
     case TOK_PIPE_EQ:
     case TOK_CARET_EQ:
+    case TOK_LT_LT_EQ:
+    case TOK_GT_GT_EQ:
         return 1;
     default:
         return 0;

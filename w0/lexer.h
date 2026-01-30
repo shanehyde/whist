@@ -65,6 +65,8 @@ typedef enum {
     TOK_PIPE_PIPE,   // ||
     TOK_LT_LT,       // <<
     TOK_GT_GT,       // >>
+    TOK_LT_LT_EQ,    // <<=
+    TOK_GT_GT_EQ,    // >>=
     TOK_PLUS_PLUS,   // ++
     TOK_MINUS_MINUS, // --
     TOK_ARROW,       // ->
@@ -101,6 +103,7 @@ typedef struct {
     int         line;
     int         column;
     int         start_column;
+    const char* error_message;
 } Lexer;
 
 void        lexer_init(Lexer* lexer, const char* source);

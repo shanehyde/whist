@@ -3,12 +3,13 @@
 #include <string.h>
 
 void lexer_init(Lexer* lexer, const char* source) {
-    lexer->source       = source;
-    lexer->current      = source;
-    lexer->start        = source;
-    lexer->line         = 1;
-    lexer->column       = 1;
-    lexer->start_column = 1;
+    lexer->source        = source;
+    lexer->current       = source;
+    lexer->start         = source;
+    lexer->line          = 1;
+    lexer->column        = 1;
+    lexer->start_column  = 1;
+    lexer->error_message = NULL;
 }
 
 static int is_at_end(Lexer* lexer) {
@@ -93,6 +94,10 @@ static void skip_whitespace(Lexer* lexer) {
                     }
                     advance(lexer);
                 }
+                if (is_at_end(lexer)) {
+                    lexer->error_message = "Unterminated block comment";
+                    return;
+                }
             } else {
                 return;
             }
@@ -103,84 +108,31 @@ static void skip_whitespace(Lexer* lexer) {
     }
 }
 
-static TokenType check_keyword(const char* start, size_t length, const char* rest, size_t rest_len,
-                               TokenType type) {
-    if (length == rest_len + 1 && memcmp(start + 1, rest, rest_len) == 0) {
-        return type;
-    }
-    return TOK_IDENT;
-}
+typedef struct {
+    const char* keyword;
+    size_t      length;
+    TokenType   type;
+} Keyword;
+
+static const Keyword keywords[] = {
+    {"break", 5, TOK_BREAK},   {"const", 5, TOK_CONST},     {"continue", 8, TOK_CONTINUE},
+    {"else", 4, TOK_ELSE},     {"enum", 4, TOK_ENUM},       {"false", 5, TOK_FALSE},
+    {"for", 3, TOK_FOR},       {"foreach", 7, TOK_FOREACH}, {"func", 4, TOK_FUNC},
+    {"if", 2, TOK_IF},         {"in", 2, TOK_IN},           {"null", 4, TOK_NULL},
+    {"return", 6, TOK_RETURN}, {"struct", 6, TOK_STRUCT},   {"true", 4, TOK_TRUE},
+    {"var", 3, TOK_VAR},       {"while", 5, TOK_WHILE},
+};
+
+static const size_t keyword_count = sizeof(keywords) / sizeof(keywords[0]);
 
 static TokenType identifier_type(Lexer* lexer) {
     size_t      length = lexer->current - lexer->start;
     const char* start  = lexer->start;
 
-    switch (start[0]) {
-    case 'b':
-        return check_keyword(start, length, "reak", 4, TOK_BREAK);
-    case 'c':
-        if (length > 1) {
-            switch (start[1]) {
-            case 'o':
-                if (length > 3 && start[2] == 'n') {
-                    if (start[3] == 's')
-                        return check_keyword(start, length, "onst", 4, TOK_CONST);
-                    if (start[3] == 't')
-                        return check_keyword(start, length, "ontinue", 7, TOK_CONTINUE);
-                }
-                break;
-            }
+    for (size_t i = 0; i < keyword_count; i++) {
+        if (keywords[i].length == length && memcmp(start, keywords[i].keyword, length) == 0) {
+            return keywords[i].type;
         }
-        break;
-    case 'e':
-        if (length > 1) {
-            switch (start[1]) {
-            case 'l':
-                return check_keyword(start, length, "lse", 3, TOK_ELSE);
-            case 'n':
-                return check_keyword(start, length, "num", 3, TOK_ENUM);
-            }
-        }
-        break;
-    case 'f':
-        if (length > 1) {
-            switch (start[1]) {
-            case 'a':
-                return check_keyword(start, length, "alse", 4, TOK_FALSE);
-            case 'o':
-                if (length > 2 && start[2] == 'r') {
-                    if (length == 3) {
-                        return TOK_FOR;
-                    } else if (length == 7) {
-                        return check_keyword(start, length, "oreach", 6, TOK_FOREACH);
-                    }
-                }
-                break;
-            case 'u':
-                return check_keyword(start, length, "unc", 3, TOK_FUNC);
-            }
-        }
-        break;
-    case 'i':
-        if (length == 2) {
-            if (start[1] == 'f')
-                return TOK_IF;
-            if (start[1] == 'n')
-                return TOK_IN;
-        }
-        break;
-    case 'n':
-        return check_keyword(start, length, "ull", 3, TOK_NULL);
-    case 'r':
-        return check_keyword(start, length, "eturn", 5, TOK_RETURN);
-    case 's':
-        return check_keyword(start, length, "truct", 5, TOK_STRUCT);
-    case 't':
-        return check_keyword(start, length, "rue", 3, TOK_TRUE);
-    case 'v':
-        return check_keyword(start, length, "ar", 2, TOK_VAR);
-    case 'w':
-        return check_keyword(start, length, "hile", 4, TOK_WHILE);
     }
     return TOK_IDENT;
 }
@@ -200,16 +152,25 @@ static Token number(Lexer* lexer) {
         char next = peek(lexer);
         if (next == 'x' || next == 'X') {
             advance(lexer);
+            if (!isxdigit(peek(lexer))) {
+                return error_token(lexer, "Invalid hexadecimal literal");
+            }
             while (isxdigit(peek(lexer)))
                 advance(lexer);
             return make_token(lexer, TOK_INT);
         } else if (next == 'b' || next == 'B') {
             advance(lexer);
+            if (peek(lexer) != '0' && peek(lexer) != '1') {
+                return error_token(lexer, "Invalid binary literal");
+            }
             while (peek(lexer) == '0' || peek(lexer) == '1')
                 advance(lexer);
             return make_token(lexer, TOK_INT);
         } else if (next == 'o' || next == 'O') {
             advance(lexer);
+            if (peek(lexer) < '0' || peek(lexer) > '7') {
+                return error_token(lexer, "Invalid octal literal");
+            }
             while (peek(lexer) >= '0' && peek(lexer) <= '7')
                 advance(lexer);
             return make_token(lexer, TOK_INT);
@@ -257,13 +218,37 @@ static Token string(Lexer* lexer) {
 }
 
 static Token character(Lexer* lexer) {
-    if (peek(lexer) == '\\') {
-        advance(lexer); // skip backslash
-    }
     if (is_at_end(lexer)) {
         return error_token(lexer, "Unterminated character literal");
     }
-    advance(lexer); // the character
+
+    if (peek(lexer) == '\\') {
+        advance(lexer); // skip backslash
+        if (is_at_end(lexer)) {
+            return error_token(lexer, "Unterminated character literal");
+        }
+        char escaped = peek(lexer);
+        if (escaped == 'x') {
+            // Hex escape: \xNN
+            advance(lexer);
+            for (int i = 0; i < 2; i++) {
+                if (!isxdigit(peek(lexer))) {
+                    return error_token(lexer, "Invalid hex escape in character literal");
+                }
+                advance(lexer);
+            }
+        } else if (escaped >= '0' && escaped <= '7') {
+            // Octal escape: \NNN (up to 3 digits)
+            for (int i = 0; i < 3 && peek(lexer) >= '0' && peek(lexer) <= '7'; i++) {
+                advance(lexer);
+            }
+        } else {
+            // Simple escape: \n, \t, \r, \\, \', \", \0, etc.
+            advance(lexer);
+        }
+    } else {
+        advance(lexer); // regular character
+    }
 
     if (peek(lexer) != '\'') {
         return error_token(lexer, "Unterminated character literal");
@@ -277,6 +262,12 @@ Token lexer_next(Lexer* lexer) {
 
     lexer->start        = lexer->current;
     lexer->start_column = lexer->column;
+
+    if (lexer->error_message) {
+        const char* msg      = lexer->error_message;
+        lexer->error_message = NULL;
+        return error_token(lexer, msg);
+    }
 
     if (is_at_end(lexer)) {
         return make_token(lexer, TOK_EOF);
@@ -352,13 +343,13 @@ Token lexer_next(Lexer* lexer) {
         return make_token(lexer, match(lexer, '=') ? TOK_EQ_EQ : TOK_EQ);
     case '<':
         if (match(lexer, '<'))
-            return make_token(lexer, TOK_LT_LT);
+            return make_token(lexer, match(lexer, '=') ? TOK_LT_LT_EQ : TOK_LT_LT);
         if (match(lexer, '='))
             return make_token(lexer, TOK_LT_EQ);
         return make_token(lexer, TOK_LT);
     case '>':
         if (match(lexer, '>'))
-            return make_token(lexer, TOK_GT_GT);
+            return make_token(lexer, match(lexer, '=') ? TOK_GT_GT_EQ : TOK_GT_GT);
         if (match(lexer, '='))
             return make_token(lexer, TOK_GT_EQ);
         return make_token(lexer, TOK_GT);
@@ -477,6 +468,10 @@ const char* token_type_name(TokenType type) {
         return "LT_LT";
     case TOK_GT_GT:
         return "GT_GT";
+    case TOK_LT_LT_EQ:
+        return "LT_LT_EQ";
+    case TOK_GT_GT_EQ:
+        return "GT_GT_EQ";
     case TOK_PLUS_PLUS:
         return "PLUS_PLUS";
     case TOK_MINUS_MINUS:
