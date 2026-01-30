@@ -162,10 +162,11 @@ static TokenType identifier_type(Lexer* lexer) {
         }
         break;
     case 'i':
-        if (length == 1) {
-            return check_keyword(start, length, "f", 1, TOK_IF);
-        } else if (length == 2) {
-            return check_keyword(start, length, "n", 1, TOK_IN);
+        if (length == 2) {
+            if (start[1] == 'f')
+                return TOK_IF;
+            if (start[1] == 'n')
+                return TOK_IN;
         }
         break;
     case 'n':

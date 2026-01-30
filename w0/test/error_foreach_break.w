@@ -1,3 +1,5 @@
+// Expected error: Undefined identifier 'x'
+
 func main(): i32 {
     foreach (var x in 0..5) {
         if (x == 3) {
