@@ -1,6 +1,7 @@
 #include "parse_expression.h"
-#include "parser_util.h"
+
 #include "parse_primary.h"
+#include "parser_util.h"
 
 #define MAX_PARSE_DEPTH 256
 extern int parse_depth;

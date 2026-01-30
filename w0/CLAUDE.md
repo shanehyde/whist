@@ -65,23 +65,13 @@ w0/
 ├── lexer.h/c      # Lexer (tokenizer)
 ├── ast.h/c        # AST node definitions and memory management
 ├── parser.h/c     # Recursive descent parser
+├── parse_*.h/c    # parse functions for grammar parts
 ├── types.h/c      # Type system and type operations
 ├── checker.h/c    # Type checker with symbol table
 ├── codegen.h/c    # C code generator
 ├── main.c         # Compiler driver
 └── test/          # Test programs
-    ├── hello.w           # Minimal program
-    ├── structs.w         # Struct definitions, member access
-    ├── enums.w           # Enum definitions
-    ├── functions.w       # Function calls, recursion
-    ├── control_flow.w    # if/else, while, for, break, continue
-    ├── variables.w       # var/const, type inference, literals
-    ├── operators.w       # All operator types
-    ├── pointers.w        # Address-of, dereference
-    ├── error_type_mismatch.w  # Expected error: type mismatch
-    ├── error_undefined.w      # Expected error: undefined var
-    ├── error_const.w          # Expected error: const assignment
-    └── error_break.w          # Expected error: break outside loop
+    
 ```
 
 ## Running Tests

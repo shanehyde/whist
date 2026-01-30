@@ -1,10 +1,11 @@
 #ifndef WHIST_CODEGEN_H
 #define WHIST_CODEGEN_H
 
+#include <stdio.h>
+
 #include "ast.h"
 #include "checker.h"
 #include "types.h"
-#include <stdio.h>
 
 typedef struct {
     FILE* out;

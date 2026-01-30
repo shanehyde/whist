@@ -1,11 +1,12 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "checker.h"
 #include "codegen.h"
 #include "lexer.h"
 #include "parser.h"
 #include "print_ast.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 static char* read_file(const char* path) {
     FILE* file = fopen(path, "rb");

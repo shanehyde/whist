@@ -1,15 +1,17 @@
 #include "parser.h"
+
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "parse_enum_decl.h"
 #include "parse_expression.h"
 #include "parse_func_decl.h"
 #include "parse_struct_decl.h"
 #include "parse_var_decl.h"
 #include "parser_util.h"
-#include <errno.h>
-#include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 // Maximum recursion depth to prevent stack overflow
 #define MAX_PARSE_DEPTH 256

@@ -13,5 +13,12 @@ SpaceBeforeParens: ControlStatements
 PointerAlignment: Left
 AlignConsecutiveAssignments: Consecutive
 AlignConsecutiveDeclarations: Consecutive
-SortIncludes: true
-IncludeBlocks: Preserve
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex:           '^<.*>'
+    Priority:        1
+  - Regex:           '".*"'
+    Priority:        2
+  - Regex:           '.*'
+    Priority:        3

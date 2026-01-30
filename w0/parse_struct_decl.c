@@ -1,6 +1,7 @@
+#include <stdlib.h>
+
 #include "parse_enum_decl.h"
 #include "parser_util.h"
-#include <stdlib.h>
 
 Node* parse_type(Parser* parser);
 

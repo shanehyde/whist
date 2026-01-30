@@ -1,6 +1,8 @@
 #include "parse_enum_decl.h"
-#include "parser_util.h"
+
 #include <stdlib.h>
+
+#include "parser_util.h"
 
 Node* parse_enum_decl(Parser* parser) {
     Token name = parser->current;
