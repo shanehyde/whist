@@ -2,8 +2,9 @@ CC = cc
 CFLAGS = -Wall -Wextra -std=c11 -g
 LDFLAGS =
 
-SRC = main.c lexer.c parser.c ast.c types.c checker.c codegen.c print_ast.c
+SRC = main.c lexer.c parser.c parser_util.c ast.c types.c checker.c codegen.c print_ast.c
 OBJ = $(SRC:.c=.o)
+DEPS = $(SRC:.c=.d)
 BIN = bin
 TARGET = $(BIN)/w0
 
@@ -20,8 +21,11 @@ $(BIN):
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+%.d: %.c
+	$(CC) -MM $< -MF $@
+
 clean:
-	rm -f $(OBJ)
+	rm -f $(OBJ) $(DEPS)
 	rm -rf $(BIN)
 
 test: $(TARGET)
@@ -196,10 +200,5 @@ test-help:
 
 format:
 	clang-format -i *.c *.h
-main.o: main.c lexer.h parser.h checker.h codegen.h
-lexer.o: lexer.c lexer.h
-parser.o: parser.c parser.h lexer.h ast.h
-ast.o: ast.c ast.h lexer.h
-types.o: types.c types.h
-checker.o: checker.c checker.h ast.h types.h lexer.h
-codegen.o: codegen.c codegen.h ast.h types.h checker.h
+
+-include $(DEPS)
