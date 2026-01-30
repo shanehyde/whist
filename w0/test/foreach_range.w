@@ -1,6 +1,6 @@
 func main(): i32 {
     var total = 0;
-    foreach (var i in 1..6) {
+    foreach (const i in 1..6) {
         total = total + i;
     }
     return total;

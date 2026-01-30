@@ -738,11 +738,13 @@ static void check_stmt(Checker* checker, Node* node) {
                   "Foreach range end must be int, got '%s'", type_name(end_type));
         }
 
-        // Add the loop variable as an int64
+        // Add the loop variable as a const int64 (immutable)
         Symbol* sym = checker_define(checker, node->as.foreach_stmt.var_name, SYM_VAR, type_int64);
         if (!sym) {
             error(checker, node->line, node->column, "Variable '%s' already declared in this scope",
                   node->as.foreach_stmt.var_name);
+        } else {
+            sym->is_const = 1; // Foreach variables are immutable
         }
 
         int was_in_loop  = checker->in_loop;

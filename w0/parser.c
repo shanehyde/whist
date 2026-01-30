@@ -788,8 +788,8 @@ static Node* parse_foreach_stmt(Parser* parser) {
     Token token = parser->previous;
     consume(parser, TOK_LPAREN, "Expected '(' after 'foreach'");
 
-    // Parse: var identifier
-    consume(parser, TOK_VAR, "Expected 'var' in foreach loop");
+    // Parse: const identifier (foreach variables are immutable)
+    consume(parser, TOK_CONST, "Expected 'const' in foreach loop");
     consume(parser, TOK_IDENT, "Expected identifier after 'var'");
 
     Token var_token = parser->previous;
