@@ -65,6 +65,11 @@ static void consume(Parser* parser, TokenType type, const char* message) {
 static void synchronize(Parser* parser) {
     parser->panic_mode = 0;
 
+    // Always advance at least once to ensure progress and prevent infinite loops
+    if (parser->current.type != TOK_EOF) {
+        advance(parser);
+    }
+
     while (parser->current.type != TOK_EOF) {
         if (parser->previous.type == TOK_SEMICOLON)
             return;
