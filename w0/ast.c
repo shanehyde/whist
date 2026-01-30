@@ -1,7 +1,6 @@
 #include "ast.h"
 
 #include <stdlib.h>
-#include <string.h>
 
 Node* node_new(NodeType type, int line, int column) {
     Node* node   = calloc(1, sizeof(Node));

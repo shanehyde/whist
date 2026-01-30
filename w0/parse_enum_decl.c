@@ -1,7 +1,5 @@
 #include "parse_enum_decl.h"
 
-#include <stdlib.h>
-
 #include "parser_util.h"
 
 Node* parse_enum_decl(Parser* parser) {
