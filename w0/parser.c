@@ -1,7 +1,30 @@
 #include "parser.h"
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// Maximum recursion depth to prevent stack overflow
+#define MAX_PARSE_DEPTH 256
+
+// Precedence levels for binary operators
+typedef enum {
+    PREC_NONE       = 0,
+    PREC_OR         = 3,  // ||
+    PREC_AND        = 4,  // &&
+    PREC_BIT_OR     = 5,  // |
+    PREC_BIT_XOR    = 6,  // ^
+    PREC_BIT_AND    = 7,  // &
+    PREC_EQUALITY   = 8,  // == !=
+    PREC_COMPARISON = 9,  // < > <= >=
+    PREC_SHIFT      = 10, // << >>
+    PREC_TERM       = 11, // + -
+    PREC_FACTOR     = 12, // * / %
+} Precedence;
+
+// Current recursion depth for expression parsing
+static int parse_depth = 0;
 
 // Forward declarations
 static Node* parse_declaration(Parser* parser);
@@ -46,20 +69,16 @@ static void error_at(Parser* parser, Token* token, const char* message) {
     parser->panic_mode = 1;
     parser->had_error  = 1;
 
-    snprintf(parser->error_msg, sizeof(parser->error_msg), "[line %d:%d] Error", token->line,
-             token->column);
-
     if (token->type == TOK_EOF) {
-        snprintf(parser->error_msg + strlen(parser->error_msg),
-                 sizeof(parser->error_msg) - strlen(parser->error_msg), " at end");
-    } else if (token->type != TOK_ERROR) {
-        snprintf(parser->error_msg + strlen(parser->error_msg),
-                 sizeof(parser->error_msg) - strlen(parser->error_msg), " at '%.*s'",
-                 (int)token->length, token->start);
+        snprintf(parser->error_msg, sizeof(parser->error_msg), "[line %d:%d] Error at end: %s",
+                 token->line, token->column, message);
+    } else if (token->type == TOK_ERROR) {
+        snprintf(parser->error_msg, sizeof(parser->error_msg), "[line %d:%d] Error: %s",
+                 token->line, token->column, message);
+    } else {
+        snprintf(parser->error_msg, sizeof(parser->error_msg), "[line %d:%d] Error at '%.*s': %s",
+                 token->line, token->column, (int)token->length, token->start, message);
     }
-
-    snprintf(parser->error_msg + strlen(parser->error_msg),
-             sizeof(parser->error_msg) - strlen(parser->error_msg), ": %s", message);
 
     fprintf(stderr, "%s\n", parser->error_msg);
 }
@@ -108,6 +127,9 @@ static void synchronize(Parser* parser) {
 
 static char* copy_token_string(Token* token) {
     char* str = malloc(token->length + 1);
+    if (!str) {
+        return NULL;
+    }
     memcpy(str, token->start, token->length);
     str[token->length] = '\0';
     return str;
@@ -120,6 +142,10 @@ static Node* parse_primary(Parser* parser) {
 
     if (match(parser, TOK_INT)) {
         Node* node = node_new(NODE_INT_LIT, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         // Parse integer (handle hex, binary, octal)
         const char* start = token.start;
         int         base  = 10;
@@ -135,28 +161,88 @@ static Node* parse_primary(Parser* parser) {
                 start += 2;
             }
         }
-        node->as.int_lit.value = strtol(start, NULL, base);
+        errno = 0;
+        char* endptr;
+        long  value = strtol(start, &endptr, base);
+        if (errno == ERANGE) {
+            error(parser, "Integer literal out of range");
+        }
+        node->as.int_lit.value = value;
         return node;
     }
 
     if (match(parser, TOK_FLOAT)) {
-        Node* node               = node_new(NODE_FLOAT_LIT, token.line, token.column);
+        Node* node = node_new(NODE_FLOAT_LIT, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         node->as.float_lit.value = strtod(token.start, NULL);
         return node;
     }
 
     if (match(parser, TOK_STRING)) {
         Node* node = node_new(NODE_STRING_LIT, token.line, token.column);
-        // Skip quotes
-        node->as.string_lit.value = malloc(token.length - 1);
-        memcpy(node->as.string_lit.value, token.start + 1, token.length - 2);
-        node->as.string_lit.value[token.length - 2] = '\0';
-        node->as.string_lit.length                  = token.length - 2;
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        // Allocate max possible size (actual size may be smaller due to escapes)
+        size_t max_len            = token.length - 2; // Skip quotes
+        node->as.string_lit.value = malloc(max_len + 1);
+        if (!node->as.string_lit.value) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        // Process escape sequences
+        const char* src = token.start + 1;
+        const char* end = token.start + token.length - 1;
+        char*       dst = node->as.string_lit.value;
+        while (src < end) {
+            if (*src == '\\' && src + 1 < end) {
+                src++;
+                switch (*src) {
+                case 'n':
+                    *dst++ = '\n';
+                    break;
+                case 't':
+                    *dst++ = '\t';
+                    break;
+                case 'r':
+                    *dst++ = '\r';
+                    break;
+                case '0':
+                    *dst++ = '\0';
+                    break;
+                case '\\':
+                    *dst++ = '\\';
+                    break;
+                case '"':
+                    *dst++ = '"';
+                    break;
+                case '\'':
+                    *dst++ = '\'';
+                    break;
+                default:
+                    *dst++ = *src;
+                    break;
+                }
+                src++;
+            } else {
+                *dst++ = *src++;
+            }
+        }
+        *dst                       = '\0';
+        node->as.string_lit.length = dst - node->as.string_lit.value;
         return node;
     }
 
     if (match(parser, TOK_CHAR)) {
         Node* node = node_new(NODE_CHAR_LIT, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         // Handle escape sequences
         if (token.start[1] == '\\') {
             switch (token.start[2]) {
@@ -189,18 +275,35 @@ static Node* parse_primary(Parser* parser) {
     }
 
     if (match(parser, TOK_TRUE) || match(parser, TOK_FALSE)) {
-        Node* node              = node_new(NODE_BOOL_LIT, token.line, token.column);
+        Node* node = node_new(NODE_BOOL_LIT, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         node->as.bool_lit.value = (token.type == TOK_TRUE);
         return node;
     }
 
     if (match(parser, TOK_NULL)) {
-        return node_new(NODE_NULL_LIT, token.line, token.column);
+        Node* node = node_new(NODE_NULL_LIT, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        return node;
     }
 
     if (match(parser, TOK_IDENT)) {
-        Node* node            = node_new(NODE_IDENT, token.line, token.column);
-        node->as.ident.name   = copy_token_string(&token);
+        Node* node = node_new(NODE_IDENT, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        node->as.ident.name = copy_token_string(&token);
+        if (!node->as.ident.name) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         node->as.ident.length = token.length;
         return node;
     }
@@ -219,10 +322,13 @@ static Node* parse_primary(Parser* parser) {
     return NULL;
 }
 
-static Node* parse_foreach_stmt(Parser* parser);
 static Node* parse_struct_init(Parser* parser) {
     Token start = parser->previous;
     Node* node  = node_new(NODE_STRUCT_INIT, start.line, start.column);
+    if (!node) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     nodelist_init(&node->as.struct_init.fields);
 
     if (!check(parser, TOK_RBRACE)) {
@@ -231,7 +337,15 @@ static Node* parse_struct_init(Parser* parser) {
             consume(parser, TOK_IDENT, "Expected field name in struct initializer");
 
             Node* field = node_new(NODE_FIELD_INIT, field_name.line, field_name.column);
-            field->as.field_init.name        = copy_token_string(&field_name);
+            if (!field) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
+            field->as.field_init.name = copy_token_string(&field_name);
+            if (!field->as.field_init.name) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
             field->as.field_init.name_length = field_name.length;
 
             consume(parser, TOK_COLON, "Expected ':' after field name");
@@ -261,7 +375,11 @@ static Node* parse_postfix(Parser* parser) {
     for (;;) {
         if (match(parser, TOK_LPAREN)) {
             // Function call
-            Node* call         = node_new(NODE_CALL, expr->line, expr->column);
+            Node* call = node_new(NODE_CALL, expr->line, expr->column);
+            if (!call) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
             call->as.call.func = expr;
             nodelist_init(&call->as.call.args);
 
@@ -276,7 +394,11 @@ static Node* parse_postfix(Parser* parser) {
             expr = call;
         } else if (match(parser, TOK_LBRACKET)) {
             // Index
-            Node* index            = node_new(NODE_INDEX, expr->line, expr->column);
+            Node* index = node_new(NODE_INDEX, expr->line, expr->column);
+            if (!index) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
             index->as.index.object = expr;
             index->as.index.index  = parse_expression(parser);
             consume(parser, TOK_RBRACKET, "Expected ']' after index");
@@ -285,9 +407,17 @@ static Node* parse_postfix(Parser* parser) {
             // Member access
             Token name = parser->current;
             consume(parser, TOK_IDENT, "Expected member name after '.'");
-            Node* member             = node_new(NODE_MEMBER, expr->line, expr->column);
+            Node* member = node_new(NODE_MEMBER, expr->line, expr->column);
+            if (!member) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
             member->as.member.object = expr;
             member->as.member.name   = copy_token_string(&name);
+            if (!member->as.member.name) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
             member->as.member.length = name.length;
             member->as.member.arrow  = 0;
             expr                     = member;
@@ -295,16 +425,28 @@ static Node* parse_postfix(Parser* parser) {
             // Arrow member access
             Token name = parser->current;
             consume(parser, TOK_IDENT, "Expected member name after '->'");
-            Node* member             = node_new(NODE_MEMBER, expr->line, expr->column);
+            Node* member = node_new(NODE_MEMBER, expr->line, expr->column);
+            if (!member) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
             member->as.member.object = expr;
             member->as.member.name   = copy_token_string(&name);
+            if (!member->as.member.name) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
             member->as.member.length = name.length;
             member->as.member.arrow  = 1;
             expr                     = member;
         } else if (match(parser, TOK_PLUS_PLUS) || match(parser, TOK_MINUS_MINUS)) {
             // Postfix increment/decrement
-            TokenType op            = parser->previous.type;
-            Node*     unary         = node_new(NODE_UNARY, expr->line, expr->column);
+            TokenType op    = parser->previous.type;
+            Node*     unary = node_new(NODE_UNARY, expr->line, expr->column);
+            if (!unary) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
             unary->as.unary.op      = op;
             unary->as.unary.operand = expr;
             unary->as.unary.postfix = 1;
@@ -321,9 +463,13 @@ static Node* parse_unary(Parser* parser) {
     if (match(parser, TOK_BANG) || match(parser, TOK_MINUS) || match(parser, TOK_TILDE) ||
         match(parser, TOK_AMP) || match(parser, TOK_STAR) || match(parser, TOK_PLUS_PLUS) ||
         match(parser, TOK_MINUS_MINUS)) {
-        Token op               = parser->previous;
-        Node* operand          = parse_unary(parser);
-        Node* node             = node_new(NODE_UNARY, op.line, op.column);
+        Token op      = parser->previous;
+        Node* operand = parse_unary(parser);
+        Node* node    = node_new(NODE_UNARY, op.line, op.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         node->as.unary.op      = op.type;
         node->as.unary.operand = operand;
         node->as.unary.postfix = 0;
@@ -332,65 +478,77 @@ static Node* parse_unary(Parser* parser) {
     return parse_postfix(parser);
 }
 
-static Node* parse_binary(Parser* parser, int min_prec);
+static Node* parse_binary(Parser* parser, Precedence min_prec);
 
-static int get_precedence(TokenType type) {
+static Precedence get_precedence(TokenType type) {
     switch (type) {
     case TOK_STAR:
     case TOK_SLASH:
     case TOK_PERCENT:
-        return 12;
+        return PREC_FACTOR;
     case TOK_PLUS:
     case TOK_MINUS:
-        return 11;
+        return PREC_TERM;
     case TOK_LT_LT:
     case TOK_GT_GT:
-        return 10;
+        return PREC_SHIFT;
     case TOK_LT:
     case TOK_GT:
     case TOK_LT_EQ:
     case TOK_GT_EQ:
-        return 9;
+        return PREC_COMPARISON;
     case TOK_EQ_EQ:
     case TOK_BANG_EQ:
-        return 8;
+        return PREC_EQUALITY;
     case TOK_AMP:
-        return 7;
+        return PREC_BIT_AND;
     case TOK_CARET:
-        return 6;
+        return PREC_BIT_XOR;
     case TOK_PIPE:
-        return 5;
+        return PREC_BIT_OR;
     case TOK_AMP_AMP:
-        return 4;
+        return PREC_AND;
     case TOK_PIPE_PIPE:
-        return 3;
+        return PREC_OR;
     default:
-        return 0;
+        return PREC_NONE;
     }
 }
 
-static int is_binary_op(TokenType type) {
-    return get_precedence(type) > 0;
-}
-
-static Node* parse_binary(Parser* parser, int min_prec) {
-    Node* left = parse_unary(parser);
-    if (!left)
+static Node* parse_binary(Parser* parser, Precedence min_prec) {
+    parse_depth++;
+    if (parse_depth > MAX_PARSE_DEPTH) {
+        error(parser, "Maximum expression nesting depth exceeded");
+        parse_depth--;
         return NULL;
+    }
 
-    while (is_binary_op(parser->current.type) && get_precedence(parser->current.type) >= min_prec) {
+    Node* left = parse_unary(parser);
+    if (!left) {
+        parse_depth--;
+        return NULL;
+    }
+
+    while (get_precedence(parser->current.type) >= min_prec &&
+           get_precedence(parser->current.type) != PREC_NONE) {
         Token op = parser->current;
         advance(parser);
-        int   prec  = get_precedence(op.type);
-        Node* right = parse_binary(parser, prec + 1);
+        Precedence prec  = get_precedence(op.type);
+        Node*      right = parse_binary(parser, prec + 1);
 
-        Node* binary            = node_new(NODE_BINARY, op.line, op.column);
+        Node* binary = node_new(NODE_BINARY, op.line, op.column);
+        if (!binary) {
+            error(parser, "Out of memory");
+            parse_depth--;
+            return NULL;
+        }
         binary->as.binary.op    = op.type;
         binary->as.binary.left  = left;
         binary->as.binary.right = right;
         left                    = binary;
     }
 
+    parse_depth--;
     return left;
 }
 
@@ -414,7 +572,7 @@ static int is_assign_op(TokenType type) {
 }
 
 static Node* parse_assignment(Parser* parser) {
-    Node* expr = parse_binary(parser, 1);
+    Node* expr = parse_binary(parser, PREC_OR);
     if (!expr)
         return NULL;
 
@@ -423,7 +581,11 @@ static Node* parse_assignment(Parser* parser) {
         advance(parser);
         Node* value = parse_assignment(parser); // Right associative
 
-        Node* assign             = node_new(NODE_ASSIGN, op.line, op.column);
+        Node* assign = node_new(NODE_ASSIGN, op.line, op.column);
+        if (!assign) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         assign->as.assign.op     = op.type;
         assign->as.assign.target = expr;
         assign->as.assign.value  = value;
@@ -443,8 +605,12 @@ static Node* parse_type(Parser* parser) {
 
     // Pointer type
     if (match(parser, TOK_STAR)) {
-        Node* inner            = parse_type(parser);
-        Node* node             = node_new(NODE_UNARY, token.line, token.column);
+        Node* inner = parse_type(parser);
+        Node* node  = node_new(NODE_UNARY, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         node->as.unary.op      = TOK_STAR;
         node->as.unary.operand = inner;
         return node;
@@ -459,7 +625,11 @@ static Node* parse_type(Parser* parser) {
         consume(parser, TOK_RBRACKET, "Expected ']' in array type");
         Node* elem = parse_type(parser);
 
-        Node* node            = node_new(NODE_INDEX, token.line, token.column);
+        Node* node = node_new(NODE_INDEX, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         node->as.index.object = elem;
         node->as.index.index  = size;
         return node;
@@ -467,8 +637,16 @@ static Node* parse_type(Parser* parser) {
 
     // Named type
     if (match(parser, TOK_IDENT)) {
-        Node* node            = node_new(NODE_IDENT, token.line, token.column);
-        node->as.ident.name   = copy_token_string(&token);
+        Node* node = node_new(NODE_IDENT, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        node->as.ident.name = copy_token_string(&token);
+        if (!node->as.ident.name) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         node->as.ident.length = token.length;
         return node;
     }
@@ -480,6 +658,10 @@ static Node* parse_type(Parser* parser) {
 // Statement parsing
 static Node* parse_block(Parser* parser) {
     Node* block = node_new(NODE_BLOCK, parser->previous.line, parser->previous.column);
+    if (!block) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     nodelist_init(&block->as.block.stmts);
 
     while (!check(parser, TOK_RBRACE) && !check(parser, TOK_EOF)) {
@@ -498,8 +680,16 @@ static Node* parse_var_decl(Parser* parser, int is_const) {
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected variable name");
 
-    Node* node                    = node_new(NODE_VAR_DECL, name.line, name.column);
-    node->as.var_decl.name        = copy_token_string(&name);
+    Node* node = node_new(NODE_VAR_DECL, name.line, name.column);
+    if (!node) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
+    node->as.var_decl.name = copy_token_string(&name);
+    if (!node->as.var_decl.name) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     node->as.var_decl.name_length = name.length;
     node->as.var_decl.is_const    = is_const;
     node->as.var_decl.type        = NULL;
@@ -538,7 +728,11 @@ static Node* parse_if_stmt(Parser* parser) {
         }
     }
 
-    Node* node                  = node_new(NODE_IF, token.line, token.column);
+    Node* node = node_new(NODE_IF, token.line, token.column);
+    if (!node) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     node->as.if_stmt.cond       = cond;
     node->as.if_stmt.then_block = then_block;
     node->as.if_stmt.else_block = else_block;
@@ -554,7 +748,11 @@ static Node* parse_while_stmt(Parser* parser) {
     consume(parser, TOK_LBRACE, "Expected '{' after while condition");
     Node* body = parse_block(parser);
 
-    Node* node               = node_new(NODE_WHILE, token.line, token.column);
+    Node* node = node_new(NODE_WHILE, token.line, token.column);
+    if (!node) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     node->as.while_stmt.cond = cond;
     node->as.while_stmt.body = body;
     return node;
@@ -590,7 +788,11 @@ static Node* parse_for_stmt(Parser* parser) {
     consume(parser, TOK_LBRACE, "Expected '{' after for clauses");
     Node* body = parse_block(parser);
 
-    Node* node             = node_new(NODE_FOR, token.line, token.column);
+    Node* node = node_new(NODE_FOR, token.line, token.column);
+    if (!node) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     node->as.for_stmt.init = init;
     node->as.for_stmt.cond = cond;
     node->as.for_stmt.post = post;
@@ -607,7 +809,11 @@ static Node* parse_return_stmt(Parser* parser) {
     }
     consume(parser, TOK_SEMICOLON, "Expected ';' after return value");
 
-    Node* node                 = node_new(NODE_RETURN, token.line, token.column);
+    Node* node = node_new(NODE_RETURN, token.line, token.column);
+    if (!node) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     node->as.return_stmt.value = value;
     return node;
 }
@@ -637,12 +843,22 @@ static Node* parse_statement(Parser* parser) {
     if (match(parser, TOK_BREAK)) {
         Token token = parser->previous;
         consume(parser, TOK_SEMICOLON, "Expected ';' after 'break'");
-        return node_new(NODE_BREAK, token.line, token.column);
+        Node* node = node_new(NODE_BREAK, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        return node;
     }
     if (match(parser, TOK_CONTINUE)) {
         Token token = parser->previous;
         consume(parser, TOK_SEMICOLON, "Expected ';' after 'continue'");
-        return node_new(NODE_CONTINUE, token.line, token.column);
+        Node* node = node_new(NODE_CONTINUE, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        return node;
     }
     if (match(parser, TOK_LBRACE)) {
         return parse_block(parser);
@@ -653,6 +869,10 @@ static Node* parse_statement(Parser* parser) {
     consume(parser, TOK_SEMICOLON, "Expected ';' after expression");
 
     Node* node = node_new(NODE_EXPR_STMT, expr ? expr->line : 0, expr ? expr->column : 0);
+    if (!node) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     node->as.expr_stmt.expr = expr;
     return node;
 }
@@ -662,8 +882,16 @@ static Node* parse_func_decl(Parser* parser) {
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected function name");
 
-    Node* node                     = node_new(NODE_FUNC_DECL, name.line, name.column);
-    node->as.func_decl.name        = copy_token_string(&name);
+    Node* node = node_new(NODE_FUNC_DECL, name.line, name.column);
+    if (!node) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
+    node->as.func_decl.name = copy_token_string(&name);
+    if (!node->as.func_decl.name) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     node->as.func_decl.name_length = name.length;
     nodelist_init(&node->as.func_decl.params);
 
@@ -675,8 +903,16 @@ static Node* parse_func_decl(Parser* parser) {
             Token param_name = parser->current;
             consume(parser, TOK_IDENT, "Expected parameter name");
 
-            Node* param                 = node_new(NODE_PARAM, param_name.line, param_name.column);
-            param->as.param.name        = copy_token_string(&param_name);
+            Node* param = node_new(NODE_PARAM, param_name.line, param_name.column);
+            if (!param) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
+            param->as.param.name = copy_token_string(&param_name);
+            if (!param->as.param.name) {
+                error(parser, "Out of memory");
+                return NULL;
+            }
             param->as.param.name_length = param_name.length;
             param->as.param.type        = NULL;
 
@@ -707,8 +943,16 @@ static Node* parse_struct_decl(Parser* parser) {
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected struct name");
 
-    Node* node                       = node_new(NODE_STRUCT_DECL, name.line, name.column);
-    node->as.struct_decl.name        = copy_token_string(&name);
+    Node* node = node_new(NODE_STRUCT_DECL, name.line, name.column);
+    if (!node) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
+    node->as.struct_decl.name = copy_token_string(&name);
+    if (!node->as.struct_decl.name) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     node->as.struct_decl.name_length = name.length;
     nodelist_init(&node->as.struct_decl.fields);
 
@@ -718,8 +962,16 @@ static Node* parse_struct_decl(Parser* parser) {
         Token field_name = parser->current;
         consume(parser, TOK_IDENT, "Expected field name");
 
-        Node* field                 = node_new(NODE_FIELD, field_name.line, field_name.column);
-        field->as.field.name        = copy_token_string(&field_name);
+        Node* field = node_new(NODE_FIELD, field_name.line, field_name.column);
+        if (!field) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        field->as.field.name = copy_token_string(&field_name);
+        if (!field->as.field.name) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         field->as.field.name_length = field_name.length;
 
         consume(parser, TOK_COLON, "Expected ':' after field name");
@@ -742,8 +994,16 @@ static Node* parse_enum_decl(Parser* parser) {
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected enum name");
 
-    Node* node                     = node_new(NODE_ENUM_DECL, name.line, name.column);
-    node->as.enum_decl.name        = copy_token_string(&name);
+    Node* node = node_new(NODE_ENUM_DECL, name.line, name.column);
+    if (!node) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
+    node->as.enum_decl.name = copy_token_string(&name);
+    if (!node->as.enum_decl.name) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     node->as.enum_decl.name_length = name.length;
     nodelist_init(&node->as.enum_decl.values);
 
@@ -753,8 +1013,16 @@ static Node* parse_enum_decl(Parser* parser) {
         Token value_name = parser->current;
         consume(parser, TOK_IDENT, "Expected enum value name");
 
-        Node* value            = node_new(NODE_IDENT, value_name.line, value_name.column);
-        value->as.ident.name   = copy_token_string(&value_name);
+        Node* value = node_new(NODE_IDENT, value_name.line, value_name.column);
+        if (!value) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        value->as.ident.name = copy_token_string(&value_name);
+        if (!value->as.ident.name) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
         value->as.ident.length = value_name.length;
 
         nodelist_push(&node->as.enum_decl.values, value);
@@ -796,7 +1064,8 @@ void parser_init(Parser* parser, const char* source) {
     parser->had_error    = 0;
     parser->panic_mode   = 0;
     parser->error_msg[0] = '\0';
-    advance(parser); // Prime the parser
+    parse_depth          = 0; // Reset recursion depth
+    advance(parser);          // Prime the parser
 }
 
 static Node* parse_foreach_stmt(Parser* parser) {
@@ -805,10 +1074,14 @@ static Node* parse_foreach_stmt(Parser* parser) {
 
     // Parse: const identifier (foreach variables are immutable)
     consume(parser, TOK_CONST, "Expected 'const' in foreach loop");
-    consume(parser, TOK_IDENT, "Expected identifier after 'var'");
+    consume(parser, TOK_IDENT, "Expected identifier after 'const'");
 
     Token var_token = parser->previous;
     char* var_name  = malloc(var_token.length + 1);
+    if (!var_name) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     memcpy(var_name, var_token.start, var_token.length);
     var_name[var_token.length] = '\0';
 
@@ -828,7 +1101,12 @@ static Node* parse_foreach_stmt(Parser* parser) {
     consume(parser, TOK_LBRACE, "Expected '{' after foreach clauses");
     Node* body = parse_block(parser);
 
-    Node* node                            = node_new(NODE_FOREACH, token.line, token.column);
+    Node* node = node_new(NODE_FOREACH, token.line, token.column);
+    if (!node) {
+        free(var_name);
+        error(parser, "Out of memory");
+        return NULL;
+    }
     node->as.foreach_stmt.var_name        = var_name;
     node->as.foreach_stmt.var_name_length = var_token.length;
     node->as.foreach_stmt.start           = start;
@@ -839,6 +1117,10 @@ static Node* parse_foreach_stmt(Parser* parser) {
 
 Node* parser_parse(Parser* parser) {
     Node* program = node_new(NODE_PROGRAM, 1, 1);
+    if (!program) {
+        error(parser, "Out of memory");
+        return NULL;
+    }
     nodelist_init(&program->as.program.decls);
 
     while (!check(parser, TOK_EOF)) {
