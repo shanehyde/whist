@@ -25,7 +25,14 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_FUNC_DECL:
-        printf("FuncDecl: %.*s\n", node->as.func_decl.name_length, node->as.func_decl.name);
+        if (node->as.func_decl.receiver_type) {
+            printf("MethodDecl: (%s%.*s) %.*s\n",
+                   node->as.func_decl.receiver_is_const ? "const " : "",
+                   node->as.func_decl.receiver_type_len, node->as.func_decl.receiver_type,
+                   node->as.func_decl.name_length, node->as.func_decl.name);
+        } else {
+            printf("FuncDecl: %.*s\n", node->as.func_decl.name_length, node->as.func_decl.name);
+        }
         if (node->as.func_decl.params.count > 0) {
             print_indent(depth + 1);
             printf("Params:\n");

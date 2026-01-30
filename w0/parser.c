@@ -335,6 +335,22 @@ static Node* parse_primary(Parser* parser) {
         return node;
     }
 
+    // Handle 'self' keyword as an identifier
+    if (match(parser, TOK_SELF)) {
+        Node* node = node_new(NODE_IDENT, token.line, token.column);
+        if (!node) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        node->as.ident.name = strdup("self");
+        if (!node->as.ident.name) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        node->as.ident.length = 4;
+        return node;
+    }
+
     if (match(parser, TOK_LPAREN)) {
         Node* expr = parse_expression(parser);
         consume(parser, TOK_RPAREN, "Expected ')' after expression");
@@ -906,15 +922,45 @@ static Node* parse_statement(Parser* parser) {
 
 // Declaration parsing
 static Node* parse_func_decl(Parser* parser) {
+    // Check for method receiver: func (Type) or func (const Type)
+    char* receiver_type     = NULL;
+    int   receiver_type_len = 0;
+    int   receiver_is_const = 0;
+
+    if (check(parser, TOK_LPAREN)) {
+        advance(parser); // consume '('
+
+        // Check for 'const' modifier
+        if (match(parser, TOK_CONST)) {
+            receiver_is_const = 1;
+        }
+
+        // Expect struct type name
+        Token recv_type = parser->current;
+        consume(parser, TOK_IDENT, "Expected receiver type name");
+        receiver_type = copy_token_string(&recv_type);
+        if (!receiver_type) {
+            error(parser, "Out of memory");
+            return NULL;
+        }
+        receiver_type_len = recv_type.length;
+
+        consume(parser, TOK_RPAREN, "Expected ')' after receiver type");
+    }
+
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected function name");
 
     Node* node = node_new(NODE_FUNC_DECL, name.line, name.column);
     if (!node) {
+        free(receiver_type);
         error(parser, "Out of memory");
         return NULL;
     }
-    node->as.func_decl.name = copy_token_string(&name);
+    node->as.func_decl.receiver_type     = receiver_type;
+    node->as.func_decl.receiver_type_len = receiver_type_len;
+    node->as.func_decl.receiver_is_const = receiver_is_const;
+    node->as.func_decl.name              = copy_token_string(&name);
     if (!node->as.func_decl.name) {
         error(parser, "Out of memory");
         return NULL;

@@ -55,6 +55,11 @@ struct Type {
             char** field_names;
             Type** field_types;
             int    field_count;
+            // Methods
+            char** method_names;
+            Type** method_types;    // Function types for methods
+            int*   method_is_const; // Whether each method is const
+            int    method_count;
         } struc;
 
         // Enum

@@ -115,7 +115,8 @@ struct Node {
             Node* object;
             char* name;
             int   length;
-            int   arrow; // 1 for ->, 0 for .
+            int   arrow;       // 1 for ->, 0 for .
+            char* struct_name; // Set by checker if this is a method access (NULL otherwise)
         } member;
 
         // Assignment
@@ -201,6 +202,9 @@ struct Node {
 
         // Function declaration
         struct {
+            char*    receiver_type;     // Method receiver struct name (NULL for regular functions)
+            int      receiver_type_len; // Length of receiver type name
+            int      receiver_is_const; // 1 if const receiver, 0 if mutable
             char*    name;
             int      name_length;
             NodeList params;

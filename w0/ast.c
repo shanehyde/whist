@@ -68,6 +68,7 @@ void node_free(Node* node) {
     case NODE_MEMBER:
         node_free(node->as.member.object);
         free(node->as.member.name);
+        free(node->as.member.struct_name);
         break;
     case NODE_ASSIGN:
         node_free(node->as.assign.target);
@@ -116,6 +117,7 @@ void node_free(Node* node) {
         node_free(node->as.return_stmt.value);
         break;
     case NODE_FUNC_DECL:
+        free(node->as.func_decl.receiver_type);
         free(node->as.func_decl.name);
         nodelist_free(&node->as.func_decl.params);
         node_free(node->as.func_decl.return_type);

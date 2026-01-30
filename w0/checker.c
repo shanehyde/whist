@@ -527,7 +527,8 @@ static Type* check_expr(Checker* checker, Node* node) {
     }
 
     case NODE_MEMBER: {
-        Type* object = check_expr(checker, node->as.member.object);
+        Type* object      = check_expr(checker, node->as.member.object);
+        Type* struct_type = object;
 
         if (object->kind == TYPE_ERROR)
             return type_error;
@@ -539,27 +540,38 @@ static Type* check_expr(Checker* checker, Node* node) {
                       type_name(object));
                 return type_error;
             }
-            object = object->as.pointer.inner;
-            if (!object)
+            struct_type = object->as.pointer.inner;
+            if (!struct_type)
                 return type_error;
         }
 
-        if (object->kind != TYPE_STRUCT) {
+        if (struct_type->kind != TYPE_STRUCT) {
             error(checker, node->line, node->column, "Member access requires struct type, got '%s'",
-                  type_name(object));
+                  type_name(struct_type));
             return type_error;
         }
 
-        // Find field
-        const char* field_name = node->as.member.name;
-        for (int i = 0; i < object->as.struc.field_count; i++) {
-            if (strcmp(object->as.struc.field_names[i], field_name) == 0) {
-                return object->as.struc.field_types[i];
+        // Find field first
+        const char* member_name = node->as.member.name;
+        for (int i = 0; i < struct_type->as.struc.field_count; i++) {
+            if (strcmp(struct_type->as.struc.field_names[i], member_name) == 0) {
+                node->as.member.struct_name = NULL; // Not a method
+                return struct_type->as.struc.field_types[i];
             }
         }
 
-        error(checker, node->line, node->column, "Struct '%s' has no field '%s'",
-              object->as.struc.name, field_name);
+        // If not a field, check for method
+        for (int i = 0; i < struct_type->as.struc.method_count; i++) {
+            if (strcmp(struct_type->as.struc.method_names[i], member_name) == 0) {
+                // Store struct name for codegen to use
+                node->as.member.struct_name = strdup(struct_type->as.struc.name);
+                // Return the method's function type
+                return struct_type->as.struc.method_types[i];
+            }
+        }
+
+        error(checker, node->line, node->column, "Struct '%s' has no field or method '%s'",
+              struct_type->as.struc.name, member_name);
         return type_error;
     }
 
@@ -829,11 +841,21 @@ static void check_decl(Checker* checker, Node* node) {
 
     switch (node->type) {
     case NODE_FUNC_DECL: {
-        const char* name = node->as.func_decl.name;
+        const char* name          = node->as.func_decl.name;
+        const char* receiver_type = node->as.func_decl.receiver_type;
+        int         is_method     = (receiver_type != NULL);
+
+        // For methods, use mangled name: StructName_methodName
+        char mangled_name[256];
+        if (is_method) {
+            snprintf(mangled_name, sizeof(mangled_name), "%s_%s", receiver_type, name);
+        } else {
+            snprintf(mangled_name, sizeof(mangled_name), "%s", name);
+        }
 
         // Check for redefinition
-        if (checker_lookup(checker, name)) {
-            error(checker, node->line, node->column, "Redefinition of '%s'", name);
+        if (checker_lookup(checker, mangled_name)) {
+            error(checker, node->line, node->column, "Redefinition of '%s'", mangled_name);
             return;
         }
 
@@ -851,12 +873,47 @@ static void check_decl(Checker* checker, Node* node) {
 
         // Pre-declare function for recursion
         Type* func_type = type_func(param_types, param_count, return_type);
-        checker_define(checker, name, SYM_FUNC, func_type);
+        checker_define(checker, mangled_name, SYM_FUNC, func_type);
+
+        // For methods, also register the method on the struct type
+        if (is_method) {
+            Symbol* struct_sym = checker_lookup(checker, receiver_type);
+            if (!struct_sym || struct_sym->kind != SYM_TYPE ||
+                struct_sym->type->kind != TYPE_STRUCT) {
+                error(checker, node->line, node->column, "Unknown receiver type '%s'",
+                      receiver_type);
+            } else {
+                Type* st = struct_sym->type;
+                int   n  = st->as.struc.method_count;
+                st->as.struc.method_names =
+                    realloc(st->as.struc.method_names, (n + 1) * sizeof(char*));
+                st->as.struc.method_types =
+                    realloc(st->as.struc.method_types, (n + 1) * sizeof(Type*));
+                st->as.struc.method_is_const =
+                    realloc(st->as.struc.method_is_const, (n + 1) * sizeof(int));
+                st->as.struc.method_names[n]    = strdup(name);
+                st->as.struc.method_types[n]    = func_type;
+                st->as.struc.method_is_const[n] = node->as.func_decl.receiver_is_const;
+                st->as.struc.method_count       = n + 1;
+            }
+        }
 
         // Enter function scope
         checker_push_scope(checker);
         Type* old_return             = checker->current_func_return;
         checker->current_func_return = return_type;
+
+        // For methods, inject 'self' into scope
+        if (is_method) {
+            Symbol* struct_sym = checker_lookup(checker, receiver_type);
+            if (struct_sym && struct_sym->kind == SYM_TYPE) {
+                Type*   self_type = type_pointer(struct_sym->type);
+                Symbol* self_sym  = checker_define(checker, "self", SYM_VAR, self_type);
+                if (self_sym && node->as.func_decl.receiver_is_const) {
+                    self_sym->is_const = 1;
+                }
+            }
+        }
 
         // Define parameters
         for (int i = 0; i < param_count; i++) {
