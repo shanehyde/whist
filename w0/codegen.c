@@ -52,7 +52,9 @@ static void emit_type(CodeGen* gen, Node* type_node) {
             emit(gen, "uint16_t");
         } else if (strcmp(name, "uint32") == 0) {
             emit(gen, "uint32_t");
-        } else if (strcmp(name, "float") == 0) {
+        } else if (strcmp(name, "f32") == 0) {
+            emit(gen, "float");
+        } else if (strcmp(name, "f64") == 0) {
             emit(gen, "double");
         } else if (strcmp(name, "char") == 0) {
             emit(gen, "char");
@@ -345,14 +347,14 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         } else {
             // Type inference - use auto or infer from init
             // For C, we need to determine the type from the initializer
-            // For simplicity, use int64_t for int literals, double for float
+            // For simplicity, use int64_t for int literals, float for f32 literals
             if (node->as.var_decl.init) {
                 switch (node->as.var_decl.init->type) {
                 case NODE_INT_LIT:
                     emit(gen, "int64_t %s", node->as.var_decl.name);
                     break;
                 case NODE_FLOAT_LIT:
-                    emit(gen, "double %s", node->as.var_decl.name);
+                    emit(gen, "float %s", node->as.var_decl.name);
                     break;
                 case NODE_BOOL_LIT:
                     emit(gen, "bool %s", node->as.var_decl.name);

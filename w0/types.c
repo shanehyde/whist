@@ -14,7 +14,8 @@ static Type builtin_uint64 = {TYPE_UINT64, {{NULL}}};
 static Type builtin_uint8  = {TYPE_UINT8, {{NULL}}};
 static Type builtin_uint16 = {TYPE_UINT16, {{NULL}}};
 static Type builtin_uint32 = {TYPE_UINT32, {{NULL}}};
-static Type builtin_float  = {TYPE_FLOAT, {{NULL}}};
+static Type builtin_f32    = {TYPE_F32, {{NULL}}};
+static Type builtin_f64    = {TYPE_F64, {{NULL}}};
 static Type builtin_char   = {TYPE_CHAR, {{NULL}}};
 static Type builtin_string = {TYPE_STRING, {{NULL}}};
 static Type builtin_error  = {TYPE_ERROR, {{NULL}}};
@@ -29,7 +30,8 @@ Type* type_uint64 = &builtin_uint64;
 Type* type_uint8  = &builtin_uint8;
 Type* type_uint16 = &builtin_uint16;
 Type* type_uint32 = &builtin_uint32;
-Type* type_float  = &builtin_float;
+Type* type_f32    = &builtin_f32;
+Type* type_f64    = &builtin_f64;
 Type* type_char   = &builtin_char;
 Type* type_string = &builtin_string;
 Type* type_error  = &builtin_error;
@@ -113,8 +115,8 @@ void type_free(Type* type) {
     // Don't free builtins
     if (type == type_void || type == type_bool || type == type_int64 || type == type_int8 ||
         type == type_int16 || type == type_int32 || type == type_uint64 || type == type_uint8 ||
-        type == type_uint16 || type == type_uint32 || type == type_float || type == type_char ||
-        type == type_string || type == type_error) {
+        type == type_uint16 || type == type_uint32 || type == type_f32 || type == type_f64 ||
+        type == type_char || type == type_string || type == type_error) {
         return;
     }
 
@@ -206,7 +208,11 @@ int type_assignable(Type* target, Type* value) {
         return 1;
 
     // Any integer -> float promotion
-    if (target->kind == TYPE_FLOAT && type_is_integer(value))
+    if ((target->kind == TYPE_F32 || target->kind == TYPE_F64) && type_is_integer(value))
+        return 1;
+
+    // f32 -> f64 promotion
+    if (target->kind == TYPE_F64 && value->kind == TYPE_F32)
         return 1;
 
     // int64 can be assigned to any integer type (implicit narrowing)
@@ -255,8 +261,10 @@ const char* type_name(Type* type) {
         return "uint16";
     case TYPE_UINT32:
         return "uint32";
-    case TYPE_FLOAT:
-        return "float";
+    case TYPE_F32:
+        return "f32";
+    case TYPE_F64:
+        return "f64";
     case TYPE_CHAR:
         return "char";
     case TYPE_STRING:

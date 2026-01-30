@@ -322,7 +322,7 @@ int main(int argc, char** argv) {
                  "\n"
                  "func main(): int64 {\n"
                  "    var x = 42;\n"
-                 "    var y: float = 3.14;\n"
+                 "    var y: f32 = 3.14;\n"
                  "    const PI = 3.14159;\n"
                  "\n"
                  "    if (x > 0 && y != 0.0) {\n"

@@ -111,7 +111,7 @@ Whist is a C-like language with the following features:
 
 ### Types
 
-- Primitives: `void`, `bool`, `int64`, `int8`, `int16`, `int32`, `uint64`, `uint8`, `uint16`, `uint32`, `float`, `char`, `string`
+- Primitives: `void`, `bool`, `int64`, `int8`, `int16`, `int32`, `uint64`, `uint8`, `uint16`, `uint32`, `f32`, `f64`, `char`, `string`
 - Pointers: `*T`
 - Arrays: `[n]T`
 - User-defined: `struct`, `enum`
@@ -130,7 +130,8 @@ Whist is a C-like language with the following features:
 | uint8  | uint8_t      |
 | uint16 | uint16_t     |
 | uint32 | uint32_t     |
-| float  | double       |
+| f32    | float        |
+| f64    | double       |
 | char   | char         |
 | string | const char\* |
 
@@ -184,7 +185,8 @@ func add(a: int64, b: int64): int64 {
 
 func main(): int64 {
     var x = 42;
-    var y: float = 3.14;
+    var y: f32 = 3.14;
+    var y64: f64 = 3.14;
     const PI = 3.14159;
 
     if (x > 0) {

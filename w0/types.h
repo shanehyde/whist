@@ -14,7 +14,8 @@ typedef enum {
     TYPE_UINT8,
     TYPE_UINT16,
     TYPE_UINT32,
-    TYPE_FLOAT,
+    TYPE_F32,
+    TYPE_F64,
     TYPE_CHAR,
     TYPE_STRING,
     TYPE_POINTER,
@@ -83,7 +84,8 @@ extern Type* type_uint64;
 extern Type* type_uint8;
 extern Type* type_uint16;
 extern Type* type_uint32;
-extern Type* type_float;
+extern Type* type_f32;
+extern Type* type_f64;
 extern Type* type_char;
 extern Type* type_string;
 extern Type* type_error;

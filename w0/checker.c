@@ -148,8 +148,10 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
             return type_uint16;
         if (strcmp(name, "uint32") == 0)
             return type_uint32;
-        if (strcmp(name, "float") == 0)
-            return type_float;
+        if (strcmp(name, "f32") == 0)
+            return type_f32;
+        if (strcmp(name, "f64") == 0)
+            return type_f64;
         if (strcmp(name, "char") == 0)
             return type_char;
         if (strcmp(name, "string") == 0)
@@ -200,7 +202,7 @@ static Type* check_expr(Checker* checker, Node* node) {
         return type_int64;
 
     case NODE_FLOAT_LIT:
-        return type_float;
+        return type_f32;
 
     case NODE_STRING_LIT:
         return type_string;
@@ -240,8 +242,8 @@ static Type* check_expr(Checker* checker, Node* node) {
             // Allow comparing same types or numeric types
             if (type_equals(left, right))
                 return type_bool;
-            if ((type_is_integer(left) || left->kind == TYPE_FLOAT) &&
-                (type_is_integer(right) || right->kind == TYPE_FLOAT)) {
+            if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
+                (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
                 return type_bool;
             }
             error(checker, node->line, node->column, "Cannot compare '%s' and '%s'",
@@ -262,11 +264,14 @@ static Type* check_expr(Checker* checker, Node* node) {
         if (op == TOK_PLUS || op == TOK_MINUS || op == TOK_STAR || op == TOK_SLASH ||
             op == TOK_PERCENT) {
             // Numeric operands
-            if ((type_is_integer(left) || left->kind == TYPE_FLOAT) &&
-                (type_is_integer(right) || right->kind == TYPE_FLOAT)) {
-                // Promote to float if either is float
-                if (left->kind == TYPE_FLOAT || right->kind == TYPE_FLOAT) {
-                    return type_float;
+            if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
+                (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
+                // Promote to float if either operand is f32/f64
+                if (left->kind == TYPE_F64 || right->kind == TYPE_F64) {
+                    return type_f64;
+                }
+                if (left->kind == TYPE_F32 || right->kind == TYPE_F32) {
+                    return type_f32;
                 }
                 // For integer types, return the larger/common type
                 // If they're the same type, return that type
@@ -315,7 +320,8 @@ static Type* check_expr(Checker* checker, Node* node) {
 
         switch (op) {
         case TOK_MINUS:
-            if (!type_is_integer(operand) && operand->kind != TYPE_FLOAT) {
+            if (!type_is_integer(operand) && operand->kind != TYPE_F32 &&
+                operand->kind != TYPE_F64) {
                 error(checker, node->line, node->column, "Unary '-' requires numeric operand");
                 return type_error;
             }
@@ -486,8 +492,9 @@ static Type* check_expr(Checker* checker, Node* node) {
         if (op != TOK_EQ) {
             // Compound assignment: +=, -=, etc.
             // Check types are compatible for arithmetic
-            if ((!type_is_integer(target) && target->kind != TYPE_FLOAT) ||
-                (!type_is_integer(value) && value->kind != TYPE_FLOAT)) {
+            if ((!type_is_integer(target) && target->kind != TYPE_F32 &&
+                 target->kind != TYPE_F64) ||
+                (!type_is_integer(value) && value->kind != TYPE_F32 && value->kind != TYPE_F64)) {
                 error(checker, node->line, node->column,
                       "Invalid operands for compound assignment");
                 return type_error;

@@ -10,7 +10,8 @@ func main(): int32 {
 
     // Explicit types
     var x: int32 = 100;
-    var y: float = 2.718;
+    var y: f32 = 2.718;
+    var y64: f64 = 2.718;
     var z: bool = false;
 
     // Constants
