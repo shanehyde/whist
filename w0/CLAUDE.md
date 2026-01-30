@@ -60,6 +60,7 @@ bin/w0 program.w | cc -x c -o program -
 ```
 w0/
 ├── Makefile       # Build system
+├── grammar.md     # BNF grammar specification
 ├── bin/           # Build output (w0 executable)
 ├── lexer.h/c      # Lexer (tokenizer)
 ├── ast.h/c        # AST node definitions and memory management
