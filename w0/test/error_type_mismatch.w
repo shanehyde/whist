@@ -1,10 +1,10 @@
 // ERROR TEST: Type mismatch in return
 // Expected error: Return type mismatch
 
-func foo(): int32 {
+func foo(): i32 {
     return "hello";
 }
 
-func main(): int32 {
+func main(): i32 {
     return foo();
 }

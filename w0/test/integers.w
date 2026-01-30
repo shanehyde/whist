@@ -1,26 +1,26 @@
 // Test various integer types
 
-func main(): int32 {
+func main(): i32 {
     // Signed integers
-    var a: int8 = 127;
-    var b: int16 = 32767;
-    var c: int32 = 2147483647;
-    var d: int32 = 1234567890;
+    var a: i8 = 127;
+    var b: i16 = 32767;
+    var c: i32 = 2147483647;
+    var d: i32 = 1234567890;
 
     // Unsigned integers
-    var e: uint8 = 255;
-    var f: uint16 = 65535;
-    var g: uint32 = 4294967295;
+    var e: u8 = 255;
+    var f: u16 = 65535;
+    var g: u32 = 4294967295;
 
     // Arithmetic operations
-    var sum: int32 = c + 1;
-    var diff: int16 = b - 100;
+    var sum: i32 = c + 1;
+    var diff: i16 = b - 100;
 
     // Bitwise operations
-    var masked: uint8 = e & 0x0F;
-    var shifted: uint16 = f >> 8;
+    var masked: u8 = e & 0x0F;
+    var shifted: u16 = f >> 8;
 
-    // Mixed operations (result is int64)
+    // Mixed operations (result is i64)
     var mixed = a + b;
 
     return 0;

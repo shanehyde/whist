@@ -1,7 +1,7 @@
 // ERROR TEST: Assignment to const
 // Expected error: Cannot assign to const 'x'
 
-func main(): int32 {
+func main(): i32 {
     const x = 10;
     x = 20;
     return x;

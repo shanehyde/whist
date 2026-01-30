@@ -132,21 +132,21 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
             return type_void;
         if (strcmp(name, "bool") == 0)
             return type_bool;
-        if (strcmp(name, "int64") == 0)
+        if (strcmp(name, "i64") == 0)
             return type_int64;
-        if (strcmp(name, "int8") == 0)
+        if (strcmp(name, "i8") == 0)
             return type_int8;
-        if (strcmp(name, "int16") == 0)
+        if (strcmp(name, "i16") == 0)
             return type_int16;
-        if (strcmp(name, "int32") == 0)
+        if (strcmp(name, "i32") == 0)
             return type_int32;
-        if (strcmp(name, "uint64") == 0)
+        if (strcmp(name, "u64") == 0)
             return type_uint64;
-        if (strcmp(name, "uint8") == 0)
+        if (strcmp(name, "u8") == 0)
             return type_uint8;
-        if (strcmp(name, "uint16") == 0)
+        if (strcmp(name, "u16") == 0)
             return type_uint16;
-        if (strcmp(name, "uint32") == 0)
+        if (strcmp(name, "u32") == 0)
             return type_uint32;
         if (strcmp(name, "f32") == 0)
             return type_f32;
@@ -278,7 +278,7 @@ static Type* check_expr(Checker* checker, Node* node) {
                 if (type_equals(left, right)) {
                     return left;
                 }
-                // Otherwise default to int64
+                // Otherwise default to i64
                 return type_int64;
             }
 
@@ -300,7 +300,7 @@ static Type* check_expr(Checker* checker, Node* node) {
                       "Bitwise operators require integer operands");
                 return type_error;
             }
-            // Return common type or promote to int64
+            // Return common type or promote to i64
             if (type_equals(left, right)) {
                 return left;
             }

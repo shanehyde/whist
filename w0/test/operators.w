@@ -1,6 +1,6 @@
 // Test operators
 
-func main(): int32 {
+func main(): i32 {
     var a = 10;
     var b = 3;
 

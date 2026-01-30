@@ -1,5 +1,5 @@
 // Basic hello world style program
 
-func main(): int32 {
+func main(): i32 {
     return 0;
 }

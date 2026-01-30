@@ -6,7 +6,7 @@ enum Color {
     Blue,
 }
 
-func main(): int32 {
+func main(): i32 {
     var c: Color;
     c = Red;
     return 0;

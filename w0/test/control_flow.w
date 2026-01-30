@@ -1,6 +1,6 @@
 // Test control flow statements
 
-func main(): int32 {
+func main(): i32 {
     var x = 0;
 
     // If-else

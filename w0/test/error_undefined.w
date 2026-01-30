@@ -1,6 +1,6 @@
 // ERROR TEST: Undefined variable
 // Expected error: Undefined identifier 'x'
 
-func main(): int32 {
+func main(): i32 {
     return x;
 }

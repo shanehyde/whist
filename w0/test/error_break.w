@@ -1,7 +1,7 @@
 // ERROR TEST: Break outside loop
 // Expected error: Break outside of loop
 
-func main(): int32 {
+func main(): i32 {
     break;
     return 0;
 }

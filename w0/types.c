@@ -215,7 +215,7 @@ int type_assignable(Type* target, Type* value) {
     if (target->kind == TYPE_F64 && value->kind == TYPE_F32)
         return 1;
 
-    // int64 can be assigned to any integer type (implicit narrowing)
+    // i64 can be assigned to any integer type (implicit narrowing)
     // This allows integer literals to be assigned to smaller types
     if (type_is_integer(target) && value->kind == TYPE_INT64)
         return 1;
@@ -246,21 +246,21 @@ const char* type_name(Type* type) {
     case TYPE_BOOL:
         return "bool";
     case TYPE_INT64:
-        return "int64";
+        return "i64";
     case TYPE_INT8:
-        return "int8";
+        return "i8";
     case TYPE_INT16:
-        return "int16";
+        return "i16";
     case TYPE_INT32:
-        return "int32";
+        return "i32";
     case TYPE_UINT64:
-        return "uint64";
+        return "u64";
     case TYPE_UINT8:
-        return "uint8";
+        return "u8";
     case TYPE_UINT16:
-        return "uint16";
+        return "u16";
     case TYPE_UINT32:
-        return "uint32";
+        return "u32";
     case TYPE_F32:
         return "f32";
     case TYPE_F64:
