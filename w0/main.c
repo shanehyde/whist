@@ -316,43 +316,14 @@ int main(int argc, char** argv) {
             return 1;
         free_source = 1;
     } else {
-        // Default test input
-        source = "struct Point {\n"
-                 "    x: i64,\n"
-                 "    y: i64,\n"
-                 "}\n"
-                 "\n"
-                 "enum Color {\n"
-                 "    Red,\n"
-                 "    Green,\n"
-                 "    Blue,\n"
-                 "}\n"
-                 "\n"
-                 "func add(a: i64, b: i64): i64 {\n"
-                 "    return a + b;\n"
-                 "}\n"
-                 "\n"
-                 "func main(): i64 {\n"
-                 "    var x = 42;\n"
-                 "    var y: f32 = 3.14;\n"
-                 "    const PI = 3.14159;\n"
-                 "\n"
-                 "    if (x > 0 && y != 0.0) {\n"
-                 "        return add(x, 1);\n"
-                 "    } else {\n"
-                 "        return 0;\n"
-                 "    }\n"
-                 "\n"
-                 "    for (var i = 0; i < 10; i++) {\n"
-                 "        x = x + i;\n"
-                 "    }\n"
-                 "\n"
-                 "    while (x > 0) {\n"
-                 "        x--;\n"
-                 "    }\n"
-                 "\n"
-                 "    return x;\n"
-                 "}\n";
+        fprintf(stderr, "Usage: %s [options] <source-file>\n", argv[0]);
+        fprintf(stderr, "Options:\n");
+        fprintf(stderr, "  --lex     Lex only (print tokens)\n");
+        fprintf(stderr, "  --parse   Parse only (no type checking)\n");
+        fprintf(stderr, "  --check   Type check only (no code generation)\n");
+        fprintf(stderr, "  --ast     Print AST\n");
+        fprintf(stderr, "  -o <file> Output file\n");
+        return 1;
     }
 
     if (lex_only) {
