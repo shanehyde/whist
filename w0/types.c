@@ -85,11 +85,15 @@ Type* type_array(Type* elem, int size) {
 }
 
 Type* type_struct(const char* name) {
-    Type* type                 = type_new(TYPE_STRUCT);
-    type->as.struc.name        = strdup(name);
-    type->as.struc.field_names = NULL;
-    type->as.struc.field_types = NULL;
-    type->as.struc.field_count = 0;
+    Type* type                     = type_new(TYPE_STRUCT);
+    type->as.struc.name            = strdup(name);
+    type->as.struc.field_names     = NULL;
+    type->as.struc.field_types     = NULL;
+    type->as.struc.field_count     = 0;
+    type->as.struc.method_names    = NULL;
+    type->as.struc.method_types    = NULL;
+    type->as.struc.method_is_const = NULL;
+    type->as.struc.method_count    = 0;
     return type;
 }
 
@@ -128,6 +132,12 @@ void type_free(Type* type) {
         }
         free(type->as.struc.field_names);
         free(type->as.struc.field_types);
+        for (int i = 0; i < type->as.struc.method_count; i++) {
+            free(type->as.struc.method_names[i]);
+        }
+        free(type->as.struc.method_names);
+        free(type->as.struc.method_types);
+        free(type->as.struc.method_is_const);
         break;
     case TYPE_ENUM:
         free(type->as.enm.name);

@@ -298,16 +298,41 @@ static void emit_expr(CodeGen* gen, Node* node) {
         }
         break;
 
-    case NODE_CALL:
-        emit_expr(gen, node->as.call.func);
-        emit(gen, "(");
-        for (int i = 0; i < node->as.call.args.count; i++) {
-            if (i > 0)
+    case NODE_CALL: {
+        Node* func = node->as.call.func;
+        // Check if this is a method call (func is a member access with struct_name set)
+        if (func->type == NODE_MEMBER && func->as.member.struct_name != NULL) {
+            // Method call: emit StructName_method(&obj, args...) or StructName_method(ptr, args...)
+            emit(gen, "%s_%.*s(", func->as.member.struct_name, func->as.member.length,
+                 func->as.member.name);
+            // Emit the receiver as first argument
+            if (func->as.member.arrow) {
+                // obj->method() => StructName_method(obj, ...)
+                emit_expr(gen, func->as.member.object);
+            } else {
+                // obj.method() => StructName_method(&obj, ...)
+                emit(gen, "&");
+                emit_expr(gen, func->as.member.object);
+            }
+            // Emit remaining arguments
+            for (int i = 0; i < node->as.call.args.count; i++) {
                 emit(gen, ", ");
-            emit_expr(gen, node->as.call.args.nodes[i]);
+                emit_expr(gen, node->as.call.args.nodes[i]);
+            }
+            emit(gen, ")");
+        } else {
+            // Regular function call
+            emit_expr(gen, func);
+            emit(gen, "(");
+            for (int i = 0; i < node->as.call.args.count; i++) {
+                if (i > 0)
+                    emit(gen, ", ");
+                emit_expr(gen, node->as.call.args.nodes[i]);
+            }
+            emit(gen, ")");
         }
-        emit(gen, ")");
         break;
+    }
 
     case NODE_INDEX:
         emit_expr(gen, node->as.index.object);
@@ -613,12 +638,31 @@ static void emit_decl(CodeGen* gen, Node* node) {
         break;
 
     case NODE_FUNC_DECL: {
+        int is_method = (node->as.func_decl.receiver_type != NULL);
+
         // Return type
         emit_type(gen, node->as.func_decl.return_type);
-        emit(gen, " %s(", node->as.func_decl.name);
+
+        // Function name (mangled for methods)
+        if (is_method) {
+            emit(gen, " %s_%s(", node->as.func_decl.receiver_type, node->as.func_decl.name);
+        } else {
+            emit(gen, " %s(", node->as.func_decl.name);
+        }
 
         // Parameters
-        if (node->as.func_decl.params.count == 0) {
+        if (is_method) {
+            // Emit self parameter first
+            if (node->as.func_decl.receiver_is_const) {
+                emit(gen, "const ");
+            }
+            emit(gen, "%s* self", node->as.func_decl.receiver_type);
+            if (node->as.func_decl.params.count > 0) {
+                emit(gen, ", ");
+            }
+        }
+
+        if (node->as.func_decl.params.count == 0 && !is_method) {
             emit(gen, "void");
         } else {
             for (int i = 0; i < node->as.func_decl.params.count; i++) {
@@ -681,13 +725,29 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     }
     emit(gen, "\n");
 
-    // Forward declarations for functions
+    // Forward declarations for functions and methods
     for (int i = 0; i < ast->as.program.decls.count; i++) {
         Node* decl = ast->as.program.decls.nodes[i];
         if (decl->type == NODE_FUNC_DECL) {
+            int is_method = (decl->as.func_decl.receiver_type != NULL);
+
             emit_type(gen, decl->as.func_decl.return_type);
-            emit(gen, " %s(", decl->as.func_decl.name);
-            if (decl->as.func_decl.params.count == 0) {
+
+            if (is_method) {
+                emit(gen, " %s_%s(", decl->as.func_decl.receiver_type, decl->as.func_decl.name);
+                // Emit self parameter
+                if (decl->as.func_decl.receiver_is_const) {
+                    emit(gen, "const ");
+                }
+                emit(gen, "%s* self", decl->as.func_decl.receiver_type);
+                if (decl->as.func_decl.params.count > 0) {
+                    emit(gen, ", ");
+                }
+            } else {
+                emit(gen, " %s(", decl->as.func_decl.name);
+            }
+
+            if (decl->as.func_decl.params.count == 0 && !is_method) {
                 emit(gen, "void");
             } else {
                 for (int j = 0; j < decl->as.func_decl.params.count; j++) {
