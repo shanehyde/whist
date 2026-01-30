@@ -69,6 +69,13 @@ void node_free(Node* node) {
         node_free(node->as.assign.target);
         node_free(node->as.assign.value);
         break;
+    case NODE_STRUCT_INIT:
+        nodelist_free(&node->as.struct_init.fields);
+        break;
+    case NODE_FIELD_INIT:
+        free(node->as.field_init.name);
+        node_free(node->as.field_init.value);
+        break;
     case NODE_EXPR_STMT:
         node_free(node->as.expr_stmt.expr);
         break;

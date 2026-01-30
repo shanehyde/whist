@@ -20,6 +20,7 @@ static void emit_type(CodeGen* gen, Node* type_node);
 static void emit_expr(CodeGen* gen, Node* node);
 static void emit_stmt(CodeGen* gen, Node* node);
 static void emit_decl(CodeGen* gen, Node* node);
+static void emit_struct_init(CodeGen* gen, Node* node);
 
 // Emit a type from a type annotation node
 static void emit_type(CodeGen* gen, Node* type_node) {
@@ -320,10 +321,30 @@ static void emit_expr(CodeGen* gen, Node* node) {
         emit(gen, ")");
         break;
 
+    case NODE_STRUCT_INIT:
+        emit_struct_init(gen, node);
+        break;
+
     default:
         emit(gen, "/* unknown expr %d */", node->type);
         break;
     }
+}
+
+static void emit_struct_init(CodeGen* gen, Node* node) {
+    emit(gen, "{");
+    for (int i = 0; i < node->as.struct_init.fields.count; i++) {
+        Node* field = node->as.struct_init.fields.nodes[i];
+        if (!field || field->type != NODE_FIELD_INIT) {
+            continue;
+        }
+        if (i > 0) {
+            emit(gen, ", ");
+        }
+        emit(gen, ".%s = ", field->as.field_init.name);
+        emit_expr(gen, field->as.field_init.value);
+    }
+    emit(gen, "}");
 }
 
 static void emit_stmt(CodeGen* gen, Node* node) {

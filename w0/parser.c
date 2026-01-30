@@ -8,6 +8,7 @@ static Node* parse_declaration(Parser* parser);
 static Node* parse_statement(Parser* parser);
 static Node* parse_expression(Parser* parser);
 static Node* parse_type(Parser* parser);
+static Node* parse_struct_init(Parser* parser);
 
 static void advance(Parser* parser) {
     parser->previous = parser->current;
@@ -191,8 +192,45 @@ static Node* parse_primary(Parser* parser) {
         return expr;
     }
 
+    if (match(parser, TOK_LBRACE)) {
+        return parse_struct_init(parser);
+    }
+
     error(parser, "Expected expression");
     return NULL;
+}
+
+static Node* parse_struct_init(Parser* parser) {
+    Token start = parser->previous;
+    Node* node  = node_new(NODE_STRUCT_INIT, start.line, start.column);
+    nodelist_init(&node->as.struct_init.fields);
+
+    if (!check(parser, TOK_RBRACE)) {
+        for (;;) {
+            Token field_name = parser->current;
+            consume(parser, TOK_IDENT, "Expected field name in struct initializer");
+
+            Node* field = node_new(NODE_FIELD_INIT, field_name.line, field_name.column);
+            field->as.field_init.name        = copy_token_string(&field_name);
+            field->as.field_init.name_length = field_name.length;
+
+            consume(parser, TOK_COLON, "Expected ':' after field name");
+            field->as.field_init.value = parse_expression(parser);
+
+            nodelist_push(&node->as.struct_init.fields, field);
+
+            if (match(parser, TOK_COMMA)) {
+                if (check(parser, TOK_RBRACE)) {
+                    break; // trailing comma
+                }
+                continue;
+            }
+            break;
+        }
+    }
+
+    consume(parser, TOK_RBRACE, "Expected '}' after struct initializer");
+    return node;
 }
 
 static Node* parse_postfix(Parser* parser) {

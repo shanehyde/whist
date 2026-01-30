@@ -193,6 +193,71 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
     return type_error;
 }
 
+static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type) {
+    if (!struct_type || struct_type->kind != TYPE_STRUCT) {
+        error(checker, init->line, init->column, "Struct initializer requires a struct type");
+        return type_error;
+    }
+
+    int  field_count = struct_type->as.struc.field_count;
+    int* seen        = calloc(field_count, sizeof(int));
+    int  had_error   = 0;
+
+    for (int i = 0; i < init->as.struct_init.fields.count; i++) {
+        Node* field = init->as.struct_init.fields.nodes[i];
+        if (!field || field->type != NODE_FIELD_INIT) {
+            continue;
+        }
+
+        const char* field_name  = field->as.field_init.name;
+        int         field_index = -1;
+
+        for (int j = 0; j < field_count; j++) {
+            if (strcmp(struct_type->as.struc.field_names[j], field_name) == 0) {
+                field_index = j;
+                break;
+            }
+        }
+
+        if (field_index < 0) {
+            error(checker, field->line, field->column, "Struct '%s' has no field '%s'",
+                  struct_type->as.struc.name, field_name);
+            had_error = 1;
+            continue;
+        }
+
+        if (seen[field_index]) {
+            error(checker, field->line, field->column, "Duplicate initializer for field '%s'",
+                  field_name);
+            had_error = 1;
+            continue;
+        }
+
+        seen[field_index] = 1;
+
+        Type* value_type = check_expr(checker, field->as.field_init.value);
+        Type* field_type = struct_type->as.struc.field_types[field_index];
+
+        if (!type_assignable(field_type, value_type)) {
+            error(checker, field->line, field->column,
+                  "Cannot initialize field '%s' of type '%s' with '%s'", field_name,
+                  type_name(field_type), type_name(value_type));
+            had_error = 1;
+        }
+    }
+
+    for (int i = 0; i < field_count; i++) {
+        if (!seen[i]) {
+            error(checker, init->line, init->column, "Missing initializer for field '%s'",
+                  struct_type->as.struc.field_names[i]);
+            had_error = 1;
+        }
+    }
+
+    free(seen);
+    return had_error ? type_error : struct_type;
+}
+
 static Type* check_expr(Checker* checker, Node* node) {
     if (!node)
         return type_error;
@@ -470,7 +535,15 @@ static Type* check_expr(Checker* checker, Node* node) {
 
     case NODE_ASSIGN: {
         Type* target = check_expr(checker, node->as.assign.target);
-        Type* value  = check_expr(checker, node->as.assign.value);
+        Type* value  = NULL;
+
+        if (node->as.assign.value && node->as.assign.value->type == NODE_STRUCT_INIT) {
+            error(checker, node->line, node->column,
+                  "Struct initializers are only allowed in variable declarations");
+            return type_error;
+        }
+
+        value = check_expr(checker, node->as.assign.value);
 
         if (target->kind == TYPE_ERROR || value->kind == TYPE_ERROR) {
             return type_error;
@@ -510,6 +583,11 @@ static Type* check_expr(Checker* checker, Node* node) {
         return target;
     }
 
+    case NODE_STRUCT_INIT:
+        error(checker, node->line, node->column,
+              "Struct initializer requires a contextual struct type");
+        return type_error;
+
     default:
         error(checker, node->line, node->column, "Unknown expression type %d", node->type);
         return type_error;
@@ -542,7 +620,17 @@ static void check_stmt(Checker* checker, Node* node) {
         }
 
         if (node->as.var_decl.init) {
-            init_type = check_expr(checker, node->as.var_decl.init);
+            if (node->as.var_decl.init->type == NODE_STRUCT_INIT) {
+                if (!decl_type) {
+                    error(checker, node->line, node->column,
+                          "Struct initializer requires an explicit type");
+                    init_type = type_error;
+                } else {
+                    init_type = check_struct_init(checker, node->as.var_decl.init, decl_type);
+                }
+            } else {
+                init_type = check_expr(checker, node->as.var_decl.init);
+            }
         }
 
         Type* var_type;

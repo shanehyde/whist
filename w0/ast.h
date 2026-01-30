@@ -18,6 +18,8 @@ typedef enum {
     NODE_INDEX,
     NODE_MEMBER,
     NODE_ASSIGN,
+    NODE_STRUCT_INIT,
+    NODE_FIELD_INIT,
 
     // Statements
     NODE_EXPR_STMT,
@@ -120,6 +122,18 @@ struct Node {
             Node*     target;
             Node*     value;
         } assign;
+
+        // Struct initializer
+        struct {
+            NodeList fields;
+        } struct_init;
+
+        // Field initializer
+        struct {
+            char* name;
+            int   name_length;
+            Node* value;
+        } field_init;
 
         // Expression statement
         struct {

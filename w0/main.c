@@ -237,6 +237,18 @@ static void print_ast(Node* node, int depth) {
         print_ast(node->as.assign.value, depth + 1);
         break;
 
+    case NODE_STRUCT_INIT:
+        printf("StructInit\n");
+        for (int i = 0; i < node->as.struct_init.fields.count; i++) {
+            print_ast(node->as.struct_init.fields.nodes[i], depth + 1);
+        }
+        break;
+
+    case NODE_FIELD_INIT:
+        printf("FieldInit: %.*s\n", node->as.field_init.name_length, node->as.field_init.name);
+        print_ast(node->as.field_init.value, depth + 1);
+        break;
+
     case NODE_INT_LIT:
         printf("Int: %ld\n", node->as.int_lit.value);
         break;
