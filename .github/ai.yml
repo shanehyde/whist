@@ -1,0 +1,22 @@
+# Machine-readable AI agent metadata for repository automation
+working_directory: w0
+purpose: "Primary development and build happen in the `w0/` subfolder"
+entrypoint: "w0/bin/w0"
+recommended_commands:
+  - cd w0
+  - make
+  - make test
+  - ./bin/w0 --ast test/functions.w
+  - ./bin/w0 --check test/*.w
+allowed_actions:
+  read_files: true
+  run_commands: true
+  modify_docs: true
+  modify_code: false  # require explicit permission before changing source
+primary_paths:
+  - w0/
+  - w0/test/
+notes: |
+  Agents may run the build and test commands inside `w0/` to verify behaviour.
+  If source changes are required, request explicit user approval before editing
+  files, committing, or opening pull requests.

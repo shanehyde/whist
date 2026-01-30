@@ -11,6 +11,36 @@ make clean    # Remove build artifacts
 make test     # Run test suite
 ```
 
+---
+ai_agent_integration:
+    visibility: public
+    purpose: "Provide build, run, and introspection instructions for the w0 compiler and tests"
+    entrypoint: "bin/w0"
+    recommended_commands:
+        - "make"
+        - "make test"
+        - "./bin/w0 --ast test/functions.w"
+        - "./bin/w0 --check test/*.w"
+    allowed_actions:
+        - "read_files: true"
+        - "run_commands: true"
+        - "modify_docs: true"
+        - "modify_code: false  # request explicit permission before changing source code"
+    primary_paths:
+        - "w0/"
+        - "w0/test/"
+    notes: |
+        Agents may run build and test commands to verify changes. If code changes are
+        required, request explicit user approval before editing source files.
+---
+
+**AI Agent Integration**
+
+- **Purpose:** Provide structured metadata so automated agents can discover how to build, test, and inspect the bootstrap compiler.
+- **Entrypoint:** `bin/w0` (built by `make`).
+- **Recommended checks:** run `make`, then `make test`, and use `bin/w0 --ast` or `--check` for quick inspections.
+- **Safety note:** Agents may read and run commands in the workspace. Require explicit user confirmation before modifying source files or committing changes.
+
 ## Usage
 
 ```bash
