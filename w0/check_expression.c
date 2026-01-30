@@ -315,7 +315,12 @@ Type* check_expression(Checker* checker, Node* node) {
         for (int i = 0; i < struct_type->as.struc.method_count; i++) {
             if (strcmp(struct_type->as.struc.method_names[i], member_name) == 0) {
                 // Store struct name for codegen to use
-                node->as.member.struct_name = strdup(struct_type->as.struc.name);
+                char* sname = strdup(struct_type->as.struc.name);
+                if (!sname) {
+                    check_error(checker, node->line, node->column, "Out of memory");
+                    return type_error;
+                }
+                node->as.member.struct_name = sname;
                 // Return the method's function type
                 return struct_type->as.struc.method_types[i];
             }

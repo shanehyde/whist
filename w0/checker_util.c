@@ -41,8 +41,17 @@ void checker_free(Checker* checker) {
 }
 
 void checker_push_scope(Checker* checker) {
-    Scope* scope   = calloc(1, sizeof(Scope));
+    Scope* scope = calloc(1, sizeof(Scope));
+    if (!scope) {
+        fprintf(stderr, "Out of memory\n");
+        return;
+    }
     scope->symbols = calloc(SCOPE_SIZE, sizeof(Symbol*));
+    if (!scope->symbols) {
+        fprintf(stderr, "Out of memory\n");
+        free(scope);
+        return;
+    }
     scope->size    = SCOPE_SIZE;
     scope->parent  = checker->scope;
     checker->scope = scope;

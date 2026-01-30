@@ -16,13 +16,7 @@ Node* parse_foreach_stmt(Parser* parser) {
     consume(parser, TOK_IDENT, "Expected identifier after 'const'");
 
     Token var_token = parser->previous;
-    char* var_name  = malloc(var_token.length + 1);
-    if (!var_name) {
-        parse_error(parser, "Out of memory");
-        return NULL;
-    }
-    memcpy(var_name, var_token.start, var_token.length);
-    var_name[var_token.length] = '\0';
+    char* var_name  = copy_token_string(&var_token);
 
     // Parse: in
     consume(parser, TOK_IN, "Expected 'in' after foreach variable");

@@ -6,7 +6,8 @@
 #include "check_decl.h"
 #include "checker_util.h"
 
-Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type* type) {
+Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type* type,
+                       int is_const) {
     Scope*       scope = checker->scope;
     unsigned int index = hash_string(name) % scope->size;
 
@@ -21,7 +22,7 @@ Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type
     sym->kind             = kind;
     sym->name             = strdup(name);
     sym->type             = type;
-    sym->is_const         = 0;
+    sym->is_const         = is_const;
     sym->next             = scope->symbols[index];
     scope->symbols[index] = sym;
     return sym;

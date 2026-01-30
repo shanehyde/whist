@@ -18,16 +18,27 @@ void check_decl(Checker* checker, Node* node) {
         int         is_method     = (receiver_type != NULL);
 
         // For methods, use mangled name: StructName_methodName
-        char mangled_name[256];
+        char* mangled_name = NULL;
         if (is_method) {
-            snprintf(mangled_name, sizeof(mangled_name), "%s_%s", receiver_type, name);
+            size_t len  = strlen(receiver_type) + 1 + strlen(name) + 1;
+            mangled_name = malloc(len);
+            if (!mangled_name) {
+                check_error(checker, node->line, node->column, "Out of memory");
+                return;
+            }
+            snprintf(mangled_name, len, "%s_%s", receiver_type, name);
         } else {
-            snprintf(mangled_name, sizeof(mangled_name), "%s", name);
+            mangled_name = strdup(name);
+            if (!mangled_name) {
+                check_error(checker, node->line, node->column, "Out of memory");
+                return;
+            }
         }
 
         // Check for redefinition
         if (checker_lookup(checker, mangled_name)) {
             check_error(checker, node->line, node->column, "Redefinition of '%s'", mangled_name);
+            free(mangled_name);
             return;
         }
 
@@ -36,6 +47,11 @@ void check_decl(Checker* checker, Node* node) {
         Type** param_types = NULL;
         if (param_count > 0) {
             param_types = malloc(param_count * sizeof(Type*));
+            if (!param_types) {
+                check_error(checker, node->line, node->column, "Out of memory");
+                free(mangled_name);
+                return;
+            }
         }
 
         Type* return_type = type_void;
@@ -45,7 +61,7 @@ void check_decl(Checker* checker, Node* node) {
 
         // Pre-declare function for recursion
         Type* func_type = type_func(param_types, param_count, return_type);
-        checker_define(checker, mangled_name, SYM_FUNC, func_type);
+        checker_define(checker, mangled_name, SYM_FUNC, func_type, 0);
 
         // For methods, also register the method on the struct type
         if (is_method) {
@@ -57,13 +73,39 @@ void check_decl(Checker* checker, Node* node) {
             } else {
                 Type* st = struct_sym->type;
                 int   n  = st->as.struc.method_count;
-                st->as.struc.method_names =
-                    realloc(st->as.struc.method_names, (n + 1) * sizeof(char*));
-                st->as.struc.method_types =
-                    realloc(st->as.struc.method_types, (n + 1) * sizeof(Type*));
-                st->as.struc.method_is_const =
-                    realloc(st->as.struc.method_is_const, (n + 1) * sizeof(int));
-                st->as.struc.method_names[n]    = strdup(name);
+
+                char** new_names = realloc(st->as.struc.method_names, (n + 1) * sizeof(char*));
+                if (!new_names) {
+                    check_error(checker, node->line, node->column, "Out of memory");
+                    free(mangled_name);
+                    return;
+                }
+                st->as.struc.method_names = new_names;
+
+                Type** new_types = realloc(st->as.struc.method_types, (n + 1) * sizeof(Type*));
+                if (!new_types) {
+                    check_error(checker, node->line, node->column, "Out of memory");
+                    free(mangled_name);
+                    return;
+                }
+                st->as.struc.method_types = new_types;
+
+                int* new_const = realloc(st->as.struc.method_is_const, (n + 1) * sizeof(int));
+                if (!new_const) {
+                    check_error(checker, node->line, node->column, "Out of memory");
+                    free(mangled_name);
+                    return;
+                }
+                st->as.struc.method_is_const = new_const;
+
+                char* method_name = strdup(name);
+                if (!method_name) {
+                    check_error(checker, node->line, node->column, "Out of memory");
+                    free(mangled_name);
+                    return;
+                }
+
+                st->as.struc.method_names[n]    = method_name;
                 st->as.struc.method_types[n]    = func_type;
                 st->as.struc.method_is_const[n] = node->as.func_decl.receiver_is_const;
                 st->as.struc.method_count       = n + 1;
@@ -79,11 +121,9 @@ void check_decl(Checker* checker, Node* node) {
         if (is_method) {
             Symbol* struct_sym = checker_lookup(checker, receiver_type);
             if (struct_sym && struct_sym->kind == SYM_TYPE) {
-                Type*   self_type = type_pointer(struct_sym->type);
-                Symbol* self_sym  = checker_define(checker, "self", SYM_VAR, self_type);
-                if (self_sym && node->as.func_decl.receiver_is_const) {
-                    self_sym->is_const = 1;
-                }
+                Type* self_type = type_pointer(struct_sym->type);
+                checker_define(checker, "self", SYM_VAR, self_type,
+                               node->as.func_decl.receiver_is_const);
             }
         }
 
@@ -96,7 +136,7 @@ void check_decl(Checker* checker, Node* node) {
             }
             param_types[i] = ptype;
 
-            if (!checker_define(checker, param->as.param.name, SYM_VAR, ptype)) {
+            if (!checker_define(checker, param->as.param.name, SYM_VAR, ptype, 0)) {
                 check_error(checker, param->line, param->column, "Duplicate parameter name '%s'",
                             param->as.param.name);
             }
@@ -114,6 +154,7 @@ void check_decl(Checker* checker, Node* node) {
 
         checker->current_func_return = old_return;
         checker_pop_scope(checker);
+        free(mangled_name);
         break;
     }
 
@@ -138,7 +179,7 @@ void check_decl(Checker* checker, Node* node) {
             struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
         }
 
-        checker_define(checker, name, SYM_TYPE, struct_type);
+        checker_define(checker, name, SYM_TYPE, struct_type, 0);
         break;
     }
 
@@ -156,7 +197,7 @@ void check_decl(Checker* checker, Node* node) {
         enum_type->as.enm.value_count = value_count;
         enum_type->as.enm.value_names = malloc(value_count * sizeof(char*));
 
-        checker_define(checker, name, SYM_TYPE, enum_type);
+        checker_define(checker, name, SYM_TYPE, enum_type, 0);
 
         // Define enum values as constants
         for (int i = 0; i < value_count; i++) {

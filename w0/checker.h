@@ -45,7 +45,8 @@ int checker_check(Checker* checker, Node* ast);
 // Scope operations
 void    checker_push_scope(Checker* checker);
 void    checker_pop_scope(Checker* checker);
-Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type* type);
+Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type* type,
+                       int is_const);
 Symbol* checker_lookup(Checker* checker, const char* name);
 Symbol* checker_lookup_local(Checker* checker, const char* name);
 

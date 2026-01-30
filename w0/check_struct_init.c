@@ -14,7 +14,11 @@ Type* check_struct_init(Checker* checker, Node* init, Type* struct_type) {
 
     int  field_count = struct_type->as.struc.field_count;
     int* seen        = calloc(field_count, sizeof(int));
-    int  had_error   = 0;
+    if (!seen) {
+        check_error(checker, init->line, init->column, "Out of memory");
+        return type_error;
+    }
+    int had_error = 0;
 
     for (int i = 0; i < init->as.struct_init.fields.count; i++) {
         Node* field = init->as.struct_init.fields.nodes[i];
