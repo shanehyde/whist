@@ -1,31 +1,109 @@
 # Whist Bootstrap Compiler (w0)
 
 Bootstrap compiler for the Whist programming language, written in C.
+Generates C code that can be compiled with any C compiler (gcc, clang).
 
 ## Build
 
 ```bash
-cc -Wall -o whist main.c lexer.c parser.c ast.c
+make          # Build bin/w0
+make clean    # Remove build artifacts
+make test     # Run test suite
 ```
 
 ## Usage
 
 ```bash
-./whist              # Parse built-in test code and print AST
-./whist <file.w>     # Parse a source file
-./whist --lex        # Lex only (print tokens)
+bin/w0 <file.w>              # Compile to C (output to stdout)
+bin/w0 -o out.c <file.w>     # Compile to C file
+bin/w0 --check <file.w>      # Type check only
+bin/w0 --parse <file.w>      # Parse only (skip type checking)
+bin/w0 --ast <file.w>        # Print AST
+bin/w0 --lex <file.w>        # Lex only (print tokens)
+```
+
+## Compiling Whist Programs
+
+```bash
+# Compile whist to C, then C to executable
+bin/w0 -o program.c program.w
+cc -o program program.c
+
+# Or in one step
+bin/w0 program.w | cc -x c -o program -
 ```
 
 ## Project Structure
 
-- `lexer.h/c` - Lexer (tokenizer)
-- `ast.h/c` - AST node definitions and memory management
-- `parser.h/c` - Recursive descent parser
-- `main.c` - Test driver with AST printer
+```
+w0/
+├── Makefile       # Build system
+├── bin/           # Build output (w0 executable)
+├── lexer.h/c      # Lexer (tokenizer)
+├── ast.h/c        # AST node definitions and memory management
+├── parser.h/c     # Recursive descent parser
+├── types.h/c      # Type system and type operations
+├── checker.h/c    # Type checker with symbol table
+├── codegen.h/c    # C code generator
+├── main.c         # Compiler driver
+└── test/          # Test programs
+    ├── hello.w           # Minimal program
+    ├── structs.w         # Struct definitions, member access
+    ├── enums.w           # Enum definitions
+    ├── functions.w       # Function calls, recursion
+    ├── control_flow.w    # if/else, while, for, break, continue
+    ├── variables.w       # var/const, type inference, literals
+    ├── operators.w       # All operator types
+    ├── pointers.w        # Address-of, dereference
+    ├── error_type_mismatch.w  # Expected error: type mismatch
+    ├── error_undefined.w      # Expected error: undefined var
+    ├── error_const.w          # Expected error: const assignment
+    └── error_break.w          # Expected error: break outside loop
+```
+
+## Running Tests
+
+```bash
+make test     # Run all tests
+
+# Or manually:
+# Type check all valid programs
+for f in test/*.w; do
+    case "$f" in test/error_*) continue;; esac
+    echo -n "$f: "; bin/w0 --check "$f" 2>&1
+done
+
+# Compile and run all valid programs
+for f in test/*.w; do
+    case "$f" in test/error_*) continue;; esac
+    echo -n "$f: "
+    bin/w0 -o /tmp/out.c "$f" 2>/dev/null && \
+    cc -w -o /tmp/out /tmp/out.c && \
+    /tmp/out; echo "exit $?"
+done
+```
 
 ## Language Overview
 
 Whist is a C-like language with the following features:
+
+### Types
+
+- Primitives: `void`, `bool`, `int`, `float`, `char`, `string`
+- Pointers: `*T`
+- Arrays: `[n]T`
+- User-defined: `struct`, `enum`
+
+### Type Mapping to C
+
+| Whist    | C          |
+|----------|------------|
+| void     | void       |
+| bool     | bool       |
+| int      | int64_t    |
+| float    | double     |
+| char     | char       |
+| string   | const char*|
 
 ### Keywords
 
@@ -37,6 +115,8 @@ Whist is a C-like language with the following features:
 - Floats: `3.14`, `1e10`, `2.5e-3`
 - Strings: `"hello\n"`
 - Characters: `'a'`, `'\n'`
+- Booleans: `true`, `false`
+- Null: `null`
 
 ### Operators
 
@@ -45,7 +125,8 @@ Whist is a C-like language with the following features:
 - Logical: `&&`, `||`, `!`
 - Bitwise: `&`, `|`, `^`, `~`, `<<`, `>>`
 - Assignment: `=`, `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`
-- Other: `++`, `--`, `->`
+- Pointer: `&` (address-of), `*` (dereference), `->` (member access)
+- Other: `++`, `--`, `.`
 
 ### Comments
 
@@ -62,11 +143,17 @@ struct Point {
     y: int,
 }
 
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
 func add(a: int, b: int): int {
     return a + b;
 }
 
-func main() {
+func main(): int {
     var x = 42;
     var y: float = 3.14;
     const PI = 3.14159;
@@ -84,13 +171,22 @@ func main() {
     while (x > 0) {
         x--;
     }
+
+    return 0;
 }
 ```
+
+## Compiler Phases
+
+1. **Lexer** - Tokenizes source into tokens (keywords, identifiers, literals, operators)
+2. **Parser** - Builds AST using recursive descent with precedence climbing
+3. **Type Checker** - Validates types, builds symbol table, checks scopes
+4. **Code Generator** - Emits C code from AST
 
 ## Status
 
 - [x] Lexer
 - [x] AST
 - [x] Parser
-- [ ] Type checker
-- [ ] Code generation
+- [x] Type checker
+- [x] Code generation (C backend)

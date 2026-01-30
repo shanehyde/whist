@@ -3,6 +3,8 @@
 #include <string.h>
 #include "lexer.h"
 #include "parser.h"
+#include "checker.h"
+#include "codegen.h"
 
 static char *read_file(const char *path) {
     FILE *file = fopen(path, "rb");
@@ -272,12 +274,25 @@ int main(int argc, char **argv) {
     char *source;
     int free_source = 0;
     int lex_only = 0;
+    int parse_only = 0;
+    int check_only = 0;
+    int print_ast_flag = 0;
+    const char *output_file = NULL;
 
     // Parse args
     int arg_idx = 1;
     while (arg_idx < argc && argv[arg_idx][0] == '-') {
         if (strcmp(argv[arg_idx], "--lex") == 0) {
             lex_only = 1;
+        } else if (strcmp(argv[arg_idx], "--parse") == 0) {
+            parse_only = 1;
+        } else if (strcmp(argv[arg_idx], "--check") == 0) {
+            check_only = 1;
+        } else if (strcmp(argv[arg_idx], "--ast") == 0) {
+            print_ast_flag = 1;
+        } else if (strcmp(argv[arg_idx], "-o") == 0 && arg_idx + 1 < argc) {
+            arg_idx++;
+            output_file = argv[arg_idx];
         }
         arg_idx++;
     }
@@ -294,11 +309,17 @@ int main(int argc, char **argv) {
             "    y: int,\n"
             "}\n"
             "\n"
+            "enum Color {\n"
+            "    Red,\n"
+            "    Green,\n"
+            "    Blue,\n"
+            "}\n"
+            "\n"
             "func add(a: int, b: int): int {\n"
             "    return a + b;\n"
             "}\n"
             "\n"
-            "func main() {\n"
+            "func main(): int {\n"
             "    var x = 42;\n"
             "    var y: float = 3.14;\n"
             "    const PI = 3.14159;\n"
@@ -321,9 +342,8 @@ int main(int argc, char **argv) {
             "}\n";
     }
 
-    printf("Source:\n%s\n", source);
-
     if (lex_only) {
+        printf("Source:\n%s\n", source);
         printf("Tokens:\n");
         printf("%-4s  %-12s  %s\n", "LINE", "TYPE", "VALUE");
         printf("----  ------------  -----\n");
@@ -344,17 +364,61 @@ int main(int argc, char **argv) {
             printf("\n");
         } while (token.type != TOK_EOF);
     } else {
-        printf("AST:\n");
-        printf("----\n");
-
         Parser parser;
         parser_init(&parser, source);
         Node *ast = parser_parse(&parser);
 
         if (parser.had_error) {
             fprintf(stderr, "Parse failed\n");
-        } else {
+            node_free(ast);
+            if (free_source) free(source);
+            return 1;
+        }
+
+        if (print_ast_flag) {
+            printf("AST:\n");
+            printf("----\n");
             print_ast(ast, 0);
+            printf("\n");
+        }
+
+        if (!parse_only) {
+            Checker checker;
+            checker_init(&checker);
+            int ok = checker_check(&checker, ast);
+            checker_free(&checker);
+
+            if (!ok) {
+                fprintf(stderr, "Type check failed\n");
+                node_free(ast);
+                if (free_source) free(source);
+                return 1;
+            }
+
+            if (!check_only) {
+                // Code generation
+                FILE *out = stdout;
+                if (output_file) {
+                    out = fopen(output_file, "w");
+                    if (!out) {
+                        fprintf(stderr, "Could not open output file: %s\n", output_file);
+                        node_free(ast);
+                        if (free_source) free(source);
+                        return 1;
+                    }
+                }
+
+                CodeGen gen;
+                codegen_init(&gen, out);
+                codegen_emit(&gen, ast);
+
+                if (output_file) {
+                    fclose(out);
+                    fprintf(stderr, "Generated: %s\n", output_file);
+                }
+            } else {
+                fprintf(stderr, "Type check passed!\n");
+            }
         }
 
         node_free(ast);
