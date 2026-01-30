@@ -197,6 +197,14 @@ void check_statement(Checker* checker, Node* node) {
         }
         break;
 
+    case NODE_DEFER:
+        if (!checker->current_func_return) {
+            check_error(checker, node->line, node->column, "Defer outside of function");
+            return;
+        }
+        check_statement(checker, node->as.defer_stmt.stmt);
+        break;
+
     default:
         check_error(checker, node->line, node->column, "Unknown statement type %d", node->type);
         break;

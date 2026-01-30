@@ -116,6 +116,9 @@ void node_free(Node* node) {
     case NODE_RETURN:
         node_free(node->as.return_stmt.value);
         break;
+    case NODE_DEFER:
+        node_free(node->as.defer_stmt.stmt);
+        break;
     case NODE_FUNC_DECL:
         free(node->as.func_decl.receiver_type);
         free(node->as.func_decl.name);

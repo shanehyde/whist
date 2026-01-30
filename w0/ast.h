@@ -33,6 +33,7 @@ typedef enum {
     NODE_RETURN,
     NODE_BREAK,
     NODE_CONTINUE,
+    NODE_DEFER,
 
     // Declarations
     NODE_FUNC_DECL,
@@ -199,6 +200,11 @@ struct Node {
         struct {
             Node* value;
         } return_stmt;
+
+        // Defer statement
+        struct {
+            Node* stmt;
+        } defer_stmt;
 
         // Function declaration
         struct {

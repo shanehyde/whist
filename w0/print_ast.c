@@ -167,6 +167,11 @@ void print_ast(Node* node, int depth) {
         printf("Continue\n");
         break;
 
+    case NODE_DEFER:
+        printf("Defer\n");
+        print_ast(node->as.defer_stmt.stmt, depth + 1);
+        break;
+
     case NODE_EXPR_STMT:
         printf("ExprStmt\n");
         print_ast(node->as.expr_stmt.expr, depth + 1);

@@ -1,6 +1,7 @@
 #include "parse_statement.h"
 
 #include "parse_block.h"
+#include "parse_defer_stmt.h"
 #include "parse_expression.h"
 #include "parse_for_stmt.h"
 #include "parse_foreach_stmt.h"
@@ -31,6 +32,9 @@ Node* parse_statement(Parser* parser) {
     }
     if (match(parser, TOK_RETURN)) {
         return parse_return_stmt(parser);
+    }
+    if (match(parser, TOK_DEFER)) {
+        return parse_defer_stmt(parser);
     }
     if (match(parser, TOK_BREAK)) {
         Token token = parser->previous;

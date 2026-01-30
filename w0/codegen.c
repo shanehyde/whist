@@ -23,6 +23,19 @@ static void emit_stmt(CodeGen* gen, Node* node);
 static void emit_decl(CodeGen* gen, Node* node);
 static void emit_struct_init(CodeGen* gen, Node* node);
 
+static void defer_push(CodeGen* gen, Node* node) {
+    if (gen->defer_count >= gen->defer_capacity) {
+        int new_cap = gen->defer_capacity == 0 ? 8 : gen->defer_capacity * 2;
+        gen->defer_stack = realloc(gen->defer_stack, new_cap * sizeof(Node*));
+        gen->defer_capacity = new_cap;
+    }
+    gen->defer_stack[gen->defer_count++] = node;
+}
+
+static void defer_clear(CodeGen* gen) {
+    gen->defer_count = 0;
+}
+
 // Emit a type from a type annotation node
 static void emit_type(CodeGen* gen, Node* type_node) {
     if (!type_node) {
@@ -579,12 +592,29 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         break;
     case NODE_RETURN:
         emit_indent(gen);
-        emit(gen, "return");
-        if (node->as.return_stmt.value) {
-            emit(gen, " ");
-            emit_expr(gen, node->as.return_stmt.value);
+        if (gen->defer_count > 0) {
+            // With defers: store value in __ret and goto cleanup
+            if (node->as.return_stmt.value) {
+                emit(gen, "__ret = ");
+                emit_expr(gen, node->as.return_stmt.value);
+                emit(gen, ";\n");
+            }
+            emit_indent(gen);
+            emit(gen, "goto __cleanup;\n");
+        } else {
+            // No defers: normal return
+            emit(gen, "return");
+            if (node->as.return_stmt.value) {
+                emit(gen, " ");
+                emit_expr(gen, node->as.return_stmt.value);
+            }
+            emit(gen, ";\n");
         }
-        emit(gen, ";\n");
+        break;
+
+    case NODE_DEFER:
+        // Don't emit anything here - just push to defer stack
+        defer_push(gen, node->as.defer_stmt.stmt);
         break;
 
     case NODE_BREAK:
@@ -641,6 +671,11 @@ static void emit_decl(CodeGen* gen, Node* node) {
     case NODE_FUNC_DECL: {
         int is_method = (node->as.func_decl.receiver_type != NULL);
 
+        // Check if function is void
+        int is_void = !node->as.func_decl.return_type ||
+                      (node->as.func_decl.return_type->type == NODE_IDENT &&
+                       strcmp(node->as.func_decl.return_type->as.ident.name, "void") == 0);
+
         // Return type
         emit_type(gen, node->as.func_decl.return_type);
 
@@ -675,15 +710,60 @@ static void emit_decl(CodeGen* gen, Node* node) {
         }
         emit(gen, ") {\n");
 
+        // Clear defer stack for this function
+        defer_clear(gen);
+        gen->current_return_type = node->as.func_decl.return_type;
+
+        // First pass: count defers to know if we need __ret
+        int has_defers = 0;
+        if (node->as.func_decl.body) {
+            for (int i = 0; i < node->as.func_decl.body->as.block.stmts.count; i++) {
+                Node* stmt = node->as.func_decl.body->as.block.stmts.nodes[i];
+                if (stmt && stmt->type == NODE_DEFER) {
+                    has_defers = 1;
+                    break;
+                }
+            }
+        }
+
         // Body
         gen->indent++;
+
+        // Declare __ret if function has defers and is non-void
+        if (has_defers && !is_void) {
+            emit_indent(gen);
+            emit_type(gen, node->as.func_decl.return_type);
+            emit(gen, " __ret;\n");
+        }
+
         if (node->as.func_decl.body) {
             for (int i = 0; i < node->as.func_decl.body->as.block.stmts.count; i++) {
                 emit_stmt(gen, node->as.func_decl.body->as.block.stmts.nodes[i]);
             }
         }
+
+        // Emit cleanup section if there are defers
+        if (gen->defer_count > 0) {
+            emit(gen, "__cleanup:;\n");
+            // Emit deferred statements in reverse order (LIFO)
+            for (int i = gen->defer_count - 1; i >= 0; i--) {
+                emit_stmt(gen, gen->defer_stack[i]);
+            }
+            // Emit final return
+            emit_indent(gen);
+            if (is_void) {
+                emit(gen, "return;\n");
+            } else {
+                emit(gen, "return __ret;\n");
+            }
+        }
+
         gen->indent--;
         emit(gen, "}\n\n");
+
+        // Clear defer stack
+        defer_clear(gen);
+        gen->current_return_type = NULL;
         break;
     }
 
@@ -700,9 +780,13 @@ static void emit_decl(CodeGen* gen, Node* node) {
 }
 
 void codegen_init(CodeGen* gen, FILE* out) {
-    gen->out        = out;
-    gen->indent     = 0;
-    gen->temp_count = 0;
+    gen->out                = out;
+    gen->indent             = 0;
+    gen->temp_count         = 0;
+    gen->defer_stack        = NULL;
+    gen->defer_count        = 0;
+    gen->defer_capacity     = 0;
+    gen->current_return_type = NULL;
 }
 
 void codegen_emit(CodeGen* gen, Node* ast) {

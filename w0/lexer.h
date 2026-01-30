@@ -33,6 +33,7 @@ typedef enum {
     TOK_IN,
     TOK_NULL,
     TOK_SELF,
+    TOK_DEFER,
 
     // Operators
     TOK_PLUS,    // +
