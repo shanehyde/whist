@@ -1,16 +1,14 @@
 #include "parse_statement.h"
 
-#include "parser_util.h"
-// #include "parse_block.h"
 #include "parse_block.h"
 #include "parse_expression.h"
 #include "parse_for_stmt.h"
 #include "parse_foreach_stmt.h"
 #include "parse_if_stmt.h"
 #include "parse_return_stmt.h"
-#include "parse_struct_decl.h"
 #include "parse_var_decl.h"
 #include "parse_while_stmt.h"
+#include "parser_util.h"
 
 Node* parse_statement(Parser* parser) {
     if (match(parser, TOK_VAR)) {

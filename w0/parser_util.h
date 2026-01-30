@@ -4,6 +4,12 @@
 #include "lexer.h"
 #include "parser.h"
 
+// Maximum recursion depth to prevent stack overflow
+#define MAX_PARSE_DEPTH 256
+
+// Current recursion depth for expression parsing
+extern int parse_depth;
+
 void  advance(Parser* parser);
 int   check(Parser* parser, TokenType type);
 int   match(Parser* parser, TokenType type);

@@ -3,10 +3,7 @@
 #include "parse_primary.h"
 #include "parser_util.h"
 
-#define MAX_PARSE_DEPTH 256
-extern int parse_depth;
-
-Node* parse_postfix(Parser* parser) {
+static Node* parse_postfix(Parser* parser) {
     Node* expr = parse_primary(parser);
     if (!expr)
         return NULL;

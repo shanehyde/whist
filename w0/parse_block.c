@@ -1,8 +1,7 @@
 #include "parse_block.h"
 
+#include "parse_statement.h"
 #include "parser_util.h"
-
-Node* parse_statement(Parser* parser);
 
 Node* parse_block(Parser* parser) {
     Node* block = node_new(NODE_BLOCK, parser->previous.line, parser->previous.column);

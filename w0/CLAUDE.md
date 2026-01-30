@@ -64,14 +64,23 @@ w0/
 ├── bin/           # Build output (w0 executable)
 ├── lexer.h/c      # Lexer (tokenizer)
 ├── ast.h/c        # AST node definitions and memory management
-├── parser.h/c     # Recursive descent parser
-├── parse_*.h/c    # parse functions for grammar parts
+├── parser.h/c       # Parser entry point and program parsing
+├── parser_util.h/c  # Shared parser utilities (advance, match, error, etc.)
+├── parse_*.h/c      # Grammar rule implementations:
+│   ├── parse_expression  # Expression parsing with precedence climbing
+│   ├── parse_primary     # Literals, identifiers, grouping
+│   ├── parse_statement   # Statement dispatch
+│   ├── parse_block       # Block statements
+│   ├── parse_*_stmt      # Control flow (if, for, while, foreach, return)
+│   ├── parse_*_decl      # Declarations (func, struct, enum, var)
+│   ├── parse_type        # Type annotations
+│   └── parse_struct_init # Struct initializers
 ├── types.h/c      # Type system and type operations
 ├── checker.h/c    # Type checker with symbol table
 ├── codegen.h/c    # C code generator
-├── main.c         # Compiler driver
-└── test/          # Test programs
-    
+├── main.c           # Compiler driver
+├── print_ast.c      # AST pretty-printer
+└── test/            # Test programs (.w files)
 ```
 
 ## Running Tests
