@@ -7,7 +7,7 @@ Node* parse_struct_init(Parser* parser) {
     Token start = parser->previous;
     Node* node  = node_new(NODE_STRUCT_INIT, start.line, start.column);
     if (!node) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     nodelist_init(&node->as.struct_init.fields);
@@ -19,12 +19,12 @@ Node* parse_struct_init(Parser* parser) {
 
             Node* field = node_new(NODE_FIELD_INIT, field_name.line, field_name.column);
             if (!field) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             field->as.field_init.name = copy_token_string(&field_name);
             if (!field->as.field_init.name) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             field->as.field_init.name_length = field_name.length;

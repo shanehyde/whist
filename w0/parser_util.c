@@ -33,7 +33,7 @@ int match(Parser* parser, TokenType type) {
     return 1;
 }
 
-void error_at(Parser* parser, Token* token, const char* message) {
+void parse_error_at(Parser* parser, Token* token, const char* message) {
     if (parser->panic_mode)
         return;
     parser->panic_mode = 1;
@@ -53,8 +53,8 @@ void error_at(Parser* parser, Token* token, const char* message) {
     fprintf(stderr, "%s\n", parser->error_msg);
 }
 
-void error(Parser* parser, const char* message) {
-    error_at(parser, &parser->current, message);
+void parse_error(Parser* parser, const char* message) {
+    parse_error_at(parser, &parser->current, message);
 }
 
 void consume(Parser* parser, TokenType type, const char* message) {
@@ -62,7 +62,7 @@ void consume(Parser* parser, TokenType type, const char* message) {
         advance(parser);
         return;
     }
-    error(parser, message);
+    parse_error(parser, message);
 }
 
 void synchronize(Parser* parser) {

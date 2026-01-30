@@ -5,7 +5,8 @@ LDFLAGS =
 SRC = main.c lexer.c parser.c parser_util.c parse_enum_decl.c parse_struct_decl.c \
 		parse_func_decl.c parse_expression.c parse_while_stmt.c parse_type.c parse_block.c parse_if_stmt.c parse_primary.c \
 		parse_for_stmt.c parse_statement.c parse_foreach_stmt.c parse_return_stmt.c parse_var_decl.c parse_struct_init.c \
-		ast.c types.c checker.c codegen.c print_ast.c
+		ast.c types.c checker.c codegen.c print_ast.c \
+		checker_util.c check_decl.c check_statement.c check_expression.c check_struct_init.c
 OBJ = $(SRC:.c=.o)
 DEPS = $(SRC:.c=.d)
 BIN = bin

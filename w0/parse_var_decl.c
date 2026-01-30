@@ -10,12 +10,12 @@ Node* parse_var_decl(Parser* parser, int is_const) {
 
     Node* node = node_new(NODE_VAR_DECL, name.line, name.column);
     if (!node) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     node->as.var_decl.name = copy_token_string(&name);
     if (!node->as.var_decl.name) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     node->as.var_decl.name_length = name.length;

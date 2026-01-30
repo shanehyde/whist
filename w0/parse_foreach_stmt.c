@@ -18,7 +18,7 @@ Node* parse_foreach_stmt(Parser* parser) {
     Token var_token = parser->previous;
     char* var_name  = malloc(var_token.length + 1);
     if (!var_name) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     memcpy(var_name, var_token.start, var_token.length);
@@ -43,7 +43,7 @@ Node* parse_foreach_stmt(Parser* parser) {
     Node* node = node_new(NODE_FOREACH, token.line, token.column);
     if (!node) {
         free(var_name);
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     node->as.foreach_stmt.var_name        = var_name;

@@ -10,7 +10,7 @@ Node* parse_type(Parser* parser) {
         Node* inner = parse_type(parser);
         Node* node  = node_new(NODE_UNARY, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         node->as.unary.op      = TOK_STAR;
@@ -29,7 +29,7 @@ Node* parse_type(Parser* parser) {
 
         Node* node = node_new(NODE_INDEX, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         node->as.index.object = elem;
@@ -41,18 +41,18 @@ Node* parse_type(Parser* parser) {
     if (match(parser, TOK_IDENT)) {
         Node* node = node_new(NODE_IDENT, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         node->as.ident.name = copy_token_string(&token);
         if (!node->as.ident.name) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         node->as.ident.length = token.length;
         return node;
     }
 
-    error(parser, "Expected type");
+    parse_error(parser, "Expected type");
     return NULL;
 }

@@ -11,12 +11,12 @@ Node* parse_struct_decl(Parser* parser) {
 
     Node* node = node_new(NODE_STRUCT_DECL, name.line, name.column);
     if (!node) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     node->as.struct_decl.name = copy_token_string(&name);
     if (!node->as.struct_decl.name) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     node->as.struct_decl.name_length = name.length;
@@ -30,12 +30,12 @@ Node* parse_struct_decl(Parser* parser) {
 
         Node* field = node_new(NODE_FIELD, field_name.line, field_name.column);
         if (!field) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         field->as.field.name = copy_token_string(&field_name);
         if (!field->as.field.name) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         field->as.field.name_length = field_name.length;

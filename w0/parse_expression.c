@@ -13,7 +13,7 @@ static Node* parse_postfix(Parser* parser) {
             // Function call
             Node* call = node_new(NODE_CALL, expr->line, expr->column);
             if (!call) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             call->as.call.func = expr;
@@ -32,7 +32,7 @@ static Node* parse_postfix(Parser* parser) {
             // Index
             Node* index = node_new(NODE_INDEX, expr->line, expr->column);
             if (!index) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             index->as.index.object = expr;
@@ -45,13 +45,13 @@ static Node* parse_postfix(Parser* parser) {
             consume(parser, TOK_IDENT, "Expected member name after '.'");
             Node* member = node_new(NODE_MEMBER, expr->line, expr->column);
             if (!member) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             member->as.member.object = expr;
             member->as.member.name   = copy_token_string(&name);
             if (!member->as.member.name) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             member->as.member.length = name.length;
@@ -63,13 +63,13 @@ static Node* parse_postfix(Parser* parser) {
             consume(parser, TOK_IDENT, "Expected member name after '->'");
             Node* member = node_new(NODE_MEMBER, expr->line, expr->column);
             if (!member) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             member->as.member.object = expr;
             member->as.member.name   = copy_token_string(&name);
             if (!member->as.member.name) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             member->as.member.length = name.length;
@@ -80,7 +80,7 @@ static Node* parse_postfix(Parser* parser) {
             TokenType op    = parser->previous.type;
             Node*     unary = node_new(NODE_UNARY, expr->line, expr->column);
             if (!unary) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             unary->as.unary.op      = op;
@@ -103,7 +103,7 @@ static Node* parse_unary(Parser* parser) {
         Node* operand = parse_unary(parser);
         Node* node    = node_new(NODE_UNARY, op.line, op.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         node->as.unary.op      = op.type;
@@ -154,7 +154,7 @@ static Precedence get_precedence(TokenType type) {
 static Node* parse_binary(Parser* parser, Precedence min_prec) {
     parse_depth++;
     if (parse_depth > MAX_PARSE_DEPTH) {
-        error(parser, "Maximum expression nesting depth exceeded");
+        parse_error(parser, "Maximum expression nesting depth exceeded");
         parse_depth--;
         return NULL;
     }
@@ -174,7 +174,7 @@ static Node* parse_binary(Parser* parser, Precedence min_prec) {
 
         Node* binary = node_new(NODE_BINARY, op.line, op.column);
         if (!binary) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             parse_depth--;
             return NULL;
         }
@@ -219,7 +219,7 @@ static Node* parse_assignment(Parser* parser) {
 
         Node* assign = node_new(NODE_ASSIGN, op.line, op.column);
         if (!assign) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         assign->as.assign.op     = op.type;

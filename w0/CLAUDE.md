@@ -75,9 +75,15 @@ w0/
 │   ├── parse_*_decl      # Declarations (func, struct, enum, var)
 │   ├── parse_type        # Type annotations
 │   └── parse_struct_init # Struct initializers
-├── types.h/c      # Type system and type operations
-├── checker.h/c    # Type checker with symbol table
-├── codegen.h/c    # C code generator
+├── types.h/c        # Type system and type operations
+├── checker.h/c      # Type checker entry point and symbol table
+├── checker_util.h/c # Shared checker utilities
+├── check_*.h/c      # Type checking implementations:
+│   ├── check_decl       # Declaration checking (var, func, struct, enum)
+│   ├── check_expression # Expression type checking
+│   ├── check_statement  # Statement checking
+│   └── check_struct_init # Struct initializer checking
+├── codegen.h/c      # C code generator
 ├── main.c           # Compiler driver
 ├── print_ast.c      # AST pretty-printer
 └── test/            # Test programs (.w files)

@@ -15,7 +15,7 @@ Node* parse_primary(Parser* parser) {
     if (match(parser, TOK_INT)) {
         Node* node = node_new(NODE_INT_LIT, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         // Parse integer (handle hex, binary, octal)
@@ -37,7 +37,7 @@ Node* parse_primary(Parser* parser) {
         char* endptr;
         long  value = strtol(start, &endptr, base);
         if (errno == ERANGE) {
-            error(parser, "Integer literal out of range");
+            parse_error(parser, "Integer literal out of range");
         }
         node->as.int_lit.value = value;
         return node;
@@ -46,7 +46,7 @@ Node* parse_primary(Parser* parser) {
     if (match(parser, TOK_FLOAT)) {
         Node* node = node_new(NODE_FLOAT_LIT, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         node->as.float_lit.value = strtod(token.start, NULL);
@@ -56,14 +56,14 @@ Node* parse_primary(Parser* parser) {
     if (match(parser, TOK_STRING)) {
         Node* node = node_new(NODE_STRING_LIT, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         // Allocate max possible size (actual size may be smaller due to escapes)
         size_t max_len            = token.length - 2; // Skip quotes
         node->as.string_lit.value = malloc(max_len + 1);
         if (!node->as.string_lit.value) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         // Process escape sequences
@@ -112,7 +112,7 @@ Node* parse_primary(Parser* parser) {
     if (match(parser, TOK_CHAR)) {
         Node* node = node_new(NODE_CHAR_LIT, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         // Handle escape sequences
@@ -149,7 +149,7 @@ Node* parse_primary(Parser* parser) {
     if (match(parser, TOK_TRUE) || match(parser, TOK_FALSE)) {
         Node* node = node_new(NODE_BOOL_LIT, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         node->as.bool_lit.value = (token.type == TOK_TRUE);
@@ -159,7 +159,7 @@ Node* parse_primary(Parser* parser) {
     if (match(parser, TOK_NULL)) {
         Node* node = node_new(NODE_NULL_LIT, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         return node;
@@ -175,18 +175,18 @@ Node* parse_primary(Parser* parser) {
 
             Node* node = node_new(NODE_ENUM_VALUE, enum_name.line, enum_name.column);
             if (!node) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             node->as.enum_value.enum_name = copy_token_string(&enum_name);
             if (!node->as.enum_value.enum_name) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             node->as.enum_value.enum_name_length = enum_name.length;
             node->as.enum_value.value_name       = copy_token_string(&value_name);
             if (!node->as.enum_value.value_name) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             node->as.enum_value.value_name_length = value_name.length;
@@ -195,12 +195,12 @@ Node* parse_primary(Parser* parser) {
 
         Node* node = node_new(NODE_IDENT, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         node->as.ident.name = copy_token_string(&token);
         if (!node->as.ident.name) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         node->as.ident.length = token.length;
@@ -211,12 +211,12 @@ Node* parse_primary(Parser* parser) {
     if (match(parser, TOK_SELF)) {
         Node* node = node_new(NODE_IDENT, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         node->as.ident.name = strdup("self");
         if (!node->as.ident.name) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         node->as.ident.length = 4;
@@ -233,6 +233,6 @@ Node* parse_primary(Parser* parser) {
         return parse_struct_init(parser);
     }
 
-    error(parser, "Expected expression");
+    parse_error(parser, "Expected expression");
     return NULL;
 }

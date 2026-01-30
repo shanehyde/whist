@@ -37,7 +37,7 @@ Node* parse_statement(Parser* parser) {
         consume(parser, TOK_SEMICOLON, "Expected ';' after 'break'");
         Node* node = node_new(NODE_BREAK, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         return node;
@@ -47,7 +47,7 @@ Node* parse_statement(Parser* parser) {
         consume(parser, TOK_SEMICOLON, "Expected ';' after 'continue'");
         Node* node = node_new(NODE_CONTINUE, token.line, token.column);
         if (!node) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         return node;
@@ -62,7 +62,7 @@ Node* parse_statement(Parser* parser) {
 
     Node* node = node_new(NODE_EXPR_STMT, expr ? expr->line : 0, expr ? expr->column : 0);
     if (!node) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     node->as.expr_stmt.expr = expr;

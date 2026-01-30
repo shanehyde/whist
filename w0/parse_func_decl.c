@@ -26,7 +26,7 @@ Node* parse_func_decl(Parser* parser) {
         consume(parser, TOK_IDENT, "Expected receiver type name");
         receiver_type = copy_token_string(&recv_type);
         if (!receiver_type) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         receiver_type_len = recv_type.length;
@@ -40,7 +40,7 @@ Node* parse_func_decl(Parser* parser) {
     Node* node = node_new(NODE_FUNC_DECL, name.line, name.column);
     if (!node) {
         free(receiver_type);
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     node->as.func_decl.receiver_type     = receiver_type;
@@ -48,7 +48,7 @@ Node* parse_func_decl(Parser* parser) {
     node->as.func_decl.receiver_is_const = receiver_is_const;
     node->as.func_decl.name              = copy_token_string(&name);
     if (!node->as.func_decl.name) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     node->as.func_decl.name_length = name.length;
@@ -64,12 +64,12 @@ Node* parse_func_decl(Parser* parser) {
 
             Node* param = node_new(NODE_PARAM, param_name.line, param_name.column);
             if (!param) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             param->as.param.name = copy_token_string(&param_name);
             if (!param->as.param.name) {
-                error(parser, "Out of memory");
+                parse_error(parser, "Out of memory");
                 return NULL;
             }
             param->as.param.name_length = param_name.length;

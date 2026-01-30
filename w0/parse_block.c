@@ -6,7 +6,7 @@
 Node* parse_block(Parser* parser) {
     Node* block = node_new(NODE_BLOCK, parser->previous.line, parser->previous.column);
     if (!block) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     nodelist_init(&block->as.block.stmts);

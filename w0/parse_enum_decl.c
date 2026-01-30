@@ -8,12 +8,12 @@ Node* parse_enum_decl(Parser* parser) {
 
     Node* node = node_new(NODE_ENUM_DECL, name.line, name.column);
     if (!node) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     node->as.enum_decl.name = copy_token_string(&name);
     if (!node->as.enum_decl.name) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     node->as.enum_decl.name_length = name.length;
@@ -27,12 +27,12 @@ Node* parse_enum_decl(Parser* parser) {
 
         Node* value = node_new(NODE_IDENT, value_name.line, value_name.column);
         if (!value) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         value->as.ident.name = copy_token_string(&value_name);
         if (!value->as.ident.name) {
-            error(parser, "Out of memory");
+            parse_error(parser, "Out of memory");
             return NULL;
         }
         value->as.ident.length = value_name.length;

@@ -37,7 +37,7 @@ Node* parse_for_stmt(Parser* parser) {
 
     Node* node = node_new(NODE_FOR, token.line, token.column);
     if (!node) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     node->as.for_stmt.init = init;

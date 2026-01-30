@@ -26,7 +26,7 @@ static Node* parse_declaration(Parser* parser) {
         return parse_var_decl(parser, 1);
     }
 
-    error(parser, "Expected declaration");
+    parse_error(parser, "Expected declaration");
     return NULL;
 }
 
@@ -42,7 +42,7 @@ void parser_init(Parser* parser, const char* source) {
 Node* parser_parse(Parser* parser) {
     Node* program = node_new(NODE_PROGRAM, 1, 1);
     if (!program) {
-        error(parser, "Out of memory");
+        parse_error(parser, "Out of memory");
         return NULL;
     }
     nodelist_init(&program->as.program.decls);
