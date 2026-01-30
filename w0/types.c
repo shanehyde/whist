@@ -7,6 +7,12 @@
 static Type builtin_void = { TYPE_VOID, { { NULL } } };
 static Type builtin_bool = { TYPE_BOOL, { { NULL } } };
 static Type builtin_int = { TYPE_INT, { { NULL } } };
+static Type builtin_int8 = { TYPE_INT8, { { NULL } } };
+static Type builtin_int16 = { TYPE_INT16, { { NULL } } };
+static Type builtin_int32 = { TYPE_INT32, { { NULL } } };
+static Type builtin_uint8 = { TYPE_UINT8, { { NULL } } };
+static Type builtin_uint16 = { TYPE_UINT16, { { NULL } } };
+static Type builtin_uint32 = { TYPE_UINT32, { { NULL } } };
 static Type builtin_float = { TYPE_FLOAT, { { NULL } } };
 static Type builtin_char = { TYPE_CHAR, { { NULL } } };
 static Type builtin_string = { TYPE_STRING, { { NULL } } };
@@ -15,6 +21,12 @@ static Type builtin_error = { TYPE_ERROR, { { NULL } } };
 Type *type_void = &builtin_void;
 Type *type_bool = &builtin_bool;
 Type *type_int = &builtin_int;
+Type *type_int8 = &builtin_int8;
+Type *type_int16 = &builtin_int16;
+Type *type_int32 = &builtin_int32;
+Type *type_uint8 = &builtin_uint8;
+Type *type_uint16 = &builtin_uint16;
+Type *type_uint32 = &builtin_uint32;
 Type *type_float = &builtin_float;
 Type *type_char = &builtin_char;
 Type *type_string = &builtin_string;
@@ -97,6 +109,8 @@ void type_free(Type *type) {
     if (!type) return;
     // Don't free builtins
     if (type == type_void || type == type_bool || type == type_int ||
+        type == type_int8 || type == type_int16 || type == type_int32 ||
+        type == type_uint8 || type == type_uint16 || type == type_uint32 ||
         type == type_float || type == type_char || type == type_string ||
         type == type_error) {
         return;
@@ -156,12 +170,36 @@ int type_equals(Type *a, Type *b) {
     }
 }
 
+int type_is_integer(Type *type) {
+    if (!type) return 0;
+    return type->kind == TYPE_INT || type->kind == TYPE_INT8 ||
+           type->kind == TYPE_INT16 || type->kind == TYPE_INT32 ||
+           type->kind == TYPE_UINT8 || type->kind == TYPE_UINT16 ||
+           type->kind == TYPE_UINT32;
+}
+
+int type_is_signed_integer(Type *type) {
+    if (!type) return 0;
+    return type->kind == TYPE_INT || type->kind == TYPE_INT8 ||
+           type->kind == TYPE_INT16 || type->kind == TYPE_INT32;
+}
+
+int type_is_unsigned_integer(Type *type) {
+    if (!type) return 0;
+    return type->kind == TYPE_UINT8 || type->kind == TYPE_UINT16 ||
+           type->kind == TYPE_UINT32;
+}
+
 int type_assignable(Type *target, Type *value) {
     if (type_equals(target, value)) return 1;
     if (target->kind == TYPE_ERROR || value->kind == TYPE_ERROR) return 1;
 
-    // int -> float promotion
-    if (target->kind == TYPE_FLOAT && value->kind == TYPE_INT) return 1;
+    // Any integer -> float promotion
+    if (target->kind == TYPE_FLOAT && type_is_integer(value)) return 1;
+
+    // int (64-bit) can be assigned to any integer type (implicit narrowing)
+    // This allows integer literals to be assigned to smaller types
+    if (type_is_integer(target) && value->kind == TYPE_INT) return 1;
 
     // null can be assigned to pointers
     if (target->kind == TYPE_POINTER && value->kind == TYPE_POINTER &&
@@ -186,6 +224,12 @@ const char *type_name(Type *type) {
         case TYPE_VOID: return "void";
         case TYPE_BOOL: return "bool";
         case TYPE_INT: return "int";
+        case TYPE_INT8: return "int8";
+        case TYPE_INT16: return "int16";
+        case TYPE_INT32: return "int32";
+        case TYPE_UINT8: return "uint8";
+        case TYPE_UINT16: return "uint16";
+        case TYPE_UINT32: return "uint32";
         case TYPE_FLOAT: return "float";
         case TYPE_CHAR: return "char";
         case TYPE_STRING: return "string";

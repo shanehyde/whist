@@ -128,6 +128,12 @@ static Type *resolve_type(Checker *checker, Node *type_node) {
             if (strcmp(name, "void") == 0) return type_void;
             if (strcmp(name, "bool") == 0) return type_bool;
             if (strcmp(name, "int") == 0) return type_int;
+            if (strcmp(name, "int8") == 0) return type_int8;
+            if (strcmp(name, "int16") == 0) return type_int16;
+            if (strcmp(name, "int32") == 0) return type_int32;
+            if (strcmp(name, "uint8") == 0) return type_uint8;
+            if (strcmp(name, "uint16") == 0) return type_uint16;
+            if (strcmp(name, "uint32") == 0) return type_uint32;
             if (strcmp(name, "float") == 0) return type_float;
             if (strcmp(name, "char") == 0) return type_char;
             if (strcmp(name, "string") == 0) return type_string;
@@ -217,8 +223,8 @@ static Type *check_expr(Checker *checker, Node *node) {
                 op == TOK_LT_EQ || op == TOK_GT_EQ) {
                 // Allow comparing same types or numeric types
                 if (type_equals(left, right)) return type_bool;
-                if ((left->kind == TYPE_INT || left->kind == TYPE_FLOAT) &&
-                    (right->kind == TYPE_INT || right->kind == TYPE_FLOAT)) {
+                if ((type_is_integer(left) || left->kind == TYPE_FLOAT) &&
+                    (type_is_integer(right) || right->kind == TYPE_FLOAT)) {
                     return type_bool;
                 }
                 error(checker, node->line, node->column,
@@ -241,17 +247,23 @@ static Type *check_expr(Checker *checker, Node *node) {
             if (op == TOK_PLUS || op == TOK_MINUS ||
                 op == TOK_STAR || op == TOK_SLASH || op == TOK_PERCENT) {
                 // Numeric operands
-                if ((left->kind == TYPE_INT || left->kind == TYPE_FLOAT) &&
-                    (right->kind == TYPE_INT || right->kind == TYPE_FLOAT)) {
+                if ((type_is_integer(left) || left->kind == TYPE_FLOAT) &&
+                    (type_is_integer(right) || right->kind == TYPE_FLOAT)) {
                     // Promote to float if either is float
                     if (left->kind == TYPE_FLOAT || right->kind == TYPE_FLOAT) {
                         return type_float;
                     }
+                    // For integer types, return the larger/common type
+                    // If they're the same type, return that type
+                    if (type_equals(left, right)) {
+                        return left;
+                    }
+                    // Otherwise default to int (64-bit)
                     return type_int;
                 }
 
                 // Pointer arithmetic
-                if (left->kind == TYPE_POINTER && right->kind == TYPE_INT) {
+                if (left->kind == TYPE_POINTER && type_is_integer(right)) {
                     return left;
                 }
 
@@ -264,10 +276,14 @@ static Type *check_expr(Checker *checker, Node *node) {
             // Bitwise operators
             if (op == TOK_AMP || op == TOK_PIPE || op == TOK_CARET ||
                 op == TOK_LT_LT || op == TOK_GT_GT) {
-                if (left->kind != TYPE_INT || right->kind != TYPE_INT) {
+                if (!type_is_integer(left) || !type_is_integer(right)) {
                     error(checker, node->line, node->column,
-                          "Bitwise operators require int operands");
+                          "Bitwise operators require integer operands");
                     return type_error;
+                }
+                // Return common type or promote to int
+                if (type_equals(left, right)) {
+                    return left;
                 }
                 return type_int;
             }
@@ -284,7 +300,7 @@ static Type *check_expr(Checker *checker, Node *node) {
 
             switch (op) {
                 case TOK_MINUS:
-                    if (operand->kind != TYPE_INT && operand->kind != TYPE_FLOAT) {
+                    if (!type_is_integer(operand) && operand->kind != TYPE_FLOAT) {
                         error(checker, node->line, node->column,
                               "Unary '-' requires numeric operand");
                         return type_error;
@@ -300,12 +316,12 @@ static Type *check_expr(Checker *checker, Node *node) {
                     return type_bool;
 
                 case TOK_TILDE:
-                    if (operand->kind != TYPE_INT) {
+                    if (!type_is_integer(operand)) {
                         error(checker, node->line, node->column,
-                              "Unary '~' requires int operand");
+                              "Unary '~' requires integer operand");
                         return type_error;
                     }
-                    return type_int;
+                    return operand;
 
                 case TOK_AMP:
                     // Address-of
@@ -323,9 +339,9 @@ static Type *check_expr(Checker *checker, Node *node) {
 
                 case TOK_PLUS_PLUS:
                 case TOK_MINUS_MINUS:
-                    if (operand->kind != TYPE_INT && operand->kind != TYPE_POINTER) {
+                    if (!type_is_integer(operand) && operand->kind != TYPE_POINTER) {
                         error(checker, node->line, node->column,
-                              "Increment/decrement requires int or pointer");
+                              "Increment/decrement requires integer or pointer");
                         return type_error;
                     }
                     return operand;
@@ -461,8 +477,8 @@ static Type *check_expr(Checker *checker, Node *node) {
             if (op != TOK_EQ) {
                 // Compound assignment: +=, -=, etc.
                 // Check types are compatible for arithmetic
-                if ((target->kind != TYPE_INT && target->kind != TYPE_FLOAT) ||
-                    (value->kind != TYPE_INT && value->kind != TYPE_FLOAT)) {
+                if ((!type_is_integer(target) && target->kind != TYPE_FLOAT) ||
+                    (!type_is_integer(value) && value->kind != TYPE_FLOAT)) {
                     error(checker, node->line, node->column,
                           "Invalid operands for compound assignment");
                     return type_error;

@@ -89,7 +89,7 @@ Whist is a C-like language with the following features:
 
 ### Types
 
-- Primitives: `void`, `bool`, `int`, `float`, `char`, `string`
+- Primitives: `void`, `bool`, `int`, `int8`, `int16`, `int32`, `uint8`, `uint16`, `uint32`, `float`, `char`, `string`
 - Pointers: `*T`
 - Arrays: `[n]T`
 - User-defined: `struct`, `enum`
@@ -101,6 +101,12 @@ Whist is a C-like language with the following features:
 | void     | void       |
 | bool     | bool       |
 | int      | int64_t    |
+| int8     | int8_t     |
+| int16    | int16_t    |
+| int32    | int32_t    |
+| uint8    | uint8_t    |
+| uint16   | uint16_t   |
+| uint32   | uint32_t   |
 | float    | double     |
 | char     | char       |
 | string   | const char*|

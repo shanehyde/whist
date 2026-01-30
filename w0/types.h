@@ -6,7 +6,13 @@
 typedef enum {
     TYPE_VOID,
     TYPE_BOOL,
-    TYPE_INT,
+    TYPE_INT,      // 64-bit signed (default)
+    TYPE_INT8,
+    TYPE_INT16,
+    TYPE_INT32,
+    TYPE_UINT8,
+    TYPE_UINT16,
+    TYPE_UINT32,
     TYPE_FLOAT,
     TYPE_CHAR,
     TYPE_STRING,
@@ -69,6 +75,12 @@ struct Type {
 extern Type *type_void;
 extern Type *type_bool;
 extern Type *type_int;
+extern Type *type_int8;
+extern Type *type_int16;
+extern Type *type_int32;
+extern Type *type_uint8;
+extern Type *type_uint16;
+extern Type *type_uint32;
 extern Type *type_float;
 extern Type *type_char;
 extern Type *type_string;
@@ -88,6 +100,9 @@ Type *type_func(Type **params, int param_count, Type *return_type);
 void type_free(Type *type);
 int type_equals(Type *a, Type *b);
 int type_assignable(Type *target, Type *value);  // Can value be assigned to target?
+int type_is_integer(Type *type);  // Is this any integer type?
+int type_is_signed_integer(Type *type);  // Is this a signed integer type?
+int type_is_unsigned_integer(Type *type);  // Is this an unsigned integer type?
 const char *type_name(Type *type);
 
 // TypeList operations

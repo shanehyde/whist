@@ -38,6 +38,18 @@ static void emit_type(CodeGen *gen, Node *type_node) {
                 emit(gen, "bool");
             } else if (strcmp(name, "int") == 0) {
                 emit(gen, "int64_t");
+            } else if (strcmp(name, "int8") == 0) {
+                emit(gen, "int8_t");
+            } else if (strcmp(name, "int16") == 0) {
+                emit(gen, "int16_t");
+            } else if (strcmp(name, "int32") == 0) {
+                emit(gen, "int32_t");
+            } else if (strcmp(name, "uint8") == 0) {
+                emit(gen, "uint8_t");
+            } else if (strcmp(name, "uint16") == 0) {
+                emit(gen, "uint16_t");
+            } else if (strcmp(name, "uint32") == 0) {
+                emit(gen, "uint32_t");
             } else if (strcmp(name, "float") == 0) {
                 emit(gen, "double");
             } else if (strcmp(name, "char") == 0) {
