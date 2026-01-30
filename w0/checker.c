@@ -1,4 +1,5 @@
 #include "checker.h"
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -599,6 +600,18 @@ static Type* check_expr(Checker* checker, Node* node) {
                 error(checker, node->line, node->column, "Cannot assign to const '%s'",
                       t->as.ident.name);
                 return type_error;
+            }
+        } else if (t->type == NODE_MEMBER) {
+            // Check if assigning through a const pointer (e.g., self->x in a const method)
+            Node* obj = t->as.member.object;
+            if (obj->type == NODE_IDENT) {
+                Symbol* sym = checker_lookup(checker, obj->as.ident.name);
+                if (sym && sym->is_const) {
+                    error(checker, node->line, node->column,
+                          "Cannot modify field '%s' through const '%s'", t->as.member.name,
+                          obj->as.ident.name);
+                    return type_error;
+                }
             }
         }
 

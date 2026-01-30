@@ -64,24 +64,23 @@ w0/
 ├── bin/           # Build output (w0 executable)
 ├── lexer.h/c      # Lexer (tokenizer)
 ├── ast.h/c        # AST node definitions and memory management
-├── parser.h/c     # Recursive descent parser
+├── parser.h/c       # Parser entry point and program parsing
+├── parser_util.h/c  # Shared parser utilities (advance, match, error, etc.)
+├── parse_*.h/c      # Grammar rule implementations:
+│   ├── parse_expression  # Expression parsing with precedence climbing
+│   ├── parse_primary     # Literals, identifiers, grouping
+│   ├── parse_statement   # Statement dispatch
+│   ├── parse_block       # Block statements
+│   ├── parse_*_stmt      # Control flow (if, for, while, foreach, return)
+│   ├── parse_*_decl      # Declarations (func, struct, enum, var)
+│   ├── parse_type        # Type annotations
+│   └── parse_struct_init # Struct initializers
 ├── types.h/c      # Type system and type operations
 ├── checker.h/c    # Type checker with symbol table
 ├── codegen.h/c    # C code generator
-├── main.c         # Compiler driver
-└── test/          # Test programs
-    ├── hello.w           # Minimal program
-    ├── structs.w         # Struct definitions, member access
-    ├── enums.w           # Enum definitions
-    ├── functions.w       # Function calls, recursion
-    ├── control_flow.w    # if/else, while, for, break, continue
-    ├── variables.w       # var/const, type inference, literals
-    ├── operators.w       # All operator types
-    ├── pointers.w        # Address-of, dereference
-    ├── error_type_mismatch.w  # Expected error: type mismatch
-    ├── error_undefined.w      # Expected error: undefined var
-    ├── error_const.w          # Expected error: const assignment
-    └── error_break.w          # Expected error: break outside loop
+├── main.c           # Compiler driver
+├── print_ast.c      # AST pretty-printer
+└── test/            # Test programs (.w files)
 ```
 
 ## Running Tests

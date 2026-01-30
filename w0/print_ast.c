@@ -1,6 +1,8 @@
 #include "print_ast.h"
-#include "lexer.h"
+
 #include <stdio.h>
+
+#include "lexer.h"
 
 static void print_indent(int depth) {
     for (int i = 0; i < depth; i++)
