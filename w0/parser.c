@@ -4,56 +4,56 @@
 #include <string.h>
 
 // Forward declarations
-static Node *parse_declaration(Parser *parser);
-static Node *parse_statement(Parser *parser);
-static Node *parse_expression(Parser *parser);
-static Node *parse_type(Parser *parser);
+static Node* parse_declaration(Parser* parser);
+static Node* parse_statement(Parser* parser);
+static Node* parse_expression(Parser* parser);
+static Node* parse_type(Parser* parser);
 
-static void advance(Parser *parser) {
+static void advance(Parser* parser) {
     parser->previous = parser->current;
-    parser->current = lexer_next(&parser->lexer);
+    parser->current  = lexer_next(&parser->lexer);
 }
 
-static int check(Parser *parser, TokenType type) {
+static int check(Parser* parser, TokenType type) {
     return parser->current.type == type;
 }
 
-static int match(Parser *parser, TokenType type) {
-    if (!check(parser, type)) return 0;
+static int match(Parser* parser, TokenType type) {
+    if (!check(parser, type))
+        return 0;
     advance(parser);
     return 1;
 }
 
-static void error_at(Parser *parser, Token *token, const char *message) {
-    if (parser->panic_mode) return;
+static void error_at(Parser* parser, Token* token, const char* message) {
+    if (parser->panic_mode)
+        return;
     parser->panic_mode = 1;
-    parser->had_error = 1;
+    parser->had_error  = 1;
 
-    snprintf(parser->error_msg, sizeof(parser->error_msg),
-             "[line %d:%d] Error", token->line, token->column);
+    snprintf(parser->error_msg, sizeof(parser->error_msg), "[line %d:%d] Error", token->line,
+             token->column);
 
     if (token->type == TOK_EOF) {
         snprintf(parser->error_msg + strlen(parser->error_msg),
-                 sizeof(parser->error_msg) - strlen(parser->error_msg),
-                 " at end");
+                 sizeof(parser->error_msg) - strlen(parser->error_msg), " at end");
     } else if (token->type != TOK_ERROR) {
         snprintf(parser->error_msg + strlen(parser->error_msg),
-                 sizeof(parser->error_msg) - strlen(parser->error_msg),
-                 " at '%.*s'", (int)token->length, token->start);
+                 sizeof(parser->error_msg) - strlen(parser->error_msg), " at '%.*s'",
+                 (int)token->length, token->start);
     }
 
     snprintf(parser->error_msg + strlen(parser->error_msg),
-             sizeof(parser->error_msg) - strlen(parser->error_msg),
-             ": %s", message);
+             sizeof(parser->error_msg) - strlen(parser->error_msg), ": %s", message);
 
     fprintf(stderr, "%s\n", parser->error_msg);
 }
 
-static void error(Parser *parser, const char *message) {
+static void error(Parser* parser, const char* message) {
     error_at(parser, &parser->current, message);
 }
 
-static void consume(Parser *parser, TokenType type, const char *message) {
+static void consume(Parser* parser, TokenType type, const char* message) {
     if (parser->current.type == type) {
         advance(parser);
         return;
@@ -61,32 +61,33 @@ static void consume(Parser *parser, TokenType type, const char *message) {
     error(parser, message);
 }
 
-static void synchronize(Parser *parser) {
+static void synchronize(Parser* parser) {
     parser->panic_mode = 0;
 
     while (parser->current.type != TOK_EOF) {
-        if (parser->previous.type == TOK_SEMICOLON) return;
+        if (parser->previous.type == TOK_SEMICOLON)
+            return;
 
         switch (parser->current.type) {
-            case TOK_FUNC:
-            case TOK_STRUCT:
-            case TOK_ENUM:
-            case TOK_VAR:
-            case TOK_CONST:
-            case TOK_IF:
-            case TOK_WHILE:
-            case TOK_FOR:
-            case TOK_RETURN:
-                return;
-            default:
-                break;
+        case TOK_FUNC:
+        case TOK_STRUCT:
+        case TOK_ENUM:
+        case TOK_VAR:
+        case TOK_CONST:
+        case TOK_IF:
+        case TOK_WHILE:
+        case TOK_FOR:
+        case TOK_RETURN:
+            return;
+        default:
+            break;
         }
         advance(parser);
     }
 }
 
-static char *copy_token_string(Token *token) {
-    char *str = malloc(token->length + 1);
+static char* copy_token_string(Token* token) {
+    char* str = malloc(token->length + 1);
     memcpy(str, token->start, token->length);
     str[token->length] = '\0';
     return str;
@@ -94,21 +95,24 @@ static char *copy_token_string(Token *token) {
 
 // Expression parsing with precedence climbing
 
-static Node *parse_primary(Parser *parser) {
+static Node* parse_primary(Parser* parser) {
     Token token = parser->current;
 
     if (match(parser, TOK_INT)) {
-        Node *node = node_new(NODE_INT_LIT, token.line, token.column);
+        Node* node = node_new(NODE_INT_LIT, token.line, token.column);
         // Parse integer (handle hex, binary, octal)
-        const char *start = token.start;
-        int base = 10;
+        const char* start = token.start;
+        int         base  = 10;
         if (token.length > 2) {
             if (start[0] == '0' && (start[1] == 'x' || start[1] == 'X')) {
-                base = 16; start += 2;
+                base = 16;
+                start += 2;
             } else if (start[0] == '0' && (start[1] == 'b' || start[1] == 'B')) {
-                base = 2; start += 2;
+                base = 2;
+                start += 2;
             } else if (start[0] == '0' && (start[1] == 'o' || start[1] == 'O')) {
-                base = 8; start += 2;
+                base = 8;
+                start += 2;
             }
         }
         node->as.int_lit.value = strtol(start, NULL, base);
@@ -116,33 +120,47 @@ static Node *parse_primary(Parser *parser) {
     }
 
     if (match(parser, TOK_FLOAT)) {
-        Node *node = node_new(NODE_FLOAT_LIT, token.line, token.column);
+        Node* node               = node_new(NODE_FLOAT_LIT, token.line, token.column);
         node->as.float_lit.value = strtod(token.start, NULL);
         return node;
     }
 
     if (match(parser, TOK_STRING)) {
-        Node *node = node_new(NODE_STRING_LIT, token.line, token.column);
+        Node* node = node_new(NODE_STRING_LIT, token.line, token.column);
         // Skip quotes
         node->as.string_lit.value = malloc(token.length - 1);
         memcpy(node->as.string_lit.value, token.start + 1, token.length - 2);
         node->as.string_lit.value[token.length - 2] = '\0';
-        node->as.string_lit.length = token.length - 2;
+        node->as.string_lit.length                  = token.length - 2;
         return node;
     }
 
     if (match(parser, TOK_CHAR)) {
-        Node *node = node_new(NODE_CHAR_LIT, token.line, token.column);
+        Node* node = node_new(NODE_CHAR_LIT, token.line, token.column);
         // Handle escape sequences
         if (token.start[1] == '\\') {
             switch (token.start[2]) {
-                case 'n': node->as.char_lit.value = '\n'; break;
-                case 't': node->as.char_lit.value = '\t'; break;
-                case 'r': node->as.char_lit.value = '\r'; break;
-                case '0': node->as.char_lit.value = '\0'; break;
-                case '\\': node->as.char_lit.value = '\\'; break;
-                case '\'': node->as.char_lit.value = '\''; break;
-                default: node->as.char_lit.value = token.start[2]; break;
+            case 'n':
+                node->as.char_lit.value = '\n';
+                break;
+            case 't':
+                node->as.char_lit.value = '\t';
+                break;
+            case 'r':
+                node->as.char_lit.value = '\r';
+                break;
+            case '0':
+                node->as.char_lit.value = '\0';
+                break;
+            case '\\':
+                node->as.char_lit.value = '\\';
+                break;
+            case '\'':
+                node->as.char_lit.value = '\'';
+                break;
+            default:
+                node->as.char_lit.value = token.start[2];
+                break;
             }
         } else {
             node->as.char_lit.value = token.start[1];
@@ -151,7 +169,7 @@ static Node *parse_primary(Parser *parser) {
     }
 
     if (match(parser, TOK_TRUE) || match(parser, TOK_FALSE)) {
-        Node *node = node_new(NODE_BOOL_LIT, token.line, token.column);
+        Node* node              = node_new(NODE_BOOL_LIT, token.line, token.column);
         node->as.bool_lit.value = (token.type == TOK_TRUE);
         return node;
     }
@@ -161,14 +179,14 @@ static Node *parse_primary(Parser *parser) {
     }
 
     if (match(parser, TOK_IDENT)) {
-        Node *node = node_new(NODE_IDENT, token.line, token.column);
-        node->as.ident.name = copy_token_string(&token);
+        Node* node            = node_new(NODE_IDENT, token.line, token.column);
+        node->as.ident.name   = copy_token_string(&token);
         node->as.ident.length = token.length;
         return node;
     }
 
     if (match(parser, TOK_LPAREN)) {
-        Node *expr = parse_expression(parser);
+        Node* expr = parse_expression(parser);
         consume(parser, TOK_RPAREN, "Expected ')' after expression");
         return expr;
     }
@@ -177,60 +195,62 @@ static Node *parse_primary(Parser *parser) {
     return NULL;
 }
 
-static Node *parse_postfix(Parser *parser) {
-    Node *expr = parse_primary(parser);
-    if (!expr) return NULL;
+static Node* parse_postfix(Parser* parser) {
+    Node* expr = parse_primary(parser);
+    if (!expr)
+        return NULL;
 
     for (;;) {
         if (match(parser, TOK_LPAREN)) {
             // Function call
-            Node *call = node_new(NODE_CALL, expr->line, expr->column);
+            Node* call         = node_new(NODE_CALL, expr->line, expr->column);
             call->as.call.func = expr;
             nodelist_init(&call->as.call.args);
 
             if (!check(parser, TOK_RPAREN)) {
                 do {
-                    Node *arg = parse_expression(parser);
-                    if (arg) nodelist_push(&call->as.call.args, arg);
+                    Node* arg = parse_expression(parser);
+                    if (arg)
+                        nodelist_push(&call->as.call.args, arg);
                 } while (match(parser, TOK_COMMA));
             }
             consume(parser, TOK_RPAREN, "Expected ')' after arguments");
             expr = call;
         } else if (match(parser, TOK_LBRACKET)) {
             // Index
-            Node *index = node_new(NODE_INDEX, expr->line, expr->column);
+            Node* index            = node_new(NODE_INDEX, expr->line, expr->column);
             index->as.index.object = expr;
-            index->as.index.index = parse_expression(parser);
+            index->as.index.index  = parse_expression(parser);
             consume(parser, TOK_RBRACKET, "Expected ']' after index");
             expr = index;
         } else if (match(parser, TOK_DOT)) {
             // Member access
             Token name = parser->current;
             consume(parser, TOK_IDENT, "Expected member name after '.'");
-            Node *member = node_new(NODE_MEMBER, expr->line, expr->column);
+            Node* member             = node_new(NODE_MEMBER, expr->line, expr->column);
             member->as.member.object = expr;
-            member->as.member.name = copy_token_string(&name);
+            member->as.member.name   = copy_token_string(&name);
             member->as.member.length = name.length;
-            member->as.member.arrow = 0;
-            expr = member;
+            member->as.member.arrow  = 0;
+            expr                     = member;
         } else if (match(parser, TOK_ARROW)) {
             // Arrow member access
             Token name = parser->current;
             consume(parser, TOK_IDENT, "Expected member name after '->'");
-            Node *member = node_new(NODE_MEMBER, expr->line, expr->column);
+            Node* member             = node_new(NODE_MEMBER, expr->line, expr->column);
             member->as.member.object = expr;
-            member->as.member.name = copy_token_string(&name);
+            member->as.member.name   = copy_token_string(&name);
             member->as.member.length = name.length;
-            member->as.member.arrow = 1;
-            expr = member;
+            member->as.member.arrow  = 1;
+            expr                     = member;
         } else if (match(parser, TOK_PLUS_PLUS) || match(parser, TOK_MINUS_MINUS)) {
             // Postfix increment/decrement
-            TokenType op = parser->previous.type;
-            Node *unary = node_new(NODE_UNARY, expr->line, expr->column);
-            unary->as.unary.op = op;
+            TokenType op            = parser->previous.type;
+            Node*     unary         = node_new(NODE_UNARY, expr->line, expr->column);
+            unary->as.unary.op      = op;
             unary->as.unary.operand = expr;
             unary->as.unary.postfix = 1;
-            expr = unary;
+            expr                    = unary;
         } else {
             break;
         }
@@ -239,15 +259,14 @@ static Node *parse_postfix(Parser *parser) {
     return expr;
 }
 
-static Node *parse_unary(Parser *parser) {
-    if (match(parser, TOK_BANG) || match(parser, TOK_MINUS) ||
-        match(parser, TOK_TILDE) || match(parser, TOK_AMP) ||
-        match(parser, TOK_STAR) || match(parser, TOK_PLUS_PLUS) ||
+static Node* parse_unary(Parser* parser) {
+    if (match(parser, TOK_BANG) || match(parser, TOK_MINUS) || match(parser, TOK_TILDE) ||
+        match(parser, TOK_AMP) || match(parser, TOK_STAR) || match(parser, TOK_PLUS_PLUS) ||
         match(parser, TOK_MINUS_MINUS)) {
-        Token op = parser->previous;
-        Node *operand = parse_unary(parser);
-        Node *node = node_new(NODE_UNARY, op.line, op.column);
-        node->as.unary.op = op.type;
+        Token op               = parser->previous;
+        Node* operand          = parse_unary(parser);
+        Node* node             = node_new(NODE_UNARY, op.line, op.column);
+        node->as.unary.op      = op.type;
         node->as.unary.operand = operand;
         node->as.unary.postfix = 0;
         return node;
@@ -255,40 +274,40 @@ static Node *parse_unary(Parser *parser) {
     return parse_postfix(parser);
 }
 
-static Node *parse_binary(Parser *parser, int min_prec);
+static Node* parse_binary(Parser* parser, int min_prec);
 
 static int get_precedence(TokenType type) {
     switch (type) {
-        case TOK_STAR:
-        case TOK_SLASH:
-        case TOK_PERCENT:
-            return 12;
-        case TOK_PLUS:
-        case TOK_MINUS:
-            return 11;
-        case TOK_LT_LT:
-        case TOK_GT_GT:
-            return 10;
-        case TOK_LT:
-        case TOK_GT:
-        case TOK_LT_EQ:
-        case TOK_GT_EQ:
-            return 9;
-        case TOK_EQ_EQ:
-        case TOK_BANG_EQ:
-            return 8;
-        case TOK_AMP:
-            return 7;
-        case TOK_CARET:
-            return 6;
-        case TOK_PIPE:
-            return 5;
-        case TOK_AMP_AMP:
-            return 4;
-        case TOK_PIPE_PIPE:
-            return 3;
-        default:
-            return 0;
+    case TOK_STAR:
+    case TOK_SLASH:
+    case TOK_PERCENT:
+        return 12;
+    case TOK_PLUS:
+    case TOK_MINUS:
+        return 11;
+    case TOK_LT_LT:
+    case TOK_GT_GT:
+        return 10;
+    case TOK_LT:
+    case TOK_GT:
+    case TOK_LT_EQ:
+    case TOK_GT_EQ:
+        return 9;
+    case TOK_EQ_EQ:
+    case TOK_BANG_EQ:
+        return 8;
+    case TOK_AMP:
+        return 7;
+    case TOK_CARET:
+        return 6;
+    case TOK_PIPE:
+        return 5;
+    case TOK_AMP_AMP:
+        return 4;
+    case TOK_PIPE_PIPE:
+        return 3;
+    default:
+        return 0;
     }
 }
 
@@ -296,22 +315,22 @@ static int is_binary_op(TokenType type) {
     return get_precedence(type) > 0;
 }
 
-static Node *parse_binary(Parser *parser, int min_prec) {
-    Node *left = parse_unary(parser);
-    if (!left) return NULL;
+static Node* parse_binary(Parser* parser, int min_prec) {
+    Node* left = parse_unary(parser);
+    if (!left)
+        return NULL;
 
-    while (is_binary_op(parser->current.type) &&
-           get_precedence(parser->current.type) >= min_prec) {
+    while (is_binary_op(parser->current.type) && get_precedence(parser->current.type) >= min_prec) {
         Token op = parser->current;
         advance(parser);
-        int prec = get_precedence(op.type);
-        Node *right = parse_binary(parser, prec + 1);
+        int   prec  = get_precedence(op.type);
+        Node* right = parse_binary(parser, prec + 1);
 
-        Node *binary = node_new(NODE_BINARY, op.line, op.column);
-        binary->as.binary.op = op.type;
-        binary->as.binary.left = left;
+        Node* binary            = node_new(NODE_BINARY, op.line, op.column);
+        binary->as.binary.op    = op.type;
+        binary->as.binary.left  = left;
         binary->as.binary.right = right;
-        left = binary;
+        left                    = binary;
     }
 
     return left;
@@ -319,76 +338,77 @@ static Node *parse_binary(Parser *parser, int min_prec) {
 
 static int is_assign_op(TokenType type) {
     switch (type) {
-        case TOK_EQ:
-        case TOK_PLUS_EQ:
-        case TOK_MINUS_EQ:
-        case TOK_STAR_EQ:
-        case TOK_SLASH_EQ:
-        case TOK_PERCENT_EQ:
-        case TOK_AMP_EQ:
-        case TOK_PIPE_EQ:
-        case TOK_CARET_EQ:
-            return 1;
-        default:
-            return 0;
+    case TOK_EQ:
+    case TOK_PLUS_EQ:
+    case TOK_MINUS_EQ:
+    case TOK_STAR_EQ:
+    case TOK_SLASH_EQ:
+    case TOK_PERCENT_EQ:
+    case TOK_AMP_EQ:
+    case TOK_PIPE_EQ:
+    case TOK_CARET_EQ:
+        return 1;
+    default:
+        return 0;
     }
 }
 
-static Node *parse_assignment(Parser *parser) {
-    Node *expr = parse_binary(parser, 1);
-    if (!expr) return NULL;
+static Node* parse_assignment(Parser* parser) {
+    Node* expr = parse_binary(parser, 1);
+    if (!expr)
+        return NULL;
 
     if (is_assign_op(parser->current.type)) {
         Token op = parser->current;
         advance(parser);
-        Node *value = parse_assignment(parser);  // Right associative
+        Node* value = parse_assignment(parser); // Right associative
 
-        Node *assign = node_new(NODE_ASSIGN, op.line, op.column);
-        assign->as.assign.op = op.type;
+        Node* assign             = node_new(NODE_ASSIGN, op.line, op.column);
+        assign->as.assign.op     = op.type;
         assign->as.assign.target = expr;
-        assign->as.assign.value = value;
+        assign->as.assign.value  = value;
         return assign;
     }
 
     return expr;
 }
 
-static Node *parse_expression(Parser *parser) {
+static Node* parse_expression(Parser* parser) {
     return parse_assignment(parser);
 }
 
 // Type parsing
-static Node *parse_type(Parser *parser) {
+static Node* parse_type(Parser* parser) {
     Token token = parser->current;
 
     // Pointer type
     if (match(parser, TOK_STAR)) {
-        Node *inner = parse_type(parser);
-        Node *node = node_new(NODE_UNARY, token.line, token.column);
-        node->as.unary.op = TOK_STAR;
+        Node* inner            = parse_type(parser);
+        Node* node             = node_new(NODE_UNARY, token.line, token.column);
+        node->as.unary.op      = TOK_STAR;
         node->as.unary.operand = inner;
         return node;
     }
 
     // Array type [n]type
     if (match(parser, TOK_LBRACKET)) {
-        Node *size = NULL;
+        Node* size = NULL;
         if (!check(parser, TOK_RBRACKET)) {
             size = parse_expression(parser);
         }
         consume(parser, TOK_RBRACKET, "Expected ']' in array type");
-        Node *elem = parse_type(parser);
+        Node* elem = parse_type(parser);
 
-        Node *node = node_new(NODE_INDEX, token.line, token.column);
+        Node* node            = node_new(NODE_INDEX, token.line, token.column);
         node->as.index.object = elem;
-        node->as.index.index = size;
+        node->as.index.index  = size;
         return node;
     }
 
     // Named type
     if (match(parser, TOK_IDENT)) {
-        Node *node = node_new(NODE_IDENT, token.line, token.column);
-        node->as.ident.name = copy_token_string(&token);
+        Node* node            = node_new(NODE_IDENT, token.line, token.column);
+        node->as.ident.name   = copy_token_string(&token);
         node->as.ident.length = token.length;
         return node;
     }
@@ -398,30 +418,32 @@ static Node *parse_type(Parser *parser) {
 }
 
 // Statement parsing
-static Node *parse_block(Parser *parser) {
-    Node *block = node_new(NODE_BLOCK, parser->previous.line, parser->previous.column);
+static Node* parse_block(Parser* parser) {
+    Node* block = node_new(NODE_BLOCK, parser->previous.line, parser->previous.column);
     nodelist_init(&block->as.block.stmts);
 
     while (!check(parser, TOK_RBRACE) && !check(parser, TOK_EOF)) {
-        Node *stmt = parse_statement(parser);
-        if (stmt) nodelist_push(&block->as.block.stmts, stmt);
-        if (parser->panic_mode) synchronize(parser);
+        Node* stmt = parse_statement(parser);
+        if (stmt)
+            nodelist_push(&block->as.block.stmts, stmt);
+        if (parser->panic_mode)
+            synchronize(parser);
     }
 
     consume(parser, TOK_RBRACE, "Expected '}' after block");
     return block;
 }
 
-static Node *parse_var_decl(Parser *parser, int is_const) {
+static Node* parse_var_decl(Parser* parser, int is_const) {
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected variable name");
 
-    Node *node = node_new(NODE_VAR_DECL, name.line, name.column);
-    node->as.var_decl.name = copy_token_string(&name);
+    Node* node                    = node_new(NODE_VAR_DECL, name.line, name.column);
+    node->as.var_decl.name        = copy_token_string(&name);
     node->as.var_decl.name_length = name.length;
-    node->as.var_decl.is_const = is_const;
-    node->as.var_decl.type = NULL;
-    node->as.var_decl.init = NULL;
+    node->as.var_decl.is_const    = is_const;
+    node->as.var_decl.type        = NULL;
+    node->as.var_decl.init        = NULL;
 
     // Optional type annotation
     if (match(parser, TOK_COLON)) {
@@ -437,16 +459,16 @@ static Node *parse_var_decl(Parser *parser, int is_const) {
     return node;
 }
 
-static Node *parse_if_stmt(Parser *parser) {
+static Node* parse_if_stmt(Parser* parser) {
     Token token = parser->previous;
     consume(parser, TOK_LPAREN, "Expected '(' after 'if'");
-    Node *cond = parse_expression(parser);
+    Node* cond = parse_expression(parser);
     consume(parser, TOK_RPAREN, "Expected ')' after condition");
 
     consume(parser, TOK_LBRACE, "Expected '{' after if condition");
-    Node *then_block = parse_block(parser);
+    Node* then_block = parse_block(parser);
 
-    Node *else_block = NULL;
+    Node* else_block = NULL;
     if (match(parser, TOK_ELSE)) {
         if (match(parser, TOK_IF)) {
             else_block = parse_if_stmt(parser);
@@ -456,34 +478,34 @@ static Node *parse_if_stmt(Parser *parser) {
         }
     }
 
-    Node *node = node_new(NODE_IF, token.line, token.column);
-    node->as.if_stmt.cond = cond;
+    Node* node                  = node_new(NODE_IF, token.line, token.column);
+    node->as.if_stmt.cond       = cond;
     node->as.if_stmt.then_block = then_block;
     node->as.if_stmt.else_block = else_block;
     return node;
 }
 
-static Node *parse_while_stmt(Parser *parser) {
+static Node* parse_while_stmt(Parser* parser) {
     Token token = parser->previous;
     consume(parser, TOK_LPAREN, "Expected '(' after 'while'");
-    Node *cond = parse_expression(parser);
+    Node* cond = parse_expression(parser);
     consume(parser, TOK_RPAREN, "Expected ')' after condition");
 
     consume(parser, TOK_LBRACE, "Expected '{' after while condition");
-    Node *body = parse_block(parser);
+    Node* body = parse_block(parser);
 
-    Node *node = node_new(NODE_WHILE, token.line, token.column);
+    Node* node               = node_new(NODE_WHILE, token.line, token.column);
     node->as.while_stmt.cond = cond;
     node->as.while_stmt.body = body;
     return node;
 }
 
-static Node *parse_for_stmt(Parser *parser) {
+static Node* parse_for_stmt(Parser* parser) {
     Token token = parser->previous;
     consume(parser, TOK_LPAREN, "Expected '(' after 'for'");
 
     // Init
-    Node *init = NULL;
+    Node* init = NULL;
     if (match(parser, TOK_VAR)) {
         init = parse_var_decl(parser, 0);
     } else if (!match(parser, TOK_SEMICOLON)) {
@@ -492,23 +514,23 @@ static Node *parse_for_stmt(Parser *parser) {
     }
 
     // Condition
-    Node *cond = NULL;
+    Node* cond = NULL;
     if (!check(parser, TOK_SEMICOLON)) {
         cond = parse_expression(parser);
     }
     consume(parser, TOK_SEMICOLON, "Expected ';' after for condition");
 
     // Post
-    Node *post = NULL;
+    Node* post = NULL;
     if (!check(parser, TOK_RPAREN)) {
         post = parse_expression(parser);
     }
     consume(parser, TOK_RPAREN, "Expected ')' after for clauses");
 
     consume(parser, TOK_LBRACE, "Expected '{' after for clauses");
-    Node *body = parse_block(parser);
+    Node* body = parse_block(parser);
 
-    Node *node = node_new(NODE_FOR, token.line, token.column);
+    Node* node             = node_new(NODE_FOR, token.line, token.column);
     node->as.for_stmt.init = init;
     node->as.for_stmt.cond = cond;
     node->as.for_stmt.post = post;
@@ -516,21 +538,21 @@ static Node *parse_for_stmt(Parser *parser) {
     return node;
 }
 
-static Node *parse_return_stmt(Parser *parser) {
+static Node* parse_return_stmt(Parser* parser) {
     Token token = parser->previous;
-    Node *value = NULL;
+    Node* value = NULL;
 
     if (!check(parser, TOK_SEMICOLON)) {
         value = parse_expression(parser);
     }
     consume(parser, TOK_SEMICOLON, "Expected ';' after return value");
 
-    Node *node = node_new(NODE_RETURN, token.line, token.column);
+    Node* node                 = node_new(NODE_RETURN, token.line, token.column);
     node->as.return_stmt.value = value;
     return node;
 }
 
-static Node *parse_statement(Parser *parser) {
+static Node* parse_statement(Parser* parser) {
     if (match(parser, TOK_VAR)) {
         return parse_var_decl(parser, 0);
     }
@@ -564,21 +586,21 @@ static Node *parse_statement(Parser *parser) {
     }
 
     // Expression statement
-    Node *expr = parse_expression(parser);
+    Node* expr = parse_expression(parser);
     consume(parser, TOK_SEMICOLON, "Expected ';' after expression");
 
-    Node *node = node_new(NODE_EXPR_STMT, expr ? expr->line : 0, expr ? expr->column : 0);
+    Node* node = node_new(NODE_EXPR_STMT, expr ? expr->line : 0, expr ? expr->column : 0);
     node->as.expr_stmt.expr = expr;
     return node;
 }
 
 // Declaration parsing
-static Node *parse_func_decl(Parser *parser) {
+static Node* parse_func_decl(Parser* parser) {
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected function name");
 
-    Node *node = node_new(NODE_FUNC_DECL, name.line, name.column);
-    node->as.func_decl.name = copy_token_string(&name);
+    Node* node                     = node_new(NODE_FUNC_DECL, name.line, name.column);
+    node->as.func_decl.name        = copy_token_string(&name);
     node->as.func_decl.name_length = name.length;
     nodelist_init(&node->as.func_decl.params);
 
@@ -590,10 +612,10 @@ static Node *parse_func_decl(Parser *parser) {
             Token param_name = parser->current;
             consume(parser, TOK_IDENT, "Expected parameter name");
 
-            Node *param = node_new(NODE_PARAM, param_name.line, param_name.column);
-            param->as.param.name = copy_token_string(&param_name);
+            Node* param                 = node_new(NODE_PARAM, param_name.line, param_name.column);
+            param->as.param.name        = copy_token_string(&param_name);
             param->as.param.name_length = param_name.length;
-            param->as.param.type = NULL;
+            param->as.param.type        = NULL;
 
             if (match(parser, TOK_COLON)) {
                 param->as.param.type = parse_type(parser);
@@ -618,12 +640,12 @@ static Node *parse_func_decl(Parser *parser) {
     return node;
 }
 
-static Node *parse_struct_decl(Parser *parser) {
+static Node* parse_struct_decl(Parser* parser) {
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected struct name");
 
-    Node *node = node_new(NODE_STRUCT_DECL, name.line, name.column);
-    node->as.struct_decl.name = copy_token_string(&name);
+    Node* node                       = node_new(NODE_STRUCT_DECL, name.line, name.column);
+    node->as.struct_decl.name        = copy_token_string(&name);
     node->as.struct_decl.name_length = name.length;
     nodelist_init(&node->as.struct_decl.fields);
 
@@ -633,8 +655,8 @@ static Node *parse_struct_decl(Parser *parser) {
         Token field_name = parser->current;
         consume(parser, TOK_IDENT, "Expected field name");
 
-        Node *field = node_new(NODE_FIELD, field_name.line, field_name.column);
-        field->as.field.name = copy_token_string(&field_name);
+        Node* field                 = node_new(NODE_FIELD, field_name.line, field_name.column);
+        field->as.field.name        = copy_token_string(&field_name);
         field->as.field.name_length = field_name.length;
 
         consume(parser, TOK_COLON, "Expected ':' after field name");
@@ -643,7 +665,7 @@ static Node *parse_struct_decl(Parser *parser) {
         if (!check(parser, TOK_RBRACE)) {
             consume(parser, TOK_COMMA, "Expected ',' or '}' after field");
         } else {
-            match(parser, TOK_COMMA);  // Allow trailing comma
+            match(parser, TOK_COMMA); // Allow trailing comma
         }
 
         nodelist_push(&node->as.struct_decl.fields, field);
@@ -653,12 +675,12 @@ static Node *parse_struct_decl(Parser *parser) {
     return node;
 }
 
-static Node *parse_enum_decl(Parser *parser) {
+static Node* parse_enum_decl(Parser* parser) {
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected enum name");
 
-    Node *node = node_new(NODE_ENUM_DECL, name.line, name.column);
-    node->as.enum_decl.name = copy_token_string(&name);
+    Node* node                     = node_new(NODE_ENUM_DECL, name.line, name.column);
+    node->as.enum_decl.name        = copy_token_string(&name);
     node->as.enum_decl.name_length = name.length;
     nodelist_init(&node->as.enum_decl.values);
 
@@ -668,8 +690,8 @@ static Node *parse_enum_decl(Parser *parser) {
         Token value_name = parser->current;
         consume(parser, TOK_IDENT, "Expected enum value name");
 
-        Node *value = node_new(NODE_IDENT, value_name.line, value_name.column);
-        value->as.ident.name = copy_token_string(&value_name);
+        Node* value            = node_new(NODE_IDENT, value_name.line, value_name.column);
+        value->as.ident.name   = copy_token_string(&value_name);
         value->as.ident.length = value_name.length;
 
         nodelist_push(&node->as.enum_decl.values, value);
@@ -677,7 +699,7 @@ static Node *parse_enum_decl(Parser *parser) {
         if (!check(parser, TOK_RBRACE)) {
             consume(parser, TOK_COMMA, "Expected ',' or '}' after enum value");
         } else {
-            match(parser, TOK_COMMA);  // Allow trailing comma
+            match(parser, TOK_COMMA); // Allow trailing comma
         }
     }
 
@@ -685,7 +707,7 @@ static Node *parse_enum_decl(Parser *parser) {
     return node;
 }
 
-static Node *parse_declaration(Parser *parser) {
+static Node* parse_declaration(Parser* parser) {
     if (match(parser, TOK_FUNC)) {
         return parse_func_decl(parser);
     }
@@ -706,24 +728,25 @@ static Node *parse_declaration(Parser *parser) {
     return NULL;
 }
 
-void parser_init(Parser *parser, const char *source) {
+void parser_init(Parser* parser, const char* source) {
     lexer_init(&parser->lexer, source);
-    parser->had_error = 0;
-    parser->panic_mode = 0;
+    parser->had_error    = 0;
+    parser->panic_mode   = 0;
     parser->error_msg[0] = '\0';
-    advance(parser);  // Prime the parser
+    advance(parser); // Prime the parser
 }
 
-Node *parser_parse(Parser *parser) {
-    Node *program = node_new(NODE_PROGRAM, 1, 1);
+Node* parser_parse(Parser* parser) {
+    Node* program = node_new(NODE_PROGRAM, 1, 1);
     nodelist_init(&program->as.program.decls);
 
     while (!check(parser, TOK_EOF)) {
-        Node *decl = parse_declaration(parser);
+        Node* decl = parse_declaration(parser);
         if (decl) {
             nodelist_push(&program->as.program.decls, decl);
         }
-        if (parser->panic_mode) synchronize(parser);
+        if (parser->panic_mode)
+            synchronize(parser);
     }
 
     return program;

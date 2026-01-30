@@ -12,26 +12,18 @@ make test     # Run test suite
 ```
 
 ---
+
 ai_agent_integration:
-    visibility: public
-    purpose: "Provide build, run, and introspection instructions for the w0 compiler and tests"
-    entrypoint: "bin/w0"
-    recommended_commands:
-        - "make"
-        - "make test"
-        - "./bin/w0 --ast test/functions.w"
-        - "./bin/w0 --check test/*.w"
-    allowed_actions:
-        - "read_files: true"
-        - "run_commands: true"
-        - "modify_docs: true"
-        - "modify_code: false  # request explicit permission before changing source code"
-    primary_paths:
-        - "w0/"
-        - "w0/test/"
-    notes: |
-        Agents may run build and test commands to verify changes. If code changes are
-        required, request explicit user approval before editing source files.
+visibility: public
+purpose: "Provide build, run, and introspection instructions for the w0 compiler and tests"
+entrypoint: "bin/w0"
+recommended_commands: - "make" - "make test" - "./bin/w0 --ast test/functions.w" - "./bin/w0 --check test/\*.w"
+allowed_actions: - "read_files: true" - "run_commands: true" - "modify_docs: true" - "modify_code: false # request explicit permission before changing source code"
+primary_paths: - "w0/" - "w0/test/"
+notes: |
+Agents may run build and test commands to verify changes. If code changes are
+required, request explicit user approval before editing source files.
+
 ---
 
 **AI Agent Integration**
@@ -119,27 +111,28 @@ Whist is a C-like language with the following features:
 
 ### Types
 
-- Primitives: `void`, `bool`, `int`, `int8`, `int16`, `int32`, `uint8`, `uint16`, `uint32`, `float`, `char`, `string`
+- Primitives: `void`, `bool`, `int64`, `int8`, `int16`, `int32`, `uint64`, `uint8`, `uint16`, `uint32`, `float`, `char`, `string`
 - Pointers: `*T`
 - Arrays: `[n]T`
 - User-defined: `struct`, `enum`
 
 ### Type Mapping to C
 
-| Whist    | C          |
-|----------|------------|
-| void     | void       |
-| bool     | bool       |
-| int      | int64_t    |
-| int8     | int8_t     |
-| int16    | int16_t    |
-| int32    | int32_t    |
-| uint8    | uint8_t    |
-| uint16   | uint16_t   |
-| uint32   | uint32_t   |
-| float    | double     |
-| char     | char       |
-| string   | const char*|
+| Whist  | C            |
+| ------ | ------------ |
+| void   | void         |
+| bool   | bool         |
+| int64  | int64_t      |
+| int8   | int8_t       |
+| int16  | int16_t      |
+| int32  | int32_t      |
+| uint64 | uint64_t     |
+| uint8  | uint8_t      |
+| uint16 | uint16_t     |
+| uint32 | uint32_t     |
+| float  | double       |
+| char   | char         |
+| string | const char\* |
 
 ### Keywords
 
@@ -175,8 +168,8 @@ Whist is a C-like language with the following features:
 
 ```
 struct Point {
-    x: int,
-    y: int,
+    x: int64,
+    y: int64,
 }
 
 enum Color {
@@ -185,11 +178,11 @@ enum Color {
     Blue,
 }
 
-func add(a: int, b: int): int {
+func add(a: int64, b: int64): int64 {
     return a + b;
 }
 
-func main(): int {
+func main(): int64 {
     var x = 42;
     var y: float = 3.14;
     const PI = 3.14159;

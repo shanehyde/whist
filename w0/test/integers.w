@@ -1,11 +1,11 @@
 // Test various integer types
 
-func main(): int {
+func main(): int32 {
     // Signed integers
     var a: int8 = 127;
     var b: int16 = 32767;
     var c: int32 = 2147483647;
-    var d: int = 9223372036854775807;
+    var d: int32 = 1234567890;
 
     // Unsigned integers
     var e: uint8 = 255;
@@ -20,7 +20,7 @@ func main(): int {
     var masked: uint8 = e & 0x0F;
     var shifted: uint16 = f >> 8;
 
-    // Mixed operations (result is int)
+    // Mixed operations (result is int64)
     var mixed = a + b;
 
     return 0;

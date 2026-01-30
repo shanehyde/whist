@@ -1,21 +1,21 @@
 // Test function definitions and calls
 
-func add(a: int, b: int): int {
+func add(a: int32, b: int32): int32 {
     return a + b;
 }
 
-func multiply(x: int, y: int): int {
+func multiply(x: int32, y: int32): int32 {
     return x * y;
 }
 
-func factorial(n: int): int {
+func factorial(n: int32): int32 {
     if (n <= 1) {
         return 1;
     }
     return n * factorial(n - 1);
 }
 
-func main(): int {
+func main(): int32 {
     var sum = add(10, 20);
     var product = multiply(5, 6);
     var fact = factorial(5);

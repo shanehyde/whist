@@ -1,6 +1,6 @@
 // Test variable declarations and types
 
-func main(): int {
+func main(): int32 {
     // Type inference
     var a = 42;
     var b = 3.14;
@@ -9,7 +9,7 @@ func main(): int {
     var e = 'x';
 
     // Explicit types
-    var x: int = 100;
+    var x: int32 = 100;
     var y: float = 2.718;
     var z: bool = false;
 

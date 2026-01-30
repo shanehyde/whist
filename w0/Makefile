@@ -7,7 +7,7 @@ OBJ = $(SRC:.c=.o)
 BIN = bin
 TARGET = $(BIN)/w0
 
-.PHONY: all clean test
+.PHONY: all clean test format
 
 all: $(TARGET)
 
@@ -37,6 +37,9 @@ test: $(TARGET)
 		echo "--- $$f ---"; \
 		$(TARGET) --check "$$f" 2>&1 | grep "Error:"; \
 	done
+
+format:
+	clang-format -i *.c *.h
 
 # Dependencies
 main.o: main.c lexer.h parser.h checker.h codegen.h

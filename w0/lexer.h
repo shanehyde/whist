@@ -32,19 +32,19 @@ typedef enum {
     TOK_NULL,
 
     // Operators
-    TOK_PLUS,        // +
-    TOK_MINUS,       // -
-    TOK_STAR,        // *
-    TOK_SLASH,       // /
-    TOK_PERCENT,     // %
-    TOK_AMP,         // &
-    TOK_PIPE,        // |
-    TOK_CARET,       // ^
-    TOK_TILDE,       // ~
-    TOK_BANG,        // !
-    TOK_EQ,          // =
-    TOK_LT,          // <
-    TOK_GT,          // >
+    TOK_PLUS,    // +
+    TOK_MINUS,   // -
+    TOK_STAR,    // *
+    TOK_SLASH,   // /
+    TOK_PERCENT, // %
+    TOK_AMP,     // &
+    TOK_PIPE,    // |
+    TOK_CARET,   // ^
+    TOK_TILDE,   // ~
+    TOK_BANG,    // !
+    TOK_EQ,      // =
+    TOK_LT,      // <
+    TOK_GT,      // >
 
     // Multi-char operators
     TOK_PLUS_EQ,     // +=
@@ -68,40 +68,40 @@ typedef enum {
     TOK_ARROW,       // ->
 
     // Punctuation
-    TOK_LPAREN,      // (
-    TOK_RPAREN,      // )
-    TOK_LBRACE,      // {
-    TOK_RBRACE,      // }
-    TOK_LBRACKET,    // [
-    TOK_RBRACKET,    // ]
-    TOK_SEMICOLON,   // ;
-    TOK_COLON,       // :
-    TOK_COMMA,       // ,
-    TOK_DOT,         // .
+    TOK_LPAREN,    // (
+    TOK_RPAREN,    // )
+    TOK_LBRACE,    // {
+    TOK_RBRACE,    // }
+    TOK_LBRACKET,  // [
+    TOK_RBRACKET,  // ]
+    TOK_SEMICOLON, // ;
+    TOK_COLON,     // :
+    TOK_COMMA,     // ,
+    TOK_DOT,       // .
 
     // Error
     TOK_ERROR
 } TokenType;
 
 typedef struct {
-    TokenType type;
-    const char *start;
-    size_t length;
-    int line;
-    int column;
+    TokenType   type;
+    const char* start;
+    size_t      length;
+    int         line;
+    int         column;
 } Token;
 
 typedef struct {
-    const char *source;
-    const char *current;
-    const char *start;
-    int line;
-    int column;
-    int start_column;
+    const char* source;
+    const char* current;
+    const char* start;
+    int         line;
+    int         column;
+    int         start_column;
 } Lexer;
 
-void lexer_init(Lexer *lexer, const char *source);
-Token lexer_next(Lexer *lexer);
-const char *token_type_name(TokenType type);
+void        lexer_init(Lexer* lexer, const char* source);
+Token       lexer_next(Lexer* lexer);
+const char* token_type_name(TokenType type);
 
 #endif
