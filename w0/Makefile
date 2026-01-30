@@ -46,17 +46,28 @@ test: $(TARGET)
 	error_passed=0; error_failed=0; \
 	for f in test/error_*.w; do \
 		printf "\033[1m%-35s\033[0m" "$$(basename "$$f"):"; \
+		expected_error=$$(grep "// Expected error:" "$$f" | sed 's|.*// Expected error: *||' | head -1); \
 		if output=$$($(TARGET) --check "$$f" 2>&1); then \
 			echo " \033[1;31m✗ FAIL (should have failed)\033[0m"; \
-			echo "  \033[33mUnexpected success\033[0m"; \
+			echo "  \033[33mExpected: $$expected_error\033[0m"; \
+			echo "  \033[33mBut test passed unexpectedly\033[0m"; \
 			error_failed=$$((error_failed + 1)); \
 		else \
+			actual_error=$$(echo "$$output" | grep "Error:" | head -1 | sed 's|.*Error: *||'); \
 			if echo "$$output" | grep -q "Error:"; then \
-				echo " \033[1;32m✓ PASS (correctly failed)\033[0m"; \
-				echo "  \033[90m$$(echo "$$output" | grep "Error:" | head -1)\033[0m"; \
-				error_passed=$$((error_passed + 1)); \
+				if echo "$$actual_error" | grep -qF "$$expected_error"; then \
+					echo " \033[1;32m✓ PASS (correct error)\033[0m"; \
+					echo "  \033[90m$$actual_error\033[0m"; \
+					error_passed=$$((error_passed + 1)); \
+				else \
+					echo " \033[1;31m✗ FAIL (wrong error message)\033[0m"; \
+					echo "  \033[33mExpected: $$expected_error\033[0m"; \
+					echo "  \033[31mActual:   $$actual_error\033[0m"; \
+					error_failed=$$((error_failed + 1)); \
+				fi; \
 			else \
-				echo " \033[1;31m✗ FAIL (wrong error format)\033[0m"; \
+				echo " \033[1;31m✗ FAIL (no error message)\033[0m"; \
+				echo "  \033[33mExpected: $$expected_error\033[0m"; \
 				echo "$$output" | while IFS= read -r line; do echo "  \033[31m$$line\033[0m"; done; \
 				error_failed=$$((error_failed + 1)); \
 			fi; \
@@ -131,17 +142,28 @@ test-errors: $(TARGET)
 	@error_passed=0; error_failed=0; \
 	for f in test/error_*.w; do \
 		printf "\033[1m%-35s\033[0m" "$$(basename "$$f"):"; \
+		expected_error=$$(grep "// Expected error:" "$$f" | sed 's|.*// Expected error: *||' | head -1); \
 		if output=$$($(TARGET) --check "$$f" 2>&1); then \
 			echo " \033[1;31m✗ FAIL (should have failed)\033[0m"; \
-			echo "  \033[33mUnexpected success\033[0m"; \
+			echo "  \033[33mExpected: $$expected_error\033[0m"; \
+			echo "  \033[33mBut test passed unexpectedly\033[0m"; \
 			error_failed=$$((error_failed + 1)); \
 		else \
+			actual_error=$$(echo "$$output" | grep "Error:" | head -1 | sed 's|.*Error: *||'); \
 			if echo "$$output" | grep -q "Error:"; then \
-				echo " \033[1;32m✓ PASS (correctly failed)\033[0m"; \
-				echo "  \033[90m$$(echo "$$output" | grep "Error:" | head -1)\033[0m"; \
-				error_passed=$$((error_passed + 1)); \
+				if echo "$$actual_error" | grep -qF "$$expected_error"; then \
+					echo " \033[1;32m✓ PASS (correct error)\033[0m"; \
+					echo "  \033[90m$$actual_error\033[0m"; \
+					error_passed=$$((error_passed + 1)); \
+				else \
+					echo " \033[1;31m✗ FAIL (wrong error message)\033[0m"; \
+					echo "  \033[33mExpected: $$expected_error\033[0m"; \
+					echo "  \033[31mActual:   $$actual_error\033[0m"; \
+					error_failed=$$((error_failed + 1)); \
+				fi; \
 			else \
-				echo " \033[1;31m✗ FAIL (wrong error format)\033[0m"; \
+				echo " \033[1;31m✗ FAIL (no error message)\033[0m"; \
+				echo "  \033[33mExpected: $$expected_error\033[0m"; \
 				echo "$$output" | while IFS= read -r line; do echo "  \033[31m$$line\033[0m"; done; \
 				error_failed=$$((error_failed + 1)); \
 			fi; \
@@ -162,10 +184,15 @@ test-help:
 	@echo "  \033[33mValid tests:\033[0m test/*.w (excluding error_*.w)"
 	@echo "  \033[33mError tests:\033[0m test/error_*.w (should fail with specific errors)"
 	@echo ""
+	@echo "\033[1;36mError Test Format:\033[0m"
+	@echo "  Each error test file must include: \033[33m// Expected error: <message>\033[0m"
+	@echo "  The actual error must contain the expected error text"
+	@echo ""
 	@echo "\033[1;36mColor Legend:\033[0m"
-	@echo "  \033[1;32m✓ PASS\033[0m - Test passed as expected"
-	@echo "  \033[1;31m✗ FAIL\033[0m - Test failed unexpectedly"
-	@echo "  \033[90mGray text\033[0m - Error messages from expected failures"
+	@echo "  \033[1;32m✓ PASS (correct error)\033[0m - Error test failed with expected message"
+	@echo "  \033[1;31m✗ FAIL (wrong error message)\033[0m - Error test failed with wrong message"
+	@echo "  \033[1;31m✗ FAIL (should have failed)\033[0m - Error test passed unexpectedly"
+	@echo "  \033[90mGray text\033[0m - Actual error messages from successful error tests"
 
 format:
 	clang-format -i *.c *.h
