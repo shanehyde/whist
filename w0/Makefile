@@ -2,7 +2,7 @@ CC = cc
 CFLAGS = -Wall -Wextra -std=c11 -g
 LDFLAGS =
 
-SRC = main.c lexer.c parser.c ast.c types.c checker.c codegen.c
+SRC = main.c lexer.c parser.c ast.c types.c checker.c codegen.c print_ast.c
 OBJ = $(SRC:.c=.o)
 BIN = bin
 TARGET = $(BIN)/w0
