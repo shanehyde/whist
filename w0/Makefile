@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -Wall -Wextra -std=c11
+CFLAGS = -Wall -Wextra -std=c11 -g
 LDFLAGS =
 
 SRC = main.c lexer.c parser.c ast.c types.c checker.c codegen.c
