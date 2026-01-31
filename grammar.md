@@ -85,6 +85,7 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
              | <return-stmt>
              | <break-stmt>
              | <continue-stmt>
+             | <defer-stmt>
              | <block>
              | <expr-stmt>
 
@@ -106,6 +107,8 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 <break-stmt> ::= 'break' ';'
 
 <continue-stmt> ::= 'continue' ';'
+
+<defer-stmt> ::= 'defer' <statement>
 
 <expr-stmt> ::= <expression> ';'
 ```
