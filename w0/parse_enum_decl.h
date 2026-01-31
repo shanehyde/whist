@@ -4,6 +4,6 @@
 #include "ast.h"
 #include "parser.h"
 
-Node* parse_enum_decl(Parser* parser);
+Node* parse_enum_decl(Parser* parser, int is_public);
 
 #endif

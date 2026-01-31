@@ -18,11 +18,13 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 ```bnf
 <program> ::= { <declaration> }
 
-<declaration> ::= <func-decl>
-               | <struct-decl>
-               | <enum-decl>
-               | <var-decl>
+<declaration> ::= [ 'public' ] <func-decl>
+               | [ 'public' ] <struct-decl>
+               | [ 'public' ] <enum-decl>
+               | [ 'public' ] <var-decl>
 ```
+
+**Visibility:** Top-level declarations are private by default (file-local scope). The `public` keyword gives a declaration external linkage. In generated C code, private declarations are prefixed with `static`. The `main` function is always treated as having external linkage regardless of the `public` modifier.
 
 ---
 
@@ -208,9 +210,10 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 ### Keywords
 
 ```
-break    const    continue    else      enum      false
-for      foreach  func        if        in        null
-return   self     struct      true      var       while
+break    const    continue    defer     else      enum
+false    for      foreach     func      if        in
+null     public   return      self      struct    true
+var      while
 ```
 
 ### Identifiers

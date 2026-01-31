@@ -10,20 +10,22 @@
 int parse_depth = 0;
 
 static Node* parse_declaration(Parser* parser) {
+    int is_public = match(parser, TOK_PUBLIC);
+
     if (match(parser, TOK_FUNC)) {
-        return parse_func_decl(parser);
+        return parse_func_decl(parser, is_public);
     }
     if (match(parser, TOK_STRUCT)) {
-        return parse_struct_decl(parser);
+        return parse_struct_decl(parser, is_public);
     }
     if (match(parser, TOK_ENUM)) {
-        return parse_enum_decl(parser);
+        return parse_enum_decl(parser, is_public);
     }
     if (match(parser, TOK_VAR)) {
-        return parse_var_decl(parser, 0);
+        return parse_var_decl(parser, 0, is_public);
     }
     if (match(parser, TOK_CONST)) {
-        return parse_var_decl(parser, 1);
+        return parse_var_decl(parser, 1, is_public);
     }
 
     parse_error(parser, "Expected declaration");

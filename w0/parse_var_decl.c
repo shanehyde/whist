@@ -4,7 +4,7 @@
 #include "parse_type.h"
 #include "parser_util.h"
 
-Node* parse_var_decl(Parser* parser, int is_const) {
+Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected variable name");
 
@@ -18,6 +18,7 @@ Node* parse_var_decl(Parser* parser, int is_const) {
         parse_error(parser, "Out of memory");
         return NULL;
     }
+    node->as.var_decl.is_public   = is_public;
     node->as.var_decl.name_length = name.length;
     node->as.var_decl.is_const    = is_const;
     node->as.var_decl.type        = NULL;

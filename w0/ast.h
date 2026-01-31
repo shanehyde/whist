@@ -154,6 +154,7 @@ struct Node {
 
         // Variable declaration
         struct {
+            int   is_public;
             char* name;
             int   name_length;
             Node* type;
@@ -208,6 +209,7 @@ struct Node {
 
         // Function declaration
         struct {
+            int      is_public;
             char*    receiver_type;     // Method receiver struct name (NULL for regular functions)
             int      receiver_type_len; // Length of receiver type name
             int      receiver_is_const; // 1 if const receiver, 0 if mutable
@@ -227,6 +229,7 @@ struct Node {
 
         // Struct declaration
         struct {
+            int      is_public;
             char*    name;
             int      name_length;
             NodeList fields;
@@ -241,6 +244,7 @@ struct Node {
 
         // Enum declaration
         struct {
+            int      is_public;
             char*    name;
             int      name_length;
             NodeList values; // list of ident nodes

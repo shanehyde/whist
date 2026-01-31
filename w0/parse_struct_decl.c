@@ -5,7 +5,7 @@
 
 Node* parse_type(Parser* parser);
 
-Node* parse_struct_decl(Parser* parser) {
+Node* parse_struct_decl(Parser* parser, int is_public) {
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected struct name");
 
@@ -14,7 +14,8 @@ Node* parse_struct_decl(Parser* parser) {
         parse_error(parser, "Out of memory");
         return NULL;
     }
-    node->as.struct_decl.name = copy_token_string(&name);
+    node->as.struct_decl.is_public = is_public;
+    node->as.struct_decl.name      = copy_token_string(&name);
     if (!node->as.struct_decl.name) {
         parse_error(parser, "Out of memory");
         return NULL;

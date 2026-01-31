@@ -676,6 +676,11 @@ static void emit_decl(CodeGen* gen, Node* node) {
                       (node->as.func_decl.return_type->type == NODE_IDENT &&
                        strcmp(node->as.func_decl.return_type->as.ident.name, "void") == 0);
 
+        // Emit static for private functions (except main)
+        if (!node->as.func_decl.is_public && strcmp(node->as.func_decl.name, "main") != 0) {
+            emit(gen, "static ");
+        }
+
         // Return type
         emit_type(gen, node->as.func_decl.return_type);
 
@@ -768,7 +773,10 @@ static void emit_decl(CodeGen* gen, Node* node) {
     }
 
     case NODE_VAR_DECL:
-        // Global variable
+        // Global variable - emit static for private vars
+        if (!node->as.var_decl.is_public) {
+            emit(gen, "static ");
+        }
         emit_stmt(gen, node);
         emit(gen, "\n");
         break;
@@ -815,6 +823,11 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         Node* decl = ast->as.program.decls.nodes[i];
         if (decl->type == NODE_FUNC_DECL) {
             int is_method = (decl->as.func_decl.receiver_type != NULL);
+
+            // Emit static for private functions (except main)
+            if (!decl->as.func_decl.is_public && strcmp(decl->as.func_decl.name, "main") != 0) {
+                emit(gen, "static ");
+            }
 
             emit_type(gen, decl->as.func_decl.return_type);
 
