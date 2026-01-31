@@ -1,0 +1,22 @@
+name: W0 Compiler CI
+
+on:
+  pull_request:
+    paths:
+      - 'w0/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build
+        working-directory: w0
+        run: make
+
+      - name: Run tests
+        working-directory: w0
+        run: make test
