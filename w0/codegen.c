@@ -639,6 +639,10 @@ static void emit_decl(CodeGen* gen, Node* node) {
         return;
 
     switch (node->type) {
+    case NODE_EXTERN_MODULE:
+        emit(gen, "\n#include <%s.h>\n", node->as.extern_module.module_name);
+        break;
+
     case NODE_STRUCT_DECL:
         emit(gen, "typedef struct %s {\n", node->as.struct_decl.name);
         gen->indent++;
@@ -822,36 +826,37 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     for (int i = 0; i < ast->as.program.decls.count; i++) {
         Node* decl = ast->as.program.decls.nodes[i];
         if (decl->type == NODE_FUNC_DECL) {
-            int is_method = (decl->as.func_decl.receiver_type != NULL);
+            func_decl_node* fdn       = &decl->as.func_decl;
+            int             is_method = (fdn->receiver_type != NULL);
 
             // Emit static for private functions (except main)
-            if (!decl->as.func_decl.is_public && strcmp(decl->as.func_decl.name, "main") != 0) {
+            if (!fdn->is_public && strcmp(fdn->name, "main") != 0) {
                 emit(gen, "static ");
             }
 
-            emit_type(gen, decl->as.func_decl.return_type);
+            emit_type(gen, fdn->return_type);
 
             if (is_method) {
-                emit(gen, " %s_%s(", decl->as.func_decl.receiver_type, decl->as.func_decl.name);
+                emit(gen, " %s_%s(", fdn->receiver_type, fdn->name);
                 // Emit self parameter
-                if (decl->as.func_decl.receiver_is_const) {
+                if (fdn->receiver_is_const) {
                     emit(gen, "const ");
                 }
-                emit(gen, "%s* self", decl->as.func_decl.receiver_type);
-                if (decl->as.func_decl.params.count > 0) {
+                emit(gen, "%s* self", fdn->receiver_type);
+                if (fdn->params.count > 0) {
                     emit(gen, ", ");
                 }
             } else {
-                emit(gen, " %s(", decl->as.func_decl.name);
+                emit(gen, " %s(", fdn->name);
             }
 
-            if (decl->as.func_decl.params.count == 0 && !is_method) {
+            if (fdn->params.count == 0 && !is_method) {
                 emit(gen, "void");
             } else {
-                for (int j = 0; j < decl->as.func_decl.params.count; j++) {
+                for (int j = 0; j < fdn->params.count; j++) {
                     if (j > 0)
                         emit(gen, ", ");
-                    Node* param = decl->as.func_decl.params.nodes[j];
+                    Node* param = fdn->params.nodes[j];
                     emit_type_with_name(gen, param->as.param.type, param->as.param.name);
                 }
             }

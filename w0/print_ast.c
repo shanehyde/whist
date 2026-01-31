@@ -34,7 +34,13 @@ void print_ast(Node* node, int depth) {
             print_ast(node->as.program.decls.nodes[i], depth + 1);
         }
         break;
-
+    case NODE_EXTERN_MODULE:
+        printf("ExternModule: %.*s\n", node->as.extern_module.module_name_length,
+               node->as.extern_module.module_name);
+        for (int i = 0; i < node->as.extern_module.decls.count; i++) {
+            print_ast(node->as.extern_module.decls.nodes[i], depth + 1);
+        }
+        break;
     case NODE_FUNC_DECL:
         if (node->as.func_decl.receiver_type) {
             printf("MethodDecl: (%s%.*s) %.*s\n",
@@ -44,7 +50,7 @@ void print_ast(Node* node, int depth) {
         } else {
             printf("FuncDecl: %.*s\n", node->as.func_decl.name_length, node->as.func_decl.name);
         }
-        print_visibility(depth + 1, node->as.struct_decl.is_public);
+        print_visibility(depth + 1, node->as.func_decl.is_public);
         if (node->as.func_decl.params.count > 0) {
             print_indent(depth + 1);
             printf("Params:\n");
@@ -89,7 +95,7 @@ void print_ast(Node* node, int depth) {
 
     case NODE_ENUM_DECL:
         printf("EnumDecl: %.*s\n", node->as.enum_decl.name_length, node->as.enum_decl.name);
-        print_visibility(depth + 1, node->as.struct_decl.is_public);
+        print_visibility(depth + 1, node->as.enum_decl.is_public);
         for (int i = 0; i < node->as.enum_decl.values.count; i++) {
             print_ast(node->as.enum_decl.values.nodes[i], depth + 1);
         }

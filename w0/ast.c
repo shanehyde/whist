@@ -145,6 +145,10 @@ void node_free(Node* node) {
     case NODE_PROGRAM:
         nodelist_free(&node->as.program.decls);
         break;
+    case NODE_EXTERN_MODULE:
+        nodelist_free(&node->as.extern_module.decls);
+        free(node->as.extern_module.module_name);
+        break;
     default:
         break;
     }

@@ -40,6 +40,8 @@ typedef enum {
     NODE_STRUCT_DECL,
     NODE_ENUM_DECL,
 
+    NODE_EXTERN_MODULE,
+
     // Other
     NODE_PARAM,
     NODE_FIELD,
@@ -54,6 +56,28 @@ struct NodeList {
     int    count;
     int    capacity;
 };
+
+typedef struct {
+    int      is_public;
+    int      is_extern;
+    char*    receiver_type;     // Method receiver struct name (NULL for regular functions)
+    int      receiver_type_len; // Length of receiver type name
+    int      receiver_is_const; // 1 if const receiver, 0 if mutable
+    char*    name;
+    int      name_length;
+    NodeList params;
+    Node*    return_type;
+    Node*    body;
+} func_decl_node;
+
+typedef struct {
+    int   is_public;
+    char* name;
+    int   name_length;
+    Node* type;
+    Node* init;
+    int   is_const;
+} var_decl_node;
 
 struct Node {
     NodeType type;
@@ -153,14 +177,7 @@ struct Node {
         } expr_stmt;
 
         // Variable declaration
-        struct {
-            int   is_public;
-            char* name;
-            int   name_length;
-            Node* type;
-            Node* init;
-            int   is_const;
-        } var_decl;
+        var_decl_node var_decl;
 
         // Block
         struct {
@@ -208,17 +225,7 @@ struct Node {
         } defer_stmt;
 
         // Function declaration
-        struct {
-            int      is_public;
-            char*    receiver_type;     // Method receiver struct name (NULL for regular functions)
-            int      receiver_type_len; // Length of receiver type name
-            int      receiver_is_const; // 1 if const receiver, 0 if mutable
-            char*    name;
-            int      name_length;
-            NodeList params;
-            Node*    return_type;
-            Node*    body;
-        } func_decl;
+        func_decl_node func_decl;
 
         // Parameter
         struct {
@@ -249,6 +256,12 @@ struct Node {
             int      name_length;
             NodeList values; // list of ident nodes
         } enum_decl;
+
+        struct {
+            char*    module_name;
+            int      module_name_length;
+            NodeList decls;
+        } extern_module;
 
         // Program
         struct {

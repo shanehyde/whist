@@ -1,6 +1,7 @@
 #include "parser.h"
 
 #include "parse_enum_decl.h"
+#include "parse_extern_decls.h"
 #include "parse_func_decl.h"
 #include "parse_struct_decl.h"
 #include "parse_var_decl.h"
@@ -15,7 +16,9 @@ static Node* parse_declaration(Parser* parser) {
     if (!is_public) {
         is_public = match(parser, TOK_PRIVATE) == 0;
     }
-
+    if (match(parser, TOK_EXTERN)) {
+        return parse_extern_decls(parser);
+    }
     if (match(parser, TOK_FUNC)) {
         return parse_func_decl(parser, is_public);
     }
