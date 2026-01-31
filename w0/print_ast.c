@@ -9,6 +9,15 @@ static void print_indent(int depth) {
         printf("  ");
 }
 
+static void print_visibility(int depth, int is_public) {
+    print_indent(depth);
+    if (is_public) {
+        printf("Visibility: public\n");
+    } else {
+        printf("Visibility: private\n");
+    }
+}
+
 void print_ast(Node* node, int depth) {
     if (!node) {
         print_indent(depth);
@@ -35,6 +44,7 @@ void print_ast(Node* node, int depth) {
         } else {
             printf("FuncDecl: %.*s\n", node->as.func_decl.name_length, node->as.func_decl.name);
         }
+        print_visibility(depth + 1, node->as.struct_decl.is_public);
         if (node->as.func_decl.params.count > 0) {
             print_indent(depth + 1);
             printf("Params:\n");
@@ -66,6 +76,7 @@ void print_ast(Node* node, int depth) {
 
     case NODE_STRUCT_DECL:
         printf("StructDecl: %.*s\n", node->as.struct_decl.name_length, node->as.struct_decl.name);
+        print_visibility(depth + 1, node->as.struct_decl.is_public);
         for (int i = 0; i < node->as.struct_decl.fields.count; i++) {
             print_ast(node->as.struct_decl.fields.nodes[i], depth + 1);
         }
@@ -78,6 +89,7 @@ void print_ast(Node* node, int depth) {
 
     case NODE_ENUM_DECL:
         printf("EnumDecl: %.*s\n", node->as.enum_decl.name_length, node->as.enum_decl.name);
+        print_visibility(depth + 1, node->as.struct_decl.is_public);
         for (int i = 0; i < node->as.enum_decl.values.count; i++) {
             print_ast(node->as.enum_decl.values.nodes[i], depth + 1);
         }
