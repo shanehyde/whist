@@ -14,7 +14,7 @@ func test_lifo(): void {
     defer record(1);  // Should execute first
 }
 
-func main(): i64 {
+func main(): i32 {
     result = 0;
     test_lifo();
     // If LIFO order is correct: 1 executes first, then 2, then 3

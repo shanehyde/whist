@@ -12,6 +12,10 @@ int parse_depth = 0;
 static Node* parse_declaration(Parser* parser) {
     int is_public = match(parser, TOK_PUBLIC);
 
+    if (!is_public) {
+        is_public = match(parser, TOK_PRIVATE) == 0;
+    }
+
     if (match(parser, TOK_FUNC)) {
         return parse_func_decl(parser, is_public);
     }

@@ -116,13 +116,13 @@ typedef struct {
 } Keyword;
 
 static const Keyword keywords[] = {
-    {"break", 5, TOK_BREAK}, {"const", 5, TOK_CONST},   {"continue", 8, TOK_CONTINUE},
-    {"defer", 5, TOK_DEFER}, {"else", 4, TOK_ELSE},     {"enum", 4, TOK_ENUM},
-    {"false", 5, TOK_FALSE}, {"for", 3, TOK_FOR},       {"foreach", 7, TOK_FOREACH},
-    {"func", 4, TOK_FUNC},   {"if", 2, TOK_IF},         {"in", 2, TOK_IN},
-    {"null", 4, TOK_NULL},   {"public", 6, TOK_PUBLIC}, {"return", 6, TOK_RETURN},
-    {"self", 4, TOK_SELF},   {"struct", 6, TOK_STRUCT}, {"true", 4, TOK_TRUE},
-    {"var", 3, TOK_VAR},     {"while", 5, TOK_WHILE},
+    {"break", 5, TOK_BREAK},   {"const", 5, TOK_CONST},   {"continue", 8, TOK_CONTINUE},
+    {"defer", 5, TOK_DEFER},   {"else", 4, TOK_ELSE},     {"enum", 4, TOK_ENUM},
+    {"false", 5, TOK_FALSE},   {"for", 3, TOK_FOR},       {"foreach", 7, TOK_FOREACH},
+    {"func", 4, TOK_FUNC},     {"if", 2, TOK_IF},         {"in", 2, TOK_IN},
+    {"null", 4, TOK_NULL},     {"public", 6, TOK_PUBLIC}, {"private", 7, TOK_PRIVATE},
+    {"return", 6, TOK_RETURN}, {"self", 4, TOK_SELF},     {"struct", 6, TOK_STRUCT},
+    {"true", 4, TOK_TRUE},     {"var", 3, TOK_VAR},       {"while", 5, TOK_WHILE},
 };
 
 static const size_t keyword_count = sizeof(keywords) / sizeof(keywords[0]);
@@ -418,6 +418,8 @@ const char* token_type_name(TokenType type) {
         return "DEFER";
     case TOK_PUBLIC:
         return "PUBLIC";
+    case TOK_PRIVATE:
+        return "PRIVATE";
     case TOK_PLUS:
         return "PLUS";
     case TOK_MINUS:

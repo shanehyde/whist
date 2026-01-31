@@ -19,7 +19,7 @@ func move_ptr(p: *Point): void {
     p->move(1, 1);
 }
 
-func main(): i64 {
+func main(): i32 {
     var p: Point = {x: 10, y: 20};
     p.move(5, 5);
     move_ptr(&p);    // Calls p->move(1, 1)

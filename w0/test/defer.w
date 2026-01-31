@@ -20,7 +20,7 @@ func test_void_defer(): void {
     defer cleanup();
 }
 
-func main(): i64 {
+func main(): i32 {
     cleanup_count = 0;
 
     var result = test_single_defer();

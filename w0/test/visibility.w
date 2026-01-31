@@ -36,7 +36,7 @@ public func add(a: i64, b: i64): i64 {
 }
 
 // Private function - file-local (static in C)
-func helper(): void {
+private func helper(): void {
     local_counter = local_counter + 1;
 }
 
@@ -45,7 +45,7 @@ public func (Point) magnitude_squared(): i64 {
     return self->x * self->x + self->y * self->y;
 }
 
-func main(): i64 {
+func main(): i32 {
     var p: Point = { x: 3, y: 4 };
     var mag = p.magnitude_squared();
 

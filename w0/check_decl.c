@@ -35,6 +35,24 @@ void check_decl(Checker* checker, Node* node) {
             }
         }
 
+        // if main function, ensure correct signature
+        if (!is_method && strcmp(name, "main") == 0) {
+            if (node->as.func_decl.params.count != 0) {
+                check_error(checker, node->line, node->column,
+                            "main function must not have parameters");
+            }
+            if (node->as.func_decl.return_type) {
+                Type* ret_type = resolve_type(checker, node->as.func_decl.return_type);
+                if (ret_type->kind != TYPE_INT32) {
+                    check_error(checker, node->line, node->column,
+                                "main function must have return type i32");
+                }
+            } else {
+                check_error(checker, node->line, node->column,
+                            "main function must have return type i32");
+            }
+        }
+
         // Check for redefinition
         if (checker_lookup(checker, mangled_name)) {
             check_error(checker, node->line, node->column, "Redefinition of '%s'", mangled_name);
