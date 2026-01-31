@@ -714,6 +714,9 @@ static void emit_decl(CodeGen* gen, Node* node) {
                 if (i > 0)
                     emit(gen, ", ");
                 Node* param = node->as.func_decl.params.nodes[i];
+                if (param->as.param.is_const) {
+                    emit(gen, "const ");
+                }
                 emit_type_with_name(gen, param->as.param.type, param->as.param.name);
             }
         }

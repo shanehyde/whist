@@ -232,6 +232,7 @@ struct Node {
             char* name;
             int   name_length;
             Node* type;
+            int   is_const;
         } param;
 
         // Struct declaration

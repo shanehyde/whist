@@ -63,6 +63,12 @@ Node* parse_func_decl(Parser* parser, int is_public) {
     // Parameters
     if (!check(parser, TOK_RPAREN)) {
         do {
+            // Check for 'const' modifier
+            int param_is_const = 0;
+            if (match(parser, TOK_CONST)) {
+                param_is_const = 1;
+            }
+
             Token param_name = parser->current;
             consume(parser, TOK_IDENT, "Expected parameter name");
 
@@ -78,6 +84,7 @@ Node* parse_func_decl(Parser* parser, int is_public) {
             }
             param->as.param.name_length = param_name.length;
             param->as.param.type        = NULL;
+            param->as.param.is_const    = param_is_const;
 
             if (match(parser, TOK_COLON)) {
                 param->as.param.type = parse_type(parser);
