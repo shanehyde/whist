@@ -1,12 +1,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "checker.h"
 #include "codegen.h"
 #include "lexer.h"
 #include "parser.h"
 #include "print_ast.h"
+
+static int compile_and_run(const char* source_path, int argc, char** argv);
 
 static char* read_file(const char* path) {
     FILE* file = fopen(path, "rb");
@@ -32,6 +36,135 @@ static char* read_file(const char* path) {
     return buffer;
 }
 
+static int compile_and_run(const char* source_path, int argc, char** argv) {
+    // Read source file
+    char* source = read_file(source_path);
+    if (!source)
+        return 1;
+
+    // Parse
+    Parser parser;
+    parser_init(&parser, source);
+    Node* ast = parser_parse(&parser);
+
+    if (parser.had_error) {
+        fprintf(stderr, "Parse failed\n");
+        node_free(ast);
+        free(source);
+        return 1;
+    }
+
+    // Type check
+    Checker checker;
+    checker_init(&checker);
+    int ok = checker_check(&checker, ast);
+    checker_free(&checker);
+
+    if (!ok) {
+        fprintf(stderr, "Type check failed\n");
+        node_free(ast);
+        free(source);
+        return 1;
+    }
+
+    // Create temp files
+    char c_base[]   = "/tmp/w0_XXXXXX";
+    char exe_path[] = "/tmp/w0_XXXXXX";
+
+    int c_fd = mkstemp(c_base);
+    if (c_fd < 0) {
+        fprintf(stderr, "Could not create temp file\n");
+        node_free(ast);
+        free(source);
+        return 1;
+    }
+
+    // Rename to .c extension for cc
+    char c_path[256];
+    snprintf(c_path, sizeof(c_path), "%s.c", c_base);
+    close(c_fd);
+    if (rename(c_base, c_path) != 0) {
+        fprintf(stderr, "Could not rename temp file\n");
+        unlink(c_base);
+        node_free(ast);
+        free(source);
+        return 1;
+    }
+
+    int exe_fd = mkstemp(exe_path);
+    if (exe_fd < 0) {
+        fprintf(stderr, "Could not create temp file\n");
+        unlink(c_path);
+        node_free(ast);
+        free(source);
+        return 1;
+    }
+    close(exe_fd);
+
+    // Generate C code
+    FILE* c_file = fopen(c_path, "w");
+    if (!c_file) {
+        fprintf(stderr, "Could not open temp file for writing\n");
+        unlink(c_path);
+        unlink(exe_path);
+        node_free(ast);
+        free(source);
+        return 1;
+    }
+
+    CodeGen gen;
+    codegen_init(&gen, c_file);
+    codegen_emit(&gen, ast);
+    fclose(c_file);
+
+    node_free(ast);
+    free(source);
+
+    // Compile with cc
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "cc -o %s %s", exe_path, c_path);
+
+    int cc_result = system(cmd);
+    unlink(c_path);
+
+    if (cc_result != 0) {
+        fprintf(stderr, "C compilation failed\n");
+        unlink(exe_path);
+        return 1;
+    }
+
+    // Build command with args
+    size_t cmd_len = strlen(exe_path) + 1;
+    for (int i = 1; i < argc; i++) {
+        cmd_len += strlen(argv[i]) + 3; // space + quotes + arg
+    }
+
+    char* run_cmd = malloc(cmd_len + 1);
+    if (!run_cmd) {
+        unlink(exe_path);
+        return 1;
+    }
+
+    strcpy(run_cmd, exe_path);
+    for (int i = 1; i < argc; i++) {
+        strcat(run_cmd, " ");
+        strcat(run_cmd, argv[i]);
+    }
+
+    // Run the executable
+    int run_result = system(run_cmd);
+    free(run_cmd);
+
+    // Cleanup
+    unlink(exe_path);
+
+    // Extract exit code from system() return value
+    if (WIFEXITED(run_result)) {
+        return WEXITSTATUS(run_result);
+    }
+    return run_result != 0 ? 1 : 0;
+}
+
 int main(int argc, char** argv) {
     char*       source;
     int         free_source    = 0;
@@ -40,6 +173,11 @@ int main(int argc, char** argv) {
     int         check_only     = 0;
     int         print_ast_flag = 0;
     const char* output_file    = NULL;
+
+    // Check for 'run' subcommand
+    if (argc >= 3 && strcmp(argv[1], "run") == 0) {
+        return compile_and_run(argv[2], argc - 2, argv + 2);
+    }
 
     // Parse args
     int arg_idx = 1;
@@ -66,12 +204,15 @@ int main(int argc, char** argv) {
         free_source = 1;
     } else {
         fprintf(stderr, "Usage: %s [options] <source-file>\n", argv[0]);
+        fprintf(stderr, "       %s run <source-file> [args...]\n", argv[0]);
         fprintf(stderr, "Options:\n");
         fprintf(stderr, "  --lex     Lex only (print tokens)\n");
         fprintf(stderr, "  --parse   Parse only (no type checking)\n");
         fprintf(stderr, "  --check   Type check only (no code generation)\n");
         fprintf(stderr, "  --ast     Print AST\n");
         fprintf(stderr, "  -o <file> Output file\n");
+        fprintf(stderr, "Commands:\n");
+        fprintf(stderr, "  run       Compile and run the program\n");
         return 1;
     }
 
