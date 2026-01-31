@@ -25,8 +25,8 @@ static void emit_struct_init(CodeGen* gen, Node* node);
 
 static void defer_push(CodeGen* gen, Node* node) {
     if (gen->defer_count >= gen->defer_capacity) {
-        int new_cap = gen->defer_capacity == 0 ? 8 : gen->defer_capacity * 2;
-        gen->defer_stack = realloc(gen->defer_stack, new_cap * sizeof(Node*));
+        int new_cap         = gen->defer_capacity == 0 ? 8 : gen->defer_capacity * 2;
+        gen->defer_stack    = realloc(gen->defer_stack, new_cap * sizeof(Node*));
         gen->defer_capacity = new_cap;
     }
     gen->defer_stack[gen->defer_count++] = node;
@@ -780,12 +780,12 @@ static void emit_decl(CodeGen* gen, Node* node) {
 }
 
 void codegen_init(CodeGen* gen, FILE* out) {
-    gen->out                = out;
-    gen->indent             = 0;
-    gen->temp_count         = 0;
-    gen->defer_stack        = NULL;
-    gen->defer_count        = 0;
-    gen->defer_capacity     = 0;
+    gen->out                 = out;
+    gen->indent              = 0;
+    gen->temp_count          = 0;
+    gen->defer_stack         = NULL;
+    gen->defer_count         = 0;
+    gen->defer_capacity      = 0;
     gen->current_return_type = NULL;
 }
 

@@ -20,7 +20,7 @@ void check_decl(Checker* checker, Node* node) {
         // For methods, use mangled name: StructName_methodName
         char* mangled_name = NULL;
         if (is_method) {
-            size_t len  = strlen(receiver_type) + 1 + strlen(name) + 1;
+            size_t len   = strlen(receiver_type) + 1 + strlen(name) + 1;
             mangled_name = malloc(len);
             if (!mangled_name) {
                 check_error(checker, node->line, node->column, "Out of memory");
