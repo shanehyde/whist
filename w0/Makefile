@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -Wall -Wextra -std=c11 -g
+CFLAGS = -Wall -Wextra -std=c11 -g -D_POSIX_C_SOURCE=200809L
 LDFLAGS =
 
 SRC = main.c lexer.c parser.c parser_util.c parse_enum_decl.c parse_struct_decl.c \
