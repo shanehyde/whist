@@ -7,7 +7,7 @@ Node* parse_type(Parser* parser);
 Node* parse_block(Parser* parser);
 
 // Declaration parsing
-Node* parse_func_decl(Parser* parser) {
+Node* parse_func_decl(Parser* parser, int is_public) {
     // Check for method receiver: func (Type) or func (const Type)
     char* receiver_type     = NULL;
     int   receiver_type_len = 0;
@@ -43,6 +43,7 @@ Node* parse_func_decl(Parser* parser) {
         parse_error(parser, "Out of memory");
         return NULL;
     }
+    node->as.func_decl.is_public         = is_public;
     node->as.func_decl.receiver_type     = receiver_type;
     node->as.func_decl.receiver_type_len = receiver_type_len;
     node->as.func_decl.receiver_is_const = receiver_is_const;

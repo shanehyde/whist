@@ -61,7 +61,7 @@ void check_decl(Checker* checker, Node* node) {
 
         // Pre-declare function for recursion
         Type* func_type = type_func(param_types, param_count, return_type);
-        checker_define(checker, mangled_name, SYM_FUNC, func_type, 0);
+        checker_define(checker, mangled_name, SYM_FUNC, func_type, 0, node->as.func_decl.is_public);
 
         // For methods, also register the method on the struct type
         if (is_method) {
@@ -123,7 +123,7 @@ void check_decl(Checker* checker, Node* node) {
             if (struct_sym && struct_sym->kind == SYM_TYPE) {
                 Type* self_type = type_pointer(struct_sym->type);
                 checker_define(checker, "self", SYM_VAR, self_type,
-                               node->as.func_decl.receiver_is_const);
+                               node->as.func_decl.receiver_is_const, 0);
             }
         }
 
@@ -136,7 +136,7 @@ void check_decl(Checker* checker, Node* node) {
             }
             param_types[i] = ptype;
 
-            if (!checker_define(checker, param->as.param.name, SYM_VAR, ptype, 0)) {
+            if (!checker_define(checker, param->as.param.name, SYM_VAR, ptype, 0, 0)) {
                 check_error(checker, param->line, param->column, "Duplicate parameter name '%s'",
                             param->as.param.name);
             }
@@ -179,7 +179,7 @@ void check_decl(Checker* checker, Node* node) {
             struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
         }
 
-        checker_define(checker, name, SYM_TYPE, struct_type, 0);
+        checker_define(checker, name, SYM_TYPE, struct_type, 0, node->as.struct_decl.is_public);
         break;
     }
 
@@ -197,7 +197,7 @@ void check_decl(Checker* checker, Node* node) {
         enum_type->as.enm.value_count = value_count;
         enum_type->as.enm.value_names = malloc(value_count * sizeof(char*));
 
-        checker_define(checker, name, SYM_TYPE, enum_type, 0);
+        checker_define(checker, name, SYM_TYPE, enum_type, 0, node->as.enum_decl.is_public);
 
         // Define enum values as constants
         for (int i = 0; i < value_count; i++) {

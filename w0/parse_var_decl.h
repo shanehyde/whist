@@ -4,6 +4,6 @@
 #include "ast.h"
 #include "parser.h"
 
-Node* parse_var_decl(Parser* parser, int is_const);
+Node* parse_var_decl(Parser* parser, int is_const, int is_public);
 
 #endif

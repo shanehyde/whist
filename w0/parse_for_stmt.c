@@ -12,7 +12,7 @@ Node* parse_for_stmt(Parser* parser) {
     // Init
     Node* init = NULL;
     if (match(parser, TOK_VAR)) {
-        init = parse_var_decl(parser, 0);
+        init = parse_var_decl(parser, 0, 0);
     } else if (!match(parser, TOK_SEMICOLON)) {
         init = parse_expression(parser);
         consume(parser, TOK_SEMICOLON, "Expected ';' after for initializer");

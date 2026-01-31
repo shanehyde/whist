@@ -13,10 +13,10 @@
 
 Node* parse_statement(Parser* parser) {
     if (match(parser, TOK_VAR)) {
-        return parse_var_decl(parser, 0);
+        return parse_var_decl(parser, 0, 0);
     }
     if (match(parser, TOK_CONST)) {
-        return parse_var_decl(parser, 1);
+        return parse_var_decl(parser, 1, 0);
     }
     if (match(parser, TOK_IF)) {
         return parse_if_stmt(parser);

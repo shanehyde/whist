@@ -20,6 +20,7 @@ struct Symbol {
     char*      name;
     Type*      type;
     int        is_const;
+    int        is_public;
     Symbol*    next; // Hash chain
 };
 
@@ -46,7 +47,7 @@ int checker_check(Checker* checker, Node* ast);
 void    checker_push_scope(Checker* checker);
 void    checker_pop_scope(Checker* checker);
 Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type* type,
-                       int is_const);
+                       int is_const, int is_public);
 Symbol* checker_lookup(Checker* checker, const char* name);
 Symbol* checker_lookup_local(Checker* checker, const char* name);
 

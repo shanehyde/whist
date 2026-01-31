@@ -2,7 +2,7 @@
 
 #include "parser_util.h"
 
-Node* parse_enum_decl(Parser* parser) {
+Node* parse_enum_decl(Parser* parser, int is_public) {
     Token name = parser->current;
     consume(parser, TOK_IDENT, "Expected enum name");
 
@@ -11,7 +11,8 @@ Node* parse_enum_decl(Parser* parser) {
         parse_error(parser, "Out of memory");
         return NULL;
     }
-    node->as.enum_decl.name = copy_token_string(&name);
+    node->as.enum_decl.is_public = is_public;
+    node->as.enum_decl.name      = copy_token_string(&name);
     if (!node->as.enum_decl.name) {
         parse_error(parser, "Out of memory");
         return NULL;

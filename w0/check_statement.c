@@ -62,7 +62,8 @@ void check_statement(Checker* checker, Node* node) {
             var_type = type_error;
         }
 
-        checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const);
+        checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const,
+                       node->as.var_decl.is_public);
         break;
     }
 
@@ -148,7 +149,7 @@ void check_statement(Checker* checker, Node* node) {
 
         // Add the loop variable as a const int64 (immutable)
         Symbol* sym =
-            checker_define(checker, node->as.foreach_stmt.var_name, SYM_VAR, type_int64, 1);
+            checker_define(checker, node->as.foreach_stmt.var_name, SYM_VAR, type_int64, 1, 0);
         if (!sym) {
             check_error(checker, node->line, node->column,
                         "Variable '%s' already declared in this scope",
