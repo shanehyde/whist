@@ -1,6 +1,6 @@
-# W0 Language Grammar
+# Whist Language Grammar
 
-This document describes the grammar of the W0 language in BNF (Backus-Naur Form) notation.
+This document describes the grammar of the Whist language in BNF (Backus-Naur Form) notation.
 
 ## Notation
 
@@ -121,7 +121,7 @@ This document describes the grammar of the W0 language in BNF (Backus-Naur Form)
 
 <assignment> ::= <or-expr> [ <assign-op> <assignment> ]
 
-<assign-op> ::= '=' | '+=' | '-=' | '*=' | '/=' | '%=' 
+<assign-op> ::= '=' | '+=' | '-=' | '*=' | '/=' | '%='
              | '&=' | '|=' | '^=' | '<<=' | '>>='
 ```
 
@@ -265,7 +265,7 @@ return   self     struct      true      var       while
 
 ```
 +     -     *     /     %     &     |     ^     ~     !
-=     <     >     
+=     <     >
 +=    -=    *=    /=    %=    &=    |=    ^=
 ==    !=    <=    >=    &&    ||    <<    >>    <<=   >>=
 ++    --    ->    ::    ..
@@ -286,18 +286,18 @@ return   self     struct      true      var       while
 
 From lowest to highest precedence:
 
-| Precedence | Operators                | Associativity |
-|------------|--------------------------|---------------|
-| 1          | `=` `+=` `-=` `*=` `/=` `%=` `&=` `\|=` `^=` `<<=` `>>=` | Right |
-| 2          | `\|\|`                   | Left          |
-| 3          | `&&`                     | Left          |
-| 4          | `\|`                     | Left          |
-| 5          | `^`                      | Left          |
-| 6          | `&`                      | Left          |
-| 7          | `==` `!=`                | Left          |
-| 8          | `<` `>` `<=` `>=`        | Left          |
-| 9          | `<<` `>>`                | Left          |
-| 10         | `+` `-`                  | Left          |
-| 11         | `*` `/` `%`              | Left          |
-| 12         | `!` `-` `~` `&` `*` `++` `--` (unary prefix) | Right |
-| 13         | `()` `[]` `.` `->` `++` `--` (postfix) | Left |
+| Precedence | Operators                                                | Associativity |
+| ---------- | -------------------------------------------------------- | ------------- |
+| 1          | `=` `+=` `-=` `*=` `/=` `%=` `&=` `\|=` `^=` `<<=` `>>=` | Right         |
+| 2          | `\|\|`                                                   | Left          |
+| 3          | `&&`                                                     | Left          |
+| 4          | `\|`                                                     | Left          |
+| 5          | `^`                                                      | Left          |
+| 6          | `&`                                                      | Left          |
+| 7          | `==` `!=`                                                | Left          |
+| 8          | `<` `>` `<=` `>=`                                        | Left          |
+| 9          | `<<` `>>`                                                | Left          |
+| 10         | `+` `-`                                                  | Left          |
+| 11         | `*` `/` `%`                                              | Left          |
+| 12         | `!` `-` `~` `&` `*` `++` `--` (unary prefix)             | Right         |
+| 13         | `()` `[]` `.` `->` `++` `--` (postfix)                   | Left          |
