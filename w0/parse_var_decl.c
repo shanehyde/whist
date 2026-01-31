@@ -13,25 +13,27 @@ Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
         parse_error(parser, "Out of memory");
         return NULL;
     }
-    node->as.var_decl.name = copy_token_string(&name);
-    if (!node->as.var_decl.name) {
+    var_decl_node* vdn = &node->as.var_decl;
+
+    vdn->name = copy_token_string(&name);
+    if (!vdn->name) {
         parse_error(parser, "Out of memory");
         return NULL;
     }
-    node->as.var_decl.is_public   = is_public;
-    node->as.var_decl.name_length = name.length;
-    node->as.var_decl.is_const    = is_const;
-    node->as.var_decl.type        = NULL;
-    node->as.var_decl.init        = NULL;
+    vdn->is_public   = is_public;
+    vdn->name_length = name.length;
+    vdn->is_const    = is_const;
+    vdn->type        = NULL;
+    vdn->init        = NULL;
 
     // Optional type annotation
     if (match(parser, TOK_COLON)) {
-        node->as.var_decl.type = parse_type(parser);
+        vdn->type = parse_type(parser);
     }
 
     // Optional initializer
     if (match(parser, TOK_EQ)) {
-        node->as.var_decl.init = parse_expression(parser);
+        vdn->init = parse_expression(parser);
     }
 
     consume(parser, TOK_SEMICOLON, "Expected ';' after variable declaration");

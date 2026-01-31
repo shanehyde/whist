@@ -43,17 +43,20 @@ Node* parse_func_decl(Parser* parser, int is_public) {
         parse_error(parser, "Out of memory");
         return NULL;
     }
-    node->as.func_decl.is_public         = is_public;
-    node->as.func_decl.receiver_type     = receiver_type;
-    node->as.func_decl.receiver_type_len = receiver_type_len;
-    node->as.func_decl.receiver_is_const = receiver_is_const;
-    node->as.func_decl.name              = copy_token_string(&name);
-    if (!node->as.func_decl.name) {
+    func_decl_node* fdn = &node->as.func_decl;
+
+    fdn->is_public         = is_public;
+    fdn->is_extern         = 0;
+    fdn->receiver_type     = receiver_type;
+    fdn->receiver_type_len = receiver_type_len;
+    fdn->receiver_is_const = receiver_is_const;
+    fdn->name              = copy_token_string(&name);
+    if (!fdn->name) {
         parse_error(parser, "Out of memory");
         return NULL;
     }
-    node->as.func_decl.name_length = name.length;
-    nodelist_init(&node->as.func_decl.params);
+    fdn->name_length = name.length;
+    nodelist_init(&fdn->params);
 
     consume(parser, TOK_LPAREN, "Expected '(' after function name");
 
@@ -80,21 +83,28 @@ Node* parse_func_decl(Parser* parser, int is_public) {
                 param->as.param.type = parse_type(parser);
             }
 
-            nodelist_push(&node->as.func_decl.params, param);
+            nodelist_push(&fdn->params, param);
         } while (match(parser, TOK_COMMA));
     }
 
     consume(parser, TOK_RPAREN, "Expected ')' after parameters");
 
     // Return type
-    node->as.func_decl.return_type = NULL;
+    fdn->return_type = NULL;
     if (match(parser, TOK_COLON)) {
-        node->as.func_decl.return_type = parse_type(parser);
+        fdn->return_type = parse_type(parser);
     }
 
     // Body
+    if (check(parser, TOK_LBRACE) == 0) {
+        consume(parser, TOK_SEMICOLON, "Expected ';' after function declaration");
+        // extern function declaration
+        fdn->body = NULL;
+        return node;
+    }
+
     consume(parser, TOK_LBRACE, "Expected '{' before function body");
-    node->as.func_decl.body = parse_block(parser);
+    fdn->body = parse_block(parser);
 
     return node;
 }

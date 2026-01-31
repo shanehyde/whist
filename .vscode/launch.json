@@ -6,7 +6,7 @@
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/w0/bin/w0",
-      "args": ["test/hello.w"],
+      "args": ["--ast", "test/hello.w"],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}/w0",
       "environment": [],
