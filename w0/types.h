@@ -38,6 +38,9 @@ struct TypeList {
 struct Type {
     TypeKind kind;
     union {
+        struct {
+            Type* unused;
+        } builtin;
         // Array: [size]elem
         struct {
             Type* elem;
