@@ -42,7 +42,7 @@ private func helper(): void {
 
 // Public method on public struct
 public func (Point) magnitude_squared(): i64 {
-    return self->x * self->x + self->y * self->y;
+    return self.x * self.x + self.y * self.y;
 }
 
 func main(): i32 {

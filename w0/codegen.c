@@ -36,6 +36,19 @@ static void defer_clear(CodeGen* gen) {
     gen->defer_count = 0;
 }
 
+// Check if a type node represents a struct (user-defined) type
+static int is_struct_type(Node* type_node) {
+    if (!type_node || type_node->type != NODE_IDENT)
+        return 0;
+    const char* name = type_node->as.ident.name;
+    // Check against all built-in type names
+    return strcmp(name, "void") != 0 && strcmp(name, "bool") != 0 && strcmp(name, "i64") != 0 &&
+           strcmp(name, "i8") != 0 && strcmp(name, "i16") != 0 && strcmp(name, "i32") != 0 &&
+           strcmp(name, "u64") != 0 && strcmp(name, "u8") != 0 && strcmp(name, "u16") != 0 &&
+           strcmp(name, "u32") != 0 && strcmp(name, "f32") != 0 && strcmp(name, "f64") != 0 &&
+           strcmp(name, "char") != 0 && strcmp(name, "string") != 0;
+}
+
 // Emit a type from a type annotation node
 static void emit_type(CodeGen* gen, Node* type_node) {
     if (!type_node) {
@@ -76,17 +89,14 @@ static void emit_type(CodeGen* gen, Node* type_node) {
         } else if (strcmp(name, "string") == 0) {
             emit(gen, "const char*");
         } else {
-            // User-defined type (struct/enum)
-            emit(gen, "%s", name);
+            // User-defined struct type - emit as pointer (struct references)
+            emit(gen, "%s*", name);
         }
         break;
     }
     case NODE_UNARY:
-        // Pointer type: *T -> T*
-        if (type_node->as.unary.op == TOK_STAR) {
-            emit_type(gen, type_node->as.unary.operand);
-            emit(gen, "*");
-        }
+        // Pointer types no longer supported in the language
+        emit(gen, "/* pointer types not supported */");
         break;
     case NODE_INDEX:
         // Array type: [n]T -> T[n] or T*
@@ -316,18 +326,12 @@ static void emit_expr(CodeGen* gen, Node* node) {
         Node* func = node->as.call.func;
         // Check if this is a method call (func is a member access with struct_name set)
         if (func->type == NODE_MEMBER && func->as.member.struct_name != NULL) {
-            // Method call: emit StructName_method(&obj, args...) or StructName_method(ptr, args...)
+            // Method call: emit StructName_method(obj, args...)
+            // With struct references, objects are already pointers
             emit(gen, "%s_%.*s(", func->as.member.struct_name, func->as.member.length,
                  func->as.member.name);
-            // Emit the receiver as first argument
-            if (func->as.member.arrow) {
-                // obj->method() => StructName_method(obj, ...)
-                emit_expr(gen, func->as.member.object);
-            } else {
-                // obj.method() => StructName_method(&obj, ...)
-                emit(gen, "&");
-                emit_expr(gen, func->as.member.object);
-            }
+            // Emit the receiver as first argument (already a pointer)
+            emit_expr(gen, func->as.member.object);
             // Emit remaining arguments
             for (int i = 0; i < node->as.call.args.count; i++) {
                 emit(gen, ", ");
@@ -357,8 +361,8 @@ static void emit_expr(CodeGen* gen, Node* node) {
 
     case NODE_MEMBER:
         emit_expr(gen, node->as.member.object);
-        emit(gen, "%s%.*s", node->as.member.arrow ? "->" : ".", node->as.member.length,
-             node->as.member.name);
+        // With struct references, always use -> for member access
+        emit(gen, "->%.*s", node->as.member.length, node->as.member.name);
         break;
 
     case NODE_ASSIGN:
@@ -411,6 +415,10 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         if (node->as.var_decl.is_const) {
             emit(gen, "const ");
         }
+
+        // Check if this is a struct type variable with initializer
+        int struct_type = node->as.var_decl.type && is_struct_type(node->as.var_decl.type);
+
         if (node->as.var_decl.type) {
             emit_type_with_name(gen, node->as.var_decl.type, node->as.var_decl.name);
         } else {
@@ -444,8 +452,21 @@ static void emit_stmt(CodeGen* gen, Node* node) {
             }
         }
         if (node->as.var_decl.init) {
-            emit(gen, " = ");
-            emit_expr(gen, node->as.var_decl.init);
+            if (struct_type && node->as.var_decl.init->type == NODE_STRUCT_INIT) {
+                // Struct type with struct init: allocate and initialize
+                // var p: Point = {...} => Point* p = malloc(sizeof(Point)); *p = (Point){...};
+                const char* type_name = node->as.var_decl.type->as.ident.name;
+                emit(gen, " = malloc(sizeof(%s));\n", type_name);
+                emit_indent(gen);
+                emit(gen, "*%s = (%s)", node->as.var_decl.name, type_name);
+                emit_struct_init(gen, node->as.var_decl.init);
+            } else if (struct_type && node->as.var_decl.init->type == NODE_NULL_LIT) {
+                // Struct type with null: just assign NULL
+                emit(gen, " = NULL");
+            } else {
+                emit(gen, " = ");
+                emit_expr(gen, node->as.var_decl.init);
+            }
         }
         emit(gen, ";\n");
         break;
@@ -813,6 +834,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit(gen, "#include <stdint.h>\n");
     emit(gen, "#include <stdbool.h>\n");
     emit(gen, "#include <stddef.h>\n");
+    emit(gen, "#include <stdlib.h>\n");
     emit(gen, "\n");
 
     // Forward declarations for structs

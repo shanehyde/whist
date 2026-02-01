@@ -5,17 +5,10 @@
 Node* parse_type(Parser* parser) {
     Token token = parser->current;
 
-    // Pointer type
-    if (match(parser, TOK_STAR)) {
-        Node* inner = parse_type(parser);
-        Node* node  = node_new(NODE_UNARY, token.line, token.column);
-        if (!node) {
-            parse_error(parser, "Out of memory");
-            return NULL;
-        }
-        node->as.unary.op      = TOK_STAR;
-        node->as.unary.operand = inner;
-        return node;
+    // Pointer types are no longer supported - error if we see *
+    if (check(parser, TOK_STAR)) {
+        parse_error(parser, "Pointer types (*T) are no longer supported; use struct references");
+        return NULL;
     }
 
     // Array type [n]type

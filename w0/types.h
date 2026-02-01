@@ -18,11 +18,11 @@ typedef enum {
     TYPE_F64,
     TYPE_CHAR,
     TYPE_STRING,
-    TYPE_POINTER,
     TYPE_ARRAY,
     TYPE_STRUCT,
     TYPE_ENUM,
     TYPE_FUNC,
+    TYPE_NULL,  // null reference type
     TYPE_ERROR, // Used for error recovery
 } TypeKind;
 
@@ -38,11 +38,9 @@ struct TypeList {
 struct Type {
     TypeKind kind;
     union {
-        // Pointer: *inner
         struct {
-            Type* inner;
-        } pointer;
-
+            Type* unused;
+        } builtin;
         // Array: [size]elem
         struct {
             Type* elem;
@@ -94,13 +92,13 @@ extern Type* type_f64;
 extern Type* type_char;
 extern Type* type_string;
 extern Type* type_error;
+extern Type* type_null;
 
 // Type operations
 void types_init(void);
 void types_cleanup(void);
 
 Type* type_new(TypeKind kind);
-Type* type_pointer(Type* inner);
 Type* type_array(Type* elem, int size);
 Type* type_struct(const char* name);
 Type* type_enum(const char* name);

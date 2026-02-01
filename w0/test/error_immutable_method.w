@@ -8,8 +8,8 @@ struct Point {
 
 // Immutable method
 func (const Point) move(dx: i64, dy: i64): void {
-    self->x = self->x + dx;
-    self->y = self->y + dy;
+    self.x = self.x + dx;
+    self.y = self.y + dy;
 }
 
 func main(): i64 {
