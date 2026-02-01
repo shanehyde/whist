@@ -182,7 +182,8 @@ void check_decl(Checker* checker, Node* node) {
             Node* param = fdn->params.nodes[i];
             Type* ptype = func_type->as.func.param_types[i];
 
-            if (!checker_define(checker, param->as.param.name, SYM_VAR, ptype, 0, 0)) {
+            if (!checker_define(checker, param->as.param.name, SYM_VAR, ptype,
+                                param->as.param.is_const, 0)) {
                 check_error(checker, param->line, param->column, "Duplicate parameter name '%s'",
                             param->as.param.name);
             }

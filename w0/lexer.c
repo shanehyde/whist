@@ -515,6 +515,8 @@ const char* token_type_name(TokenType type) {
         return "DOT_DOT";
     case TOK_ERROR:
         return "ERROR";
+    case TOK_EXTERN:
+        return "EXTERN";
     }
     return "UNKNOWN";
 }
