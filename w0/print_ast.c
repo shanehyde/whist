@@ -230,8 +230,7 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_MEMBER:
-        printf("Member: %.*s%s\n", node->as.member.length, node->as.member.name,
-               node->as.member.arrow ? " (->)" : "");
+        printf("Member: %.*s\n", node->as.member.length, node->as.member.name);
         print_ast(node->as.member.object, depth + 1);
         break;
 

@@ -25,7 +25,7 @@ Type* check_expression(Checker* checker, Node* node) {
         return type_bool;
 
     case NODE_NULL_LIT:
-        return type_pointer(NULL); // null pointer
+        return type_null; // null reference
 
     case NODE_IDENT: {
         Symbol* sym = checker_lookup(checker, node->as.ident.name);
@@ -124,11 +124,6 @@ Type* check_expression(Checker* checker, Node* node) {
                 return type_int64;
             }
 
-            // Pointer arithmetic
-            if (left->kind == TYPE_POINTER && type_is_integer(right)) {
-                return left;
-            }
-
             check_error(checker, node->line, node->column,
                         "Invalid operands to '%s': '%s' and '%s'", token_type_name(op),
                         type_name(left), type_name(right));
@@ -186,24 +181,11 @@ Type* check_expression(Checker* checker, Node* node) {
             }
             return operand;
 
-        case TOK_AMP:
-            // Address-of
-            return type_pointer(operand);
-
-        case TOK_STAR:
-            // Dereference
-            if (operand->kind != TYPE_POINTER) {
-                check_error(checker, node->line, node->column,
-                            "Cannot dereference non-pointer type '%s'", type_name(operand));
-                return type_error;
-            }
-            return operand->as.pointer.inner ? operand->as.pointer.inner : type_error;
-
         case TOK_PLUS_PLUS:
         case TOK_MINUS_MINUS:
-            if (!type_is_integer(operand) && operand->kind != TYPE_POINTER) {
+            if (!type_is_integer(operand)) {
                 check_error(checker, node->line, node->column,
-                            "Increment/decrement requires integer or pointer");
+                            "Increment/decrement requires integer");
                 return type_error;
             }
             return operand;
@@ -266,9 +248,6 @@ Type* check_expression(Checker* checker, Node* node) {
         if (object->kind == TYPE_ARRAY) {
             return object->as.array.elem;
         }
-        if (object->kind == TYPE_POINTER) {
-            return object->as.pointer.inner ? object->as.pointer.inner : type_error;
-        }
         if (object->kind == TYPE_STRING) {
             return type_char;
         }
@@ -278,56 +257,47 @@ Type* check_expression(Checker* checker, Node* node) {
     }
 
     case NODE_MEMBER: {
-        Type* object      = check_expression(checker, node->as.member.object);
-        Type* struct_type = object;
+        Type* object = check_expression(checker, node->as.member.object);
 
         if (object->kind == TYPE_ERROR)
             return type_error;
 
-        // Handle -> operator
-        if (node->as.member.arrow) {
-            if (object->kind != TYPE_POINTER) {
-                check_error(checker, node->line, node->column,
-                            "'->' requires pointer type, got '%s'", type_name(object));
-                return type_error;
-            }
-            struct_type = object->as.pointer.inner;
-            if (!struct_type)
-                return type_error;
-        }
-
-        if (struct_type->kind != TYPE_STRUCT) {
+        // Struct types are always references
+        if (object->kind != TYPE_STRUCT) {
             check_error(checker, node->line, node->column,
-                        "Member access requires struct type, got '%s'", type_name(struct_type));
+                        "Member access requires struct type, got '%s'", type_name(object));
             return type_error;
         }
 
+        // Mark as a reference for codegen (struct vars are always refs)
+        node->as.member.is_ref = 1;
+
         // Find field first
         const char* member_name = node->as.member.name;
-        for (int i = 0; i < struct_type->as.struc.field_count; i++) {
-            if (strcmp(struct_type->as.struc.field_names[i], member_name) == 0) {
+        for (int i = 0; i < object->as.struc.field_count; i++) {
+            if (strcmp(object->as.struc.field_names[i], member_name) == 0) {
                 node->as.member.struct_name = NULL; // Not a method
-                return struct_type->as.struc.field_types[i];
+                return object->as.struc.field_types[i];
             }
         }
 
         // If not a field, check for method
-        for (int i = 0; i < struct_type->as.struc.method_count; i++) {
-            if (strcmp(struct_type->as.struc.method_names[i], member_name) == 0) {
+        for (int i = 0; i < object->as.struc.method_count; i++) {
+            if (strcmp(object->as.struc.method_names[i], member_name) == 0) {
                 // Store struct name for codegen to use
-                char* sname = strdup(struct_type->as.struc.name);
+                char* sname = strdup(object->as.struc.name);
                 if (!sname) {
                     check_error(checker, node->line, node->column, "Out of memory");
                     return type_error;
                 }
                 node->as.member.struct_name = sname;
                 // Return the method's function type
-                return struct_type->as.struc.method_types[i];
+                return object->as.struc.method_types[i];
             }
         }
 
         check_error(checker, node->line, node->column, "Struct '%s' has no field or method '%s'",
-                    struct_type->as.struc.name, member_name);
+                    object->as.struc.name, member_name);
         return type_error;
     }
 

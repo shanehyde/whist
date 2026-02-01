@@ -55,25 +55,7 @@ static Node* parse_postfix(Parser* parser) {
                 return NULL;
             }
             member->as.member.length = name.length;
-            member->as.member.arrow  = 0;
-            expr                     = member;
-        } else if (match(parser, TOK_ARROW)) {
-            // Arrow member access
-            Token name = parser->current;
-            consume(parser, TOK_IDENT, "Expected member name after '->'");
-            Node* member = node_new(NODE_MEMBER, expr->line, expr->column);
-            if (!member) {
-                parse_error(parser, "Out of memory");
-                return NULL;
-            }
-            member->as.member.object = expr;
-            member->as.member.name   = copy_token_string(&name);
-            if (!member->as.member.name) {
-                parse_error(parser, "Out of memory");
-                return NULL;
-            }
-            member->as.member.length = name.length;
-            member->as.member.arrow  = 1;
+            member->as.member.is_ref = 0; // Set by checker
             expr                     = member;
         } else if (match(parser, TOK_PLUS_PLUS) || match(parser, TOK_MINUS_MINUS)) {
             // Postfix increment/decrement
@@ -97,8 +79,7 @@ static Node* parse_postfix(Parser* parser) {
 
 static Node* parse_unary(Parser* parser) {
     if (match(parser, TOK_BANG) || match(parser, TOK_MINUS) || match(parser, TOK_TILDE) ||
-        match(parser, TOK_AMP) || match(parser, TOK_STAR) || match(parser, TOK_PLUS_PLUS) ||
-        match(parser, TOK_MINUS_MINUS)) {
+        match(parser, TOK_PLUS_PLUS) || match(parser, TOK_MINUS_MINUS)) {
         Token op      = parser->previous;
         Node* operand = parse_unary(parser);
         Node* node    = node_new(NODE_UNARY, op.line, op.column);

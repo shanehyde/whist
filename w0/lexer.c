@@ -319,8 +319,6 @@ Token lexer_next(Lexer* lexer) {
             return make_token(lexer, TOK_MINUS_MINUS);
         if (match(lexer, '='))
             return make_token(lexer, TOK_MINUS_EQ);
-        if (match(lexer, '>'))
-            return make_token(lexer, TOK_ARROW);
         return make_token(lexer, TOK_MINUS);
     case '*':
         return make_token(lexer, match(lexer, '=') ? TOK_STAR_EQ : TOK_STAR);

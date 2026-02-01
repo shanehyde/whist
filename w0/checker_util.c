@@ -122,12 +122,10 @@ Type* resolve_type(Checker* checker, Node* type_node) {
         return type_error;
     }
     case NODE_UNARY:
-        // Pointer type: *T
-        if (type_node->as.unary.op == TOK_STAR) {
-            Type* inner = resolve_type(checker, type_node->as.unary.operand);
-            return type_pointer(inner);
-        }
-        break;
+        // Pointer types no longer supported
+        check_error(checker, type_node->line, type_node->column,
+                    "Pointer types are no longer supported");
+        return type_error;
     case NODE_INDEX:
         // Array type: [n]T
         {

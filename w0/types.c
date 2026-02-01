@@ -20,6 +20,7 @@ static Type builtin_f64    = {TYPE_F64, {{NULL}}};
 static Type builtin_char   = {TYPE_CHAR, {{NULL}}};
 static Type builtin_string = {TYPE_STRING, {{NULL}}};
 static Type builtin_error  = {TYPE_ERROR, {{NULL}}};
+static Type builtin_null   = {TYPE_NULL, {{NULL}}};
 
 Type* type_void   = &builtin_void;
 Type* type_bool   = &builtin_bool;
@@ -36,6 +37,7 @@ Type* type_f64    = &builtin_f64;
 Type* type_char   = &builtin_char;
 Type* type_string = &builtin_string;
 Type* type_error  = &builtin_error;
+Type* type_null   = &builtin_null;
 
 // Track allocated types for cleanup
 static Type** allocated_types    = NULL;
@@ -69,12 +71,6 @@ Type* type_new(TypeKind kind) {
     Type* type = calloc(1, sizeof(Type));
     type->kind = kind;
     track_type(type);
-    return type;
-}
-
-Type* type_pointer(Type* inner) {
-    Type* type             = type_new(TYPE_POINTER);
-    type->as.pointer.inner = inner;
     return type;
 }
 
@@ -121,7 +117,7 @@ void type_free(Type* type) {
     if (type == type_void || type == type_bool || type == type_int64 || type == type_int8 ||
         type == type_int16 || type == type_int32 || type == type_uint64 || type == type_uint8 ||
         type == type_uint16 || type == type_uint32 || type == type_f32 || type == type_f64 ||
-        type == type_char || type == type_string || type == type_error) {
+        type == type_char || type == type_string || type == type_error || type == type_null) {
         return;
     }
 
@@ -165,8 +161,6 @@ int type_equals(Type* a, Type* b) {
         return 0;
 
     switch (a->kind) {
-    case TYPE_POINTER:
-        return type_equals(a->as.pointer.inner, b->as.pointer.inner);
     case TYPE_ARRAY:
         return a->as.array.size == b->as.array.size &&
                type_equals(a->as.array.elem, b->as.array.elem);
@@ -231,15 +225,9 @@ int type_assignable(Type* target, Type* value) {
     if (type_is_integer(target) && value->kind == TYPE_INT64)
         return 1;
 
-    // null can be assigned to pointers
-    if (target->kind == TYPE_POINTER && value->kind == TYPE_POINTER &&
-        value->as.pointer.inner == NULL) {
+    // null can be assigned to struct references
+    if (target->kind == TYPE_STRUCT && value->kind == TYPE_NULL) {
         return 1;
-    }
-
-    // Array to pointer decay
-    if (target->kind == TYPE_POINTER && value->kind == TYPE_ARRAY) {
-        return type_assignable(target->as.pointer.inner, value->as.array.elem);
     }
 
     return 0;
@@ -282,9 +270,8 @@ const char* type_name(Type* type) {
         return "string";
     case TYPE_ERROR:
         return "<error>";
-    case TYPE_POINTER:
-        snprintf(type_name_buf, sizeof(type_name_buf), "*%s", type_name(type->as.pointer.inner));
-        return type_name_buf;
+    case TYPE_NULL:
+        return "null";
     case TYPE_ARRAY:
         if (type->as.array.size >= 0) {
             snprintf(type_name_buf, sizeof(type_name_buf), "[%d]%s", type->as.array.size,

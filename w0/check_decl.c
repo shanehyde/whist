@@ -169,10 +169,11 @@ void check_decl(Checker* checker, Node* node) {
         checker->current_func_return = func_type->as.func.return_type;
 
         // For methods, inject 'self' into scope
+        // self is a struct reference (the struct type itself, with reference semantics)
         if (is_method) {
             Symbol* struct_sym = checker_lookup(checker, receiver_type);
             if (struct_sym && struct_sym->kind == SYM_TYPE) {
-                Type* self_type = type_pointer(struct_sym->type);
+                Type* self_type = struct_sym->type;
                 checker_define(checker, "self", SYM_VAR, self_type, fdn->receiver_is_const, 0);
             }
         }

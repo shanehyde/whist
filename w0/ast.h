@@ -135,12 +135,12 @@ struct Node {
             Node* index;
         } index;
 
-        // Member access: obj.member or obj->member
+        // Member access: obj.member
         struct {
             Node* object;
             char* name;
             int   length;
-            int   arrow;       // 1 for ->, 0 for .
+            int   is_ref;      // Set by checker: 1 if object is a struct reference
             char* struct_name; // Set by checker if this is a method access (NULL otherwise)
         } member;
 
