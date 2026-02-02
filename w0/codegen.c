@@ -289,6 +289,132 @@ static void emit_expr(CodeGen* gen, Node* node) {
         emit(gen, "%s", node->as.bool_lit.value ? "true" : "false");
         break;
 
+    case NODE_INTERP_STRING: {
+        // Generate a GCC statement expression that builds the interpolated string
+        // Format: ({ size_t __len = ...; char* __buf = malloc(__len); sprintf(__buf, ...); __buf; })
+        emit(gen, "({ ");
+
+        // First, calculate the total length needed
+        emit(gen, "size_t __len = 1");  // +1 for null terminator
+        for (int i = 0; i < node->as.interp_string.part_count; i++) {
+            Node* part = node->as.interp_string.parts[i];
+            if (part->type == NODE_STRING_LIT) {
+                // String literals: add strlen
+                emit(gen, " + %d", part->as.string_lit.length);
+            } else {
+                // Expression: use snprintf(NULL, 0, ...) to measure
+                Type* t = part->checked_type;
+                if (t && t->kind == TYPE_STRING) {
+                    emit(gen, " + strlen(");
+                    emit_expr(gen, part);
+                    emit(gen, ")");
+                } else if (t && t->kind == TYPE_BOOL) {
+                    // "true" (4) or "false" (5)
+                    emit(gen, " + (");
+                    emit_expr(gen, part);
+                    emit(gen, " ? 4 : 5)");
+                } else if (t && t->kind == TYPE_CHAR) {
+                    emit(gen, " + 1");
+                } else if (t && (t->kind == TYPE_INT64 || t->kind == TYPE_INT32 ||
+                               t->kind == TYPE_INT16 || t->kind == TYPE_INT8)) {
+                    // Signed integer
+                    emit(gen, " + snprintf(NULL, 0, \"%%lld\", (long long)");
+                    emit_expr(gen, part);
+                    emit(gen, ")");
+                } else if (t && (t->kind == TYPE_UINT64 || t->kind == TYPE_UINT32 ||
+                               t->kind == TYPE_UINT16 || t->kind == TYPE_UINT8)) {
+                    // Unsigned integer
+                    emit(gen, " + snprintf(NULL, 0, \"%%llu\", (unsigned long long)");
+                    emit_expr(gen, part);
+                    emit(gen, ")");
+                } else {
+                    // Default to signed integer format
+                    emit(gen, " + snprintf(NULL, 0, \"%%lld\", (long long)");
+                    emit_expr(gen, part);
+                    emit(gen, ")");
+                }
+            }
+        }
+        emit(gen, "; ");
+
+        // Allocate buffer
+        emit(gen, "char* __buf = malloc(__len); ");
+
+        // Build the format string and arguments for sprintf
+        emit(gen, "sprintf(__buf, \"");
+
+        // Emit format specifiers
+        for (int i = 0; i < node->as.interp_string.part_count; i++) {
+            Node* part = node->as.interp_string.parts[i];
+            if (part->type == NODE_STRING_LIT) {
+                // Emit escaped string content
+                for (int j = 0; j < part->as.string_lit.length; j++) {
+                    char c = part->as.string_lit.value[j];
+                    switch (c) {
+                    case '\n': emit(gen, "\\n"); break;
+                    case '\t': emit(gen, "\\t"); break;
+                    case '\r': emit(gen, "\\r"); break;
+                    case '\\': emit(gen, "\\\\"); break;
+                    case '"': emit(gen, "\\\""); break;
+                    case '%': emit(gen, "%%%%"); break;  // Escape % for printf
+                    default: emit(gen, "%c", c); break;
+                    }
+                }
+            } else {
+                Type* t = part->checked_type;
+                if (t && t->kind == TYPE_STRING) {
+                    emit(gen, "%%s");
+                } else if (t && t->kind == TYPE_BOOL) {
+                    emit(gen, "%%s");
+                } else if (t && t->kind == TYPE_CHAR) {
+                    emit(gen, "%%c");
+                } else if (t && (t->kind == TYPE_UINT64 || t->kind == TYPE_UINT32 ||
+                               t->kind == TYPE_UINT16 || t->kind == TYPE_UINT8)) {
+                    emit(gen, "%%llu");
+                } else {
+                    // Default to signed long long
+                    emit(gen, "%%lld");
+                }
+            }
+        }
+        emit(gen, "\"");
+
+        // Emit arguments
+        for (int i = 0; i < node->as.interp_string.part_count; i++) {
+            Node* part = node->as.interp_string.parts[i];
+            if (part->type != NODE_STRING_LIT) {
+                emit(gen, ", ");
+                Type* t = part->checked_type;
+                if (t && t->kind == TYPE_BOOL) {
+                    emit(gen, "(");
+                    emit_expr(gen, part);
+                    emit(gen, ") ? \"true\" : \"false\"");
+                } else if (t && (t->kind == TYPE_UINT64 || t->kind == TYPE_UINT32 ||
+                               t->kind == TYPE_UINT16 || t->kind == TYPE_UINT8)) {
+                    emit(gen, "(unsigned long long)");
+                    emit_expr(gen, part);
+                } else if (t && (t->kind == TYPE_INT64 || t->kind == TYPE_INT32 ||
+                               t->kind == TYPE_INT16 || t->kind == TYPE_INT8)) {
+                    emit(gen, "(long long)");
+                    emit_expr(gen, part);
+                } else if (t && t->kind == TYPE_CHAR) {
+                    emit_expr(gen, part);
+                } else if (t && t->kind == TYPE_STRING) {
+                    emit_expr(gen, part);
+                } else {
+                    // Fallback
+                    emit(gen, "(long long)");
+                    emit_expr(gen, part);
+                }
+            }
+        }
+        emit(gen, "); ");
+
+        // Return the buffer
+        emit(gen, "__buf; })");
+        break;
+    }
+
     case NODE_NULL_LIT:
         emit(gen, "NULL");
         break;
@@ -437,7 +563,8 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                     emit(gen, "bool %s", node->as.var_decl.name);
                     break;
                 case NODE_STRING_LIT:
-                    emit(gen, "const char* %s", node->as.var_decl.name);
+                case NODE_INTERP_STRING:
+                    emit(gen, "char* %s", node->as.var_decl.name);  // mutable since malloc'd
                     break;
                 case NODE_CHAR_LIT:
                     emit(gen, "char %s", node->as.var_decl.name);
@@ -837,6 +964,8 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit(gen, "#include <stdbool.h>\n");
     emit(gen, "#include <stddef.h>\n");
     emit(gen, "#include <stdlib.h>\n");
+    emit(gen, "#include <stdio.h>\n");
+    emit(gen, "#include <string.h>\n");
     emit(gen, "\n");
 
     // Forward declarations for structs

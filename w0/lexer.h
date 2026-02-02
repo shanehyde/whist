@@ -14,6 +14,13 @@ typedef enum {
     TOK_STRING,
     TOK_CHAR,
 
+    // String interpolation
+    TOK_INTERP_STRING, // Simple backtick string without ${}
+    TOK_INTERP_START,  // Opening ` when ${} is present
+    TOK_STRING_PART,   // Text segment between interpolations
+    TOK_INTERP_EXPR,   // The ${ opener
+    TOK_INTERP_END,    // Closing `
+
     // Keywords
     TOK_IF,
     TOK_ELSE,
@@ -111,6 +118,8 @@ typedef struct {
     int         column;
     int         start_column;
     const char* error_message;
+    int         in_interp;    // Whether we're inside a backtick string
+    int         brace_depth;  // Depth of {} inside ${...}
 } Lexer;
 
 void        lexer_init(Lexer* lexer, const char* source);

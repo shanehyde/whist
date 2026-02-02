@@ -10,21 +10,57 @@ Type* check_expression(Checker* checker, Node* node) {
 
     switch (node->type) {
     case NODE_INT_LIT:
+        node->checked_type = type_int64;
         return type_int64;
 
     case NODE_FLOAT_LIT:
+        node->checked_type = type_f32;
         return type_f32;
 
     case NODE_STRING_LIT:
+        node->checked_type = type_string;
         return type_string;
 
+    case NODE_INTERP_STRING: {
+        // Check each part of the interpolated string
+        for (int i = 0; i < node->as.interp_string.part_count; i++) {
+            Node* part = node->as.interp_string.parts[i];
+            Type* part_type = check_expression(checker, part);
+
+            if (part_type->kind == TYPE_ERROR) {
+                return type_error;
+            }
+
+            // String parts (NODE_STRING_LIT) are always valid
+            if (part->type == NODE_STRING_LIT) {
+                continue;
+            }
+
+            // Expressions must be interpolatable types
+            if (part_type->kind != TYPE_STRING &&
+                !type_is_integer(part_type) &&
+                part_type->kind != TYPE_BOOL &&
+                part_type->kind != TYPE_CHAR) {
+                check_error(checker, part->line, part->column,
+                            "Cannot interpolate type '%s' (expected string, integer, bool, or char)",
+                            type_name(part_type));
+                return type_error;
+            }
+        }
+        node->checked_type = type_string;
+        return type_string;
+    }
+
     case NODE_CHAR_LIT:
+        node->checked_type = type_char;
         return type_char;
 
     case NODE_BOOL_LIT:
+        node->checked_type = type_bool;
         return type_bool;
 
     case NODE_NULL_LIT:
+        node->checked_type = type_null;
         return type_null; // null reference
 
     case NODE_IDENT: {
@@ -34,6 +70,7 @@ Type* check_expression(Checker* checker, Node* node) {
                         node->as.ident.name);
             return type_error;
         }
+        node->checked_type = sym->type;
         return sym->type;
     }
 
@@ -64,6 +101,7 @@ Type* check_expression(Checker* checker, Node* node) {
                         node->as.enum_value.value_name, node->as.enum_value.enum_name);
             return type_error;
         }
+        node->checked_type = enum_type;
         return enum_type;
     }
 

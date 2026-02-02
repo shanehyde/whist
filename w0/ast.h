@@ -11,6 +11,7 @@ typedef enum {
     NODE_CHAR_LIT,
     NODE_BOOL_LIT,
     NODE_NULL_LIT,
+    NODE_INTERP_STRING,
     NODE_IDENT,
     NODE_BINARY,
     NODE_UNARY,
@@ -79,10 +80,13 @@ typedef struct {
     int   is_const;
 } var_decl_node;
 
+typedef struct Type Type; // Forward declaration
+
 struct Node {
     NodeType type;
     int      line;
     int      column;
+    Type*    checked_type; // Set by type checker, NULL before checking
 
     union {
         // Literals
@@ -102,6 +106,12 @@ struct Node {
         struct {
             int value;
         } bool_lit;
+
+        // Interpolated string
+        struct {
+            Node** parts;      // Array of string literals and expressions
+            int    part_count;
+        } interp_string;
 
         // Identifier
         struct {

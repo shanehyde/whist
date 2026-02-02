@@ -264,6 +264,13 @@ void print_ast(Node* node, int depth) {
         printf("String: \"%.*s\"\n", node->as.string_lit.length, node->as.string_lit.value);
         break;
 
+    case NODE_INTERP_STRING:
+        printf("InterpString (%d parts)\n", node->as.interp_string.part_count);
+        for (int i = 0; i < node->as.interp_string.part_count; i++) {
+            print_ast(node->as.interp_string.parts[i], depth + 1);
+        }
+        break;
+
     case NODE_CHAR_LIT:
         printf("Char: '%c'\n", node->as.char_lit.value);
         break;

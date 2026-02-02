@@ -11,6 +11,8 @@ void lexer_init(Lexer* lexer, const char* source) {
     lexer->column        = 1;
     lexer->start_column  = 1;
     lexer->error_message = NULL;
+    lexer->in_interp     = 0;
+    lexer->brace_depth   = 0;
 }
 
 static int is_at_end(Lexer* lexer) {
@@ -224,6 +226,49 @@ static Token string(Lexer* lexer) {
     return make_token(lexer, TOK_STRING);
 }
 
+// Scan a template string part (after ` or after })
+// Returns TOK_INTERP_STRING if no ${, TOK_INTERP_START/TOK_STRING_PART otherwise
+static Token template_string(Lexer* lexer, int is_start) {
+    int has_interp = 0;
+
+    while (!is_at_end(lexer)) {
+        char c = peek(lexer);
+        if (c == '`') {
+            break;
+        }
+        if (c == '$' && peek_next(lexer) == '{') {
+            has_interp = 1;
+            break;
+        }
+        if (c == '\\' && peek_next(lexer) != '\0') {
+            advance(lexer); // skip backslash
+        }
+        advance(lexer);
+    }
+
+    if (is_at_end(lexer)) {
+        return error_token(lexer, "Unterminated template string");
+    }
+
+    if (peek(lexer) == '`') {
+        // End of template string
+        advance(lexer); // consume `
+        if (is_start && !has_interp) {
+            // Simple backtick string without interpolation
+            return make_token(lexer, TOK_INTERP_STRING);
+        }
+        lexer->in_interp = 0;
+        return make_token(lexer, TOK_INTERP_END);
+    }
+
+    // We hit ${
+    if (is_start) {
+        lexer->in_interp = 1;
+        return make_token(lexer, TOK_INTERP_START);
+    }
+    return make_token(lexer, TOK_STRING_PART);
+}
+
 static Token character(Lexer* lexer) {
     if (is_at_end(lexer)) {
         return error_token(lexer, "Unterminated character literal");
@@ -282,19 +327,40 @@ Token lexer_next(Lexer* lexer) {
 
     char c = advance(lexer);
 
+    // Handle ${ inside template strings
+    if (lexer->in_interp && c == '$' && peek(lexer) == '{') {
+        advance(lexer); // consume {
+        return make_token(lexer, TOK_INTERP_EXPR);
+    }
+
     if (isalpha(c) || c == '_')
         return identifier(lexer);
     if (isdigit(c))
         return number(lexer);
 
     switch (c) {
+    case '`':
+        return template_string(lexer, 1);
     case '(':
         return make_token(lexer, TOK_LPAREN);
     case ')':
         return make_token(lexer, TOK_RPAREN);
     case '{':
+        if (lexer->in_interp)
+            lexer->brace_depth++;
         return make_token(lexer, TOK_LBRACE);
     case '}':
+        if (lexer->in_interp) {
+            if (lexer->brace_depth > 0) {
+                lexer->brace_depth--;
+            } else {
+                // End of ${...}, scan next string part
+                // Reset start to after the } so the string part doesn't include it
+                lexer->start = lexer->current;
+                lexer->start_column = lexer->column;
+                return template_string(lexer, 0);
+            }
+        }
         return make_token(lexer, TOK_RBRACE);
     case '[':
         return make_token(lexer, TOK_LBRACKET);
@@ -381,6 +447,16 @@ const char* token_type_name(TokenType type) {
         return "STRING";
     case TOK_CHAR:
         return "CHAR";
+    case TOK_INTERP_STRING:
+        return "INTERP_STRING";
+    case TOK_INTERP_START:
+        return "INTERP_START";
+    case TOK_STRING_PART:
+        return "STRING_PART";
+    case TOK_INTERP_EXPR:
+        return "INTERP_EXPR";
+    case TOK_INTERP_END:
+        return "INTERP_END";
     case TOK_IF:
         return "IF";
     case TOK_ELSE:

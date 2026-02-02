@@ -43,6 +43,12 @@ void node_free(Node* node) {
     case NODE_STRING_LIT:
         free(node->as.string_lit.value);
         break;
+    case NODE_INTERP_STRING:
+        for (int i = 0; i < node->as.interp_string.part_count; i++) {
+            node_free(node->as.interp_string.parts[i]);
+        }
+        free(node->as.interp_string.parts);
+        break;
     case NODE_IDENT:
         free(node->as.ident.name);
         break;
