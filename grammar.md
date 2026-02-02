@@ -16,7 +16,7 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 ## Program Structure
 
 ```bnf
-<program> ::= { <declaration> }
+<program> ::= { <import-stmt> | <declaration> }
 
 <declaration> ::= [ 'public' | 'private' ] <func-defn>
                | [ 'public' | 'private' ] <struct-decl>
@@ -30,6 +30,14 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 ---
 
 ## Declarations
+
+### Import Statement
+
+```bnf
+<import-stmt> ::= 'import' <identifier> ';'
+```
+
+Import statements load declarations from external Whist source files. The imported module is resolved from the `lib/` directory relative to the current working directory. For example, `import std;` loads and parses `lib/std.w`, and all declarations from that file become available in the importing file.
 
 ### Function Declaration
 
@@ -215,9 +223,9 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 
 ```
 break    const    continue    defer     else      enum
-false    for      foreach     func      if        in
-null     public   private     return    self      struct
-true     var      while
+extern   false    for         foreach   func      if
+import   in       null        public    private   return
+self     struct   true        var       while
 ```
 
 ### Identifiers
