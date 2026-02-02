@@ -7,7 +7,7 @@
 #include "checker_util.h"
 
 Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type* type,
-                       int is_const, int is_public) {
+                       int is_const, int is_public, const char* source_module) {
     Scope*       scope = checker->scope;
     unsigned int index = hash_string(name) % scope->size;
 
@@ -24,12 +24,60 @@ Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type
     sym->type             = type;
     sym->is_const         = is_const;
     sym->is_public        = is_public;
+    sym->source_module    = source_module ? strdup(source_module) : NULL;
     sym->next             = scope->symbols[index];
     scope->symbols[index] = sym;
     return sym;
 }
 
+// Check if a module is accessible from the current context
+static int is_module_accessible(Checker* checker, const char* source_module) {
+    // NULL source_module means same module - always accessible
+    if (!source_module) {
+        return 1;
+    }
+
+    // Use current function's accessible modules if set, otherwise use global direct_imports
+    char** modules = checker->current_accessible_modules;
+    int    count   = checker->current_accessible_modules_count;
+
+    if (!modules) {
+        modules = checker->direct_imports;
+        count   = checker->direct_imports_count;
+    }
+
+    // Check if module is in the accessible list
+    for (int i = 0; i < count; i++) {
+        if (strcmp(modules[i], source_module) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 Symbol* checker_lookup(Checker* checker, const char* name) {
+    for (Scope* scope = checker->scope; scope; scope = scope->parent) {
+        unsigned int index = hash_string(name) % scope->size;
+        for (Symbol* sym = scope->symbols[index]; sym; sym = sym->next) {
+            if (strcmp(sym->name, name) == 0) {
+                // Check module visibility
+                if (!is_module_accessible(checker, sym->source_module)) {
+                    continue; // Symbol exists but not accessible from this module
+                }
+                // Symbols from library imports must be public to be accessible
+                if (sym->source_module && !sym->is_public) {
+                    continue; // Private symbol from library import
+                }
+                return sym;
+            }
+        }
+    }
+    return NULL;
+}
+
+// Lookup without visibility checking (for error messages)
+Symbol* checker_lookup_any(Checker* checker, const char* name) {
     for (Scope* scope = checker->scope; scope; scope = scope->parent) {
         unsigned int index = hash_string(name) % scope->size;
         for (Symbol* sym = scope->symbols[index]; sym; sym = sym->next) {

@@ -24,6 +24,11 @@ typedef struct {
     char** imported_modules;
     int    imported_modules_count;
     int    imported_modules_capacity;
+
+    // Library modules directly imported by the root file (for visibility checking)
+    char** direct_imports;
+    int    direct_imports_count;
+    int    direct_imports_capacity;
 } Parser;
 
 // Precedence levels for binary operators

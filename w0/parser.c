@@ -65,6 +65,11 @@ void parser_init_with_path(Parser* parser, const char* source, const char* sourc
     parser->imported_modules_count    = 0;
     parser->imported_modules_capacity = 0;
 
+    // Initialize direct imports tracking (library modules directly imported by this file)
+    parser->direct_imports          = NULL;
+    parser->direct_imports_count    = 0;
+    parser->direct_imports_capacity = 0;
+
     advance_token(parser); // Prime the parser
 }
 
@@ -80,6 +85,12 @@ void parser_free(Parser* parser) {
         free(parser->imported_modules[i]);
     }
     free(parser->imported_modules);
+
+    // Free all direct import names
+    for (int i = 0; i < parser->direct_imports_count; i++) {
+        free(parser->direct_imports[i]);
+    }
+    free(parser->direct_imports);
 }
 
 Node* parser_parse(Parser* parser) {

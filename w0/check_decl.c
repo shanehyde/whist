@@ -52,7 +52,8 @@ void check_decl(Checker* checker, Node* node) {
                 func_decl_node* fdn       = &decl->as.func_decl;
                 Type*           func_type = get_function_type(checker, decl);
 
-                checker_define(checker, fdn->name, SYM_FUNC, func_type, 0, fdn->is_public);
+                checker_define(checker, fdn->name, SYM_FUNC, func_type, 0, fdn->is_public,
+                               fdn->source_module);
             }
         }
 
@@ -112,7 +113,8 @@ void check_decl(Checker* checker, Node* node) {
         Type* func_type = get_function_type(checker, node);
 
         // Pre-declare function for recursion
-        checker_define(checker, mangled_name, SYM_FUNC, func_type, 1, fdn->is_public);
+        checker_define(checker, mangled_name, SYM_FUNC, func_type, 1, fdn->is_public,
+                       fdn->source_module);
 
         // For methods, also register the method on the struct type
         if (is_method) {
@@ -168,13 +170,20 @@ void check_decl(Checker* checker, Node* node) {
         Type* old_return             = checker->current_func_return;
         checker->current_func_return = func_type->as.func.return_type;
 
+        // Set this function's accessible modules for visibility checking
+        char** old_accessible_modules             = checker->current_accessible_modules;
+        int    old_accessible_modules_count       = checker->current_accessible_modules_count;
+        checker->current_accessible_modules       = fdn->accessible_modules;
+        checker->current_accessible_modules_count = fdn->accessible_modules_count;
+
         // For methods, inject 'self' into scope
         // self is a struct reference (the struct type itself, with reference semantics)
         if (is_method) {
             Symbol* struct_sym = checker_lookup(checker, receiver_type);
             if (struct_sym && struct_sym->kind == SYM_TYPE) {
                 Type* self_type = struct_sym->type;
-                checker_define(checker, "self", SYM_VAR, self_type, fdn->receiver_is_const, 0);
+                checker_define(checker, "self", SYM_VAR, self_type, fdn->receiver_is_const, 0,
+                               NULL);
             }
         }
 
@@ -184,7 +193,7 @@ void check_decl(Checker* checker, Node* node) {
             Type* ptype = func_type->as.func.param_types[i];
 
             if (!checker_define(checker, param->as.param.name, SYM_VAR, ptype,
-                                param->as.param.is_const, 0)) {
+                                param->as.param.is_const, 0, NULL)) {
                 check_error(checker, param->line, param->column, "Duplicate parameter name '%s'",
                             param->as.param.name);
             }
@@ -199,6 +208,10 @@ void check_decl(Checker* checker, Node* node) {
                 check_statement(checker, body->as.block.stmts.nodes[i]);
             }
         }
+
+        // Restore previous accessible modules context
+        checker->current_accessible_modules       = old_accessible_modules;
+        checker->current_accessible_modules_count = old_accessible_modules_count;
 
         checker->current_func_return = old_return;
         checker_pop_scope(checker);
@@ -227,7 +240,8 @@ void check_decl(Checker* checker, Node* node) {
             struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
         }
 
-        checker_define(checker, name, SYM_TYPE, struct_type, 0, node->as.struct_decl.is_public);
+        checker_define(checker, name, SYM_TYPE, struct_type, 0, node->as.struct_decl.is_public,
+                       node->as.struct_decl.source_module);
         break;
     }
 
@@ -245,7 +259,8 @@ void check_decl(Checker* checker, Node* node) {
         enum_type->as.enm.value_count = value_count;
         enum_type->as.enm.value_names = malloc(value_count * sizeof(char*));
 
-        checker_define(checker, name, SYM_TYPE, enum_type, 0, node->as.enum_decl.is_public);
+        checker_define(checker, name, SYM_TYPE, enum_type, 0, node->as.enum_decl.is_public,
+                       node->as.enum_decl.source_module);
 
         // Define enum values as constants
         for (int i = 0; i < value_count; i++) {

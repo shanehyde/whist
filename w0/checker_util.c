@@ -25,12 +25,21 @@ unsigned int hash_string(const char* str) {
 }
 
 void checker_init(Checker* checker) {
-    checker->scope               = NULL;
-    checker->current_func_return = NULL;
-    checker->in_loop             = 0;
-    checker->error_count         = 0;
-    checker->error_msg[0]        = '\0';
+    checker->scope                            = NULL;
+    checker->current_func_return              = NULL;
+    checker->in_loop                          = 0;
+    checker->error_count                      = 0;
+    checker->error_msg[0]                     = '\0';
+    checker->direct_imports                   = NULL;
+    checker->direct_imports_count             = 0;
+    checker->current_accessible_modules       = NULL;
+    checker->current_accessible_modules_count = 0;
     types_init();
+}
+
+void checker_set_direct_imports(Checker* checker, char** direct_imports, int count) {
+    checker->direct_imports       = direct_imports;
+    checker->direct_imports_count = count;
 }
 
 void checker_free(Checker* checker) {
@@ -69,6 +78,7 @@ void checker_pop_scope(Checker* checker) {
         while (sym) {
             Symbol* next = sym->next;
             free(sym->name);
+            free(sym->source_module);
             free(sym);
             sym = next;
         }

@@ -28,3 +28,8 @@ func min_i64(a: i64, b: i64): i64 {
     }
     return b;
 }
+
+// Private internal function - should not be visible outside std
+private func _internal_std(): i64 {
+    return 42;
+}
