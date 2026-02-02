@@ -62,6 +62,44 @@ static int is_module_accessible(Checker* checker, const char* source_module) {
     return 0;
 }
 
+// Check if a name is a directly imported library module
+int is_imported_module(Checker* checker, const char* name) {
+    // Use current function's accessible modules if set, otherwise use global direct_imports
+    char** modules = checker->current_accessible_modules;
+    int    count   = checker->current_accessible_modules_count;
+
+    if (!modules) {
+        modules = checker->direct_imports;
+        count   = checker->direct_imports_count;
+    }
+
+    for (int i = 0; i < count; i++) {
+        if (strcmp(modules[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Look up a symbol from a specific module (for module-qualified access)
+Symbol* checker_lookup_in_module(Checker* checker, const char* module_name,
+                                 const char* symbol_name) {
+    for (Scope* scope = checker->scope; scope; scope = scope->parent) {
+        unsigned int index = hash_string(symbol_name) % scope->size;
+        for (Symbol* sym = scope->symbols[index]; sym; sym = sym->next) {
+            if (strcmp(sym->name, symbol_name) == 0 && sym->source_module &&
+                strcmp(sym->source_module, module_name) == 0) {
+                // Must be public for module-qualified access
+                if (!sym->is_public) {
+                    return NULL;
+                }
+                return sym;
+            }
+        }
+    }
+    return NULL;
+}
+
 Symbol* checker_lookup(Checker* checker, const char* name) {
     for (Scope* scope = checker->scope; scope; scope = scope->parent) {
         unsigned int index = hash_string(name) % scope->size;
@@ -71,13 +109,13 @@ Symbol* checker_lookup(Checker* checker, const char* name) {
                 if (!is_module_accessible(checker, sym->source_module)) {
                     continue; // Symbol exists but not accessible from this module
                 }
-                // Symbols from library imports must be public to be accessible
-                // Exception: private symbols are accessible if we're in the same module
+                // Symbols from library imports require module qualification
+                // Skip them here - they must be accessed via module.symbol syntax
                 int same_module = (sym->source_module == NULL && checker->current_module == NULL) ||
                                   (sym->source_module && checker->current_module &&
                                    strcmp(sym->source_module, checker->current_module) == 0);
-                if (sym->source_module && !sym->is_public && !same_module) {
-                    continue; // Private symbol from library import
+                if (sym->source_module && !same_module) {
+                    continue; // Library symbol - require module qualification
                 }
                 return sym;
             }

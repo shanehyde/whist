@@ -257,6 +257,22 @@ Type* check_expression(Checker* checker, Node* node) {
     }
 
     case NODE_MEMBER: {
+        // Check for module-qualified access first (e.g., std.print)
+        if (node->as.member.object->type == NODE_IDENT) {
+            const char* name = node->as.member.object->as.ident.name;
+            if (is_imported_module(checker, name)) {
+                Symbol* sym = checker_lookup_in_module(checker, name, node->as.member.name);
+                if (!sym) {
+                    check_error(checker, node->line, node->column,
+                                "Module '%s' has no public symbol '%s'", name,
+                                node->as.member.name);
+                    return type_error;
+                }
+                node->as.member.module_name = strdup(name);
+                return sym->type;
+            }
+        }
+
         Type* object = check_expression(checker, node->as.member.object);
 
         if (object->kind == TYPE_ERROR)

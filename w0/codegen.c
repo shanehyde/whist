@@ -324,8 +324,18 @@ static void emit_expr(CodeGen* gen, Node* node) {
 
     case NODE_CALL: {
         Node* func = node->as.call.func;
-        // Check if this is a method call (func is a member access with struct_name set)
-        if (func->type == NODE_MEMBER && func->as.member.struct_name != NULL) {
+        // Check if this is a module-qualified call (e.g., std.print())
+        if (func->type == NODE_MEMBER && func->as.member.module_name != NULL) {
+            // Module-qualified call: emit module_func(args...)
+            emit(gen, "%s_%.*s(", func->as.member.module_name, func->as.member.length,
+                 func->as.member.name);
+            for (int i = 0; i < node->as.call.args.count; i++) {
+                if (i > 0)
+                    emit(gen, ", ");
+                emit_expr(gen, node->as.call.args.nodes[i]);
+            }
+            emit(gen, ")");
+        } else if (func->type == NODE_MEMBER && func->as.member.struct_name != NULL) {
             // Method call: emit StructName_method(obj, args...)
             // With struct references, objects are already pointers
             emit(gen, "%s_%.*s(", func->as.member.struct_name, func->as.member.length,
@@ -711,9 +721,12 @@ static void emit_decl(CodeGen* gen, Node* node) {
         // Return type
         emit_type(gen, node->as.func_decl.return_type);
 
-        // Function name (mangled for methods)
+        // Function name (mangled for methods and library functions)
         if (is_method) {
             emit(gen, " %s_%s(", node->as.func_decl.receiver_type, node->as.func_decl.name);
+        } else if (gen->current_module != NULL) {
+            // Library function: emit with module prefix
+            emit(gen, " %s_%s(", gen->current_module, node->as.func_decl.name);
         } else {
             emit(gen, " %s(", node->as.func_decl.name);
         }
@@ -859,6 +872,11 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
             continue;
+        // Determine if this is a library module (not "main")
+        const char* module_prefix = NULL;
+        if (strcmp(mod->as.module.name, "main") != 0) {
+            module_prefix = mod->as.module.name;
+        }
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
             if (decl->type == NODE_FUNC_DECL) {
@@ -882,6 +900,9 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                     if (fdn->params.count > 0) {
                         emit(gen, ", ");
                     }
+                } else if (module_prefix != NULL) {
+                    // Library function: emit with module prefix
+                    emit(gen, " %s_%s(", module_prefix, fdn->name);
                 } else {
                     emit(gen, " %s(", fdn->name);
                 }
@@ -907,8 +928,11 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
             continue;
+        // Set current module context (NULL for "main", module name for library imports)
+        gen->current_module = strcmp(mod->as.module.name, "main") == 0 ? NULL : mod->as.module.name;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             emit_decl(gen, mod->as.module.decls.nodes[i]);
         }
     }
+    gen->current_module = NULL;
 }
