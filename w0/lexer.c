@@ -122,12 +122,12 @@ static const Keyword keywords[] = {
     {"enum", 4, TOK_ENUM},       {"extern", 6, TOK_EXTERN},
     {"false", 5, TOK_FALSE},     {"for", 3, TOK_FOR},
     {"foreach", 7, TOK_FOREACH}, {"func", 4, TOK_FUNC},
-    {"if", 2, TOK_IF},           {"in", 2, TOK_IN},
-    {"null", 4, TOK_NULL},       {"public", 6, TOK_PUBLIC},
-    {"private", 7, TOK_PRIVATE}, {"return", 6, TOK_RETURN},
-    {"self", 4, TOK_SELF},       {"struct", 6, TOK_STRUCT},
-    {"true", 4, TOK_TRUE},       {"var", 3, TOK_VAR},
-    {"while", 5, TOK_WHILE},
+    {"if", 2, TOK_IF},           {"import", 6, TOK_IMPORT},
+    {"in", 2, TOK_IN},           {"null", 4, TOK_NULL},
+    {"public", 6, TOK_PUBLIC},   {"private", 7, TOK_PRIVATE},
+    {"return", 6, TOK_RETURN},   {"self", 4, TOK_SELF},
+    {"struct", 6, TOK_STRUCT},   {"true", 4, TOK_TRUE},
+    {"var", 3, TOK_VAR},         {"while", 5, TOK_WHILE},
 };
 
 static const size_t keyword_count = sizeof(keywords) / sizeof(keywords[0]);
@@ -519,6 +519,8 @@ const char* token_type_name(TokenType type) {
         return "ERROR";
     case TOK_EXTERN:
         return "EXTERN";
+    case TOK_IMPORT:
+        return "IMPORT";
     case TOK_BY:
         return "BY";
     }

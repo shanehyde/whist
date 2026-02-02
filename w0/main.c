@@ -44,12 +44,13 @@ static int compile_and_run(const char* source_path, int argc, char** argv) {
 
     // Parse
     Parser parser;
-    parser_init(&parser, source);
+    parser_init_with_path(&parser, source, source_path);
     Node* ast = parser_parse(&parser);
 
     if (parser.had_error) {
         fprintf(stderr, "Parse failed\n");
         node_free(ast);
+        parser_free(&parser);
         free(source);
         return 1;
     }
@@ -118,6 +119,7 @@ static int compile_and_run(const char* source_path, int argc, char** argv) {
     fclose(c_file);
 
     node_free(ast);
+    parser_free(&parser);
     free(source);
 
     // Compile with cc
@@ -197,8 +199,10 @@ int main(int argc, char** argv) {
         arg_idx++;
     }
 
+    const char* source_file = NULL;
     if (arg_idx < argc) {
-        source = read_file(argv[arg_idx]);
+        source_file = argv[arg_idx];
+        source      = read_file(source_file);
         if (!source)
             return 1;
         free_source = 1;
@@ -239,12 +243,13 @@ int main(int argc, char** argv) {
         } while (token.type != TOK_EOF);
     } else {
         Parser parser;
-        parser_init(&parser, source);
+        parser_init_with_path(&parser, source, source_file);
         Node* ast = parser_parse(&parser);
 
         if (parser.had_error) {
             fprintf(stderr, "Parse failed\n");
             node_free(ast);
+            parser_free(&parser);
             if (free_source)
                 free(source);
             return 1;
@@ -266,6 +271,7 @@ int main(int argc, char** argv) {
             if (!ok) {
                 fprintf(stderr, "Type check failed\n");
                 node_free(ast);
+                parser_free(&parser);
                 if (free_source)
                     free(source);
                 return 1;
@@ -279,6 +285,7 @@ int main(int argc, char** argv) {
                     if (!out) {
                         fprintf(stderr, "Could not open output file: %s\n", output_file);
                         node_free(ast);
+                        parser_free(&parser);
                         if (free_source)
                             free(source);
                         return 1;
@@ -299,6 +306,7 @@ int main(int argc, char** argv) {
         }
 
         node_free(ast);
+        parser_free(&parser);
     }
 
     if (free_source)
