@@ -247,6 +247,9 @@ static Token template_string(Lexer* lexer, int is_start) {
     }
 
     if (is_at_end(lexer)) {
+        // Reset interpolation state on unterminated template string
+        lexer->brace_depth = 0;
+        lexer->in_interp   = 0;
         return error_token(lexer, "Unterminated template string");
     }
 
@@ -356,7 +359,7 @@ Token lexer_next(Lexer* lexer) {
             } else {
                 // End of ${...}, scan next string part
                 // Reset start to after the } so the string part doesn't include it
-                lexer->start = lexer->current;
+                lexer->start        = lexer->current;
                 lexer->start_column = lexer->column;
                 return template_string(lexer, 0);
             }

@@ -121,6 +121,7 @@ Node* parse_primary_expression(Parser* parser) {
         node->as.string_lit.value = malloc(max_len + 1);
         if (!node->as.string_lit.value) {
             parse_error(parser, "Out of memory");
+            node_free(node);
             return NULL;
         }
         // Process escape sequences
@@ -179,6 +180,7 @@ Node* parse_primary_expression(Parser* parser) {
         Node** parts    = malloc(capacity * sizeof(Node*));
         if (!parts) {
             parse_error(parser, "Out of memory");
+            node_free(node);
             return NULL;
         }
         int part_count = 0;
@@ -205,7 +207,7 @@ Node* parse_primary_expression(Parser* parser) {
                 parse_error(parser, "Out of memory");
                 return NULL;
             }
-            size_t max_len            = token.length - 1; // Skip opening `
+            size_t max_len                = token.length - 1; // Skip opening `
             str_part->as.string_lit.value = malloc(max_len + 1);
             if (!str_part->as.string_lit.value) {
                 parse_error(parser, "Out of memory");
@@ -248,7 +250,7 @@ Node* parse_primary_expression(Parser* parser) {
                     *dst++ = *src++;
                 }
             }
-            *dst                          = '\0';
+            *dst                           = '\0';
             str_part->as.string_lit.length = dst - str_part->as.string_lit.value;
             ADD_PART(str_part);
         }
@@ -278,7 +280,7 @@ Node* parse_primary_expression(Parser* parser) {
                     parse_error(parser, "Out of memory");
                     return NULL;
                 }
-                size_t max_len            = part_token.length;
+                size_t max_len                = part_token.length;
                 str_part->as.string_lit.value = malloc(max_len + 1);
                 if (!str_part->as.string_lit.value) {
                     parse_error(parser, "Out of memory");
@@ -321,7 +323,7 @@ Node* parse_primary_expression(Parser* parser) {
                         *dst++ = *src++;
                     }
                 }
-                *dst                          = '\0';
+                *dst                           = '\0';
                 str_part->as.string_lit.length = dst - str_part->as.string_lit.value;
                 ADD_PART(str_part);
             }
@@ -340,7 +342,7 @@ Node* parse_primary_expression(Parser* parser) {
                     parse_error(parser, "Out of memory");
                     return NULL;
                 }
-                size_t max_len            = end_token.length - 1; // Exclude closing `
+                size_t max_len                = end_token.length - 1; // Exclude closing `
                 str_part->as.string_lit.value = malloc(max_len + 1);
                 if (!str_part->as.string_lit.value) {
                     parse_error(parser, "Out of memory");
@@ -383,7 +385,7 @@ Node* parse_primary_expression(Parser* parser) {
                         *dst++ = *src++;
                     }
                 }
-                *dst                          = '\0';
+                *dst                           = '\0';
                 str_part->as.string_lit.length = dst - str_part->as.string_lit.value;
                 ADD_PART(str_part);
             }

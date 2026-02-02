@@ -1,4 +1,5 @@
 // Error: Cannot interpolate struct type
+// Expected error: Cannot interpolate type 'Point'
 
 struct Point { x: i64, y: i64 }
 

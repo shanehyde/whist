@@ -291,11 +291,12 @@ static void emit_expr(CodeGen* gen, Node* node) {
 
     case NODE_INTERP_STRING: {
         // Generate a GCC statement expression that builds the interpolated string
-        // Format: ({ size_t __len = ...; char* __buf = malloc(__len); sprintf(__buf, ...); __buf; })
+        // Format: ({ size_t __len = ...; char* __buf = malloc(__len); sprintf(__buf, ...); __buf;
+        // })
         emit(gen, "({ ");
 
         // First, calculate the total length needed
-        emit(gen, "size_t __len = 1");  // +1 for null terminator
+        emit(gen, "size_t __len = 1"); // +1 for null terminator
         for (int i = 0; i < node->as.interp_string.part_count; i++) {
             Node* part = node->as.interp_string.parts[i];
             if (part->type == NODE_STRING_LIT) {
@@ -316,13 +317,13 @@ static void emit_expr(CodeGen* gen, Node* node) {
                 } else if (t && t->kind == TYPE_CHAR) {
                     emit(gen, " + 1");
                 } else if (t && (t->kind == TYPE_INT64 || t->kind == TYPE_INT32 ||
-                               t->kind == TYPE_INT16 || t->kind == TYPE_INT8)) {
+                                 t->kind == TYPE_INT16 || t->kind == TYPE_INT8)) {
                     // Signed integer
                     emit(gen, " + snprintf(NULL, 0, \"%%lld\", (long long)");
                     emit_expr(gen, part);
                     emit(gen, ")");
                 } else if (t && (t->kind == TYPE_UINT64 || t->kind == TYPE_UINT32 ||
-                               t->kind == TYPE_UINT16 || t->kind == TYPE_UINT8)) {
+                                 t->kind == TYPE_UINT16 || t->kind == TYPE_UINT8)) {
                     // Unsigned integer
                     emit(gen, " + snprintf(NULL, 0, \"%%llu\", (unsigned long long)");
                     emit_expr(gen, part);
@@ -351,13 +352,30 @@ static void emit_expr(CodeGen* gen, Node* node) {
                 for (int j = 0; j < part->as.string_lit.length; j++) {
                     char c = part->as.string_lit.value[j];
                     switch (c) {
-                    case '\n': emit(gen, "\\n"); break;
-                    case '\t': emit(gen, "\\t"); break;
-                    case '\r': emit(gen, "\\r"); break;
-                    case '\\': emit(gen, "\\\\"); break;
-                    case '"': emit(gen, "\\\""); break;
-                    case '%': emit(gen, "%%%%"); break;  // Escape % for printf
-                    default: emit(gen, "%c", c); break;
+                    case '\n':
+                        emit(gen, "\\n");
+                        break;
+                    case '\t':
+                        emit(gen, "\\t");
+                        break;
+                    case '\r':
+                        emit(gen, "\\r");
+                        break;
+                    case '\\':
+                        emit(gen, "\\\\");
+                        break;
+                    case '"':
+                        emit(gen, "\\\"");
+                        break;
+                    case '%':
+                        emit(gen, "%%%%");
+                        break; // Escape % for printf
+                    case '\0':
+                        emit(gen, "\\0");
+                        break; // Escape null character
+                    default:
+                        emit(gen, "%c", c);
+                        break;
                     }
                 }
             } else {
@@ -369,7 +387,7 @@ static void emit_expr(CodeGen* gen, Node* node) {
                 } else if (t && t->kind == TYPE_CHAR) {
                     emit(gen, "%%c");
                 } else if (t && (t->kind == TYPE_UINT64 || t->kind == TYPE_UINT32 ||
-                               t->kind == TYPE_UINT16 || t->kind == TYPE_UINT8)) {
+                                 t->kind == TYPE_UINT16 || t->kind == TYPE_UINT8)) {
                     emit(gen, "%%llu");
                 } else {
                     // Default to signed long long
@@ -390,11 +408,11 @@ static void emit_expr(CodeGen* gen, Node* node) {
                     emit_expr(gen, part);
                     emit(gen, ") ? \"true\" : \"false\"");
                 } else if (t && (t->kind == TYPE_UINT64 || t->kind == TYPE_UINT32 ||
-                               t->kind == TYPE_UINT16 || t->kind == TYPE_UINT8)) {
+                                 t->kind == TYPE_UINT16 || t->kind == TYPE_UINT8)) {
                     emit(gen, "(unsigned long long)");
                     emit_expr(gen, part);
                 } else if (t && (t->kind == TYPE_INT64 || t->kind == TYPE_INT32 ||
-                               t->kind == TYPE_INT16 || t->kind == TYPE_INT8)) {
+                                 t->kind == TYPE_INT16 || t->kind == TYPE_INT8)) {
                     emit(gen, "(long long)");
                     emit_expr(gen, part);
                 } else if (t && t->kind == TYPE_CHAR) {
@@ -564,7 +582,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                     break;
                 case NODE_STRING_LIT:
                 case NODE_INTERP_STRING:
-                    emit(gen, "char* %s", node->as.var_decl.name);  // mutable since malloc'd
+                    emit(gen, "char* %s", node->as.var_decl.name); // mutable since malloc'd
                     break;
                 case NODE_CHAR_LIT:
                     emit(gen, "char %s", node->as.var_decl.name);
