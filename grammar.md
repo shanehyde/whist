@@ -188,6 +188,7 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 <primary-expr> ::= <int-literal>
                 | <float-literal>
                 | <string-literal>
+                | <template-literal>
                 | <char-literal>
                 | 'true'
                 | 'false'
@@ -262,6 +263,19 @@ true     var      while
 <string-char> ::= <any-char-except-quote-or-backslash>
                | <escape-sequence>
 
+<template-literal> ::= '`' { <template-char> | <interpolation> } '`'
+
+<template-char> ::= <any-char-except-backtick-dollar-or-backslash>
+                 | <escape-sequence>
+                 | '\$'
+                 | '\`'
+
+<interpolation> ::= '${' <expression> '}'
+```
+
+**Template Literals:** Backtick-delimited strings support `${expr}` interpolation. Expressions must be of type `string`, `bool`, `char`, or any integer type (`i8`-`i64`, `u8`-`u64`). The result is heap-allocated; the caller is responsible for freeing the memory.
+
+```bnf
 <char-literal> ::= '\'' ( <char-char> | <escape-sequence> ) '\''
 
 <char-char> ::= <any-char-except-quote-or-backslash>
