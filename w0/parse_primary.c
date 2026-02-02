@@ -9,10 +9,10 @@
 #include "parse_struct_init.h"
 #include "parser_util.h"
 
-Node* parse_primary(Parser* parser) {
+Node* parse_primary_expression(Parser* parser) {
     Token token = parser->current;
 
-    if (match(parser, TOK_INT)) {
+    if (match_token(parser, TOK_INT)) {
         Node* node = node_new(NODE_INT_LIT, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");
@@ -43,7 +43,7 @@ Node* parse_primary(Parser* parser) {
         return node;
     }
 
-    if (match(parser, TOK_FLOAT)) {
+    if (match_token(parser, TOK_FLOAT)) {
         Node* node = node_new(NODE_FLOAT_LIT, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");
@@ -53,7 +53,7 @@ Node* parse_primary(Parser* parser) {
         return node;
     }
 
-    if (match(parser, TOK_STRING)) {
+    if (match_token(parser, TOK_STRING)) {
         Node* node = node_new(NODE_STRING_LIT, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");
@@ -109,7 +109,7 @@ Node* parse_primary(Parser* parser) {
         return node;
     }
 
-    if (match(parser, TOK_CHAR)) {
+    if (match_token(parser, TOK_CHAR)) {
         Node* node = node_new(NODE_CHAR_LIT, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");
@@ -146,7 +146,7 @@ Node* parse_primary(Parser* parser) {
         return node;
     }
 
-    if (match(parser, TOK_TRUE) || match(parser, TOK_FALSE)) {
+    if (match_token(parser, TOK_TRUE) || match_token(parser, TOK_FALSE)) {
         Node* node = node_new(NODE_BOOL_LIT, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");
@@ -156,7 +156,7 @@ Node* parse_primary(Parser* parser) {
         return node;
     }
 
-    if (match(parser, TOK_NULL)) {
+    if (match_token(parser, TOK_NULL)) {
         Node* node = node_new(NODE_NULL_LIT, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");
@@ -165,13 +165,13 @@ Node* parse_primary(Parser* parser) {
         return node;
     }
 
-    if (match(parser, TOK_IDENT)) {
+    if (match_token(parser, TOK_IDENT)) {
         // Check for qualified enum value: EnumName::ValueName
-        if (check(parser, TOK_COLON_COLON)) {
+        if (check_token(parser, TOK_COLON_COLON)) {
             Token enum_name = token;
-            advance(parser); // consume ::
+            advance_token(parser); // consume ::
             Token value_name = parser->current;
-            consume(parser, TOK_IDENT, "Expected enum value name after '::'");
+            consume_token(parser, TOK_IDENT, "Expected enum value name after '::'");
 
             Node* node = node_new(NODE_ENUM_VALUE, enum_name.line, enum_name.column);
             if (!node) {
@@ -208,7 +208,7 @@ Node* parse_primary(Parser* parser) {
     }
 
     // Handle 'self' keyword as an identifier
-    if (match(parser, TOK_SELF)) {
+    if (match_token(parser, TOK_SELF)) {
         Node* node = node_new(NODE_IDENT, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");
@@ -223,13 +223,13 @@ Node* parse_primary(Parser* parser) {
         return node;
     }
 
-    if (match(parser, TOK_LPAREN)) {
+    if (match_token(parser, TOK_LPAREN)) {
         Node* expr = parse_expression(parser);
-        consume(parser, TOK_RPAREN, "Expected ')' after expression");
+        consume_token(parser, TOK_RPAREN, "Expected ')' after expression");
         return expr;
     }
 
-    if (match(parser, TOK_LBRACE)) {
+    if (match_token(parser, TOK_LBRACE)) {
         return parse_struct_init(parser);
     }
 

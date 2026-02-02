@@ -10,12 +10,12 @@
 // Current recursion depth for expression parsing
 extern int parse_depth;
 
-void  advance(Parser* parser);
-int   check(Parser* parser, TokenType type);
-int   match(Parser* parser, TokenType type);
+void  advance_token(Parser* parser);
+int   check_token(Parser* parser, TokenType type);
+int   match_token(Parser* parser, TokenType type);
 void  parse_error_at(Parser* parser, Token* token, const char* message);
 void  parse_error(Parser* parser, const char* message);
-void  consume(Parser* parser, TokenType type, const char* message);
+void  consume_token(Parser* parser, TokenType type, const char* message);
 void  synchronize(Parser* parser);
 char* copy_token_string(Token* token);
 

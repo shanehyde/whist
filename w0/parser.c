@@ -11,27 +11,27 @@
 int parse_depth = 0;
 
 static Node* parse_declaration(Parser* parser) {
-    int is_public = match(parser, TOK_PUBLIC);
+    int is_public = match_token(parser, TOK_PUBLIC);
 
     if (!is_public) {
-        is_public = match(parser, TOK_PRIVATE) == 0;
+        is_public = match_token(parser, TOK_PRIVATE) == 0;
     }
-    if (match(parser, TOK_EXTERN)) {
+    if (match_token(parser, TOK_EXTERN)) {
         return parse_extern_decls(parser);
     }
-    if (match(parser, TOK_FUNC)) {
+    if (match_token(parser, TOK_FUNC)) {
         return parse_func_decl(parser, is_public);
     }
-    if (match(parser, TOK_STRUCT)) {
+    if (match_token(parser, TOK_STRUCT)) {
         return parse_struct_decl(parser, is_public);
     }
-    if (match(parser, TOK_ENUM)) {
+    if (match_token(parser, TOK_ENUM)) {
         return parse_enum_decl(parser, is_public);
     }
-    if (match(parser, TOK_VAR)) {
+    if (match_token(parser, TOK_VAR)) {
         return parse_var_decl(parser, 0, is_public);
     }
-    if (match(parser, TOK_CONST)) {
+    if (match_token(parser, TOK_CONST)) {
         return parse_var_decl(parser, 1, is_public);
     }
 
@@ -45,7 +45,7 @@ void parser_init(Parser* parser, const char* source) {
     parser->panic_mode   = 0;
     parser->error_msg[0] = '\0';
     parse_depth          = 0; // Reset recursion depth
-    advance(parser);          // Prime the parser
+    advance_token(parser);    // Prime the parser
 }
 
 Node* parser_parse(Parser* parser) {
@@ -56,7 +56,7 @@ Node* parser_parse(Parser* parser) {
     }
     nodelist_init(&program->as.program.decls);
 
-    while (!check(parser, TOK_EOF)) {
+    while (!check_token(parser, TOK_EOF)) {
         Node* decl = parse_declaration(parser);
         if (decl) {
             nodelist_push(&program->as.program.decls, decl);

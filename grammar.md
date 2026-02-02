@@ -106,7 +106,7 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 <for-init> ::= <var-decl>
             | <expression>
 
-<foreach-stmt> ::= 'foreach' '(' 'const' <identifier> 'in' <expression> '..' <expression> ')' '{' <block> '}'
+<foreach-stmt> ::= 'foreach' '(' 'const' <identifier> 'in' <expression> '..' <expression> [ 'by' <expression> ] ')' '{' <block> '}'
 
 <return-stmt> ::= 'return' [ <expression> ] ';'
 

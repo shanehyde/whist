@@ -4,7 +4,7 @@
 
 Node* parse_enum_decl(Parser* parser, int is_public) {
     Token name = parser->current;
-    consume(parser, TOK_IDENT, "Expected enum name");
+    consume_token(parser, TOK_IDENT, "Expected enum name");
 
     Node* node = node_new(NODE_ENUM_DECL, name.line, name.column);
     if (!node) {
@@ -20,11 +20,11 @@ Node* parse_enum_decl(Parser* parser, int is_public) {
     node->as.enum_decl.name_length = name.length;
     nodelist_init(&node->as.enum_decl.values);
 
-    consume(parser, TOK_LBRACE, "Expected '{' after enum name");
+    consume_token(parser, TOK_LBRACE, "Expected '{' after enum name");
 
-    while (!check(parser, TOK_RBRACE) && !check(parser, TOK_EOF)) {
+    while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
         Token value_name = parser->current;
-        consume(parser, TOK_IDENT, "Expected enum value name");
+        consume_token(parser, TOK_IDENT, "Expected enum value name");
 
         Node* value = node_new(NODE_IDENT, value_name.line, value_name.column);
         if (!value) {
@@ -40,13 +40,13 @@ Node* parse_enum_decl(Parser* parser, int is_public) {
 
         nodelist_push(&node->as.enum_decl.values, value);
 
-        if (!check(parser, TOK_RBRACE)) {
-            consume(parser, TOK_COMMA, "Expected ',' or '}' after enum value");
+        if (!check_token(parser, TOK_RBRACE)) {
+            consume_token(parser, TOK_COMMA, "Expected ',' or '}' after enum value");
         } else {
-            match(parser, TOK_COMMA); // Allow trailing comma
+            match_token(parser, TOK_COMMA); // Allow trailing comma
         }
     }
 
-    consume(parser, TOK_RBRACE, "Expected '}' after enum values");
+    consume_token(parser, TOK_RBRACE, "Expected '}' after enum values");
     return node;
 }

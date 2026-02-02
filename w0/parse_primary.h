@@ -4,6 +4,6 @@
 #include "ast.h"
 #include "parser.h"
 
-Node* parse_primary(Parser* parser);
+Node* parse_primary_expression(Parser* parser);
 
 #endif

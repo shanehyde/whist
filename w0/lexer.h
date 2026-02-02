@@ -28,6 +28,7 @@ typedef enum {
     TOK_FUNC,
     TOK_VAR,
     TOK_CONST,
+    TOK_BY,
     TOK_TRUE,
     TOK_FALSE,
     TOK_IN,

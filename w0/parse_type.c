@@ -6,18 +6,18 @@ Node* parse_type(Parser* parser) {
     Token token = parser->current;
 
     // Pointer types are no longer supported - error if we see *
-    if (check(parser, TOK_STAR)) {
+    if (check_token(parser, TOK_STAR)) {
         parse_error(parser, "Pointer types (*T) are no longer supported; use struct references");
         return NULL;
     }
 
     // Array type [n]type
-    if (match(parser, TOK_LBRACKET)) {
+    if (match_token(parser, TOK_LBRACKET)) {
         Node* size = NULL;
-        if (!check(parser, TOK_RBRACKET)) {
+        if (!check_token(parser, TOK_RBRACKET)) {
             size = parse_expression(parser);
         }
-        consume(parser, TOK_RBRACKET, "Expected ']' in array type");
+        consume_token(parser, TOK_RBRACKET, "Expected ']' in array type");
         Node* elem = parse_type(parser);
 
         Node* node = node_new(NODE_INDEX, token.line, token.column);
@@ -31,7 +31,7 @@ Node* parse_type(Parser* parser) {
     }
 
     // Named type
-    if (match(parser, TOK_IDENT)) {
+    if (match_token(parser, TOK_IDENT)) {
         Node* node = node_new(NODE_IDENT, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");

@@ -5,7 +5,7 @@
 
 Node* parse_extern_decls(Parser* parser) {
     Token module_name = parser->current;
-    consume(parser, TOK_IDENT, "Expected module name string after 'extern'");
+    consume_token(parser, TOK_IDENT, "Expected module name string after 'extern'");
 
     Node* node = node_new(NODE_EXTERN_MODULE, module_name.line, module_name.column);
     if (!node) {
@@ -19,9 +19,9 @@ Node* parse_extern_decls(Parser* parser) {
     }
     node->as.extern_module.module_name_length = module_name.length;
     nodelist_init(&node->as.extern_module.decls);
-    consume(parser, TOK_LBRACE, "Expected '{' after extern module name");
+    consume_token(parser, TOK_LBRACE, "Expected '{' after extern module name");
 
-    while (match(parser, TOK_FUNC)) {
+    while (match_token(parser, TOK_FUNC)) {
         Node* funcDeclNode = parse_func_decl(parser, 0);
         if (!funcDeclNode) {
             return NULL;
@@ -31,6 +31,6 @@ Node* parse_extern_decls(Parser* parser) {
         nodelist_push(&node->as.extern_module.decls, funcDeclNode);
     }
 
-    consume(parser, TOK_RBRACE, "Expected '}' after extern module declarations");
+    consume_token(parser, TOK_RBRACE, "Expected '}' after extern module declarations");
     return node;
 }
