@@ -4,6 +4,6 @@
 #include "ast.h"
 #include "parser.h"
 
-Node* parse_extern_decls(Parser* parser);
+Node* parse_extern_decls(Parser* parser, int is_public);
 
 #endif

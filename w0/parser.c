@@ -14,13 +14,16 @@
 int parse_depth = 0;
 
 static Node* parse_declaration(Parser* parser) {
-    int is_public = match_token(parser, TOK_PUBLIC);
+    int is_public      = match_token(parser, TOK_PUBLIC);
+    int has_visibility = is_public;
 
     if (!is_public) {
-        is_public = match_token(parser, TOK_PRIVATE) == 0;
+        has_visibility = match_token(parser, TOK_PRIVATE);
+        is_public      = !has_visibility; // default to public if no modifier
     }
     if (match_token(parser, TOK_EXTERN)) {
-        return parse_extern_decls(parser);
+        // Extern defaults to private when no visibility modifier
+        return parse_extern_decls(parser, has_visibility ? is_public : 0);
     }
     if (match_token(parser, TOK_FUNC)) {
         return parse_func_decl(parser, is_public);
