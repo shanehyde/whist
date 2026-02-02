@@ -593,7 +593,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
 
     case NODE_FOREACH:
         emit_indent(gen);
-        // Generate: for (int64_t var = start; var < end; var++) {
+        // Generate: for (int64_t var = start; var <= end; var += step) {
         emit(gen, "for (int64_t %s = ", node->as.foreach_stmt.var_name);
         emit_expr(gen, node->as.foreach_stmt.start);
         emit(gen, "; %s <= ", node->as.foreach_stmt.var_name);

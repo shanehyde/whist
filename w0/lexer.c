@@ -116,14 +116,14 @@ typedef struct {
 } Keyword;
 
 static const Keyword keywords[] = {
-    {"break", 5, TOK_BREAK},     {"const", 5, TOK_CONST},   {"continue", 8, TOK_CONTINUE},
+    {"break", 5, TOK_BREAK},     {"by", 2, TOK_BY},         {"continue", 8, TOK_CONTINUE},
     {"defer", 5, TOK_DEFER},     {"else", 4, TOK_ELSE},     {"enum", 4, TOK_ENUM},
     {"extern", 6, TOK_EXTERN},   {"false", 5, TOK_FALSE},   {"for", 3, TOK_FOR},
     {"foreach", 7, TOK_FOREACH}, {"func", 4, TOK_FUNC},     {"if", 2, TOK_IF},
     {"in", 2, TOK_IN},           {"null", 4, TOK_NULL},     {"public", 6, TOK_PUBLIC},
     {"private", 7, TOK_PRIVATE}, {"return", 6, TOK_RETURN}, {"self", 4, TOK_SELF},
     {"struct", 6, TOK_STRUCT},   {"true", 4, TOK_TRUE},     {"var", 3, TOK_VAR},
-    {"by", 2, TOK_BY},           {"while", 5, TOK_WHILE},
+    {"while", 5, TOK_WHILE},
 };
 
 static const size_t keyword_count = sizeof(keywords) / sizeof(keywords[0]);
