@@ -840,60 +840,75 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit(gen, "\n");
 
     // Forward declarations for structs
-    for (int i = 0; i < ast->as.program.decls.count; i++) {
-        Node* decl = ast->as.program.decls.nodes[i];
-        if (decl->type == NODE_STRUCT_DECL) {
-            emit(gen, "typedef struct %s %s;\n", decl->as.struct_decl.name,
-                 decl->as.struct_decl.name);
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type == NODE_STRUCT_DECL) {
+                emit(gen, "typedef struct %s %s;\n", decl->as.struct_decl.name,
+                     decl->as.struct_decl.name);
+            }
         }
     }
     emit(gen, "\n");
 
     // Forward declarations for functions and methods
-    for (int i = 0; i < ast->as.program.decls.count; i++) {
-        Node* decl = ast->as.program.decls.nodes[i];
-        if (decl->type == NODE_FUNC_DECL) {
-            func_decl_node* fdn       = &decl->as.func_decl;
-            int             is_method = (fdn->receiver_type != NULL);
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type == NODE_FUNC_DECL) {
+                func_decl_node* fdn       = &decl->as.func_decl;
+                int             is_method = (fdn->receiver_type != NULL);
 
-            // Emit static for private functions (except main)
-            if (!fdn->is_public && strcmp(fdn->name, "main") != 0) {
-                emit(gen, "static ");
-            }
-
-            emit_type(gen, fdn->return_type);
-
-            if (is_method) {
-                emit(gen, " %s_%s(", fdn->receiver_type, fdn->name);
-                // Emit self parameter
-                if (fdn->receiver_is_const) {
-                    emit(gen, "const ");
+                // Emit static for private functions (except main)
+                if (!fdn->is_public && strcmp(fdn->name, "main") != 0) {
+                    emit(gen, "static ");
                 }
-                emit(gen, "%s* self", fdn->receiver_type);
-                if (fdn->params.count > 0) {
-                    emit(gen, ", ");
-                }
-            } else {
-                emit(gen, " %s(", fdn->name);
-            }
 
-            if (fdn->params.count == 0 && !is_method) {
-                emit(gen, "void");
-            } else {
-                for (int j = 0; j < fdn->params.count; j++) {
-                    if (j > 0)
+                emit_type(gen, fdn->return_type);
+
+                if (is_method) {
+                    emit(gen, " %s_%s(", fdn->receiver_type, fdn->name);
+                    // Emit self parameter
+                    if (fdn->receiver_is_const) {
+                        emit(gen, "const ");
+                    }
+                    emit(gen, "%s* self", fdn->receiver_type);
+                    if (fdn->params.count > 0) {
                         emit(gen, ", ");
-                    Node* param = fdn->params.nodes[j];
-                    emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+                    }
+                } else {
+                    emit(gen, " %s(", fdn->name);
                 }
+
+                if (fdn->params.count == 0 && !is_method) {
+                    emit(gen, "void");
+                } else {
+                    for (int j = 0; j < fdn->params.count; j++) {
+                        if (j > 0)
+                            emit(gen, ", ");
+                        Node* param = fdn->params.nodes[j];
+                        emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+                    }
+                }
+                emit(gen, ");\n");
             }
-            emit(gen, ");\n");
         }
     }
     emit(gen, "\n");
 
     // Emit all declarations
-    for (int i = 0; i < ast->as.program.decls.count; i++) {
-        emit_decl(gen, ast->as.program.decls.nodes[i]);
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            emit_decl(gen, mod->as.module.decls.nodes[i]);
+        }
     }
 }

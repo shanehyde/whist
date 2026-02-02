@@ -45,6 +45,9 @@ struct Checker {
     // Library modules accessible from the current function (NULL = use direct_imports)
     char** current_accessible_modules;
     int    current_accessible_modules_count;
+
+    // Current module being processed (NULL = main module)
+    const char* current_module;
 };
 
 void checker_init(Checker* checker);
