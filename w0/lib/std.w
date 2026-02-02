@@ -1,5 +1,13 @@
 // Standard library for Whist
 
+extern stdio {
+    func printf(fmt:string, s: string): void;
+}
+
+func print (s: string): void {
+    printf("%s", s);
+}
+
 func abs_i64(x: i64): i64 {
     if (x < 0) {
         return -x;
@@ -20,3 +28,4 @@ func min_i64(a: i64, b: i64): i64 {
     }
     return b;
 }
+
