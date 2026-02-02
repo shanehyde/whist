@@ -1,6 +1,7 @@
 #include "parser.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "parse_enum_decl.h"
 #include "parse_extern_decls.h"
@@ -102,12 +103,24 @@ Node* parser_parse(Parser* parser) {
         parse_error(parser, "Out of memory");
         return NULL;
     }
-    nodelist_init(&program->as.program.decls);
+    nodelist_init(&program->as.program.modules);
+
+    // Create main module for the entry file
+    Node* main_module = node_new(NODE_MODULE, 1, 1);
+    if (!main_module) {
+        parse_error(parser, "Out of memory");
+        node_free(program);
+        return NULL;
+    }
+    main_module->as.module.name        = strdup("main");
+    main_module->as.module.name_length = 4;
+    nodelist_init(&main_module->as.module.decls);
+    nodelist_push(&program->as.program.modules, main_module);
 
     while (!check_token(parser, TOK_EOF)) {
         // Handle import statements
         if (match_token(parser, TOK_IMPORT)) {
-            if (!parse_import_stmt(parser, &program->as.program.decls)) {
+            if (!parse_import_stmt(parser, program, main_module)) {
                 // Import failed, but continue parsing
                 if (parser->panic_mode)
                     synchronize(parser);
@@ -117,7 +130,7 @@ Node* parser_parse(Parser* parser) {
 
         Node* decl = parse_declaration(parser);
         if (decl) {
-            nodelist_push(&program->as.program.decls, decl);
+            nodelist_push(&main_module->as.module.decls, decl);
         }
         if (parser->panic_mode)
             synchronize(parser);

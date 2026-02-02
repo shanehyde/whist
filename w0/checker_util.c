@@ -34,6 +34,7 @@ void checker_init(Checker* checker) {
     checker->direct_imports_count             = 0;
     checker->current_accessible_modules       = NULL;
     checker->current_accessible_modules_count = 0;
+    checker->current_module                   = NULL;
     types_init();
 }
 

@@ -144,7 +144,11 @@ void node_free(Node* node) {
         nodelist_free(&node->as.enum_decl.values);
         break;
     case NODE_PROGRAM:
-        nodelist_free(&node->as.program.decls);
+        nodelist_free(&node->as.program.modules);
+        break;
+    case NODE_MODULE:
+        free(node->as.module.name);
+        nodelist_free(&node->as.module.decls);
         break;
     case NODE_EXTERN_MODULE:
         nodelist_free(&node->as.extern_module.decls);

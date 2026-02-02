@@ -30,8 +30,14 @@ void print_ast(Node* node, int depth) {
     switch (node->type) {
     case NODE_PROGRAM:
         printf("Program\n");
-        for (int i = 0; i < node->as.program.decls.count; i++) {
-            print_ast(node->as.program.decls.nodes[i], depth + 1);
+        for (int i = 0; i < node->as.program.modules.count; i++) {
+            print_ast(node->as.program.modules.nodes[i], depth + 1);
+        }
+        break;
+    case NODE_MODULE:
+        printf("Module: %.*s\n", node->as.module.name_length, node->as.module.name);
+        for (int i = 0; i < node->as.module.decls.count; i++) {
+            print_ast(node->as.module.decls.nodes[i], depth + 1);
         }
         break;
     case NODE_EXTERN_MODULE:

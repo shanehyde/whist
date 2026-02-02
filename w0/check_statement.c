@@ -63,7 +63,7 @@ void check_statement(Checker* checker, Node* node) {
         }
 
         checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const,
-                       node->as.var_decl.is_public, node->as.var_decl.source_module);
+                       node->as.var_decl.is_public, checker->current_module);
         break;
     }
 

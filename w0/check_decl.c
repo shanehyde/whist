@@ -53,7 +53,7 @@ void check_decl(Checker* checker, Node* node) {
                 Type*           func_type = get_function_type(checker, decl);
 
                 checker_define(checker, fdn->name, SYM_FUNC, func_type, 0, fdn->is_public,
-                               fdn->source_module);
+                               checker->current_module);
             }
         }
 
@@ -114,7 +114,7 @@ void check_decl(Checker* checker, Node* node) {
 
         // Pre-declare function for recursion
         checker_define(checker, mangled_name, SYM_FUNC, func_type, 1, fdn->is_public,
-                       fdn->source_module);
+                       checker->current_module);
 
         // For methods, also register the method on the struct type
         if (is_method) {
@@ -241,7 +241,7 @@ void check_decl(Checker* checker, Node* node) {
         }
 
         checker_define(checker, name, SYM_TYPE, struct_type, 0, node->as.struct_decl.is_public,
-                       node->as.struct_decl.source_module);
+                       checker->current_module);
         break;
     }
 
@@ -260,7 +260,7 @@ void check_decl(Checker* checker, Node* node) {
         enum_type->as.enm.value_names = malloc(value_count * sizeof(char*));
 
         checker_define(checker, name, SYM_TYPE, enum_type, 0, node->as.enum_decl.is_public,
-                       node->as.enum_decl.source_module);
+                       checker->current_module);
 
         // Define enum values as constants
         for (int i = 0; i < value_count; i++) {

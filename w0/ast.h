@@ -41,6 +41,7 @@ typedef enum {
     NODE_ENUM_DECL,
 
     NODE_EXTERN_MODULE,
+    NODE_MODULE,
 
     // Other
     NODE_PARAM,
@@ -273,9 +274,16 @@ struct Node {
             NodeList decls;
         } extern_module;
 
+        // Module
+        struct {
+            char*    name;
+            int      name_length;
+            NodeList decls;
+        } module;
+
         // Program
         struct {
-            NodeList decls;
+            NodeList modules;
         } program;
     } as;
 };

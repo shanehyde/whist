@@ -1,5 +1,6 @@
 #include "checker.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -37,6 +38,11 @@ static int is_module_accessible(Checker* checker, const char* source_module) {
         return 1;
     }
 
+    // If we're currently in the same module, it's accessible
+    if (checker->current_module && strcmp(checker->current_module, source_module) == 0) {
+        return 1;
+    }
+
     // Use current function's accessible modules if set, otherwise use global direct_imports
     char** modules = checker->current_accessible_modules;
     int    count   = checker->current_accessible_modules_count;
@@ -66,7 +72,11 @@ Symbol* checker_lookup(Checker* checker, const char* name) {
                     continue; // Symbol exists but not accessible from this module
                 }
                 // Symbols from library imports must be public to be accessible
-                if (sym->source_module && !sym->is_public) {
+                // Exception: private symbols are accessible if we're in the same module
+                int same_module = (sym->source_module == NULL && checker->current_module == NULL) ||
+                                  (sym->source_module && checker->current_module &&
+                                   strcmp(sym->source_module, checker->current_module) == 0);
+                if (sym->source_module && !sym->is_public && !same_module) {
                     continue; // Private symbol from library import
                 }
                 return sym;
@@ -110,22 +120,58 @@ int checker_check(Checker* checker, Node* ast) {
 
     checker_push_scope(checker); // Global scope
 
-    // First pass: declare all types and functions (for forward references)
-    for (int i = 0; i < ast->as.program.decls.count; i++) {
-        Node* decl = ast->as.program.decls.nodes[i];
-        if (decl->type == NODE_STRUCT_DECL || decl->type == NODE_ENUM_DECL) {
-            check_decl(checker, decl);
+    // First pass: declare all types (structs, enums) for forward references
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        // Set current module context (NULL for "main", module name for library imports)
+        checker->current_module =
+            strcmp(mod->as.module.name, "main") == 0 ? NULL : mod->as.module.name;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type == NODE_STRUCT_DECL || decl->type == NODE_ENUM_DECL) {
+                check_decl(checker, decl);
+            }
         }
     }
 
-    // Second pass: check everything
-    for (int i = 0; i < ast->as.program.decls.count; i++) {
-        Node* decl = ast->as.program.decls.nodes[i];
-        if (decl->type != NODE_STRUCT_DECL && decl->type != NODE_ENUM_DECL) {
-            check_decl(checker, decl);
+    // Second pass: check everything else
+    // Process library modules (non-main) first, then main module last
+    // This ensures library functions are declared before main uses them
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        // Skip main module in this pass
+        if (strcmp(mod->as.module.name, "main") == 0)
+            continue;
+        checker->current_module = mod->as.module.name;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type != NODE_STRUCT_DECL && decl->type != NODE_ENUM_DECL) {
+                check_decl(checker, decl);
+            }
         }
     }
 
+    // Third pass: check main module
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        if (strcmp(mod->as.module.name, "main") != 0)
+            continue;
+        checker->current_module = NULL;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type != NODE_STRUCT_DECL && decl->type != NODE_ENUM_DECL) {
+                check_decl(checker, decl);
+            }
+        }
+    }
+
+    checker->current_module = NULL;
     checker_pop_scope(checker);
 
     return checker->error_count == 0;

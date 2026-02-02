@@ -4,6 +4,6 @@
 #include "ast.h"
 #include "parser.h"
 
-int parse_import_stmt(Parser* parser, NodeList* decls);
+int parse_import_stmt(Parser* parser, Node* program, Node* current_module);
 
 #endif

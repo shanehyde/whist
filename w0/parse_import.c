@@ -99,29 +99,6 @@ static void add_direct_import(Parser* parser, const char* module_name, size_t le
     parser->direct_imports[parser->direct_imports_count++] = name_copy;
 }
 
-// Set source_module on a declaration node
-static void set_decl_source_module(Node* decl, const char* source_module) {
-    if (!decl)
-        return;
-
-    switch (decl->type) {
-    case NODE_FUNC_DECL:
-        decl->as.func_decl.source_module = source_module ? strdup(source_module) : NULL;
-        break;
-    case NODE_STRUCT_DECL:
-        decl->as.struct_decl.source_module = source_module ? strdup(source_module) : NULL;
-        break;
-    case NODE_ENUM_DECL:
-        decl->as.enum_decl.source_module = source_module ? strdup(source_module) : NULL;
-        break;
-    case NODE_VAR_DECL:
-        decl->as.var_decl.source_module = source_module ? strdup(source_module) : NULL;
-        break;
-    default:
-        break;
-    }
-}
-
 // Check if file exists
 static int file_exists(const char* path) {
     FILE* f = fopen(path, "r");
@@ -182,7 +159,7 @@ static void build_import_path(Parser* parser, char* path, size_t path_size, cons
     snprintf(path, path_size, "lib/%.*s.w", (int)module_length, module_name);
 }
 
-int parse_import_stmt(Parser* parser, NodeList* decls) {
+int parse_import_stmt(Parser* parser, Node* program, Node* current_module) {
     // Expect identifier or string after 'import'
     Token       import_token = parser->current;
     const char* module_name;
@@ -291,61 +268,58 @@ int parse_import_stmt(Parser* parser, NodeList* decls) {
         return 0;
     }
 
-    // For library imports, track as direct import and set source_module
-    // For relative imports, declarations stay in the same module (source_module = NULL)
-    char* source_module_name = NULL;
+    // For library imports, track as direct import
     if (!is_relative) {
-        // Library import: track as direct import
         add_direct_import(parser, module_name, module_length);
-
-        // Create source module name string
-        source_module_name = malloc(module_length + 1);
-        if (source_module_name) {
-            memcpy(source_module_name, module_name, module_length);
-            source_module_name[module_length] = '\0';
-        }
     }
 
-    // Merge declarations from imported file into current program
+    // Handle the imported AST based on import type
     if (import_ast && import_ast->type == NODE_PROGRAM) {
-        for (int i = 0; i < import_ast->as.program.decls.count; i++) {
-            Node* decl = import_ast->as.program.decls.nodes[i];
-
-            // For library imports, set source_module on declarations that don't already have one
-            // (declarations that already have source_module are from transitive library imports)
-            if (!is_relative && decl) {
-                // Check if this declaration already has a source_module (from a transitive import)
-                char* existing_module = NULL;
-                switch (decl->type) {
-                case NODE_FUNC_DECL:
-                    existing_module = decl->as.func_decl.source_module;
-                    break;
-                case NODE_STRUCT_DECL:
-                    existing_module = decl->as.struct_decl.source_module;
-                    break;
-                case NODE_ENUM_DECL:
-                    existing_module = decl->as.enum_decl.source_module;
-                    break;
-                case NODE_VAR_DECL:
-                    existing_module = decl->as.var_decl.source_module;
-                    break;
-                default:
-                    break;
-                }
-
-                // Only set source_module if not already set (preserve transitive import info)
-                if (!existing_module) {
-                    set_decl_source_module(decl, source_module_name);
+        if (is_relative) {
+            // Relative import: merge only the "main" module's declarations into current_module
+            // Keep library modules (non-main) as separate modules in the program
+            for (int m = 0; m < import_ast->as.program.modules.count; m++) {
+                Node* imported_module = import_ast->as.program.modules.nodes[m];
+                if (imported_module && imported_module->type == NODE_MODULE) {
+                    if (strcmp(imported_module->as.module.name, "main") == 0) {
+                        // Merge main module's declarations into current module
+                        for (int i = 0; i < imported_module->as.module.decls.count; i++) {
+                            Node* decl = imported_module->as.module.decls.nodes[i];
+                            nodelist_push(&current_module->as.module.decls, decl);
+                        }
+                        // Clear to prevent double-free
+                        imported_module->as.module.decls.count = 0;
+                    } else {
+                        // Keep library modules as separate modules
+                        nodelist_push(&program->as.program.modules, imported_module);
+                    }
                 }
             }
-
-            nodelist_push(decls, decl);
+            // Clear to prevent double-free (only main was freed, others moved)
+            import_ast->as.program.modules.count = 0;
+        } else {
+            // Library import: move modules from imported AST to program
+            // The first module (main) of the library becomes a module named after the import
+            for (int m = 0; m < import_ast->as.program.modules.count; m++) {
+                Node* imported_module = import_ast->as.program.modules.nodes[m];
+                if (imported_module && imported_module->type == NODE_MODULE) {
+                    // Rename "main" module to the library name
+                    if (strcmp(imported_module->as.module.name, "main") == 0) {
+                        free(imported_module->as.module.name);
+                        imported_module->as.module.name = malloc(module_length + 1);
+                        if (imported_module->as.module.name) {
+                            memcpy(imported_module->as.module.name, module_name, module_length);
+                            imported_module->as.module.name[module_length] = '\0';
+                            imported_module->as.module.name_length         = (int)module_length;
+                        }
+                    }
+                    nodelist_push(&program->as.program.modules, imported_module);
+                }
+            }
+            // Clear to prevent double-free
+            import_ast->as.program.modules.count = 0;
         }
-        // Don't free the individual declaration nodes, just the program wrapper
-        import_ast->as.program.decls.count = 0; // Prevent double-free
     }
-
-    free(source_module_name);
 
     node_free(import_ast);
     return 1;
