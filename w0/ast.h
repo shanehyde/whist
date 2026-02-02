@@ -149,6 +149,7 @@ struct Node {
             int   length;
             int   is_ref;      // Set by checker: 1 if object is a struct reference
             char* struct_name; // Set by checker if this is a method access (NULL otherwise)
+            char* module_name; // Set by checker for module-qualified access (e.g., "std")
         } member;
 
         // Assignment

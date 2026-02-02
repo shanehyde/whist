@@ -69,6 +69,7 @@ void node_free(Node* node) {
         node_free(node->as.member.object);
         free(node->as.member.name);
         free(node->as.member.struct_name);
+        free(node->as.member.module_name);
         break;
     case NODE_ASSIGN:
         node_free(node->as.assign.target);

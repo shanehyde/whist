@@ -65,4 +65,9 @@ Symbol* checker_lookup(Checker* checker, const char* name);
 Symbol* checker_lookup_any(Checker* checker, const char* name); // Ignores module visibility
 Symbol* checker_lookup_local(Checker* checker, const char* name);
 
+// Module-qualified access
+int     is_imported_module(Checker* checker, const char* name);
+Symbol* checker_lookup_in_module(Checker* checker, const char* module_name,
+                                 const char* symbol_name);
+
 #endif

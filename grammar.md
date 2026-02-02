@@ -39,8 +39,8 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 
 Import statements load declarations from external Whist source files. There are two forms:
 
-- **Module import:** `import std;` resolves the module name from the `lib/` directory (e.g., `lib/std.w`).
-- **Relative import:** `import "./path/to/file.w";` or `import "../file.w";` resolves the path relative to the importing file's directory. String imports must start with `./` or `../`.
+- **Module import:** `import std;` resolves the module name from the `lib/` directory (e.g., `lib/std.w`). Symbols from module imports must be accessed with module qualification: `std.print("hello")`. Unqualified access is an error.
+- **Relative import:** `import "./path/to/file.w";` or `import "../file.w";` resolves the path relative to the importing file's directory. String imports must start with `./` or `../`. Symbols from relative imports are merged into the current module and accessed without qualification.
 
 ### Function Declaration
 
