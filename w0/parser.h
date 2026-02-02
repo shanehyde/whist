@@ -11,6 +11,19 @@ typedef struct {
     int   had_error;
     int   panic_mode;
     char  error_msg[256];
+
+    // Source file path for resolving imports
+    const char* source_path;
+
+    // Imported source buffers (kept alive for AST string references)
+    char** imported_sources;
+    int    imported_sources_count;
+    int    imported_sources_capacity;
+
+    // Imported module names (to prevent duplicate imports)
+    char** imported_modules;
+    int    imported_modules_count;
+    int    imported_modules_capacity;
 } Parser;
 
 // Precedence levels for binary operators
@@ -29,6 +42,8 @@ typedef enum {
 } Precedence;
 
 void  parser_init(Parser* parser, const char* source);
+void  parser_init_with_path(Parser* parser, const char* source, const char* source_path);
+void  parser_free(Parser* parser);
 Node* parser_parse(Parser* parser);
 
 #endif
