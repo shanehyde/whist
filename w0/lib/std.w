@@ -1,6 +1,6 @@
 // Standard library for Whist
 
-extern stdio {
+private extern stdio {
     func printf(fmt:string, s: string): void;
 }
 
