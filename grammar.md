@@ -34,10 +34,13 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 ### Import Statement
 
 ```bnf
-<import-stmt> ::= 'import' <identifier> ';'
+<import-stmt> ::= 'import' ( <identifier> | <string-literal> ) ';'
 ```
 
-Import statements load declarations from external Whist source files. The imported module is resolved from the `lib/` directory relative to the current working directory. For example, `import std;` loads and parses `lib/std.w`, and all declarations from that file become available in the importing file.
+Import statements load declarations from external Whist source files. There are two forms:
+
+- **Module import:** `import std;` resolves the module name from the `lib/` directory (e.g., `lib/std.w`).
+- **Relative import:** `import "./path/to/file.w";` or `import "../file.w";` resolves the path relative to the importing file's directory. String imports must start with `./` or `../`.
 
 ### Function Declaration
 

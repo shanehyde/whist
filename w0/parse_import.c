@@ -87,10 +87,39 @@ static int file_exists(const char* path) {
     return 0;
 }
 
+// Check if path is a relative import (starts with ./ or ../)
+static int is_relative_path(const char* path, size_t length) {
+    if (length >= 2 && path[0] == '.' && path[1] == '/') {
+        return 1;
+    }
+    if (length >= 3 && path[0] == '.' && path[1] == '.' && path[2] == '/') {
+        return 1;
+    }
+    return 0;
+}
+
 // Build path to imported module
-// Tries source-relative path first, then falls back to cwd-relative path
+// For relative paths (./ or ../), resolves relative to source file
+// For module names, tries source-relative lib/ first, then falls back to cwd-relative lib/
 static void build_import_path(Parser* parser, char* path, size_t path_size, const char* module_name,
-                              size_t module_length) {
+                              size_t module_length, int is_relative) {
+    if (is_relative) {
+        // Relative import: resolve relative to source file's directory
+        if (parser->source_path) {
+            char* path_copy = strdup(parser->source_path);
+            if (path_copy) {
+                char* dir = dirname(path_copy);
+                snprintf(path, path_size, "%s/%.*s", dir, (int)module_length, module_name);
+                free(path_copy);
+                return;
+            }
+        }
+        // Fallback if no source path: use path as-is relative to cwd
+        snprintf(path, path_size, "%.*s", (int)module_length, module_name);
+        return;
+    }
+
+    // Standard library import: try lib/ directories
     if (parser->source_path) {
         // Make a copy because dirname may modify its argument
         char* path_copy = strdup(parser->source_path);
@@ -109,24 +138,51 @@ static void build_import_path(Parser* parser, char* path, size_t path_size, cons
 }
 
 int parse_import_stmt(Parser* parser, NodeList* decls) {
-    // Expect identifier after 'import'
-    Token module_name = parser->current;
-    consume_token(parser, TOK_IDENT, "Expected module name after 'import'");
+    // Expect identifier or string after 'import'
+    Token       import_token = parser->current;
+    const char* module_name;
+    size_t      module_length;
+    int         is_relative = 0;
+
+    if (parser->current.type == TOK_STRING) {
+        // String import: "./path/to/file.w" or "../path/to/file.w"
+        advance_token(parser);
+        // Extract path without quotes
+        module_name   = import_token.start + 1;
+        module_length = import_token.length - 2;
+        is_relative   = is_relative_path(module_name, module_length);
+        if (!is_relative) {
+            parse_error(parser, "String imports must be relative paths (start with ./ or ../)");
+            return 0;
+        }
+    } else if (parser->current.type == TOK_IDENT) {
+        // Identifier import: std
+        advance_token(parser);
+        module_name   = import_token.start;
+        module_length = import_token.length;
+    } else {
+        parse_error(parser, "Expected module name or path after 'import'");
+        return 0;
+    }
 
     // Expect semicolon
     consume_token(parser, TOK_SEMICOLON, "Expected ';' after import statement");
 
+    // Build path to import file first (needed for duplicate detection with relative paths)
+    char path[1024];
+    build_import_path(parser, path, sizeof(path), module_name, module_length, is_relative);
+
+    // For relative imports, use the resolved path as the module key for duplicate detection
+    const char* module_key        = is_relative ? path : module_name;
+    size_t      module_key_length = is_relative ? strlen(path) : module_length;
+
     // Check if already imported (skip silently)
-    if (is_module_imported(parser, module_name.start, module_name.length)) {
+    if (is_module_imported(parser, module_key, module_key_length)) {
         return 1; // Already imported, nothing to do
     }
 
     // Mark as imported before parsing (prevents cycles)
-    add_imported_module(parser, module_name.start, module_name.length);
-
-    // Build path to import file
-    char path[1024];
-    build_import_path(parser, path, sizeof(path), module_name.start, module_name.length);
+    add_imported_module(parser, module_key, module_key_length);
 
     // Read the imported file
     char* source = read_file(path);
