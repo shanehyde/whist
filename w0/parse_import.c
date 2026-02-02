@@ -77,6 +77,51 @@ static void add_imported_source(Parser* parser, char* source) {
     parser->imported_sources[parser->imported_sources_count++] = source;
 }
 
+// Add a direct import (library module directly imported by current file)
+static void add_direct_import(Parser* parser, const char* module_name, size_t length) {
+    // Grow array if needed
+    if (parser->direct_imports_count >= parser->direct_imports_capacity) {
+        int new_capacity =
+            parser->direct_imports_capacity == 0 ? 8 : parser->direct_imports_capacity * 2;
+        char** new_array = realloc(parser->direct_imports, new_capacity * sizeof(char*));
+        if (!new_array)
+            return;
+        parser->direct_imports          = new_array;
+        parser->direct_imports_capacity = new_capacity;
+    }
+
+    // Copy the module name
+    char* name_copy = malloc(length + 1);
+    if (!name_copy)
+        return;
+    memcpy(name_copy, module_name, length);
+    name_copy[length]                                      = '\0';
+    parser->direct_imports[parser->direct_imports_count++] = name_copy;
+}
+
+// Set source_module on a declaration node
+static void set_decl_source_module(Node* decl, const char* source_module) {
+    if (!decl)
+        return;
+
+    switch (decl->type) {
+    case NODE_FUNC_DECL:
+        decl->as.func_decl.source_module = source_module ? strdup(source_module) : NULL;
+        break;
+    case NODE_STRUCT_DECL:
+        decl->as.struct_decl.source_module = source_module ? strdup(source_module) : NULL;
+        break;
+    case NODE_ENUM_DECL:
+        decl->as.enum_decl.source_module = source_module ? strdup(source_module) : NULL;
+        break;
+    case NODE_VAR_DECL:
+        decl->as.var_decl.source_module = source_module ? strdup(source_module) : NULL;
+        break;
+    default:
+        break;
+    }
+}
+
 // Check if file exists
 static int file_exists(const char* path) {
     FILE* f = fopen(path, "r");
@@ -176,9 +221,15 @@ int parse_import_stmt(Parser* parser, NodeList* decls) {
     const char* module_key        = is_relative ? path : module_name;
     size_t      module_key_length = is_relative ? strlen(path) : module_length;
 
-    // Check if already imported (skip silently)
+    // Check if already imported
     if (is_module_imported(parser, module_key, module_key_length)) {
-        return 1; // Already imported, nothing to do
+        // Module already imported - but still track as direct import if it's a library import
+        // This allows this file to access the module's symbols even if a dependency imported it
+        // first
+        if (!is_relative) {
+            add_direct_import(parser, module_name, module_length);
+        }
+        return 1; // Already imported, nothing more to do
     }
 
     // Mark as imported before parsing (prevents cycles)
@@ -225,20 +276,76 @@ int parse_import_stmt(Parser* parser, NodeList* decls) {
     import_parser.imported_modules       = NULL;
     import_parser.imported_modules_count = 0;
 
+    // Free sub-parser's direct_imports (not needed - each file tracks its own imports via
+    // source_file)
+    for (int i = 0; i < import_parser.direct_imports_count; i++) {
+        free(import_parser.direct_imports[i]);
+    }
+    free(import_parser.direct_imports);
+    import_parser.direct_imports       = NULL;
+    import_parser.direct_imports_count = 0;
+
     if (import_parser.had_error) {
         fprintf(stderr, "Failed to parse imported file: %s\n", path);
         node_free(import_ast);
         return 0;
     }
 
+    // For library imports, track as direct import and set source_module
+    // For relative imports, declarations stay in the same module (source_module = NULL)
+    char* source_module_name = NULL;
+    if (!is_relative) {
+        // Library import: track as direct import
+        add_direct_import(parser, module_name, module_length);
+
+        // Create source module name string
+        source_module_name = malloc(module_length + 1);
+        if (source_module_name) {
+            memcpy(source_module_name, module_name, module_length);
+            source_module_name[module_length] = '\0';
+        }
+    }
+
     // Merge declarations from imported file into current program
     if (import_ast && import_ast->type == NODE_PROGRAM) {
         for (int i = 0; i < import_ast->as.program.decls.count; i++) {
-            nodelist_push(decls, import_ast->as.program.decls.nodes[i]);
+            Node* decl = import_ast->as.program.decls.nodes[i];
+
+            // For library imports, set source_module on declarations that don't already have one
+            // (declarations that already have source_module are from transitive library imports)
+            if (!is_relative && decl) {
+                // Check if this declaration already has a source_module (from a transitive import)
+                char* existing_module = NULL;
+                switch (decl->type) {
+                case NODE_FUNC_DECL:
+                    existing_module = decl->as.func_decl.source_module;
+                    break;
+                case NODE_STRUCT_DECL:
+                    existing_module = decl->as.struct_decl.source_module;
+                    break;
+                case NODE_ENUM_DECL:
+                    existing_module = decl->as.enum_decl.source_module;
+                    break;
+                case NODE_VAR_DECL:
+                    existing_module = decl->as.var_decl.source_module;
+                    break;
+                default:
+                    break;
+                }
+
+                // Only set source_module if not already set (preserve transitive import info)
+                if (!existing_module) {
+                    set_decl_source_module(decl, source_module_name);
+                }
+            }
+
+            nodelist_push(decls, decl);
         }
         // Don't free the individual declaration nodes, just the program wrapper
         import_ast->as.program.decls.count = 0; // Prevent double-free
     }
+
+    free(source_module_name);
 
     node_free(import_ast);
     return 1;

@@ -1,6 +1,8 @@
 #include <stdlib.h>
+#include <string.h>
 
 #include "parse_enum_decl.h"
+#include "parser.h"
 #include "parser_util.h"
 
 Node* parse_type(Parser* parser);
@@ -112,6 +114,20 @@ Node* parse_func_decl(Parser* parser, int is_public) {
 
     consume_token(parser, TOK_LBRACE, "Expected '{' before function body");
     fdn->body = parse_block(parser);
+
+    // Copy current file's direct imports to accessible_modules
+    // This determines which library modules this function can access
+    fdn->accessible_modules_count = parser->direct_imports_count;
+    if (parser->direct_imports_count > 0) {
+        fdn->accessible_modules = malloc(parser->direct_imports_count * sizeof(char*));
+        if (fdn->accessible_modules) {
+            for (int i = 0; i < parser->direct_imports_count; i++) {
+                fdn->accessible_modules[i] = strdup(parser->direct_imports[i]);
+            }
+        }
+    } else {
+        fdn->accessible_modules = NULL;
+    }
 
     return node;
 }

@@ -21,7 +21,8 @@ struct Symbol {
     Type*      type;
     int        is_const;
     int        is_public;
-    Symbol*    next; // Hash chain
+    char*      source_module; // NULL = same module, else external module name
+    Symbol*    next;          // Hash chain
 };
 
 struct Scope {
@@ -36,9 +37,18 @@ struct Checker {
     int    in_loop;             // Are we inside a loop?
     int    error_count;
     char   error_msg[256];
+
+    // Library modules directly imported by the root file (for global scope)
+    char** direct_imports;
+    int    direct_imports_count;
+
+    // Library modules accessible from the current function (NULL = use direct_imports)
+    char** current_accessible_modules;
+    int    current_accessible_modules_count;
 };
 
 void checker_init(Checker* checker);
+void checker_set_direct_imports(Checker* checker, char** direct_imports, int count);
 void checker_free(Checker* checker);
 
 int checker_check(Checker* checker, Node* ast);
@@ -47,8 +57,9 @@ int checker_check(Checker* checker, Node* ast);
 void    checker_push_scope(Checker* checker);
 void    checker_pop_scope(Checker* checker);
 Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type* type,
-                       int is_const, int is_public);
+                       int is_const, int is_public, const char* source_module);
 Symbol* checker_lookup(Checker* checker, const char* name);
+Symbol* checker_lookup_any(Checker* checker, const char* name); // Ignores module visibility
 Symbol* checker_lookup_local(Checker* checker, const char* name);
 
 #endif

@@ -58,12 +58,14 @@ static int compile_and_run(const char* source_path, int argc, char** argv) {
     // Type check
     Checker checker;
     checker_init(&checker);
+    checker_set_direct_imports(&checker, parser.direct_imports, parser.direct_imports_count);
     int ok = checker_check(&checker, ast);
     checker_free(&checker);
 
     if (!ok) {
         fprintf(stderr, "Type check failed\n");
         node_free(ast);
+        parser_free(&parser);
         free(source);
         return 1;
     }
@@ -265,6 +267,8 @@ int main(int argc, char** argv) {
         if (!parse_only) {
             Checker checker;
             checker_init(&checker);
+            checker_set_direct_imports(&checker, parser.direct_imports,
+                                       parser.direct_imports_count);
             int ok = checker_check(&checker, ast);
             checker_free(&checker);
 

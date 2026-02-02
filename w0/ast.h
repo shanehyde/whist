@@ -68,6 +68,11 @@ typedef struct {
     NodeList params;
     Node*    return_type;
     Node*    body;
+    char*    source_module; // NULL = same module, else external module name
+
+    // Library modules accessible from this function's body
+    char** accessible_modules;
+    int    accessible_modules_count;
 } func_decl_node;
 
 typedef struct {
@@ -77,6 +82,7 @@ typedef struct {
     Node* type;
     Node* init;
     int   is_const;
+    char* source_module; // NULL = same module, else external module name
 } var_decl_node;
 
 struct Node {
@@ -242,6 +248,7 @@ struct Node {
             char*    name;
             int      name_length;
             NodeList fields;
+            char*    source_module; // NULL = same module, else external module name
         } struct_decl;
 
         // Field
@@ -256,7 +263,8 @@ struct Node {
             int      is_public;
             char*    name;
             int      name_length;
-            NodeList values; // list of ident nodes
+            NodeList values;        // list of ident nodes
+            char*    source_module; // NULL = same module, else external module name
         } enum_decl;
 
         struct {
