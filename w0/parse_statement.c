@@ -12,33 +12,33 @@
 #include "parser_util.h"
 
 Node* parse_statement(Parser* parser) {
-    if (match(parser, TOK_VAR)) {
+    if (match_token(parser, TOK_VAR)) {
         return parse_var_decl(parser, 0, 0);
     }
-    if (match(parser, TOK_CONST)) {
+    if (match_token(parser, TOK_CONST)) {
         return parse_var_decl(parser, 1, 0);
     }
-    if (match(parser, TOK_IF)) {
+    if (match_token(parser, TOK_IF)) {
         return parse_if_stmt(parser);
     }
-    if (match(parser, TOK_WHILE)) {
+    if (match_token(parser, TOK_WHILE)) {
         return parse_while_stmt(parser);
     }
-    if (match(parser, TOK_FOR)) {
+    if (match_token(parser, TOK_FOR)) {
         return parse_for_stmt(parser);
     }
-    if (match(parser, TOK_FOREACH)) {
+    if (match_token(parser, TOK_FOREACH)) {
         return parse_foreach_stmt(parser);
     }
-    if (match(parser, TOK_RETURN)) {
+    if (match_token(parser, TOK_RETURN)) {
         return parse_return_stmt(parser);
     }
-    if (match(parser, TOK_DEFER)) {
+    if (match_token(parser, TOK_DEFER)) {
         return parse_defer_stmt(parser);
     }
-    if (match(parser, TOK_BREAK)) {
+    if (match_token(parser, TOK_BREAK)) {
         Token token = parser->previous;
-        consume(parser, TOK_SEMICOLON, "Expected ';' after 'break'");
+        consume_token(parser, TOK_SEMICOLON, "Expected ';' after 'break'");
         Node* node = node_new(NODE_BREAK, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");
@@ -46,9 +46,9 @@ Node* parse_statement(Parser* parser) {
         }
         return node;
     }
-    if (match(parser, TOK_CONTINUE)) {
+    if (match_token(parser, TOK_CONTINUE)) {
         Token token = parser->previous;
-        consume(parser, TOK_SEMICOLON, "Expected ';' after 'continue'");
+        consume_token(parser, TOK_SEMICOLON, "Expected ';' after 'continue'");
         Node* node = node_new(NODE_CONTINUE, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");
@@ -56,13 +56,13 @@ Node* parse_statement(Parser* parser) {
         }
         return node;
     }
-    if (match(parser, TOK_LBRACE)) {
+    if (match_token(parser, TOK_LBRACE)) {
         return parse_block(parser);
     }
 
     // Expression statement
     Node* expr = parse_expression(parser);
-    consume(parser, TOK_SEMICOLON, "Expected ';' after expression");
+    consume_token(parser, TOK_SEMICOLON, "Expected ';' after expression");
 
     Node* node = node_new(NODE_EXPR_STMT, expr ? expr->line : 0, expr ? expr->column : 0);
     if (!node) {

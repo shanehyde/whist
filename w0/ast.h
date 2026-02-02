@@ -211,6 +211,7 @@ struct Node {
             int   var_name_length;
             Node* start;
             Node* end;
+            Node* step;
             Node* body;
         } foreach_stmt;
 

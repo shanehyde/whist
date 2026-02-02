@@ -6,7 +6,7 @@
 
 Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
     Token name = parser->current;
-    consume(parser, TOK_IDENT, "Expected variable name");
+    consume_token(parser, TOK_IDENT, "Expected variable name");
 
     Node* node = node_new(NODE_VAR_DECL, name.line, name.column);
     if (!node) {
@@ -27,15 +27,15 @@ Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
     vdn->init        = NULL;
 
     // Optional type annotation
-    if (match(parser, TOK_COLON)) {
+    if (match_token(parser, TOK_COLON)) {
         vdn->type = parse_type(parser);
     }
 
     // Optional initializer
-    if (match(parser, TOK_EQ)) {
+    if (match_token(parser, TOK_EQ)) {
         vdn->init = parse_expression(parser);
     }
 
-    consume(parser, TOK_SEMICOLON, "Expected ';' after variable declaration");
+    consume_token(parser, TOK_SEMICOLON, "Expected ';' after variable declaration");
     return node;
 }

@@ -6,11 +6,11 @@ Node* parse_block(Parser* parser);
 
 Node* parse_while_stmt(Parser* parser) {
     Token token = parser->previous;
-    consume(parser, TOK_LPAREN, "Expected '(' after 'while'");
+    consume_token(parser, TOK_LPAREN, "Expected '(' after 'while'");
     Node* cond = parse_expression(parser);
-    consume(parser, TOK_RPAREN, "Expected ')' after condition");
+    consume_token(parser, TOK_RPAREN, "Expected ')' after condition");
 
-    consume(parser, TOK_LBRACE, "Expected '{' after while condition");
+    consume_token(parser, TOK_LBRACE, "Expected '{' after while condition");
     Node* body = parse_block(parser);
 
     Node* node = node_new(NODE_WHILE, token.line, token.column);

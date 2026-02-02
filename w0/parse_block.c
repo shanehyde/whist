@@ -11,7 +11,7 @@ Node* parse_block(Parser* parser) {
     }
     nodelist_init(&block->as.block.stmts);
 
-    while (!check(parser, TOK_RBRACE) && !check(parser, TOK_EOF)) {
+    while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
         Node* stmt = parse_statement(parser);
         if (stmt)
             nodelist_push(&block->as.block.stmts, stmt);
@@ -19,6 +19,6 @@ Node* parse_block(Parser* parser) {
             synchronize(parser);
     }
 
-    consume(parser, TOK_RBRACE, "Expected '}' after block");
+    consume_token(parser, TOK_RBRACE, "Expected '}' after block");
     return block;
 }

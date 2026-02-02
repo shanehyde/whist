@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-void advance(Parser* parser) {
+void advance_token(Parser* parser) {
     parser->previous = parser->current;
 
     for (;;) {
@@ -22,14 +22,14 @@ void advance(Parser* parser) {
     }
 }
 
-int check(Parser* parser, TokenType type) {
+int check_token(Parser* parser, TokenType type) {
     return parser->current.type == type;
 }
 
-int match(Parser* parser, TokenType type) {
-    if (!check(parser, type))
+int match_token(Parser* parser, TokenType type) {
+    if (!check_token(parser, type))
         return 0;
-    advance(parser);
+    advance_token(parser);
     return 1;
 }
 
@@ -57,9 +57,9 @@ void parse_error(Parser* parser, const char* message) {
     parse_error_at(parser, &parser->current, message);
 }
 
-void consume(Parser* parser, TokenType type, const char* message) {
+void consume_token(Parser* parser, TokenType type, const char* message) {
     if (parser->current.type == type) {
-        advance(parser);
+        advance_token(parser);
         return;
     }
     parse_error(parser, message);
@@ -70,7 +70,7 @@ void synchronize(Parser* parser) {
 
     // Always advance at least once to ensure progress and prevent infinite loops
     if (parser->current.type != TOK_EOF) {
-        advance(parser);
+        advance_token(parser);
     }
 
     while (parser->current.type != TOK_EOF) {
@@ -91,7 +91,7 @@ void synchronize(Parser* parser) {
         default:
             break;
         }
-        advance(parser);
+        advance_token(parser);
     }
 }
 

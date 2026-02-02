@@ -4,12 +4,12 @@
 #include "parser_util.h"
 
 static Node* parse_postfix(Parser* parser) {
-    Node* expr = parse_primary(parser);
+    Node* expr = parse_primary_expression(parser);
     if (!expr)
         return NULL;
 
     for (;;) {
-        if (match(parser, TOK_LPAREN)) {
+        if (match_token(parser, TOK_LPAREN)) {
             // Function call
             Node* call = node_new(NODE_CALL, expr->line, expr->column);
             if (!call) {
@@ -19,16 +19,16 @@ static Node* parse_postfix(Parser* parser) {
             call->as.call.func = expr;
             nodelist_init(&call->as.call.args);
 
-            if (!check(parser, TOK_RPAREN)) {
+            if (!check_token(parser, TOK_RPAREN)) {
                 do {
                     Node* arg = parse_expression(parser);
                     if (arg)
                         nodelist_push(&call->as.call.args, arg);
-                } while (match(parser, TOK_COMMA));
+                } while (match_token(parser, TOK_COMMA));
             }
-            consume(parser, TOK_RPAREN, "Expected ')' after arguments");
+            consume_token(parser, TOK_RPAREN, "Expected ')' after arguments");
             expr = call;
-        } else if (match(parser, TOK_LBRACKET)) {
+        } else if (match_token(parser, TOK_LBRACKET)) {
             // Index
             Node* index = node_new(NODE_INDEX, expr->line, expr->column);
             if (!index) {
@@ -37,12 +37,12 @@ static Node* parse_postfix(Parser* parser) {
             }
             index->as.index.object = expr;
             index->as.index.index  = parse_expression(parser);
-            consume(parser, TOK_RBRACKET, "Expected ']' after index");
+            consume_token(parser, TOK_RBRACKET, "Expected ']' after index");
             expr = index;
-        } else if (match(parser, TOK_DOT)) {
+        } else if (match_token(parser, TOK_DOT)) {
             // Member access
             Token name = parser->current;
-            consume(parser, TOK_IDENT, "Expected member name after '.'");
+            consume_token(parser, TOK_IDENT, "Expected member name after '.'");
             Node* member = node_new(NODE_MEMBER, expr->line, expr->column);
             if (!member) {
                 parse_error(parser, "Out of memory");
@@ -57,7 +57,7 @@ static Node* parse_postfix(Parser* parser) {
             member->as.member.length = name.length;
             member->as.member.is_ref = 0; // Set by checker
             expr                     = member;
-        } else if (match(parser, TOK_PLUS_PLUS) || match(parser, TOK_MINUS_MINUS)) {
+        } else if (match_token(parser, TOK_PLUS_PLUS) || match_token(parser, TOK_MINUS_MINUS)) {
             // Postfix increment/decrement
             TokenType op    = parser->previous.type;
             Node*     unary = node_new(NODE_UNARY, expr->line, expr->column);
@@ -78,8 +78,9 @@ static Node* parse_postfix(Parser* parser) {
 }
 
 static Node* parse_unary(Parser* parser) {
-    if (match(parser, TOK_BANG) || match(parser, TOK_MINUS) || match(parser, TOK_TILDE) ||
-        match(parser, TOK_PLUS_PLUS) || match(parser, TOK_MINUS_MINUS)) {
+    if (match_token(parser, TOK_BANG) || match_token(parser, TOK_MINUS) ||
+        match_token(parser, TOK_TILDE) || match_token(parser, TOK_PLUS_PLUS) ||
+        match_token(parser, TOK_MINUS_MINUS)) {
         Token op      = parser->previous;
         Node* operand = parse_unary(parser);
         Node* node    = node_new(NODE_UNARY, op.line, op.column);
@@ -149,7 +150,7 @@ static Node* parse_binary(Parser* parser, Precedence min_prec) {
     while (get_precedence(parser->current.type) >= min_prec &&
            get_precedence(parser->current.type) != PREC_NONE) {
         Token op = parser->current;
-        advance(parser);
+        advance_token(parser);
         Precedence prec  = get_precedence(op.type);
         Node*      right = parse_binary(parser, prec + 1);
 
@@ -188,15 +189,15 @@ static int is_assign_op(TokenType type) {
     }
 }
 
-static Node* parse_assignment(Parser* parser) {
+Node* parse_expression(Parser* parser) {
     Node* expr = parse_binary(parser, PREC_OR);
     if (!expr)
         return NULL;
 
     if (is_assign_op(parser->current.type)) {
         Token op = parser->current;
-        advance(parser);
-        Node* value = parse_assignment(parser); // Right associative
+        advance_token(parser);
+        Node* value = parse_expression(parser); // Right associative
 
         Node* assign = node_new(NODE_ASSIGN, op.line, op.column);
         if (!assign) {
@@ -210,8 +211,4 @@ static Node* parse_assignment(Parser* parser) {
     }
 
     return expr;
-}
-
-Node* parse_expression(Parser* parser) {
-    return parse_assignment(parser);
 }

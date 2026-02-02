@@ -111,6 +111,7 @@ void node_free(Node* node) {
         free(node->as.foreach_stmt.var_name);
         node_free(node->as.foreach_stmt.start);
         node_free(node->as.foreach_stmt.end);
+        node_free(node->as.foreach_stmt.step);
         node_free(node->as.foreach_stmt.body);
         break;
     case NODE_RETURN:

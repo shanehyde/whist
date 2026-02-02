@@ -596,9 +596,11 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         // Generate: for (int64_t var = start; var < end; var++) {
         emit(gen, "for (int64_t %s = ", node->as.foreach_stmt.var_name);
         emit_expr(gen, node->as.foreach_stmt.start);
-        emit(gen, "; %s < ", node->as.foreach_stmt.var_name);
+        emit(gen, "; %s <= ", node->as.foreach_stmt.var_name);
         emit_expr(gen, node->as.foreach_stmt.end);
-        emit(gen, "; %s++) {\n", node->as.foreach_stmt.var_name);
+        emit(gen, "; %s += ", node->as.foreach_stmt.var_name);
+        emit_expr(gen, node->as.foreach_stmt.step);
+        emit(gen, ") {\n");
         gen->indent++;
         if (node->as.foreach_stmt.body->type == NODE_BLOCK) {
             for (int i = 0; i < node->as.foreach_stmt.body->as.block.stmts.count; i++) {
