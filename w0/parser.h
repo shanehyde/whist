@@ -46,9 +46,26 @@ typedef enum {
     PREC_FACTOR     = 12, // * / %
 } Precedence;
 
+// Maximum recursion depth to prevent stack overflow
+#define MAX_PARSE_DEPTH 256
+
+// Current recursion depth for expression parsing
+extern int parse_depth;
+
+// Parser lifecycle
 void  parser_init(Parser* parser, const char* source);
 void  parser_init_with_path(Parser* parser, const char* source, const char* source_path);
 void  parser_free(Parser* parser);
 Node* parser_parse(Parser* parser);
+
+// Parser utilities (used by other modules)
+void  advance_token(Parser* parser);
+int   check_token(Parser* parser, TokenType type);
+int   match_token(Parser* parser, TokenType type);
+void  parse_error_at(Parser* parser, Token* token, const char* message);
+void  parse_error(Parser* parser, const char* message);
+void  consume_token(Parser* parser, TokenType type, const char* message);
+void  synchronize(Parser* parser);
+char* copy_token_string(Token* token);
 
 #endif
