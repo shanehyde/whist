@@ -11,6 +11,44 @@ Node* parse_type(Parser* parser) {
         return NULL;
     }
 
+    // Tuple type: (T1, T2, ...)
+    if (match_token(parser, TOK_LPAREN)) {
+        Node* node = node_new(NODE_TUPLE_TYPE, token.line, token.column);
+        if (!node) {
+            parse_error(parser, "Out of memory");
+            return NULL;
+        }
+        nodelist_init(&node->as.tuple_type.elem_types);
+
+        // Parse first type
+        Node* first_type = parse_type(parser);
+        if (!first_type) {
+            node_free(node);
+            return NULL;
+        }
+        nodelist_push(&node->as.tuple_type.elem_types, first_type);
+
+        // Require at least one comma (i.e., at least 2 elements for a tuple)
+        if (!check_token(parser, TOK_COMMA)) {
+            parse_error(parser, "Tuple type requires at least 2 elements");
+            node_free(node);
+            return NULL;
+        }
+
+        // Parse remaining types
+        while (match_token(parser, TOK_COMMA)) {
+            Node* elem_type = parse_type(parser);
+            if (!elem_type) {
+                node_free(node);
+                return NULL;
+            }
+            nodelist_push(&node->as.tuple_type.elem_types, elem_type);
+        }
+
+        consume_token(parser, TOK_RPAREN, "Expected ')' after tuple type");
+        return node;
+    }
+
     // Array type [n]type
     if (match_token(parser, TOK_LBRACKET)) {
         Node* size = NULL;

@@ -77,7 +77,10 @@ Import statements load declarations from external Whist source files. There are 
 
 ```bnf
 <var-decl> ::= ( 'var' | 'const' ) <identifier> [ ':' <type> ] [ '=' <expression> ] ';'
+            | 'var' '(' <identifier> { ',' <identifier> } ')' '=' <expression> ';'
 ```
+
+**Tuple destructuring:** `var (a, b) = expr;` unpacks a tuple into individual variables. The number of identifiers must match the tuple's arity.
 
 ---
 
@@ -87,7 +90,10 @@ Import statements load declarations from external Whist source files. There are 
 <type> ::= <identifier>
         | '*' <type>
         | '[' [ <expression> ] ']' <type>
+        | '(' <type> ',' <type> { ',' <type> } ')'
 ```
+
+**Tuple types:** `(T1, T2)` or `(T1, T2, T3, ...)` represent fixed-size heterogeneous collections. Tuples must have at least two elements.
 
 ---
 
@@ -208,6 +214,7 @@ Import statements load declarations from external Whist source files. There are 
                 | <enum-value-access>
                 | '(' <expression> ')'
                 | <struct-init>
+                | <tuple-literal>
 
 <enum-value-access> ::= <identifier> '::' <identifier>
 
@@ -216,7 +223,11 @@ Import statements load declarations from external Whist source files. There are 
 <field-init-list> ::= <field-init> { ',' <field-init> } [ ',' ]
 
 <field-init> ::= <identifier> ':' <expression>
+
+<tuple-literal> ::= '(' <expression> ',' <expression> { ',' <expression> } ')'
 ```
+
+**Tuple literals:** `(1, "hello")` creates a tuple value. Tuples must have at least two elements. Access elements by index: `t[0]`, `t[1]`.
 
 ---
 

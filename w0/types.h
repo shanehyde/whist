@@ -22,6 +22,7 @@ typedef enum {
     TYPE_STRUCT,
     TYPE_ENUM,
     TYPE_FUNC,
+    TYPE_TUPLE,
     TYPE_NULL,  // null reference type
     TYPE_ERROR, // Used for error recovery
 } TypeKind;
@@ -73,6 +74,12 @@ struct Type {
             int    param_count;
             Type*  return_type;
         } func;
+
+        // Tuple
+        struct {
+            Type** elem_types;
+            int    elem_count;
+        } tuple;
     } as;
 };
 
@@ -103,6 +110,7 @@ Type* type_array(Type* elem, int size);
 Type* type_struct(const char* name);
 Type* type_enum(const char* name);
 Type* type_func(Type** params, int param_count, Type* return_type);
+Type* type_tuple(Type** elems, int count);
 
 void        type_free(Type* type);
 int         type_equals(Type* a, Type* b);

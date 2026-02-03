@@ -17,6 +17,10 @@ typedef struct {
     int         defer_capacity;      // Capacity of defer stack
     Node*       current_return_type; // Return type of current function (for __ret variable)
     const char* current_module;      // Current module name (NULL for "main")
+    // Tuple typedef tracking
+    Type** tuple_types; // Array of unique tuple types
+    int    tuple_type_count;
+    int    tuple_type_capacity;
 } CodeGen;
 
 void codegen_init(CodeGen* gen, FILE* out);

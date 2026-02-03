@@ -224,9 +224,48 @@ Node* parse_primary_expression(Parser* parser) {
     }
 
     if (match_token(parser, TOK_LPAREN)) {
-        Node* expr = parse_expression(parser);
+        Node* first = parse_expression(parser);
+        if (!first) {
+            return NULL;
+        }
+
+        // Check for comma - if present, this is a tuple literal
+        if (match_token(parser, TOK_COMMA)) {
+            // Tuple literal: (e1, e2, ...)
+            Node* node = node_new(NODE_TUPLE_LIT, token.line, token.column);
+            if (!node) {
+                parse_error(parser, "Out of memory");
+                node_free(first);
+                return NULL;
+            }
+            nodelist_init(&node->as.tuple_lit.elements);
+            nodelist_push(&node->as.tuple_lit.elements, first);
+
+            // Parse second element (required after comma)
+            Node* elem = parse_expression(parser);
+            if (!elem) {
+                node_free(node);
+                return NULL;
+            }
+            nodelist_push(&node->as.tuple_lit.elements, elem);
+
+            // Parse remaining elements
+            while (match_token(parser, TOK_COMMA)) {
+                elem = parse_expression(parser);
+                if (!elem) {
+                    node_free(node);
+                    return NULL;
+                }
+                nodelist_push(&node->as.tuple_lit.elements, elem);
+            }
+
+            consume_token(parser, TOK_RPAREN, "Expected ')' after tuple elements");
+            return node;
+        }
+
+        // Regular parenthesized expression
         consume_token(parser, TOK_RPAREN, "Expected ')' after expression");
-        return expr;
+        return first;
     }
 
     if (match_token(parser, TOK_LBRACE)) {

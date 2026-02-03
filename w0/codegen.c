@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "types.h"
+
 static void emit_indent(CodeGen* gen) {
     for (int i = 0; i < gen->indent; i++) {
         fprintf(gen->out, "    ");
@@ -17,11 +19,14 @@ static void emit(CodeGen* gen, const char* fmt, ...) {
     va_end(args);
 }
 
-static void emit_type(CodeGen* gen, Node* type_node);
-static void emit_expr(CodeGen* gen, Node* node);
-static void emit_stmt(CodeGen* gen, Node* node);
-static void emit_decl(CodeGen* gen, Node* node);
-static void emit_struct_init(CodeGen* gen, Node* node);
+static void  emit_type(CodeGen* gen, Node* type_node);
+static void  emit_resolved_type(CodeGen* gen, Type* type);
+static void  emit_expr(CodeGen* gen, Node* node);
+static void  emit_stmt(CodeGen* gen, Node* node);
+static void  emit_decl(CodeGen* gen, Node* node);
+static void  emit_struct_init(CodeGen* gen, Node* node);
+static int   tuple_types_equal(Type* a, Type* b);
+static Type* type_from_node(Node* type_node);
 
 static void defer_push(CodeGen* gen, Node* node) {
     if (gen->defer_count >= gen->defer_capacity) {
@@ -109,6 +114,121 @@ static void emit_type(CodeGen* gen, Node* type_node) {
             emit(gen, "*");
         }
         break;
+    case NODE_TUPLE_TYPE: {
+        // Build a Type* and find the matching typedef
+        Type* tuple = type_from_node(type_node);
+        int   idx   = -1;
+        for (int i = 0; i < gen->tuple_type_count; i++) {
+            if (tuple_types_equal(gen->tuple_types[i], tuple)) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx >= 0) {
+            emit(gen, "__tuple_t%d", idx);
+        } else {
+            // Fallback to inline struct
+            emit(gen, "struct { ");
+            for (int i = 0; i < type_node->as.tuple_type.elem_types.count; i++) {
+                emit_type(gen, type_node->as.tuple_type.elem_types.nodes[i]);
+                emit(gen, " _%d; ", i);
+            }
+            emit(gen, "}");
+        }
+        break;
+    }
+    default:
+        emit(gen, "/* unknown type */");
+        break;
+    }
+}
+
+// Emit a resolved Type* (used for inferred types like tuples)
+static void emit_resolved_type(CodeGen* gen, Type* type) {
+    if (!type) {
+        emit(gen, "void");
+        return;
+    }
+
+    switch (type->kind) {
+    case TYPE_VOID:
+        emit(gen, "void");
+        break;
+    case TYPE_BOOL:
+        emit(gen, "bool");
+        break;
+    case TYPE_INT64:
+        emit(gen, "int64_t");
+        break;
+    case TYPE_INT8:
+        emit(gen, "int8_t");
+        break;
+    case TYPE_INT16:
+        emit(gen, "int16_t");
+        break;
+    case TYPE_INT32:
+        emit(gen, "int32_t");
+        break;
+    case TYPE_UINT64:
+        emit(gen, "uint64_t");
+        break;
+    case TYPE_UINT8:
+        emit(gen, "uint8_t");
+        break;
+    case TYPE_UINT16:
+        emit(gen, "uint16_t");
+        break;
+    case TYPE_UINT32:
+        emit(gen, "uint32_t");
+        break;
+    case TYPE_F32:
+        emit(gen, "float");
+        break;
+    case TYPE_F64:
+        emit(gen, "double");
+        break;
+    case TYPE_CHAR:
+        emit(gen, "char");
+        break;
+    case TYPE_STRING:
+        emit(gen, "const char*");
+        break;
+    case TYPE_ARRAY:
+        emit_resolved_type(gen, type->as.array.elem);
+        if (type->as.array.size >= 0) {
+            emit(gen, "[%d]", type->as.array.size);
+        } else {
+            emit(gen, "*");
+        }
+        break;
+    case TYPE_STRUCT:
+        emit(gen, "%s*", type->as.struc.name);
+        break;
+    case TYPE_ENUM:
+        emit(gen, "%s", type->as.enm.name);
+        break;
+    case TYPE_TUPLE: {
+        // Find the typedef index for this tuple type
+        int idx = -1;
+        for (int i = 0; i < gen->tuple_type_count; i++) {
+            if (tuple_types_equal(gen->tuple_types[i], type)) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx >= 0) {
+            emit(gen, "__tuple_t%d", idx);
+        } else {
+            // Fallback to inline struct (shouldn't happen if collection is correct)
+            emit(gen, "struct { ");
+            for (int i = 0; i < type->as.tuple.elem_count; i++) {
+                emit_resolved_type(gen, type->as.tuple.elem_types[i]);
+                emit(gen, " _%d; ", i);
+            }
+            emit(gen, "}");
+        }
+        break;
+    }
     default:
         emit(gen, "/* unknown type */");
         break;
@@ -364,9 +484,15 @@ static void emit_expr(CodeGen* gen, Node* node) {
 
     case NODE_INDEX:
         emit_expr(gen, node->as.index.object);
-        emit(gen, "[");
-        emit_expr(gen, node->as.index.index);
-        emit(gen, "]");
+        if (node->as.index.is_tuple_index) {
+            // Tuple indexing: obj._N
+            emit(gen, "._%ld", node->as.index.index->as.int_lit.value);
+        } else {
+            // Array/string indexing: obj[index]
+            emit(gen, "[");
+            emit_expr(gen, node->as.index.index);
+            emit(gen, "]");
+        }
         break;
 
     case NODE_MEMBER:
@@ -385,6 +511,17 @@ static void emit_expr(CodeGen* gen, Node* node) {
 
     case NODE_STRUCT_INIT:
         emit_struct_init(gen, node);
+        break;
+
+    case NODE_TUPLE_LIT:
+        // Tuple literal: (e1, e2, ...) -> {e1, e2, ...}
+        emit(gen, "{");
+        for (int i = 0; i < node->as.tuple_lit.elements.count; i++) {
+            if (i > 0)
+                emit(gen, ", ");
+            emit_expr(gen, node->as.tuple_lit.elements.nodes[i]);
+        }
+        emit(gen, "}");
         break;
 
     default:
@@ -421,6 +558,31 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         break;
 
     case NODE_VAR_DECL: {
+        // Handle destructuring: var (a, b) = tuple;
+        if (node->as.var_decl.destruct_count > 0) {
+            Type* tuple_type = (Type*)node->as.var_decl.destruct_tuple_type;
+
+            // Emit a temporary variable to hold the tuple value
+            emit_indent(gen);
+            emit_resolved_type(gen, tuple_type);
+            emit(gen, " __tuple%d = ", gen->temp_count);
+            emit_expr(gen, node->as.var_decl.init);
+            emit(gen, ";\n");
+            int temp_id = gen->temp_count++;
+
+            // Emit each destructured variable
+            for (int i = 0; i < node->as.var_decl.destruct_count; i++) {
+                emit_indent(gen);
+                if (node->as.var_decl.is_const) {
+                    emit(gen, "const ");
+                }
+                emit_resolved_type(gen, tuple_type->as.tuple.elem_types[i]);
+                emit(gen, " %s = __tuple%d._%d;\n", node->as.var_decl.destruct_names[i], temp_id,
+                     i);
+            }
+            break;
+        }
+
         emit_indent(gen);
         if (node->as.var_decl.is_const) {
             emit(gen, "const ");
@@ -452,6 +614,59 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 case NODE_CHAR_LIT:
                     emit(gen, "char %s", node->as.var_decl.name);
                     break;
+                case NODE_TUPLE_LIT: {
+                    // Build a tuple type from the literal's elements
+                    int    count = node->as.var_decl.init->as.tuple_lit.elements.count;
+                    Type** elems = malloc(count * sizeof(Type*));
+                    for (int i = 0; i < count; i++) {
+                        Node* elem = node->as.var_decl.init->as.tuple_lit.elements.nodes[i];
+                        switch (elem->type) {
+                        case NODE_INT_LIT:
+                            elems[i] = type_int64;
+                            break;
+                        case NODE_FLOAT_LIT:
+                            elems[i] = type_f32;
+                            break;
+                        case NODE_BOOL_LIT:
+                            elems[i] = type_bool;
+                            break;
+                        case NODE_STRING_LIT:
+                            elems[i] = type_string;
+                            break;
+                        case NODE_CHAR_LIT:
+                            elems[i] = type_char;
+                            break;
+                        case NODE_TUPLE_LIT:
+                            // Nested tuple - would need recursive handling
+                            elems[i] = type_int64; // Fallback
+                            break;
+                        default:
+                            elems[i] = type_int64; // Default
+                            break;
+                        }
+                    }
+                    Type* tuple = type_tuple(elems, count);
+                    // Find matching typedef
+                    int idx = -1;
+                    for (int i = 0; i < gen->tuple_type_count; i++) {
+                        if (tuple_types_equal(gen->tuple_types[i], tuple)) {
+                            idx = i;
+                            break;
+                        }
+                    }
+                    if (idx >= 0) {
+                        emit(gen, "__tuple_t%d %s", idx, node->as.var_decl.name);
+                    } else {
+                        // Fallback to inline struct
+                        emit(gen, "struct { ");
+                        for (int i = 0; i < count; i++) {
+                            emit_resolved_type(gen, elems[i]);
+                            emit(gen, " _%d; ", i);
+                        }
+                        emit(gen, "} %s", node->as.var_decl.name);
+                    }
+                    break;
+                }
                 default:
                     // Default to auto if we can't determine
                     emit(gen, "int64_t %s", node->as.var_decl.name);
@@ -830,6 +1045,294 @@ static void emit_decl(CodeGen* gen, Node* node) {
     }
 }
 
+// Check if two tuple types are structurally equal
+static int tuple_types_equal(Type* a, Type* b) {
+    if (a->as.tuple.elem_count != b->as.tuple.elem_count)
+        return 0;
+    for (int i = 0; i < a->as.tuple.elem_count; i++) {
+        if (!type_equals(a->as.tuple.elem_types[i], b->as.tuple.elem_types[i]))
+            return 0;
+    }
+    return 1;
+}
+
+// Register a tuple type and return its index (for typedef name)
+static int register_tuple_type(CodeGen* gen, Type* type) {
+    // Check if already registered
+    for (int i = 0; i < gen->tuple_type_count; i++) {
+        if (tuple_types_equal(gen->tuple_types[i], type))
+            return i;
+    }
+    // Add new
+    if (gen->tuple_type_count >= gen->tuple_type_capacity) {
+        int new_cap              = gen->tuple_type_capacity == 0 ? 8 : gen->tuple_type_capacity * 2;
+        gen->tuple_types         = realloc(gen->tuple_types, new_cap * sizeof(Type*));
+        gen->tuple_type_capacity = new_cap;
+    }
+    gen->tuple_types[gen->tuple_type_count] = type;
+    return gen->tuple_type_count++;
+}
+
+// Recursively register tuple types from a Type
+static void collect_tuple_types_from_type(CodeGen* gen, Type* type) {
+    if (!type)
+        return;
+    if (type->kind == TYPE_TUPLE) {
+        register_tuple_type(gen, type);
+        for (int i = 0; i < type->as.tuple.elem_count; i++) {
+            collect_tuple_types_from_type(gen, type->as.tuple.elem_types[i]);
+        }
+    } else if (type->kind == TYPE_ARRAY) {
+        collect_tuple_types_from_type(gen, type->as.array.elem);
+    }
+}
+
+// Collect tuple types from a type node
+static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node);
+
+// Build a Type* from a tuple literal (for type collection)
+static Type* type_from_tuple_lit(Node* node) {
+    int    count = node->as.tuple_lit.elements.count;
+    Type** elems = malloc(count * sizeof(Type*));
+    for (int i = 0; i < count; i++) {
+        Node* elem = node->as.tuple_lit.elements.nodes[i];
+        switch (elem->type) {
+        case NODE_INT_LIT:
+            elems[i] = type_int64;
+            break;
+        case NODE_FLOAT_LIT:
+            elems[i] = type_f32;
+            break;
+        case NODE_BOOL_LIT:
+            elems[i] = type_bool;
+            break;
+        case NODE_STRING_LIT:
+            elems[i] = type_string;
+            break;
+        case NODE_CHAR_LIT:
+            elems[i] = type_char;
+            break;
+        case NODE_TUPLE_LIT:
+            elems[i] = type_from_tuple_lit(elem);
+            break;
+        default:
+            elems[i] = type_int64; // Default
+            break;
+        }
+    }
+    return type_tuple(elems, count);
+}
+
+// Collect tuple types from an expression node
+static void collect_tuple_types_from_expr(CodeGen* gen, Node* node) {
+    if (!node)
+        return;
+    switch (node->type) {
+    case NODE_TUPLE_LIT: {
+        // Build and register the tuple type
+        Type* tuple = type_from_tuple_lit(node);
+        register_tuple_type(gen, tuple);
+        // Collect from nested tuples
+        for (int i = 0; i < node->as.tuple_lit.elements.count; i++) {
+            collect_tuple_types_from_expr(gen, node->as.tuple_lit.elements.nodes[i]);
+        }
+        break;
+    }
+    case NODE_BINARY:
+        collect_tuple_types_from_expr(gen, node->as.binary.left);
+        collect_tuple_types_from_expr(gen, node->as.binary.right);
+        break;
+    case NODE_UNARY:
+        collect_tuple_types_from_expr(gen, node->as.unary.operand);
+        break;
+    case NODE_CALL:
+        collect_tuple_types_from_expr(gen, node->as.call.func);
+        for (int i = 0; i < node->as.call.args.count; i++) {
+            collect_tuple_types_from_expr(gen, node->as.call.args.nodes[i]);
+        }
+        break;
+    case NODE_INDEX:
+        collect_tuple_types_from_expr(gen, node->as.index.object);
+        collect_tuple_types_from_expr(gen, node->as.index.index);
+        break;
+    case NODE_MEMBER:
+        collect_tuple_types_from_expr(gen, node->as.member.object);
+        break;
+    case NODE_ASSIGN:
+        collect_tuple_types_from_expr(gen, node->as.assign.target);
+        collect_tuple_types_from_expr(gen, node->as.assign.value);
+        break;
+    default:
+        break;
+    }
+}
+
+// Collect tuple types from a statement node
+static void collect_tuple_types_from_stmt(CodeGen* gen, Node* node) {
+    if (!node)
+        return;
+    switch (node->type) {
+    case NODE_VAR_DECL:
+        if (node->as.var_decl.type)
+            collect_tuple_types_from_node(gen, node->as.var_decl.type);
+        if (node->as.var_decl.init)
+            collect_tuple_types_from_expr(gen, node->as.var_decl.init);
+        // Also collect from destructuring type if present
+        if (node->as.var_decl.destruct_tuple_type) {
+            collect_tuple_types_from_type(gen, (Type*)node->as.var_decl.destruct_tuple_type);
+        }
+        break;
+    case NODE_EXPR_STMT:
+        collect_tuple_types_from_expr(gen, node->as.expr_stmt.expr);
+        break;
+    case NODE_BLOCK:
+        for (int i = 0; i < node->as.block.stmts.count; i++) {
+            collect_tuple_types_from_stmt(gen, node->as.block.stmts.nodes[i]);
+        }
+        break;
+    case NODE_IF:
+        collect_tuple_types_from_expr(gen, node->as.if_stmt.cond);
+        collect_tuple_types_from_stmt(gen, node->as.if_stmt.then_block);
+        if (node->as.if_stmt.else_block)
+            collect_tuple_types_from_stmt(gen, node->as.if_stmt.else_block);
+        break;
+    case NODE_WHILE:
+        collect_tuple_types_from_expr(gen, node->as.while_stmt.cond);
+        collect_tuple_types_from_stmt(gen, node->as.while_stmt.body);
+        break;
+    case NODE_FOR:
+        if (node->as.for_stmt.init)
+            collect_tuple_types_from_stmt(gen, node->as.for_stmt.init);
+        if (node->as.for_stmt.cond)
+            collect_tuple_types_from_expr(gen, node->as.for_stmt.cond);
+        if (node->as.for_stmt.post)
+            collect_tuple_types_from_expr(gen, node->as.for_stmt.post);
+        collect_tuple_types_from_stmt(gen, node->as.for_stmt.body);
+        break;
+    case NODE_RETURN:
+        if (node->as.return_stmt.value)
+            collect_tuple_types_from_expr(gen, node->as.return_stmt.value);
+        break;
+    case NODE_DEFER:
+        collect_tuple_types_from_stmt(gen, node->as.defer_stmt.stmt);
+        break;
+    default:
+        break;
+    }
+}
+
+// Build a Type* from a type node (for codegen purposes, simplified)
+static Type* type_from_node(Node* type_node) {
+    if (!type_node)
+        return type_void;
+
+    switch (type_node->type) {
+    case NODE_IDENT: {
+        const char* name = type_node->as.ident.name;
+        if (strcmp(name, "void") == 0)
+            return type_void;
+        if (strcmp(name, "bool") == 0)
+            return type_bool;
+        if (strcmp(name, "i64") == 0)
+            return type_int64;
+        if (strcmp(name, "i8") == 0)
+            return type_int8;
+        if (strcmp(name, "i16") == 0)
+            return type_int16;
+        if (strcmp(name, "i32") == 0)
+            return type_int32;
+        if (strcmp(name, "u64") == 0)
+            return type_uint64;
+        if (strcmp(name, "u8") == 0)
+            return type_uint8;
+        if (strcmp(name, "u16") == 0)
+            return type_uint16;
+        if (strcmp(name, "u32") == 0)
+            return type_uint32;
+        if (strcmp(name, "f32") == 0)
+            return type_f32;
+        if (strcmp(name, "f64") == 0)
+            return type_f64;
+        if (strcmp(name, "char") == 0)
+            return type_char;
+        if (strcmp(name, "string") == 0)
+            return type_string;
+        // User-defined type - return a struct type
+        return type_struct(name);
+    }
+    case NODE_INDEX: {
+        Type* elem = type_from_node(type_node->as.index.object);
+        int   size = -1;
+        if (type_node->as.index.index && type_node->as.index.index->type == NODE_INT_LIT) {
+            size = (int)type_node->as.index.index->as.int_lit.value;
+        }
+        return type_array(elem, size);
+    }
+    case NODE_TUPLE_TYPE: {
+        int    count = type_node->as.tuple_type.elem_types.count;
+        Type** elems = malloc(count * sizeof(Type*));
+        for (int i = 0; i < count; i++) {
+            elems[i] = type_from_node(type_node->as.tuple_type.elem_types.nodes[i]);
+        }
+        return type_tuple(elems, count);
+    }
+    default:
+        return type_error;
+    }
+}
+
+// Collect tuple types from a type node
+static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node) {
+    if (!type_node)
+        return;
+    if (type_node->type == NODE_TUPLE_TYPE) {
+        // Build a Type* and register it
+        Type* tuple = type_from_node(type_node);
+        register_tuple_type(gen, tuple);
+        // Recurse into element types
+        for (int i = 0; i < type_node->as.tuple_type.elem_types.count; i++) {
+            collect_tuple_types_from_node(gen, type_node->as.tuple_type.elem_types.nodes[i]);
+        }
+    } else if (type_node->type == NODE_INDEX) {
+        // Array type - recurse into element type
+        collect_tuple_types_from_node(gen, type_node->as.index.object);
+    }
+}
+
+// Collect all tuple types from a declaration
+static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
+    if (!decl)
+        return;
+    switch (decl->type) {
+    case NODE_FUNC_DECL:
+        if (decl->as.func_decl.return_type)
+            collect_tuple_types_from_node(gen, decl->as.func_decl.return_type);
+        for (int i = 0; i < decl->as.func_decl.params.count; i++) {
+            Node* param = decl->as.func_decl.params.nodes[i];
+            if (param->as.param.type)
+                collect_tuple_types_from_node(gen, param->as.param.type);
+        }
+        if (decl->as.func_decl.body)
+            collect_tuple_types_from_stmt(gen, decl->as.func_decl.body);
+        break;
+    case NODE_VAR_DECL:
+        if (decl->as.var_decl.type)
+            collect_tuple_types_from_node(gen, decl->as.var_decl.type);
+        if (decl->as.var_decl.init)
+            collect_tuple_types_from_expr(gen, decl->as.var_decl.init);
+        break;
+    case NODE_STRUCT_DECL:
+        for (int i = 0; i < decl->as.struct_decl.fields.count; i++) {
+            Node* field = decl->as.struct_decl.fields.nodes[i];
+            if (field->as.field.type)
+                collect_tuple_types_from_node(gen, field->as.field.type);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 void codegen_init(CodeGen* gen, FILE* out) {
     gen->out                 = out;
     gen->indent              = 0;
@@ -838,11 +1341,24 @@ void codegen_init(CodeGen* gen, FILE* out) {
     gen->defer_count         = 0;
     gen->defer_capacity      = 0;
     gen->current_return_type = NULL;
+    gen->tuple_types         = NULL;
+    gen->tuple_type_count    = 0;
+    gen->tuple_type_capacity = 0;
 }
 
 void codegen_emit(CodeGen* gen, Node* ast) {
     if (!ast || ast->type != NODE_PROGRAM)
         return;
+
+    // First pass: collect all tuple types
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            collect_tuple_types_from_decl(gen, mod->as.module.decls.nodes[i]);
+        }
+    }
 
     // Emit header
     emit(gen, "/* Generated by whist compiler */\n");
@@ -851,6 +1367,19 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit(gen, "#include <stddef.h>\n");
     emit(gen, "#include <stdlib.h>\n");
     emit(gen, "\n");
+
+    // Emit tuple typedefs
+    for (int i = 0; i < gen->tuple_type_count; i++) {
+        emit(gen, "typedef struct { ");
+        Type* tuple = gen->tuple_types[i];
+        for (int j = 0; j < tuple->as.tuple.elem_count; j++) {
+            emit_resolved_type(gen, tuple->as.tuple.elem_types[j]);
+            emit(gen, " _%d; ", j);
+        }
+        emit(gen, "} __tuple_t%d;\n", i);
+    }
+    if (gen->tuple_type_count > 0)
+        emit(gen, "\n");
 
     // Forward declarations for structs
     for (int m = 0; m < ast->as.program.modules.count; m++) {

@@ -89,6 +89,14 @@ void node_free(Node* node) {
         free(node->as.var_decl.name);
         node_free(node->as.var_decl.type);
         node_free(node->as.var_decl.init);
+        // Free destructuring names if present
+        if (node->as.var_decl.destruct_names) {
+            for (int i = 0; i < node->as.var_decl.destruct_count; i++) {
+                free(node->as.var_decl.destruct_names[i]);
+            }
+            free(node->as.var_decl.destruct_names);
+            free(node->as.var_decl.destruct_name_lens);
+        }
         break;
     case NODE_BLOCK:
         nodelist_free(&node->as.block.stmts);
@@ -143,6 +151,12 @@ void node_free(Node* node) {
     case NODE_ENUM_DECL:
         free(node->as.enum_decl.name);
         nodelist_free(&node->as.enum_decl.values);
+        break;
+    case NODE_TUPLE_TYPE:
+        nodelist_free(&node->as.tuple_type.elem_types);
+        break;
+    case NODE_TUPLE_LIT:
+        nodelist_free(&node->as.tuple_lit.elements);
         break;
     case NODE_PROGRAM:
         nodelist_free(&node->as.program.modules);

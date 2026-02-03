@@ -14,6 +14,54 @@ void check_statement(Checker* checker, Node* node) {
         break;
 
     case NODE_VAR_DECL: {
+        // Check if this is a destructuring declaration
+        if (node->as.var_decl.destruct_count > 0) {
+            // Destructuring: var (a, b) = tuple;
+            // Check for redefinitions
+            for (int i = 0; i < node->as.var_decl.destruct_count; i++) {
+                if (checker_lookup_local(checker, node->as.var_decl.destruct_names[i])) {
+                    check_error(checker, node->line, node->column, "Redefinition of '%s'",
+                                node->as.var_decl.destruct_names[i]);
+                    return;
+                }
+            }
+
+            // Initializer is required (parser enforces this)
+            Type* init_type = check_expression(checker, node->as.var_decl.init);
+
+            // Check that init is a tuple
+            if (init_type->kind != TYPE_TUPLE && init_type->kind != TYPE_ERROR) {
+                check_error(checker, node->line, node->column,
+                            "Destructuring requires a tuple, got '%s'", type_name(init_type));
+                return;
+            }
+
+            // Check arity matches
+            if (init_type->kind == TYPE_TUPLE &&
+                init_type->as.tuple.elem_count != node->as.var_decl.destruct_count) {
+                check_error(checker, node->line, node->column,
+                            "Destructuring pattern has %d variables, but tuple has %d elements",
+                            node->as.var_decl.destruct_count, init_type->as.tuple.elem_count);
+                return;
+            }
+
+            // Store the tuple type for codegen
+            if (init_type->kind == TYPE_TUPLE) {
+                node->as.var_decl.destruct_tuple_type = init_type;
+            }
+
+            // Define each variable
+            for (int i = 0; i < node->as.var_decl.destruct_count; i++) {
+                Type* elem_type =
+                    init_type->kind == TYPE_TUPLE ? init_type->as.tuple.elem_types[i] : type_error;
+                checker_define(checker, node->as.var_decl.destruct_names[i], SYM_VAR, elem_type,
+                               node->as.var_decl.is_const, node->as.var_decl.is_public,
+                               checker->current_module);
+            }
+            break;
+        }
+
+        // Normal variable declaration
         const char* name = node->as.var_decl.name;
 
         // Check for redefinition

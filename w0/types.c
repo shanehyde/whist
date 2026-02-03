@@ -110,6 +110,13 @@ Type* type_func(Type** params, int param_count, Type* return_type) {
     return type;
 }
 
+Type* type_tuple(Type** elems, int count) {
+    Type* type                = type_new(TYPE_TUPLE);
+    type->as.tuple.elem_types = elems;
+    type->as.tuple.elem_count = count;
+    return type;
+}
+
 void type_free(Type* type) {
     if (!type)
         return;
@@ -146,6 +153,9 @@ void type_free(Type* type) {
     case TYPE_FUNC:
         free(type->as.func.param_types);
         break;
+    case TYPE_TUPLE:
+        free(type->as.tuple.elem_types);
+        break;
     default:
         break;
     }
@@ -175,6 +185,15 @@ int type_equals(Type* a, Type* b) {
             return 0;
         for (int i = 0; i < a->as.func.param_count; i++) {
             if (!type_equals(a->as.func.param_types[i], b->as.func.param_types[i])) {
+                return 0;
+            }
+        }
+        return 1;
+    case TYPE_TUPLE:
+        if (a->as.tuple.elem_count != b->as.tuple.elem_count)
+            return 0;
+        for (int i = 0; i < a->as.tuple.elem_count; i++) {
+            if (!type_equals(a->as.tuple.elem_types[i], b->as.tuple.elem_types[i])) {
                 return 0;
             }
         }
@@ -288,6 +307,27 @@ const char* type_name(Type* type) {
         snprintf(type_name_buf, sizeof(type_name_buf), "func(...): %s",
                  type_name(type->as.func.return_type));
         return type_name_buf;
+    case TYPE_TUPLE: {
+        char* p   = type_name_buf;
+        char* end = type_name_buf + sizeof(type_name_buf) - 1;
+        *p++      = '(';
+        for (int i = 0; i < type->as.tuple.elem_count && p < end; i++) {
+            if (i > 0) {
+                if (p + 2 < end) {
+                    *p++ = ',';
+                    *p++ = ' ';
+                }
+            }
+            const char* elem_name = type_name(type->as.tuple.elem_types[i]);
+            while (*elem_name && p < end) {
+                *p++ = *elem_name++;
+            }
+        }
+        if (p < end)
+            *p++ = ')';
+        *p = '\0';
+        return type_name_buf;
+    }
     }
     return "<unknown>";
 }

@@ -43,6 +43,10 @@ typedef enum {
     NODE_EXTERN_MODULE,
     NODE_MODULE,
 
+    // Tuple types
+    NODE_TUPLE_TYPE, // (T1, T2, ...)
+    NODE_TUPLE_LIT,  // (e1, e2, ...)
+
     // Other
     NODE_PARAM,
     NODE_FIELD,
@@ -78,12 +82,18 @@ typedef struct {
 
 typedef struct {
     int   is_public;
-    char* name;
-    int   name_length;
+    char* name;        // NULL if destructuring
+    int   name_length; // 0 if destructuring
     Node* type;
     Node* init;
     int   is_const;
     char* source_module; // NULL = same module, else external module name
+
+    // Destructuring support: var (a, b) = tuple;
+    char** destruct_names; // NULL if not destructuring
+    int*   destruct_name_lens;
+    int    destruct_count;      // 0 if not destructuring
+    void*  destruct_tuple_type; // Type* set by checker for codegen (cast to void* to avoid dep)
 } var_decl_node;
 
 struct Node {
@@ -140,6 +150,7 @@ struct Node {
         struct {
             Node* object;
             Node* index;
+            int   is_tuple_index; // Set by checker if indexing a tuple
         } index;
 
         // Member access: obj.member
@@ -178,6 +189,16 @@ struct Node {
             char* value_name;
             int   value_name_length;
         } enum_value;
+
+        // Tuple type: (T1, T2, ...)
+        struct {
+            NodeList elem_types;
+        } tuple_type;
+
+        // Tuple literal: (e1, e2, ...)
+        struct {
+            NodeList elements;
+        } tuple_lit;
 
         // Expression statement
         struct {
