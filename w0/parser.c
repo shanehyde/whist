@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "vec.h"
+
 // ============================================================================
 // Parser Utilities
 // ============================================================================
@@ -1466,16 +1468,8 @@ static int is_module_imported(Parser* parser, const char* module_name, size_t le
 
 // Add a module name to the imported list
 static void add_imported_module(Parser* parser, const char* module_name, size_t length) {
-    // Grow array if needed
-    if (parser->imported_modules_count >= parser->imported_modules_capacity) {
-        int new_capacity =
-            parser->imported_modules_capacity == 0 ? 8 : parser->imported_modules_capacity * 2;
-        char** new_array = realloc(parser->imported_modules, new_capacity * sizeof(char*));
-        if (!new_array)
-            return;
-        parser->imported_modules          = new_array;
-        parser->imported_modules_capacity = new_capacity;
-    }
+    VEC_GROW(parser->imported_modules, parser->imported_modules_count,
+             parser->imported_modules_capacity);
 
     // Copy the module name
     char* name_copy = malloc(length + 1);
@@ -1488,31 +1482,14 @@ static void add_imported_module(Parser* parser, const char* module_name, size_t 
 
 // Add source buffer to parser's list (keeps it alive for AST references)
 static void add_imported_source(Parser* parser, char* source) {
-    // Grow array if needed
-    if (parser->imported_sources_count >= parser->imported_sources_capacity) {
-        int new_capacity =
-            parser->imported_sources_capacity == 0 ? 8 : parser->imported_sources_capacity * 2;
-        char** new_array = realloc(parser->imported_sources, new_capacity * sizeof(char*));
-        if (!new_array)
-            return;
-        parser->imported_sources          = new_array;
-        parser->imported_sources_capacity = new_capacity;
-    }
+    VEC_GROW(parser->imported_sources, parser->imported_sources_count,
+             parser->imported_sources_capacity);
     parser->imported_sources[parser->imported_sources_count++] = source;
 }
 
 // Add a direct import (library module directly imported by current file)
 static void add_direct_import(Parser* parser, const char* module_name, size_t length) {
-    // Grow array if needed
-    if (parser->direct_imports_count >= parser->direct_imports_capacity) {
-        int new_capacity =
-            parser->direct_imports_capacity == 0 ? 8 : parser->direct_imports_capacity * 2;
-        char** new_array = realloc(parser->direct_imports, new_capacity * sizeof(char*));
-        if (!new_array)
-            return;
-        parser->direct_imports          = new_array;
-        parser->direct_imports_capacity = new_capacity;
-    }
+    VEC_GROW(parser->direct_imports, parser->direct_imports_count, parser->direct_imports_capacity);
 
     // Copy the module name
     char* name_copy = malloc(length + 1);

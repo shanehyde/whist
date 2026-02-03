@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "vec.h"
+
 // Built-in type singletons
 static Type builtin_void   = {TYPE_VOID, {{NULL}}};
 static Type builtin_bool   = {TYPE_BOOL, {{NULL}}};
@@ -45,11 +47,7 @@ static int    allocated_count    = 0;
 static int    allocated_capacity = 0;
 
 static void track_type(Type* type) {
-    if (allocated_count >= allocated_capacity) {
-        int new_cap        = allocated_capacity == 0 ? 64 : allocated_capacity * 2;
-        allocated_types    = realloc(allocated_types, new_cap * sizeof(Type*));
-        allocated_capacity = new_cap;
-    }
+    VEC_GROW_N(allocated_types, allocated_count, allocated_capacity, 64);
     allocated_types[allocated_count++] = type;
 }
 
@@ -339,11 +337,7 @@ void typelist_init(TypeList* list) {
 }
 
 void typelist_push(TypeList* list, Type* type) {
-    if (list->count >= list->capacity) {
-        int new_cap    = list->capacity == 0 ? 8 : list->capacity * 2;
-        list->types    = realloc(list->types, new_cap * sizeof(Type*));
-        list->capacity = new_cap;
-    }
+    VEC_GROW(list->types, list->count, list->capacity);
     list->types[list->count++] = type;
 }
 

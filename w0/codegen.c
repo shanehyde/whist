@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "types.h"
+#include "vec.h"
 
 static void emit_indent(CodeGen* gen) {
     for (int i = 0; i < gen->indent; i++) {
@@ -33,11 +34,7 @@ static int   tuple_types_equal(Type* a, Type* b);
 static Type* type_from_node(Node* type_node);
 
 static void defer_push(CodeGen* gen, Node* node) {
-    if (gen->defer_count >= gen->defer_capacity) {
-        int new_cap         = gen->defer_capacity == 0 ? 8 : gen->defer_capacity * 2;
-        gen->defer_stack    = realloc(gen->defer_stack, new_cap * sizeof(Node*));
-        gen->defer_capacity = new_cap;
-    }
+    VEC_GROW(gen->defer_stack, gen->defer_count, gen->defer_capacity);
     gen->defer_stack[gen->defer_count++] = node;
 }
 
@@ -1117,11 +1114,7 @@ static int register_tuple_type(CodeGen* gen, Type* type) {
             return i;
     }
     // Add new
-    if (gen->tuple_type_count >= gen->tuple_type_capacity) {
-        int new_cap              = gen->tuple_type_capacity == 0 ? 8 : gen->tuple_type_capacity * 2;
-        gen->tuple_types         = realloc(gen->tuple_types, new_cap * sizeof(Type*));
-        gen->tuple_type_capacity = new_cap;
-    }
+    VEC_GROW(gen->tuple_types, gen->tuple_type_count, gen->tuple_type_capacity);
     gen->tuple_types[gen->tuple_type_count] = type;
     return gen->tuple_type_count++;
 }

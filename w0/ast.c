@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "vec.h"
+
 // ============================================================================
 // DestructPattern functions
 // ============================================================================
@@ -69,11 +71,7 @@ void nodelist_init(NodeList* list) {
 }
 
 void nodelist_push(NodeList* list, Node* node) {
-    if (list->count >= list->capacity) {
-        int new_cap    = list->capacity == 0 ? 8 : list->capacity * 2;
-        list->nodes    = realloc(list->nodes, new_cap * sizeof(Node*));
-        list->capacity = new_cap;
-    }
+    VEC_GROW(list->nodes, list->count, list->capacity);
     list->nodes[list->count++] = node;
 }
 
