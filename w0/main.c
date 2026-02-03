@@ -4,6 +4,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "alloc.h"
 #include "checker.h"
 #include "codegen.h"
 #include "lexer.h"
@@ -23,15 +24,9 @@ static char* read_file(const char* path) {
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    char* buffer = malloc(size + 1);
-    if (!buffer) {
-        fprintf(stderr, "Could not allocate memory for file\n");
-        fclose(file);
-        return NULL;
-    }
-
-    size_t read  = fread(buffer, 1, size, file);
-    buffer[read] = '\0';
+    char*  buffer = xmalloc(size + 1);
+    size_t read   = fread(buffer, 1, size, file);
+    buffer[read]  = '\0';
     fclose(file);
     return buffer;
 }
@@ -143,12 +138,7 @@ static int compile_and_run(const char* source_path, int argc, char** argv) {
         cmd_len += strlen(argv[i]) + 3; // space + quotes + arg
     }
 
-    char* run_cmd = malloc(cmd_len + 1);
-    if (!run_cmd) {
-        unlink(exe_path);
-        return 1;
-    }
-
+    char* run_cmd = xmalloc(cmd_len + 1);
     strcpy(run_cmd, exe_path);
     for (int i = 1; i < argc; i++) {
         strcat(run_cmd, " ");

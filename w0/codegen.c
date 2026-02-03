@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "alloc.h"
 #include "types.h"
 #include "vec.h"
 
@@ -672,7 +673,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 case NODE_TUPLE_LIT: {
                     // Build a tuple type from the literal's elements
                     int    count = node->as.var_decl.init->as.tuple_lit.elements.count;
-                    Type** elems = malloc(count * sizeof(Type*));
+                    Type** elems = xmalloc(count * sizeof(Type*));
                     for (int i = 0; i < count; i++) {
                         Node* elem = node->as.var_decl.init->as.tuple_lit.elements.nodes[i];
                         switch (elem->type) {
@@ -1125,7 +1126,7 @@ static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node);
 // Build a Type* from a tuple literal (for type collection)
 static Type* type_from_tuple_lit(Node* node) {
     int    count = node->as.tuple_lit.elements.count;
-    Type** elems = malloc(count * sizeof(Type*));
+    Type** elems = xmalloc(count * sizeof(Type*));
     for (int i = 0; i < count; i++) {
         Node* elem = node->as.tuple_lit.elements.nodes[i];
         switch (elem->type) {
@@ -1321,7 +1322,7 @@ static Type* type_from_node(Node* type_node) {
     }
     case NODE_TUPLE_TYPE: {
         int    count = type_node->as.tuple_type.elem_types.count;
-        Type** elems = malloc(count * sizeof(Type*));
+        Type** elems = xmalloc(count * sizeof(Type*));
         for (int i = 0; i < count; i++) {
             elems[i] = type_from_node(type_node->as.tuple_type.elem_types.nodes[i]);
         }

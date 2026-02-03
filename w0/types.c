@@ -66,7 +66,7 @@ void types_cleanup(void) {
 }
 
 Type* type_new(TypeKind kind) {
-    Type* type = calloc(1, sizeof(Type));
+    Type* type = xcalloc(1, sizeof(Type));
     type->kind = kind;
     track_type(type);
     return type;
@@ -81,7 +81,7 @@ Type* type_array(Type* elem, int size) {
 
 Type* type_struct(const char* name) {
     Type* type                     = type_new(TYPE_STRUCT);
-    type->as.struc.name            = strdup(name);
+    type->as.struc.name            = xstrdup(name);
     type->as.struc.field_names     = NULL;
     type->as.struc.field_types     = NULL;
     type->as.struc.field_count     = 0;
@@ -94,7 +94,7 @@ Type* type_struct(const char* name) {
 
 Type* type_enum(const char* name) {
     Type* type               = type_new(TYPE_ENUM);
-    type->as.enm.name        = strdup(name);
+    type->as.enm.name        = xstrdup(name);
     type->as.enm.value_names = NULL;
     type->as.enm.value_count = 0;
     return type;

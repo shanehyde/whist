@@ -6,10 +6,10 @@
 #ifndef VEC_H
 #define VEC_H
 
-#include <stdlib.h>
+#include "alloc.h"
 
 // Grow array capacity if needed (doubles capacity, starting at initial_cap)
-// All parameters must be lvalues.
+// All parameters must be lvalues. Uses xrealloc for checked allocation.
 //
 // Usage:
 //   VEC_GROW(list->nodes, list->count, list->capacity);
@@ -24,7 +24,7 @@
     do {                                                                                           \
         if ((count) >= (capacity)) {                                                               \
             int _new_cap = (capacity) == 0 ? (initial_cap) : (capacity) * 2;                       \
-            (array)      = realloc((array), (size_t)_new_cap * sizeof(*(array)));                  \
+            (array)      = xrealloc((array), (size_t)_new_cap * sizeof(*(array)));                 \
             (capacity)   = _new_cap;                                                               \
         }                                                                                          \
     } while (0)
