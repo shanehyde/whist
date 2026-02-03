@@ -38,11 +38,5 @@ func main(): i32 {
     a *= 3;
     a /= 2;
 
-    // Increment/decrement
-    a++;
-    b--;
-    ++a;
-    --b;
-
     return a;
 }

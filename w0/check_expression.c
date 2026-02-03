@@ -182,15 +182,6 @@ Type* check_expression(Checker* checker, Node* node) {
             }
             return operand;
 
-        case TOK_PLUS_PLUS:
-        case TOK_MINUS_MINUS:
-            if (!type_is_integer(operand)) {
-                check_error(checker, node->line, node->column,
-                            "Increment/decrement requires integer");
-                return type_error;
-            }
-            return operand;
-
         default:
             check_error(checker, node->line, node->column, "Unknown unary operator");
             return type_error;

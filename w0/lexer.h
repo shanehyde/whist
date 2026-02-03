@@ -56,27 +56,25 @@ typedef enum {
     TOK_GT,      // >
 
     // Multi-char operators
-    TOK_PLUS_EQ,     // +=
-    TOK_MINUS_EQ,    // -=
-    TOK_STAR_EQ,     // *=
-    TOK_SLASH_EQ,    // /=
-    TOK_PERCENT_EQ,  // %=
-    TOK_AMP_EQ,      // &=
-    TOK_PIPE_EQ,     // |=
-    TOK_CARET_EQ,    // ^=
-    TOK_EQ_EQ,       // ==
-    TOK_BANG_EQ,     // !=
-    TOK_LT_EQ,       // <=
-    TOK_GT_EQ,       // >=
-    TOK_AMP_AMP,     // &&
-    TOK_PIPE_PIPE,   // ||
-    TOK_LT_LT,       // <<
-    TOK_GT_GT,       // >>
-    TOK_LT_LT_EQ,    // <<=
-    TOK_GT_GT_EQ,    // >>=
-    TOK_PLUS_PLUS,   // ++
-    TOK_MINUS_MINUS, // --
-    TOK_ARROW,       // ->
+    TOK_PLUS_EQ,    // +=
+    TOK_MINUS_EQ,   // -=
+    TOK_STAR_EQ,    // *=
+    TOK_SLASH_EQ,   // /=
+    TOK_PERCENT_EQ, // %=
+    TOK_AMP_EQ,     // &=
+    TOK_PIPE_EQ,    // |=
+    TOK_CARET_EQ,   // ^=
+    TOK_EQ_EQ,      // ==
+    TOK_BANG_EQ,    // !=
+    TOK_LT_EQ,      // <=
+    TOK_GT_EQ,      // >=
+    TOK_AMP_AMP,    // &&
+    TOK_PIPE_PIPE,  // ||
+    TOK_LT_LT,      // <<
+    TOK_GT_GT,      // >>
+    TOK_LT_LT_EQ,   // <<=
+    TOK_GT_GT_EQ,   // >>=
+    TOK_ARROW,      // ->
 
     // Punctuation
     TOK_LPAREN,      // (

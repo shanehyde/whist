@@ -313,14 +313,12 @@ Token lexer_next(Lexer* lexer) {
     case '^':
         return make_token(lexer, match(lexer, '=') ? TOK_CARET_EQ : TOK_CARET);
     case '+':
-        if (match(lexer, '+'))
-            return make_token(lexer, TOK_PLUS_PLUS);
         if (match(lexer, '='))
             return make_token(lexer, TOK_PLUS_EQ);
         return make_token(lexer, TOK_PLUS);
     case '-':
-        if (match(lexer, '-'))
-            return make_token(lexer, TOK_MINUS_MINUS);
+        if (match(lexer, '>'))
+            return make_token(lexer, TOK_ARROW);
         if (match(lexer, '='))
             return make_token(lexer, TOK_MINUS_EQ);
         return make_token(lexer, TOK_MINUS);
@@ -485,10 +483,6 @@ const char* token_type_name(TokenType type) {
         return "LT_LT_EQ";
     case TOK_GT_GT_EQ:
         return "GT_GT_EQ";
-    case TOK_PLUS_PLUS:
-        return "PLUS_PLUS";
-    case TOK_MINUS_MINUS:
-        return "MINUS_MINUS";
     case TOK_ARROW:
         return "ARROW";
     case TOK_LPAREN:

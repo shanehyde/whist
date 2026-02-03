@@ -327,10 +327,6 @@ static const char* unary_op_str(TokenType op) {
         return "&";
     case TOK_STAR:
         return "*";
-    case TOK_PLUS_PLUS:
-        return "++";
-    case TOK_MINUS_MINUS:
-        return "--";
     default:
         return "?";
     }
@@ -449,15 +445,9 @@ static void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_UNARY:
-        if (node->as.unary.postfix) {
-            emit(gen, "(");
-            emit_expr(gen, node->as.unary.operand);
-            emit(gen, "%s)", unary_op_str(node->as.unary.op));
-        } else {
-            emit(gen, "(%s", unary_op_str(node->as.unary.op));
-            emit_expr(gen, node->as.unary.operand);
-            emit(gen, ")");
-        }
+        emit(gen, "(%s", unary_op_str(node->as.unary.op));
+        emit_expr(gen, node->as.unary.operand);
+        emit(gen, ")");
         break;
 
     case NODE_CALL: {
