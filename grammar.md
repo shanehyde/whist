@@ -77,10 +77,15 @@ Import statements load declarations from external Whist source files. There are 
 
 ```bnf
 <var-decl> ::= ( 'var' | 'const' ) <identifier> [ ':' <type> ] [ '=' <expression> ] ';'
-            | 'var' '(' <identifier> { ',' <identifier> } ')' '=' <expression> ';'
+            | 'var' <destruct-pattern> '=' <expression> ';'
+
+<destruct-pattern> ::= '(' <destruct-element> ',' <destruct-element> { ',' <destruct-element> } ')'
+
+<destruct-element> ::= <identifier>
+                    | <destruct-pattern>
 ```
 
-**Tuple destructuring:** `var (a, b) = expr;` unpacks a tuple into individual variables. The number of identifiers must match the tuple's arity.
+**Tuple destructuring:** `var (a, b) = expr;` unpacks a tuple into individual variables. The number of elements must match the tuple's arity. Nested patterns are supported: `var (x, (y, z)) = (1, (2, 3));` unpacks nested tuples.
 
 ---
 

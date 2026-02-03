@@ -12,6 +12,10 @@ static void emit_indent(CodeGen* gen) {
     }
 }
 
+// Forward declaration for recursive pattern emit
+static void emit_destruct_pattern(CodeGen* gen, DestructPattern* pattern, const char* temp_prefix,
+                                  int is_const);
+
 static void emit(CodeGen* gen, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -554,6 +558,57 @@ static void emit_struct_init(CodeGen* gen, Node* node) {
     emit(gen, "}");
 }
 
+// Emit code to extract values from a tuple into variables (recursive for nested patterns)
+// temp_prefix is the expression to access the current tuple (e.g., "__tuple0" or "__tuple0._1")
+static void emit_destruct_pattern(CodeGen* gen, DestructPattern* pattern, const char* temp_prefix,
+                                  int is_const) {
+    if (!pattern)
+        return;
+
+    Type* type = (Type*)pattern->resolved_type;
+
+    switch (pattern->kind) {
+    case PATTERN_IDENT:
+        // Emit: [const] Type name = temp_prefix;
+        emit_indent(gen);
+        if (is_const) {
+            emit(gen, "const ");
+        }
+        emit_resolved_type(gen, type);
+        emit(gen, " %s = %s;\n", pattern->as.ident.name, temp_prefix);
+        break;
+
+    case PATTERN_TUPLE:
+        // For tuple patterns, we need to access each element
+        // The tuple value is at temp_prefix, elements are temp_prefix._0, temp_prefix._1, etc.
+        for (int i = 0; i < pattern->as.tuple.count; i++) {
+            DestructPattern* elem = pattern->as.tuple.elements[i];
+
+            // Build the accessor string for this element
+            char accessor[256];
+            snprintf(accessor, sizeof(accessor), "%s._%d", temp_prefix, i);
+
+            if (elem->kind == PATTERN_TUPLE) {
+                // For nested tuple patterns, first create a temp variable for this level
+                Type* elem_type = (Type*)elem->resolved_type;
+                emit_indent(gen);
+                emit_resolved_type(gen, elem_type);
+                int temp_id = gen->temp_count++;
+                emit(gen, " __tuple%d = %s;\n", temp_id, accessor);
+
+                // Then recursively emit the nested pattern
+                char nested_prefix[64];
+                snprintf(nested_prefix, sizeof(nested_prefix), "__tuple%d", temp_id);
+                emit_destruct_pattern(gen, elem, nested_prefix, is_const);
+            } else {
+                // Simple identifier - directly assign from accessor
+                emit_destruct_pattern(gen, elem, accessor, is_const);
+            }
+        }
+        break;
+    }
+}
+
 static void emit_stmt(CodeGen* gen, Node* node) {
     if (!node)
         return;
@@ -566,28 +621,23 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         break;
 
     case NODE_VAR_DECL: {
-        // Handle destructuring: var (a, b) = tuple;
-        if (node->as.var_decl.destruct_count > 0) {
-            Type* tuple_type = (Type*)node->as.var_decl.destruct_tuple_type;
+        // Handle destructuring: var (a, b) = tuple; or var (a, (b, c)) = nested;
+        DestructPattern* pattern = node->as.var_decl.destruct_pattern;
+        if (pattern) {
+            Type* tuple_type = (Type*)pattern->resolved_type;
 
             // Emit a temporary variable to hold the tuple value
             emit_indent(gen);
             emit_resolved_type(gen, tuple_type);
-            emit(gen, " __tuple%d = ", gen->temp_count);
+            int temp_id = gen->temp_count++;
+            emit(gen, " __tuple%d = ", temp_id);
             emit_expr(gen, node->as.var_decl.init);
             emit(gen, ";\n");
-            int temp_id = gen->temp_count++;
 
-            // Emit each destructured variable
-            for (int i = 0; i < node->as.var_decl.destruct_count; i++) {
-                emit_indent(gen);
-                if (node->as.var_decl.is_const) {
-                    emit(gen, "const ");
-                }
-                emit_resolved_type(gen, tuple_type->as.tuple.elem_types[i]);
-                emit(gen, " %s = __tuple%d._%d;\n", node->as.var_decl.destruct_names[i], temp_id,
-                     i);
-            }
+            // Recursively emit the destructured variables
+            char temp_prefix[64];
+            snprintf(temp_prefix, sizeof(temp_prefix), "__tuple%d", temp_id);
+            emit_destruct_pattern(gen, pattern, temp_prefix, node->as.var_decl.is_const);
             break;
         }
 
@@ -1076,20 +1126,6 @@ static int register_tuple_type(CodeGen* gen, Type* type) {
     return gen->tuple_type_count++;
 }
 
-// Recursively register tuple types from a Type
-static void collect_tuple_types_from_type(CodeGen* gen, Type* type) {
-    if (!type)
-        return;
-    if (type->kind == TYPE_TUPLE) {
-        register_tuple_type(gen, type);
-        for (int i = 0; i < type->as.tuple.elem_count; i++) {
-            collect_tuple_types_from_type(gen, type->as.tuple.elem_types[i]);
-        }
-    } else if (type->kind == TYPE_ARRAY) {
-        collect_tuple_types_from_type(gen, type->as.array.elem);
-    }
-}
-
 // Collect tuple types from a type node
 static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node);
 
@@ -1170,6 +1206,25 @@ static void collect_tuple_types_from_expr(CodeGen* gen, Node* node) {
     }
 }
 
+// Collect tuple types from a destructuring pattern (recursive)
+static void collect_tuple_types_from_pattern(CodeGen* gen, DestructPattern* pattern) {
+    if (!pattern)
+        return;
+
+    // Collect the resolved type if it's a tuple
+    Type* type = (Type*)pattern->resolved_type;
+    if (type && type->kind == TYPE_TUPLE) {
+        register_tuple_type(gen, type);
+    }
+
+    // Recurse into nested patterns
+    if (pattern->kind == PATTERN_TUPLE) {
+        for (int i = 0; i < pattern->as.tuple.count; i++) {
+            collect_tuple_types_from_pattern(gen, pattern->as.tuple.elements[i]);
+        }
+    }
+}
+
 // Collect tuple types from a statement node
 static void collect_tuple_types_from_stmt(CodeGen* gen, Node* node) {
     if (!node)
@@ -1180,9 +1235,9 @@ static void collect_tuple_types_from_stmt(CodeGen* gen, Node* node) {
             collect_tuple_types_from_node(gen, node->as.var_decl.type);
         if (node->as.var_decl.init)
             collect_tuple_types_from_expr(gen, node->as.var_decl.init);
-        // Also collect from destructuring type if present
-        if (node->as.var_decl.destruct_tuple_type) {
-            collect_tuple_types_from_type(gen, (Type*)node->as.var_decl.destruct_tuple_type);
+        // Also collect from destructuring pattern if present
+        if (node->as.var_decl.destruct_pattern) {
+            collect_tuple_types_from_pattern(gen, node->as.var_decl.destruct_pattern);
         }
         break;
     case NODE_EXPR_STMT:

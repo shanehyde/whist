@@ -3,6 +3,37 @@
 
 #include "lexer.h"
 
+// Forward declaration for destructuring patterns
+typedef struct DestructPattern DestructPattern;
+
+// Destructuring pattern kinds
+typedef enum {
+    PATTERN_IDENT, // Single identifier: x
+    PATTERN_TUPLE  // Nested tuple: (a, b) or (a, (b, c))
+} PatternKind;
+
+// Recursive destructuring pattern for tuple unpacking
+struct DestructPattern {
+    PatternKind kind;
+    union {
+        struct {
+            char* name;
+            int   name_length;
+        } ident;
+        struct {
+            DestructPattern** elements;
+            int               count;
+        } tuple;
+    } as;
+    void* resolved_type; // Type* set by checker (cast to void* to avoid dep)
+};
+
+// Pattern memory management
+DestructPattern* pattern_new_ident(const char* name, int length);
+DestructPattern* pattern_new_tuple(int capacity);
+void             pattern_tuple_push(DestructPattern* pattern, DestructPattern* elem);
+void             pattern_free(DestructPattern* pattern);
+
 typedef enum {
     // Expressions
     NODE_INT_LIT,
@@ -89,11 +120,8 @@ typedef struct {
     int   is_const;
     char* source_module; // NULL = same module, else external module name
 
-    // Destructuring support: var (a, b) = tuple;
-    char** destruct_names; // NULL if not destructuring
-    int*   destruct_name_lens;
-    int    destruct_count;      // 0 if not destructuring
-    void*  destruct_tuple_type; // Type* set by checker for codegen (cast to void* to avoid dep)
+    // Destructuring support: var (a, b) = tuple; or var (a, (b, c)) = nested;
+    DestructPattern* destruct_pattern; // NULL if not destructuring
 } var_decl_node;
 
 struct Node {

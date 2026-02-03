@@ -14,6 +14,14 @@ static Type* check_expression(Checker* checker, Node* node);
 static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
 static Type* resolve_type(Checker* checker, Node* type_node);
 
+// Forward declarations for destructuring pattern checking
+static int  check_destruct_pattern_redefinitions(Checker* checker, DestructPattern* pattern,
+                                                 int line, int col);
+static int  check_destruct_pattern_against_type(Checker* checker, DestructPattern* pattern,
+                                                Type* type, int line, int col);
+static void define_destruct_pattern_vars(Checker* checker, DestructPattern* pattern, Type* type,
+                                         int is_const, int is_public);
+
 // =============================================================================
 // Utility functions
 // =============================================================================
@@ -821,6 +829,118 @@ static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type) 
 }
 
 // =============================================================================
+// Destructuring pattern checking
+// =============================================================================
+
+// Check for redefinitions in a destructuring pattern (recursive)
+// Returns 1 if error found, 0 otherwise
+static int check_destruct_pattern_redefinitions(Checker* checker, DestructPattern* pattern,
+                                                int line, int col) {
+    if (!pattern)
+        return 0;
+
+    switch (pattern->kind) {
+    case PATTERN_IDENT:
+        if (checker_lookup_local(checker, pattern->as.ident.name)) {
+            check_error(checker, line, col, "Redefinition of '%s'", pattern->as.ident.name);
+            return 1;
+        }
+        return 0;
+
+    case PATTERN_TUPLE:
+        for (int i = 0; i < pattern->as.tuple.count; i++) {
+            if (check_destruct_pattern_redefinitions(checker, pattern->as.tuple.elements[i], line,
+                                                     col)) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    return 0;
+}
+
+// Check that a destructuring pattern matches a type (recursive)
+// Also sets resolved_type on each pattern node
+// Returns 1 if error found, 0 otherwise
+static int check_destruct_pattern_against_type(Checker* checker, DestructPattern* pattern,
+                                               Type* type, int line, int col) {
+    if (!pattern || !type)
+        return 1;
+
+    pattern->resolved_type = type;
+
+    switch (pattern->kind) {
+    case PATTERN_IDENT:
+        // Any type is valid for an identifier pattern
+        return 0;
+
+    case PATTERN_TUPLE:
+        // Pattern must match a tuple type
+        if (type->kind != TYPE_TUPLE && type->kind != TYPE_ERROR) {
+            check_error(checker, line, col, "Nested pattern requires a tuple, got '%s'",
+                        type_name(type));
+            return 1;
+        }
+
+        if (type->kind == TYPE_ERROR) {
+            // Propagate error type to all children
+            for (int i = 0; i < pattern->as.tuple.count; i++) {
+                check_destruct_pattern_against_type(checker, pattern->as.tuple.elements[i],
+                                                    type_error, line, col);
+            }
+            return 0;
+        }
+
+        // Check arity
+        if (type->as.tuple.elem_count != pattern->as.tuple.count) {
+            check_error(checker, line, col,
+                        "Nested pattern has %d elements, but tuple has %d elements",
+                        pattern->as.tuple.count, type->as.tuple.elem_count);
+            return 1;
+        }
+
+        // Recursively check each element
+        for (int i = 0; i < pattern->as.tuple.count; i++) {
+            if (check_destruct_pattern_against_type(checker, pattern->as.tuple.elements[i],
+                                                    type->as.tuple.elem_types[i], line, col)) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+    return 0;
+}
+
+// Define variables for all identifiers in a destructuring pattern (recursive)
+static void define_destruct_pattern_vars(Checker* checker, DestructPattern* pattern, Type* type,
+                                         int is_const, int is_public) {
+    if (!pattern)
+        return;
+
+    switch (pattern->kind) {
+    case PATTERN_IDENT:
+        checker_define(checker, pattern->as.ident.name, SYM_VAR, type, is_const, is_public,
+                       checker->current_module);
+        break;
+
+    case PATTERN_TUPLE:
+        if (type->kind == TYPE_TUPLE) {
+            for (int i = 0; i < pattern->as.tuple.count; i++) {
+                define_destruct_pattern_vars(checker, pattern->as.tuple.elements[i],
+                                             type->as.tuple.elem_types[i], is_const, is_public);
+            }
+        } else {
+            // Error type - propagate to all children
+            for (int i = 0; i < pattern->as.tuple.count; i++) {
+                define_destruct_pattern_vars(checker, pattern->as.tuple.elements[i], type_error,
+                                             is_const, is_public);
+            }
+        }
+        break;
+    }
+}
+
+// =============================================================================
 // Statement checking
 // =============================================================================
 
@@ -835,49 +955,27 @@ static void check_statement(Checker* checker, Node* node) {
 
     case NODE_VAR_DECL: {
         // Check if this is a destructuring declaration
-        if (node->as.var_decl.destruct_count > 0) {
-            // Destructuring: var (a, b) = tuple;
+        DestructPattern* pattern = node->as.var_decl.destruct_pattern;
+        if (pattern) {
+            // Destructuring: var (a, b) = tuple; or var (a, (b, c)) = nested;
+
             // Check for redefinitions
-            for (int i = 0; i < node->as.var_decl.destruct_count; i++) {
-                if (checker_lookup_local(checker, node->as.var_decl.destruct_names[i])) {
-                    check_error(checker, node->line, node->column, "Redefinition of '%s'",
-                                node->as.var_decl.destruct_names[i]);
-                    return;
-                }
+            if (check_destruct_pattern_redefinitions(checker, pattern, node->line, node->column)) {
+                return;
             }
 
             // Initializer is required (parser enforces this)
             Type* init_type = check_expression(checker, node->as.var_decl.init);
 
-            // Check that init is a tuple
-            if (init_type->kind != TYPE_TUPLE && init_type->kind != TYPE_ERROR) {
-                check_error(checker, node->line, node->column,
-                            "Destructuring requires a tuple, got '%s'", type_name(init_type));
+            // Check pattern against initializer type
+            if (check_destruct_pattern_against_type(checker, pattern, init_type, node->line,
+                                                    node->column)) {
                 return;
             }
 
-            // Check arity matches
-            if (init_type->kind == TYPE_TUPLE &&
-                init_type->as.tuple.elem_count != node->as.var_decl.destruct_count) {
-                check_error(checker, node->line, node->column,
-                            "Destructuring pattern has %d variables, but tuple has %d elements",
-                            node->as.var_decl.destruct_count, init_type->as.tuple.elem_count);
-                return;
-            }
-
-            // Store the tuple type for codegen
-            if (init_type->kind == TYPE_TUPLE) {
-                node->as.var_decl.destruct_tuple_type = init_type;
-            }
-
-            // Define each variable
-            for (int i = 0; i < node->as.var_decl.destruct_count; i++) {
-                Type* elem_type =
-                    init_type->kind == TYPE_TUPLE ? init_type->as.tuple.elem_types[i] : type_error;
-                checker_define(checker, node->as.var_decl.destruct_names[i], SYM_VAR, elem_type,
-                               node->as.var_decl.is_const, node->as.var_decl.is_public,
-                               checker->current_module);
-            }
+            // Define all variables in the pattern
+            define_destruct_pattern_vars(checker, pattern, init_type, node->as.var_decl.is_const,
+                                         node->as.var_decl.is_public);
             break;
         }
 
