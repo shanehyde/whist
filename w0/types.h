@@ -120,6 +120,11 @@ int         type_is_signed_integer(Type* type);         // Is this a signed inte
 int         type_is_unsigned_integer(Type* type);       // Is this an unsigned integer type?
 const char* type_name(Type* type);
 
+// Builtin type lookup utilities
+Type*       type_builtin_from_name(const char* name); // Returns builtin Type* or NULL
+const char* type_c_name(const char* name);            // Returns C type string or NULL
+int         type_is_builtin_name(const char* name);   // Is this a builtin type name?
+
 // TypeList operations
 void typelist_init(TypeList* list);
 void typelist_push(TypeList* list, Type* type);

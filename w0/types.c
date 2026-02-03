@@ -330,6 +330,51 @@ const char* type_name(Type* type) {
     return "<unknown>";
 }
 
+// Builtin type lookup table
+static struct {
+    const char* whist_name;
+    Type**      type_ptr;
+    const char* c_name;
+} builtin_types[] = {
+    {"void", &type_void, "void"},
+    {"bool", &type_bool, "bool"},
+    {"i64", &type_int64, "int64_t"},
+    {"i8", &type_int8, "int8_t"},
+    {"i16", &type_int16, "int16_t"},
+    {"i32", &type_int32, "int32_t"},
+    {"u64", &type_uint64, "uint64_t"},
+    {"u8", &type_uint8, "uint8_t"},
+    {"u16", &type_uint16, "uint16_t"},
+    {"u32", &type_uint32, "uint32_t"},
+    {"f32", &type_f32, "float"},
+    {"f64", &type_f64, "double"},
+    {"char", &type_char, "char"},
+    {"string", &type_string, "const char*"},
+    {NULL, NULL, NULL},
+};
+
+Type* type_builtin_from_name(const char* name) {
+    for (int i = 0; builtin_types[i].whist_name; i++) {
+        if (strcmp(name, builtin_types[i].whist_name) == 0) {
+            return *builtin_types[i].type_ptr;
+        }
+    }
+    return NULL;
+}
+
+const char* type_c_name(const char* name) {
+    for (int i = 0; builtin_types[i].whist_name; i++) {
+        if (strcmp(name, builtin_types[i].whist_name) == 0) {
+            return builtin_types[i].c_name;
+        }
+    }
+    return NULL;
+}
+
+int type_is_builtin_name(const char* name) {
+    return type_builtin_from_name(name) != NULL;
+}
+
 void typelist_init(TypeList* list) {
     list->types    = NULL;
     list->count    = 0;

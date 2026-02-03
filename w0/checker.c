@@ -265,34 +265,11 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
     switch (type_node->type) {
     case NODE_IDENT: {
         const char* name = type_node->as.ident.name;
-        if (strcmp(name, "void") == 0)
-            return type_void;
-        if (strcmp(name, "bool") == 0)
-            return type_bool;
-        if (strcmp(name, "i64") == 0)
-            return type_int64;
-        if (strcmp(name, "i8") == 0)
-            return type_int8;
-        if (strcmp(name, "i16") == 0)
-            return type_int16;
-        if (strcmp(name, "i32") == 0)
-            return type_int32;
-        if (strcmp(name, "u64") == 0)
-            return type_uint64;
-        if (strcmp(name, "u8") == 0)
-            return type_uint8;
-        if (strcmp(name, "u16") == 0)
-            return type_uint16;
-        if (strcmp(name, "u32") == 0)
-            return type_uint32;
-        if (strcmp(name, "f32") == 0)
-            return type_f32;
-        if (strcmp(name, "f64") == 0)
-            return type_f64;
-        if (strcmp(name, "char") == 0)
-            return type_char;
-        if (strcmp(name, "string") == 0)
-            return type_string;
+
+        // Check for builtin type
+        Type* builtin = type_builtin_from_name(name);
+        if (builtin)
+            return builtin;
 
         // Look up user-defined type
         Symbol* sym = checker_lookup(checker, name);
