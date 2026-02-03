@@ -1,5 +1,6 @@
 #include "check_expression.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "checker_util.h"
@@ -239,17 +240,39 @@ Type* check_expression(Checker* checker, Node* node) {
             return type_error;
         }
 
-        if (!type_is_integer(index)) {
-            check_error(checker, node->line, node->column,
-                        "Array index must be an integer, got '%s'", type_name(index));
-            return type_error;
-        }
-
         if (object->kind == TYPE_ARRAY) {
+            if (!type_is_integer(index)) {
+                check_error(checker, node->line, node->column,
+                            "Array index must be an integer, got '%s'", type_name(index));
+                return type_error;
+            }
             return object->as.array.elem;
         }
         if (object->kind == TYPE_STRING) {
+            if (!type_is_integer(index)) {
+                check_error(checker, node->line, node->column,
+                            "String index must be an integer, got '%s'", type_name(index));
+                return type_error;
+            }
             return type_char;
+        }
+        if (object->kind == TYPE_TUPLE) {
+            // Tuple index must be a compile-time constant integer
+            if (node->as.index.index->type != NODE_INT_LIT) {
+                check_error(checker, node->line, node->column,
+                            "Tuple index must be a compile-time constant");
+                return type_error;
+            }
+            int idx = (int)node->as.index.index->as.int_lit.value;
+            if (idx < 0 || idx >= object->as.tuple.elem_count) {
+                check_error(checker, node->line, node->column,
+                            "Tuple index %d out of bounds (tuple has %d elements)", idx,
+                            object->as.tuple.elem_count);
+                return type_error;
+            }
+            // Mark this as a tuple index for codegen
+            node->as.index.is_tuple_index = 1;
+            return object->as.tuple.elem_types[idx];
         }
 
         check_error(checker, node->line, node->column, "Cannot index type '%s'", type_name(object));
@@ -383,6 +406,15 @@ Type* check_expression(Checker* checker, Node* node) {
         check_error(checker, node->line, node->column,
                     "Struct initializer requires a contextual struct type");
         return type_error;
+
+    case NODE_TUPLE_LIT: {
+        int    count = node->as.tuple_lit.elements.count;
+        Type** elems = malloc(count * sizeof(Type*));
+        for (int i = 0; i < count; i++) {
+            elems[i] = check_expression(checker, node->as.tuple_lit.elements.nodes[i]);
+        }
+        return type_tuple(elems, count);
+    }
 
     default:
         check_error(checker, node->line, node->column, "Unknown expression type %d", node->type);

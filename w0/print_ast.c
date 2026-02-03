@@ -108,8 +108,19 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_VAR_DECL:
-        printf("VarDecl: %.*s%s\n", node->as.var_decl.name_length, node->as.var_decl.name,
-               node->as.var_decl.is_const ? " (const)" : "");
+        if (node->as.var_decl.destruct_count > 0) {
+            printf("VarDecl: (");
+            for (int i = 0; i < node->as.var_decl.destruct_count; i++) {
+                if (i > 0)
+                    printf(", ");
+                printf("%.*s", node->as.var_decl.destruct_name_lens[i],
+                       node->as.var_decl.destruct_names[i]);
+            }
+            printf(")%s\n", node->as.var_decl.is_const ? " (const)" : "");
+        } else {
+            printf("VarDecl: %.*s%s\n", node->as.var_decl.name_length, node->as.var_decl.name,
+                   node->as.var_decl.is_const ? " (const)" : "");
+        }
         if (node->as.var_decl.type) {
             print_indent(depth + 1);
             printf("Type:\n");
@@ -290,6 +301,20 @@ void print_ast(Node* node, int depth) {
         printf("EnumValue: %.*s::%.*s\n", node->as.enum_value.enum_name_length,
                node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
                node->as.enum_value.value_name);
+        break;
+
+    case NODE_TUPLE_TYPE:
+        printf("TupleType\n");
+        for (int i = 0; i < node->as.tuple_type.elem_types.count; i++) {
+            print_ast(node->as.tuple_type.elem_types.nodes[i], depth + 1);
+        }
+        break;
+
+    case NODE_TUPLE_LIT:
+        printf("TupleLit\n");
+        for (int i = 0; i < node->as.tuple_lit.elements.count; i++) {
+            print_ast(node->as.tuple_lit.elements.nodes[i], depth + 1);
+        }
         break;
 
     default:

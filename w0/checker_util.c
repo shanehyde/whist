@@ -150,6 +150,14 @@ Type* resolve_type(Checker* checker, Node* type_node) {
             }
             return type_array(elem, size);
         }
+    case NODE_TUPLE_TYPE: {
+        int    count = type_node->as.tuple_type.elem_types.count;
+        Type** elems = malloc(count * sizeof(Type*));
+        for (int i = 0; i < count; i++) {
+            elems[i] = resolve_type(checker, type_node->as.tuple_type.elem_types.nodes[i]);
+        }
+        return type_tuple(elems, count);
+    }
     default:
         break;
     }

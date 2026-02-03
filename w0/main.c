@@ -270,9 +270,9 @@ int main(int argc, char** argv) {
             checker_set_direct_imports(&checker, parser.direct_imports,
                                        parser.direct_imports_count);
             int ok = checker_check(&checker, ast);
-            checker_free(&checker);
 
             if (!ok) {
+                checker_free(&checker);
                 fprintf(stderr, "Type check failed\n");
                 node_free(ast);
                 parser_free(&parser);
@@ -287,6 +287,7 @@ int main(int argc, char** argv) {
                 if (output_file) {
                     out = fopen(output_file, "w");
                     if (!out) {
+                        checker_free(&checker);
                         fprintf(stderr, "Could not open output file: %s\n", output_file);
                         node_free(ast);
                         parser_free(&parser);
@@ -299,12 +300,14 @@ int main(int argc, char** argv) {
                 CodeGen gen;
                 codegen_init(&gen, out);
                 codegen_emit(&gen, ast);
+                checker_free(&checker); // Free types after codegen
 
                 if (output_file) {
                     fclose(out);
                     fprintf(stderr, "Generated: %s\n", output_file);
                 }
             } else {
+                checker_free(&checker);
                 fprintf(stderr, "Type check passed!\n");
             }
         }
