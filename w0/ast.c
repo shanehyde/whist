@@ -1,6 +1,58 @@
 #include "ast.h"
 
 #include <stdlib.h>
+#include <string.h>
+
+// ============================================================================
+// DestructPattern functions
+// ============================================================================
+
+DestructPattern* pattern_new_ident(const char* name, int length) {
+    DestructPattern* pattern = calloc(1, sizeof(DestructPattern));
+    pattern->kind            = PATTERN_IDENT;
+    pattern->as.ident.name   = malloc(length + 1);
+    memcpy(pattern->as.ident.name, name, length);
+    pattern->as.ident.name[length] = '\0';
+    pattern->as.ident.name_length  = length;
+    pattern->resolved_type         = NULL;
+    return pattern;
+}
+
+DestructPattern* pattern_new_tuple(int capacity) {
+    DestructPattern* pattern   = calloc(1, sizeof(DestructPattern));
+    pattern->kind              = PATTERN_TUPLE;
+    pattern->as.tuple.elements = malloc(capacity * sizeof(DestructPattern*));
+    pattern->as.tuple.count    = 0;
+    pattern->resolved_type     = NULL;
+    return pattern;
+}
+
+void pattern_tuple_push(DestructPattern* pattern, DestructPattern* elem) {
+    // Note: caller must ensure capacity; for simplicity we just store
+    pattern->as.tuple.elements[pattern->as.tuple.count++] = elem;
+}
+
+void pattern_free(DestructPattern* pattern) {
+    if (!pattern)
+        return;
+
+    switch (pattern->kind) {
+    case PATTERN_IDENT:
+        free(pattern->as.ident.name);
+        break;
+    case PATTERN_TUPLE:
+        for (int i = 0; i < pattern->as.tuple.count; i++) {
+            pattern_free(pattern->as.tuple.elements[i]);
+        }
+        free(pattern->as.tuple.elements);
+        break;
+    }
+    free(pattern);
+}
+
+// ============================================================================
+// Node functions
+// ============================================================================
 
 Node* node_new(NodeType type, int line, int column) {
     Node* node   = calloc(1, sizeof(Node));
@@ -89,14 +141,8 @@ void node_free(Node* node) {
         free(node->as.var_decl.name);
         node_free(node->as.var_decl.type);
         node_free(node->as.var_decl.init);
-        // Free destructuring names if present
-        if (node->as.var_decl.destruct_names) {
-            for (int i = 0; i < node->as.var_decl.destruct_count; i++) {
-                free(node->as.var_decl.destruct_names[i]);
-            }
-            free(node->as.var_decl.destruct_names);
-            free(node->as.var_decl.destruct_name_lens);
-        }
+        // Free destructuring pattern if present
+        pattern_free(node->as.var_decl.destruct_pattern);
         break;
     case NODE_BLOCK:
         nodelist_free(&node->as.block.stmts);

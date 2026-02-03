@@ -13,11 +13,14 @@ func main(): i32 {
     // Destructuring
     var (a, b) = (10, 20);
 
+    // Nested destructuring
+    var (p, (q, r)) = (3, (4, 5));
+
     // Nested tuples
     var nested: (i64, (i64, i64)) = (1, (2, 3));
     var inner: (i64, i64) = nested[1];
     var innerFirst: i64 = inner[0];
 
     // Return sum to verify values
-    return x + pair[0] + pair[1] + a + b + innerFirst;
+    return x + pair[0] + pair[1] + a + b + p + q + r + innerFirst;
 }

@@ -119,11 +119,12 @@ char* copy_token_string(Token* token) {
 // Forward Declarations
 // ============================================================================
 
-static Node* parse_expression(Parser* parser);
-static Node* parse_type(Parser* parser);
-static Node* parse_block(Parser* parser);
-static Node* parse_statement(Parser* parser);
-static Node* parse_var_decl(Parser* parser, int is_const, int is_public);
+static Node*            parse_expression(Parser* parser);
+static Node*            parse_type(Parser* parser);
+static Node*            parse_block(Parser* parser);
+static Node*            parse_statement(Parser* parser);
+static Node*            parse_var_decl(Parser* parser, int is_const, int is_public);
+static DestructPattern* parse_destruct_pattern(Parser* parser);
 
 // ============================================================================
 // Type Parsing
@@ -1013,75 +1014,96 @@ static Node* parse_statement(Parser* parser) {
 // Declaration Parsing
 // ============================================================================
 
+// Parse a destructuring pattern element: either an identifier or a nested tuple pattern
+// Called after '(' has been consumed for the outer pattern, or recursively for nested patterns
+static DestructPattern* parse_destruct_pattern_element(Parser* parser) {
+    if (check_token(parser, TOK_LPAREN)) {
+        // Nested tuple pattern: (a, b) or (a, (b, c))
+        advance_token(parser); // consume '('
+
+        DestructPattern* pattern = pattern_new_tuple(4);
+
+        // Parse first element
+        DestructPattern* first = parse_destruct_pattern_element(parser);
+        if (!first) {
+            pattern_free(pattern);
+            return NULL;
+        }
+        pattern_tuple_push(pattern, first);
+
+        // Parse remaining elements (comma-separated)
+        while (match_token(parser, TOK_COMMA)) {
+            // Grow capacity if needed
+            if (pattern->as.tuple.count >= 4) {
+                int new_cap = pattern->as.tuple.count * 2;
+                pattern->as.tuple.elements =
+                    realloc(pattern->as.tuple.elements, new_cap * sizeof(DestructPattern*));
+            }
+            DestructPattern* elem = parse_destruct_pattern_element(parser);
+            if (!elem) {
+                pattern_free(pattern);
+                return NULL;
+            }
+            pattern_tuple_push(pattern, elem);
+        }
+
+        consume_token(parser, TOK_RPAREN, "Expected ')' after nested destructuring pattern");
+
+        // Require at least 2 elements for tuple pattern
+        if (pattern->as.tuple.count < 2) {
+            parse_error(parser, "Destructuring pattern requires at least 2 elements");
+            pattern_free(pattern);
+            return NULL;
+        }
+
+        return pattern;
+    } else if (check_token(parser, TOK_IDENT)) {
+        // Simple identifier
+        Token name_tok = parser->current;
+        advance_token(parser);
+        return pattern_new_ident(name_tok.start, name_tok.length);
+    } else {
+        parse_error(parser, "Expected variable name or nested pattern in destructuring");
+        return NULL;
+    }
+}
+
+// Parse the top-level destructuring pattern: var (pattern) = ...
+// Called after 'var' or 'const' keyword, when '(' is the next token
+static DestructPattern* parse_destruct_pattern(Parser* parser) {
+    // We expect '(' to already be the current token
+    if (!check_token(parser, TOK_LPAREN)) {
+        parse_error(parser, "Expected '(' for destructuring pattern");
+        return NULL;
+    }
+    return parse_destruct_pattern_element(parser);
+}
+
 static Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
     Token start = parser->current;
 
-    // Check for destructuring: var (a, b) = ...
+    // Check for destructuring: var (a, b) = ... or var (a, (b, c)) = ...
     if (check_token(parser, TOK_LPAREN)) {
-        advance_token(parser); // consume '('
+        DestructPattern* pattern = parse_destruct_pattern(parser);
+        if (!pattern) {
+            return NULL;
+        }
 
         Node* node = node_new(NODE_VAR_DECL, start.line, start.column);
         if (!node) {
             parse_error(parser, "Out of memory");
+            pattern_free(pattern);
             return NULL;
         }
         var_decl_node* vdn = &node->as.var_decl;
 
-        vdn->name               = NULL; // NULL indicates destructuring
-        vdn->name_length        = 0;
-        vdn->is_public          = is_public;
-        vdn->is_const           = is_const;
-        vdn->type               = NULL;
-        vdn->init               = NULL;
-        vdn->destruct_names     = NULL;
-        vdn->destruct_name_lens = NULL;
-        vdn->destruct_count     = 0;
-
-        // Collect names into a temporary list
-        int    capacity = 4;
-        char** names    = malloc(capacity * sizeof(char*));
-        int*   lens     = malloc(capacity * sizeof(int));
-        int    count    = 0;
-
-        // Parse first name
-        Token name_tok = parser->current;
-        consume_token(parser, TOK_IDENT, "Expected variable name in destructuring pattern");
-
-        names[count] = copy_token_string(&name_tok);
-        lens[count]  = name_tok.length;
-        count++;
-
-        // Parse remaining names (comma-separated)
-        while (match_token(parser, TOK_COMMA)) {
-            if (count >= capacity) {
-                capacity *= 2;
-                names = realloc(names, capacity * sizeof(char*));
-                lens  = realloc(lens, capacity * sizeof(int));
-            }
-            name_tok = parser->current;
-            consume_token(parser, TOK_IDENT, "Expected variable name after ',' in destructuring");
-            names[count] = copy_token_string(&name_tok);
-            lens[count]  = name_tok.length;
-            count++;
-        }
-
-        consume_token(parser, TOK_RPAREN, "Expected ')' after destructuring pattern");
-
-        // Require at least 2 names for destructuring
-        if (count < 2) {
-            parse_error(parser, "Destructuring requires at least 2 variables");
-            for (int i = 0; i < count; i++)
-                free(names[i]);
-            free(names);
-            free(lens);
-            node_free(node);
-            return NULL;
-        }
-
-        vdn->destruct_names      = names;
-        vdn->destruct_name_lens  = lens;
-        vdn->destruct_count      = count;
-        vdn->destruct_tuple_type = NULL; // Set by checker
+        vdn->name             = NULL; // NULL indicates destructuring
+        vdn->name_length      = 0;
+        vdn->is_public        = is_public;
+        vdn->is_const         = is_const;
+        vdn->type             = NULL;
+        vdn->init             = NULL;
+        vdn->destruct_pattern = pattern;
 
         // Optional type annotation
         if (match_token(parser, TOK_COLON)) {
@@ -1116,15 +1138,12 @@ static Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
         parse_error(parser, "Out of memory");
         return NULL;
     }
-    vdn->is_public           = is_public;
-    vdn->name_length         = name.length;
-    vdn->is_const            = is_const;
-    vdn->type                = NULL;
-    vdn->init                = NULL;
-    vdn->destruct_names      = NULL;
-    vdn->destruct_name_lens  = NULL;
-    vdn->destruct_count      = 0;
-    vdn->destruct_tuple_type = NULL;
+    vdn->is_public        = is_public;
+    vdn->name_length      = name.length;
+    vdn->is_const         = is_const;
+    vdn->type             = NULL;
+    vdn->init             = NULL;
+    vdn->destruct_pattern = NULL;
 
     // Optional type annotation
     if (match_token(parser, TOK_COLON)) {

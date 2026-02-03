@@ -9,6 +9,27 @@ static void print_indent(int depth) {
         printf("  ");
 }
 
+// Print a destructuring pattern (recursive)
+static void print_destruct_pattern(DestructPattern* pattern) {
+    if (!pattern)
+        return;
+
+    switch (pattern->kind) {
+    case PATTERN_IDENT:
+        printf("%.*s", pattern->as.ident.name_length, pattern->as.ident.name);
+        break;
+    case PATTERN_TUPLE:
+        printf("(");
+        for (int i = 0; i < pattern->as.tuple.count; i++) {
+            if (i > 0)
+                printf(", ");
+            print_destruct_pattern(pattern->as.tuple.elements[i]);
+        }
+        printf(")");
+        break;
+    }
+}
+
 static void print_visibility(int depth, int is_public) {
     print_indent(depth);
     if (is_public) {
@@ -108,15 +129,10 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_VAR_DECL:
-        if (node->as.var_decl.destruct_count > 0) {
-            printf("VarDecl: (");
-            for (int i = 0; i < node->as.var_decl.destruct_count; i++) {
-                if (i > 0)
-                    printf(", ");
-                printf("%.*s", node->as.var_decl.destruct_name_lens[i],
-                       node->as.var_decl.destruct_names[i]);
-            }
-            printf(")%s\n", node->as.var_decl.is_const ? " (const)" : "");
+        if (node->as.var_decl.destruct_pattern) {
+            printf("VarDecl: ");
+            print_destruct_pattern(node->as.var_decl.destruct_pattern);
+            printf("%s\n", node->as.var_decl.is_const ? " (const)" : "");
         } else {
             printf("VarDecl: %.*s%s\n", node->as.var_decl.name_length, node->as.var_decl.name,
                    node->as.var_decl.is_const ? " (const)" : "");
