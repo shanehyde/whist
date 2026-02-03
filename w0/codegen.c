@@ -49,6 +49,24 @@ static int is_struct_type(Node* type_node) {
            strcmp(name, "char") != 0 && strcmp(name, "string") != 0;
 }
 
+// Helper to emit function name with appropriate prefix (method or module)
+// For methods: emits "StructName_funcname("
+// For library functions: emits "module_funcname("
+// For main module functions: emits "funcname("
+static void emit_function_name(CodeGen* gen, const char* func_name, const char* receiver_type,
+                               const char* module_name) {
+    if (receiver_type != NULL) {
+        // Method: prefix with struct name
+        emit(gen, " %s_%s(", receiver_type, func_name);
+    } else if (module_name != NULL) {
+        // Library function: prefix with module name
+        emit(gen, " %s_%s(", module_name, func_name);
+    } else {
+        // Main module function: no prefix
+        emit(gen, " %s(", func_name);
+    }
+}
+
 // Emit a type from a type annotation node
 static void emit_type(CodeGen* gen, Node* type_node) {
     if (!type_node) {
@@ -722,14 +740,9 @@ static void emit_decl(CodeGen* gen, Node* node) {
         emit_type(gen, node->as.func_decl.return_type);
 
         // Function name (mangled for methods and library functions)
-        if (is_method) {
-            emit(gen, " %s_%s(", node->as.func_decl.receiver_type, node->as.func_decl.name);
-        } else if (gen->current_module != NULL) {
-            // Library function: emit with module prefix
-            emit(gen, " %s_%s(", gen->current_module, node->as.func_decl.name);
-        } else {
-            emit(gen, " %s(", node->as.func_decl.name);
-        }
+        emit_function_name(gen, node->as.func_decl.name,
+                           is_method ? node->as.func_decl.receiver_type : NULL,
+                           gen->current_module);
 
         // Parameters
         if (is_method) {
@@ -890,9 +903,12 @@ void codegen_emit(CodeGen* gen, Node* ast) {
 
                 emit_type(gen, fdn->return_type);
 
+                // Emit function name with appropriate prefix
+                emit_function_name(gen, fdn->name, is_method ? fdn->receiver_type : NULL,
+                                   module_prefix);
+
+                // Emit self parameter for methods
                 if (is_method) {
-                    emit(gen, " %s_%s(", fdn->receiver_type, fdn->name);
-                    // Emit self parameter
                     if (fdn->receiver_is_const) {
                         emit(gen, "const ");
                     }
@@ -900,11 +916,6 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                     if (fdn->params.count > 0) {
                         emit(gen, ", ");
                     }
-                } else if (module_prefix != NULL) {
-                    // Library function: emit with module prefix
-                    emit(gen, " %s_%s(", module_prefix, fdn->name);
-                } else {
-                    emit(gen, " %s(", fdn->name);
                 }
 
                 if (fdn->params.count == 0 && !is_method) {

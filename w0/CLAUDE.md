@@ -34,6 +34,32 @@ Types: `void`, `bool`, `i8`-`i64`, `u8`-`u64`, `f32`, `f64`, `char`, `string`, `
 
 Operators: `+ - * / %`, `== != < > <= >=`, `&& || !`, `& | ^ ~ << >>`, `++ --`, `. ->`
 
+### Imports
+
+**Module imports** (from `lib/` directory) require qualification:
+```whist
+import std;
+
+func main(): i32 {
+    std.print("Hello!\n");        // ✓ Correct: module-qualified
+    var x = std.abs_i64(-42);     // ✓ Correct: module-qualified
+    // print("Hi!\n");            // ✗ Error: unqualified access
+    return 0;
+}
+```
+
+**Relative imports** merge symbols into current namespace:
+```whist
+import "./helper.w";
+
+func main(): i32 {
+    helper_function();  // ✓ Correct: no qualification needed
+    return 0;
+}
+```
+
+### Basic Example
+
 ```whist
 struct Point { x: i64, y: i64 }
 
