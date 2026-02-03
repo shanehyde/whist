@@ -57,18 +57,6 @@ static Node* parse_postfix(Parser* parser) {
             member->as.member.length = name.length;
             member->as.member.is_ref = 0; // Set by checker
             expr                     = member;
-        } else if (match_token(parser, TOK_PLUS_PLUS) || match_token(parser, TOK_MINUS_MINUS)) {
-            // Postfix increment/decrement
-            TokenType op    = parser->previous.type;
-            Node*     unary = node_new(NODE_UNARY, expr->line, expr->column);
-            if (!unary) {
-                parse_error(parser, "Out of memory");
-                return NULL;
-            }
-            unary->as.unary.op      = op;
-            unary->as.unary.operand = expr;
-            unary->as.unary.postfix = 1;
-            expr                    = unary;
         } else {
             break;
         }
@@ -79,8 +67,7 @@ static Node* parse_postfix(Parser* parser) {
 
 static Node* parse_unary(Parser* parser) {
     if (match_token(parser, TOK_BANG) || match_token(parser, TOK_MINUS) ||
-        match_token(parser, TOK_TILDE) || match_token(parser, TOK_PLUS_PLUS) ||
-        match_token(parser, TOK_MINUS_MINUS)) {
+        match_token(parser, TOK_TILDE)) {
         Token op      = parser->previous;
         Node* operand = parse_unary(parser);
         Node* node    = node_new(NODE_UNARY, op.line, op.column);
@@ -90,7 +77,6 @@ static Node* parse_unary(Parser* parser) {
         }
         node->as.unary.op      = op.type;
         node->as.unary.operand = operand;
-        node->as.unary.postfix = 0;
         return node;
     }
     return parse_postfix(parser);

@@ -181,7 +181,7 @@ Import statements load declarations from external Whist source files. There are 
 <unary-expr> ::= <unary-op> <unary-expr>
               | <postfix-expr>
 
-<unary-op> ::= '!' | '-' | '~' | '&' | '*' | '++' | '--'
+<unary-op> ::= '!' | '-' | '~' | '&' | '*'
 ```
 
 ### Postfix Expressions
@@ -193,8 +193,6 @@ Import statements load declarations from external Whist source files. There are 
               | '[' <expression> ']'           (* index *)
               | '.' <identifier>               (* member access *)
               | '->' <identifier>              (* pointer member access *)
-              | '++'                           (* postfix increment *)
-              | '--'                           (* postfix decrement *)
 
 <arg-list> ::= <expression> { ',' <expression> }
 ```
@@ -300,7 +298,7 @@ self     struct   true        var       while
 =     <     >
 +=    -=    *=    /=    %=    &=    |=    ^=
 ==    !=    <=    >=    &&    ||    <<    >>    <<=   >>=
-++    --    ->    ::    ..
+->    ::    ..
 (     )     {     }     [     ]     ;     :     ,     .
 ```
 
@@ -331,5 +329,5 @@ From lowest to highest precedence:
 | 9          | `<<` `>>`                                                | Left          |
 | 10         | `+` `-`                                                  | Left          |
 | 11         | `*` `/` `%`                                              | Left          |
-| 12         | `!` `-` `~` `&` `*` `++` `--` (unary prefix)             | Right         |
-| 13         | `()` `[]` `.` `->` `++` `--` (postfix)                   | Left          |
+| 12         | `!` `-` `~` `&` `*` (unary prefix)                       | Right         |
+| 13         | `()` `[]` `.` `->` (postfix)                             | Left          |

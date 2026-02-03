@@ -219,8 +219,7 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_UNARY:
-        printf("Unary: %s%s\n", token_type_name(node->as.unary.op),
-               node->as.unary.postfix ? " (postfix)" : "");
+        printf("Unary: %s\n", token_type_name(node->as.unary.op));
         print_ast(node->as.unary.operand, depth + 1);
         break;
 

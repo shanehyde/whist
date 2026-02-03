@@ -137,7 +137,6 @@ struct Node {
         struct {
             TokenType op;
             Node*     operand;
-            int       postfix; // 1 for postfix ++/--, 0 for prefix
         } unary;
 
         // Function call

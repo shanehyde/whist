@@ -32,7 +32,7 @@ bin/w0 program.w | cc -x c -o program -
 
 Types: `void`, `bool`, `i8`-`i64`, `u8`-`u64`, `f32`, `f64`, `char`, `string`, `*T`, `[n]T`, `struct`, `enum`
 
-Operators: `+ - * / %`, `== != < > <= >=`, `&& || !`, `& | ^ ~ << >>`, `++ --`, `. ->`
+Operators: `+ - * / %`, `== != < > <= >=`, `&& || !`, `& | ^ ~ << >>`, `. ->`
 
 ### Imports
 
