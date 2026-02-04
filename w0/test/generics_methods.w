@@ -24,6 +24,7 @@ func (Pair<i32, Box<T>>) set(k: i32, v: Box<T>): void {
 
 func main(): i32 {
     var b: Box<i64> = {value: 10};
+    var p: Pair<i32, Box<i64>> = {key: 1, value: b};
 
     // Test get method
     if (b.get() != 10) {

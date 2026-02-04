@@ -64,6 +64,89 @@ typedef struct {
 
 static TypeSubstContext* g_subst_ctx = NULL; // Global substitution context
 
+// Helper to check if a name is a type variable (not a builtin type)
+static int codegen_is_type_variable(const char* name) {
+    return !type_is_builtin_name(name);
+}
+
+// Extract additional type bindings from matching a method's receiver pattern against concrete args
+// For example, matching <i32, Box<T>> against [i32, Box_i64] extracts T=i64
+// Returns 1 on match (and fills out_* params), 0 on no match
+static int codegen_extract_method_bindings(NodeList* pattern_args, Type** concrete_args,
+                                           int arg_count, char*** out_params, Type*** out_args,
+                                           int* out_count) {
+    int    capacity = 4;
+    int    count    = 0;
+    char** params   = xmalloc(capacity * sizeof(char*));
+    Type** args     = xmalloc(capacity * sizeof(Type*));
+
+    for (int i = 0; i < arg_count; i++) {
+        Node* pattern  = pattern_args->nodes[i];
+        Type* concrete = concrete_args[i];
+
+        if (pattern->type == NODE_IDENT) {
+            const char* name = pattern->as.ident.name;
+            // If it's a type variable, bind it
+            if (codegen_is_type_variable(name)) {
+                if (count >= capacity) {
+                    capacity *= 2;
+                    params = xrealloc(params, capacity * sizeof(char*));
+                    args   = xrealloc(args, capacity * sizeof(Type*));
+                }
+                params[count] = xstrdup(name);
+                args[count]   = concrete;
+                count++;
+            }
+            // If it's a concrete type, check it matches (for partial specialization)
+            // For now, we trust that the checker validated this
+        } else if (pattern->type == NODE_GENERIC_TYPE) {
+            // Pattern is like Box<T>, concrete is like Box_i64
+            if (concrete->kind != TYPE_STRUCT)
+                continue;
+
+            const char* pattern_base  = pattern->as.generic_type.base_name;
+            const char* concrete_name = concrete->as.struc.name;
+
+            // Check the base matches
+            size_t base_len = strlen(pattern_base);
+            if (strncmp(concrete_name, pattern_base, base_len) != 0 ||
+                concrete_name[base_len] != '_') {
+                free(params);
+                free(args);
+                return 0;
+            }
+
+            // For single type arg, extract the binding
+            if (pattern->as.generic_type.type_args.count == 1) {
+                Node* nested = pattern->as.generic_type.type_args.nodes[0];
+                if (nested->type == NODE_IDENT && codegen_is_type_variable(nested->as.ident.name)) {
+                    // Extract type from mangled name suffix
+                    const char* suffix    = concrete_name + base_len + 1;
+                    Type*       extracted = type_builtin_from_name(suffix);
+                    if (!extracted) {
+                        // Assume it's a struct type
+                        extracted = type_struct(suffix);
+                    }
+
+                    if (count >= capacity) {
+                        capacity *= 2;
+                        params = xrealloc(params, capacity * sizeof(char*));
+                        args   = xrealloc(args, capacity * sizeof(Type*));
+                    }
+                    params[count] = xstrdup(nested->as.ident.name);
+                    args[count]   = extracted;
+                    count++;
+                }
+            }
+        }
+    }
+
+    *out_params = params;
+    *out_args   = args;
+    *out_count  = count;
+    return 1;
+}
+
 // Helper to emit function name with appropriate prefix (method or module)
 // For methods: emits "StructName_funcname("
 // For library functions: emits "module_funcname("
@@ -153,7 +236,7 @@ static void emit_type(CodeGen* gen, Node* type_node) {
     }
     case NODE_GENERIC_TYPE: {
         // Generic type instantiation - emit the mangled name as struct reference
-        // Build the mangled name: Box<i64> -> Box_i64
+        // Build the mangled name: Box<i64> -> Box_i64, Box<T> -> Box_i64 (with subst)
         const char* base = type_node->as.generic_type.base_name;
         emit(gen, "%s", base);
         for (int i = 0; i < type_node->as.generic_type.type_args.count; i++) {
@@ -161,13 +244,23 @@ static void emit_type(CodeGen* gen, Node* type_node) {
             // Get simple type name for mangling
             Node* arg = type_node->as.generic_type.type_args.nodes[i];
             if (arg->type == NODE_IDENT) {
-                const char* c_name = type_c_name(arg->as.ident.name);
-                if (c_name) {
-                    // Builtin type - use the whist name for mangling
-                    emit(gen, "%s", arg->as.ident.name);
-                } else {
-                    // User-defined type
-                    emit(gen, "%s", arg->as.ident.name);
+                const char* arg_name = arg->as.ident.name;
+                // Check for type parameter substitution
+                int substituted = 0;
+                if (g_subst_ctx) {
+                    for (int s = 0; s < g_subst_ctx->count; s++) {
+                        if (strcmp(g_subst_ctx->type_params[s], arg_name) == 0) {
+                            // Emit the substituted type's name for mangling
+                            Type*       subst_type  = g_subst_ctx->type_args[s];
+                            const char* mangle_name = type_name(subst_type);
+                            emit(gen, "%s", mangle_name);
+                            substituted = 1;
+                            break;
+                        }
+                    }
+                }
+                if (!substituted) {
+                    emit(gen, "%s", arg_name);
                 }
             } else if (arg->type == NODE_GENERIC_TYPE) {
                 // Nested generic - recurse to get mangled name
@@ -176,7 +269,22 @@ static void emit_type(CodeGen* gen, Node* type_node) {
                     emit(gen, "_");
                     Node* nested = arg->as.generic_type.type_args.nodes[j];
                     if (nested->type == NODE_IDENT) {
-                        emit(gen, "%s", nested->as.ident.name);
+                        const char* nested_name = nested->as.ident.name;
+                        // Check for type parameter substitution
+                        int subst = 0;
+                        if (g_subst_ctx) {
+                            for (int s = 0; s < g_subst_ctx->count; s++) {
+                                if (strcmp(g_subst_ctx->type_params[s], nested_name) == 0) {
+                                    Type* subst_type = g_subst_ctx->type_args[s];
+                                    emit(gen, "%s", type_name(subst_type));
+                                    subst = 1;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!subst) {
+                            emit(gen, "%s", nested_name);
+                        }
                     }
                 }
             }
@@ -1786,17 +1894,38 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         int    method_count = 0;
         collect_generic_methods(ast, info->base_name, &methods, &method_count);
 
-        // Set up substitution context
-        TypeSubstContext subst_ctx;
-        subst_ctx.type_params = template->as.struct_decl.type_params;
-        subst_ctx.type_args   = info->type_args;
-        subst_ctx.count       = template->as.struct_decl.type_param_count;
-        g_subst_ctx           = &subst_ctx;
-
         // Emit forward declaration for each method
         for (int j = 0; j < method_count; j++) {
             Node*           method = methods[j];
             func_decl_node* fdn    = &method->as.func_decl;
+
+            // Extract method-specific type bindings
+            char** method_params     = NULL;
+            Type** method_args       = NULL;
+            int    method_bind_count = 0;
+            codegen_extract_method_bindings(&fdn->receiver_type_args, info->type_args,
+                                            info->type_arg_count, &method_params, &method_args,
+                                            &method_bind_count);
+
+            // Build combined substitution context
+            int    combined_count  = template->as.struct_decl.type_param_count + method_bind_count;
+            char** combined_params = xmalloc(combined_count * sizeof(char*));
+            Type** combined_args   = xmalloc(combined_count * sizeof(Type*));
+
+            for (int k = 0; k < template->as.struct_decl.type_param_count; k++) {
+                combined_params[k] = template->as.struct_decl.type_params[k];
+                combined_args[k]   = info->type_args[k];
+            }
+            for (int k = 0; k < method_bind_count; k++) {
+                combined_params[template->as.struct_decl.type_param_count + k] = method_params[k];
+                combined_args[template->as.struct_decl.type_param_count + k]   = method_args[k];
+            }
+
+            TypeSubstContext subst_ctx;
+            subst_ctx.type_params = combined_params;
+            subst_ctx.type_args   = combined_args;
+            subst_ctx.count       = combined_count;
+            g_subst_ctx           = &subst_ctx;
 
             // Return type (with substitution)
             emit_type_subst(gen, fdn->return_type);
@@ -1820,9 +1949,17 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                 emit_type_with_name_subst(gen, param->as.param.type, param->as.param.name);
             }
             emit(gen, ");\n");
+
+            g_subst_ctx = NULL;
+            free(combined_params);
+            free(combined_args);
+            for (int k = 0; k < method_bind_count; k++) {
+                free(method_params[k]);
+            }
+            free(method_params);
+            free(method_args);
         }
 
-        g_subst_ctx = NULL;
         free(methods);
     }
     emit(gen, "\n");
@@ -1854,17 +1991,38 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         int    method_count = 0;
         collect_generic_methods(ast, info->base_name, &methods, &method_count);
 
-        // Set up substitution context
-        TypeSubstContext subst_ctx;
-        subst_ctx.type_params = template->as.struct_decl.type_params;
-        subst_ctx.type_args   = info->type_args;
-        subst_ctx.count       = template->as.struct_decl.type_param_count;
-        g_subst_ctx           = &subst_ctx;
-
         // Emit implementation for each method
         for (int j = 0; j < method_count; j++) {
             Node*           method = methods[j];
             func_decl_node* fdn    = &method->as.func_decl;
+
+            // Extract method-specific type bindings
+            char** method_params     = NULL;
+            Type** method_args       = NULL;
+            int    method_bind_count = 0;
+            codegen_extract_method_bindings(&fdn->receiver_type_args, info->type_args,
+                                            info->type_arg_count, &method_params, &method_args,
+                                            &method_bind_count);
+
+            // Build combined substitution context
+            int    combined_count  = template->as.struct_decl.type_param_count + method_bind_count;
+            char** combined_params = xmalloc(combined_count * sizeof(char*));
+            Type** combined_args   = xmalloc(combined_count * sizeof(Type*));
+
+            for (int k = 0; k < template->as.struct_decl.type_param_count; k++) {
+                combined_params[k] = template->as.struct_decl.type_params[k];
+                combined_args[k]   = info->type_args[k];
+            }
+            for (int k = 0; k < method_bind_count; k++) {
+                combined_params[template->as.struct_decl.type_param_count + k] = method_params[k];
+                combined_args[template->as.struct_decl.type_param_count + k]   = method_args[k];
+            }
+
+            TypeSubstContext subst_ctx;
+            subst_ctx.type_params = combined_params;
+            subst_ctx.type_args   = combined_args;
+            subst_ctx.count       = combined_count;
+            g_subst_ctx           = &subst_ctx;
 
             // Check if function is void
             int is_void =
@@ -1936,9 +2094,17 @@ void codegen_emit(CodeGen* gen, Node* ast) {
 
             gen->indent--;
             emit(gen, "}\n\n");
+
+            g_subst_ctx = NULL;
+            free(combined_params);
+            free(combined_args);
+            for (int k = 0; k < method_bind_count; k++) {
+                free(method_params[k]);
+            }
+            free(method_params);
+            free(method_args);
         }
 
-        g_subst_ctx = NULL;
         free(methods);
     }
 }

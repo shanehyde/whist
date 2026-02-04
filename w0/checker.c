@@ -341,6 +341,170 @@ Symbol* checker_lookup_local(Checker* checker, const char* name) {
 // Type resolution
 // =============================================================================
 
+// Helper to check if an identifier is a type variable (not a builtin or defined type)
+static int is_type_variable(Checker* checker, const char* name) {
+    if (type_builtin_from_name(name))
+        return 0;
+    Symbol* sym = checker_lookup_any(checker, name);
+    if (sym && sym->kind == SYM_TYPE)
+        return 0;
+    return 1;
+}
+
+// Forward declaration
+static Type* resolve_type(Checker* checker, Node* type_node);
+
+// Try to match a method's receiver type args against concrete instantiation args.
+// pattern_args: the method's receiver_type_args (e.g., <i32, Box<T>>)
+// concrete_args: the resolved types for instantiation (e.g., [i32, Box_i64])
+// def: the generic struct definition (for type param names)
+// On success, sets out_params/out_args/out_count to the extracted bindings
+// Returns 1 on success, 0 on failure (pattern doesn't match)
+static int unify_method_pattern(Checker* checker, NodeList* pattern_args, Type** concrete_args,
+                                int arg_count, char*** out_params, Type*** out_args,
+                                int* out_count) {
+    // Collect type variable bindings
+    int    binding_capacity = 4;
+    int    binding_count    = 0;
+    char** bound_names      = xmalloc(binding_capacity * sizeof(char*));
+    Type** bound_types      = xmalloc(binding_capacity * sizeof(Type*));
+
+    // Process each argument position
+    for (int i = 0; i < arg_count; i++) {
+        Node* pattern  = pattern_args->nodes[i];
+        Type* concrete = concrete_args[i];
+
+        // Case 1: Pattern is a simple identifier
+        if (pattern->type == NODE_IDENT) {
+            const char* name = pattern->as.ident.name;
+
+            // Check if it's a concrete type (builtin or defined)
+            Type* builtin = type_builtin_from_name(name);
+            if (builtin) {
+                // Must match exactly
+                if (!type_equals(builtin, concrete)) {
+                    free(bound_names);
+                    free(bound_types);
+                    return 0;
+                }
+                continue;
+            }
+
+            // Check if it's a defined type
+            Symbol* sym = checker_lookup_any(checker, name);
+            if (sym && sym->kind == SYM_TYPE) {
+                // Must match exactly
+                if (!type_equals(sym->type, concrete)) {
+                    free(bound_names);
+                    free(bound_types);
+                    return 0;
+                }
+                continue;
+            }
+
+            // It's a type variable - bind it
+            // Check if already bound
+            int found = 0;
+            for (int b = 0; b < binding_count; b++) {
+                if (strcmp(bound_names[b], name) == 0) {
+                    // Already bound - must match
+                    if (!type_equals(bound_types[b], concrete)) {
+                        free(bound_names);
+                        free(bound_types);
+                        return 0;
+                    }
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found) {
+                // New binding
+                if (binding_count >= binding_capacity) {
+                    binding_capacity *= 2;
+                    bound_names = xrealloc(bound_names, binding_capacity * sizeof(char*));
+                    bound_types = xrealloc(bound_types, binding_capacity * sizeof(Type*));
+                }
+                bound_names[binding_count] = xstrdup(name);
+                bound_types[binding_count] = concrete;
+                binding_count++;
+            }
+        }
+        // Case 2: Pattern is a generic type (e.g., Box<T>)
+        else if (pattern->type == NODE_GENERIC_TYPE) {
+            // Concrete must be a struct with matching base name
+            if (concrete->kind != TYPE_STRUCT) {
+                free(bound_names);
+                free(bound_types);
+                return 0;
+            }
+
+            // Build expected mangled name prefix
+            const char* pattern_base = pattern->as.generic_type.base_name;
+
+            // Check if concrete struct name starts with pattern base
+            if (strncmp(concrete->as.struc.name, pattern_base, strlen(pattern_base)) != 0 ||
+                concrete->as.struc.name[strlen(pattern_base)] != '_') {
+                free(bound_names);
+                free(bound_types);
+                return 0;
+            }
+
+            // For now, handle simple case: Box<T> matching Box_i64
+            // Extract the type argument from the mangled name
+            int nested_arg_count = pattern->as.generic_type.type_args.count;
+            if (nested_arg_count == 1) {
+                Node* nested_pattern = pattern->as.generic_type.type_args.nodes[0];
+                if (nested_pattern->type == NODE_IDENT &&
+                    is_type_variable(checker, nested_pattern->as.ident.name)) {
+                    // Extract the type from mangled name
+                    const char* type_suffix = concrete->as.struc.name + strlen(pattern_base) + 1;
+                    Type*       extracted   = type_builtin_from_name(type_suffix);
+                    if (!extracted) {
+                        // Could be a user-defined type or another struct
+                        Symbol* sym = checker_lookup_any(checker, type_suffix);
+                        if (sym && sym->kind == SYM_TYPE) {
+                            extracted = sym->type;
+                        } else {
+                            // Try as a mangled struct name
+                            extracted = type_struct(type_suffix);
+                        }
+                    }
+
+                    // Bind the type variable
+                    const char* var_name = nested_pattern->as.ident.name;
+                    int         found    = 0;
+                    for (int b = 0; b < binding_count; b++) {
+                        if (strcmp(bound_names[b], var_name) == 0) {
+                            if (!type_equals(bound_types[b], extracted)) {
+                                free(bound_names);
+                                free(bound_types);
+                                return 0;
+                            }
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        if (binding_count >= binding_capacity) {
+                            binding_capacity *= 2;
+                            bound_names = xrealloc(bound_names, binding_capacity * sizeof(char*));
+                            bound_types = xrealloc(bound_types, binding_capacity * sizeof(Type*));
+                        }
+                        bound_names[binding_count] = xstrdup(var_name);
+                        bound_types[binding_count] = extracted;
+                        binding_count++;
+                    }
+                }
+            }
+        }
+    }
+
+    *out_params = bound_names;
+    *out_args   = bound_types;
+    *out_count  = binding_count;
+    return 1;
+}
+
 static Type* resolve_type(Checker* checker, Node* type_node) {
     if (!type_node)
         return type_void;
@@ -448,6 +612,38 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
             Node*           method_decl = def->methods[m];
             func_decl_node* mfdn        = &method_decl->as.func_decl;
 
+            // Try to match method's receiver pattern against concrete args
+            char** method_params = NULL;
+            Type** method_args   = NULL;
+            int    method_count  = 0;
+
+            if (!unify_method_pattern(checker, &mfdn->receiver_type_args, resolved_args, arg_count,
+                                      &method_params, &method_args, &method_count)) {
+                // Pattern doesn't match - skip this method for this instantiation
+                continue;
+            }
+
+            // Combine struct params with method-specific bindings for substitution
+            int    combined_count  = def->type_param_count + method_count;
+            char** combined_params = xmalloc(combined_count * sizeof(char*));
+            Type** combined_args   = xmalloc(combined_count * sizeof(Type*));
+
+            // First, add the struct's type params
+            for (int i = 0; i < def->type_param_count; i++) {
+                combined_params[i] = def->type_params[i];
+                combined_args[i]   = resolved_args[i];
+            }
+            // Then add method-specific bindings
+            for (int i = 0; i < method_count; i++) {
+                combined_params[def->type_param_count + i] = method_params[i];
+                combined_args[def->type_param_count + i]   = method_args[i];
+            }
+
+            // Set up combined substitution context
+            checker->current_type_params      = combined_params;
+            checker->current_type_args        = combined_args;
+            checker->current_type_param_count = combined_count;
+
             // Build function type with substituted types
             int    param_count = mfdn->params.count;
             Type** param_types = NULL;
@@ -463,6 +659,20 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
 
             Type* return_type =
                 mfdn->return_type ? resolve_type(checker, mfdn->return_type) : type_void;
+
+            // Restore struct-only context
+            checker->current_type_params      = def->type_params;
+            checker->current_type_args        = resolved_args;
+            checker->current_type_param_count = def->type_param_count;
+
+            // Free combined arrays (but not the strings - they're borrowed or will be freed later)
+            free(combined_params);
+            free(combined_args);
+            for (int i = 0; i < method_count; i++) {
+                free(method_params[i]);
+            }
+            free(method_params);
+            free(method_args);
 
             Type* method_type = type_func(param_types, param_count, return_type);
 
