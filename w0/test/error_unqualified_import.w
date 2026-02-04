@@ -1,5 +1,5 @@
 // Test that library symbols cannot be accessed without module qualification
-// EXPECT_ERROR: Undefined identifier 'print'
+// Expected error: Undefined identifier 'print'
 
 import std;
 

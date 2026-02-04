@@ -1,5 +1,5 @@
 // Test that private symbols from library imports are not accessible via module qualification
-// EXPECT_ERROR: Module 'std' has no public symbol '_internal_std'
+// Expected error: Module 'std' has no public symbol '_internal_std'
 
 import std;
 
