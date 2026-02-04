@@ -568,6 +568,45 @@ static Node* parse_primary_expression(Parser* parser) {
         return parse_struct_init(parser);
     }
 
+    // Array literal: [e1, e2, ...]
+    if (match_token(parser, TOK_LBRACKET)) {
+        Node* node = node_new(NODE_ARRAY_LIT, token.line, token.column);
+        if (!node) {
+            parse_error(parser, "Out of memory");
+            return NULL;
+        }
+        nodelist_init(&node->as.array_lit.elements);
+        node->as.array_lit.resolved_type = NULL;
+
+        // Check for empty array literal []
+        if (!check_token(parser, TOK_RBRACKET)) {
+            // Parse first element
+            Node* elem = parse_expression(parser);
+            if (!elem) {
+                node_free(node);
+                return NULL;
+            }
+            nodelist_push(&node->as.array_lit.elements, elem);
+
+            // Parse remaining elements
+            while (match_token(parser, TOK_COMMA)) {
+                // Allow trailing comma
+                if (check_token(parser, TOK_RBRACKET)) {
+                    break;
+                }
+                elem = parse_expression(parser);
+                if (!elem) {
+                    node_free(node);
+                    return NULL;
+                }
+                nodelist_push(&node->as.array_lit.elements, elem);
+            }
+        }
+
+        consume_token(parser, TOK_RBRACKET, "Expected ']' after array elements");
+        return node;
+    }
+
     parse_error(parser, "Expected expression");
     return NULL;
 }
@@ -602,16 +641,58 @@ static Node* parse_postfix(Parser* parser) {
             consume_token(parser, TOK_RPAREN, "Expected ')' after arguments");
             expr = call;
         } else if (match_token(parser, TOK_LBRACKET)) {
-            // Index
-            Node* index = node_new(NODE_INDEX, expr->line, expr->column);
-            if (!index) {
-                parse_error(parser, "Out of memory");
-                return NULL;
+            // Check for slice syntax: [:], [:end], [start:], [start:end]
+            // vs regular index: [expr]
+
+            if (check_token(parser, TOK_COLON)) {
+                // [:end] or [:]
+                advance_token(parser); // consume ':'
+                Node* end = NULL;
+                if (!check_token(parser, TOK_RBRACKET)) {
+                    end = parse_expression(parser);
+                }
+                Node* slice = node_new(NODE_SLICE, expr->line, expr->column);
+                if (!slice) {
+                    parse_error(parser, "Out of memory");
+                    return NULL;
+                }
+                slice->as.slice.object = expr;
+                slice->as.slice.start  = NULL;
+                slice->as.slice.end    = end;
+                consume_token(parser, TOK_RBRACKET, "Expected ']'");
+                expr = slice;
+            } else {
+                Node* first = parse_expression(parser);
+                if (check_token(parser, TOK_COLON)) {
+                    // [start:end] or [start:]
+                    advance_token(parser); // consume ':'
+                    Node* end = NULL;
+                    if (!check_token(parser, TOK_RBRACKET)) {
+                        end = parse_expression(parser);
+                    }
+                    Node* slice = node_new(NODE_SLICE, expr->line, expr->column);
+                    if (!slice) {
+                        parse_error(parser, "Out of memory");
+                        return NULL;
+                    }
+                    slice->as.slice.object = expr;
+                    slice->as.slice.start  = first;
+                    slice->as.slice.end    = end;
+                    consume_token(parser, TOK_RBRACKET, "Expected ']'");
+                    expr = slice;
+                } else {
+                    // Regular index [expr]
+                    Node* index = node_new(NODE_INDEX, expr->line, expr->column);
+                    if (!index) {
+                        parse_error(parser, "Out of memory");
+                        return NULL;
+                    }
+                    index->as.index.object = expr;
+                    index->as.index.index  = first;
+                    consume_token(parser, TOK_RBRACKET, "Expected ']'");
+                    expr = index;
+                }
             }
-            index->as.index.object = expr;
-            index->as.index.index  = parse_expression(parser);
-            consume_token(parser, TOK_RBRACKET, "Expected ']' after index");
-            expr = index;
         } else if (match_token(parser, TOK_DOT)) {
             // Member access
             Token name = parser->current;

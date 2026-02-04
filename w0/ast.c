@@ -116,6 +116,11 @@ void node_free(Node* node) {
         node_free(node->as.index.object);
         node_free(node->as.index.index);
         break;
+    case NODE_SLICE:
+        node_free(node->as.slice.object);
+        node_free(node->as.slice.start);
+        node_free(node->as.slice.end);
+        break;
     case NODE_MEMBER:
         node_free(node->as.member.object);
         free(node->as.member.name);
@@ -209,6 +214,9 @@ void node_free(Node* node) {
         break;
     case NODE_TUPLE_LIT:
         nodelist_free(&node->as.tuple_lit.elements);
+        break;
+    case NODE_ARRAY_LIT:
+        nodelist_free(&node->as.array_lit.elements);
         break;
     case NODE_GENERIC_TYPE:
         free(node->as.generic_type.base_name);

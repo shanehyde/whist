@@ -19,6 +19,7 @@ typedef enum {
     TYPE_CHAR,
     TYPE_STRING,
     TYPE_ARRAY,
+    TYPE_SPAN,
     TYPE_STRUCT,
     TYPE_ENUM,
     TYPE_FUNC,
@@ -48,6 +49,11 @@ struct Type {
             Type* elem;
             int   size; // -1 for dynamic/unknown size
         } array;
+
+        // Span: Span<T>
+        struct {
+            Type* elem; // Element type T
+        } span;
 
         // Struct
         struct {
@@ -118,6 +124,7 @@ Type* type_enum(const char* name);
 Type* type_func(Type** params, int param_count, Type* return_type);
 Type* type_tuple(Type** elems, int count);
 Type* type_generic_param(const char* name);
+Type* type_span(Type* elem);
 
 // Generic type name mangling
 char* type_mangle_generic(const char* base, Type** args, int count);

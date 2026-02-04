@@ -79,6 +79,27 @@ static GenericInstance* lookup_generic_instance(Checker* checker, const char* ma
     return NULL;
 }
 
+// Look up an already-instantiated span type by mangled name
+static SpanInstance* lookup_span_instance(Checker* checker, const char* mangled_name) {
+    for (int i = 0; i < checker->span_instance_count; i++) {
+        if (strcmp(checker->span_instances[i].mangled_name, mangled_name) == 0) {
+            return &checker->span_instances[i];
+        }
+    }
+    return NULL;
+}
+
+// Register an instantiated span type
+static void register_span_instance(Checker* checker, const char* mangled_name, Type* elem_type,
+                                   Type* span_type) {
+    VEC_GROW(checker->span_instances, checker->span_instance_count,
+             checker->span_instance_capacity);
+    SpanInstance* inst = &checker->span_instances[checker->span_instance_count++];
+    inst->mangled_name = xstrdup(mangled_name);
+    inst->elem_type    = elem_type;
+    inst->type         = span_type;
+}
+
 // Register an instantiated generic struct
 static void register_generic_instance(Checker* checker, const char* mangled_name,
                                       const char* base_name, Type* type, Type** type_args,
@@ -157,6 +178,10 @@ void checker_init(Checker* checker) {
     checker->current_type_params       = NULL;
     checker->current_type_args         = NULL;
     checker->current_type_param_count  = 0;
+    // Span support
+    checker->span_instances         = NULL;
+    checker->span_instance_count    = 0;
+    checker->span_instance_capacity = 0;
     types_init();
 }
 
@@ -216,6 +241,11 @@ void checker_free(Checker* checker) {
         free(checker->generic_instances[i].type_args);
     }
     free(checker->generic_instances);
+    // Free span instances
+    for (int i = 0; i < checker->span_instance_count; i++) {
+        free(checker->span_instances[i].mangled_name);
+    }
+    free(checker->span_instances);
     types_cleanup();
 }
 
@@ -566,9 +596,42 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
         return type_error;
     }
     case NODE_GENERIC_TYPE: {
-        // Generic type instantiation: Box<i64>, Pair<K, V>
+        // Generic type instantiation: Box<i64>, Pair<K, V>, Span<T>
         const char* base_name = type_node->as.generic_type.base_name;
         int         arg_count = type_node->as.generic_type.type_args.count;
+
+        // Handle builtin Span<T> type
+        if (strcmp(base_name, "Span") == 0) {
+            if (arg_count != 1) {
+                check_error(checker, type_node->line, type_node->column,
+                            "Span requires exactly 1 type argument, got %d", arg_count);
+                return type_error;
+            }
+
+            // Resolve element type
+            Type* elem_type = resolve_type(checker, type_node->as.generic_type.type_args.nodes[0]);
+            if (elem_type == type_error) {
+                return type_error;
+            }
+
+            // Generate mangled name for the span instance
+            char mangled[256];
+            snprintf(mangled, sizeof(mangled), "Span_%s", type_name(elem_type));
+
+            // Check if already instantiated
+            SpanInstance* existing = lookup_span_instance(checker, mangled);
+            if (existing) {
+                return existing->type;
+            }
+
+            // Create the span type
+            Type* span_type = type_span(elem_type);
+
+            // Register for codegen
+            register_span_instance(checker, mangled, elem_type, span_type);
+
+            return span_type;
+        }
 
         // Look up the generic definition
         GenericDef* def = lookup_generic_def(checker, base_name);
@@ -796,8 +859,8 @@ static Type* check_binary_expr(Checker* checker, Node* node) {
     TokenType op = node->as.binary.op;
 
     // Comparison operators return bool
-    if (op == TOK_EQ_EQ || op == TOK_BANG_EQ || op == TOK_LT || op == TOK_GT ||
-        op == TOK_LT_EQ || op == TOK_GT_EQ) {
+    if (op == TOK_EQ_EQ || op == TOK_BANG_EQ || op == TOK_LT || op == TOK_GT || op == TOK_LT_EQ ||
+        op == TOK_GT_EQ) {
         if (type_equals(left, right))
             return type_bool;
         if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
@@ -832,15 +895,13 @@ static Type* check_binary_expr(Checker* checker, Node* node) {
                 return left;
             return type_int64;
         }
-        check_error(checker, node->line, node->column,
-                    "Invalid operands to '%s': '%s' and '%s'", token_type_name(op),
-                    type_name(left), type_name(right));
+        check_error(checker, node->line, node->column, "Invalid operands to '%s': '%s' and '%s'",
+                    token_type_name(op), type_name(left), type_name(right));
         return type_error;
     }
 
     // Bitwise operators
-    if (op == TOK_AMP || op == TOK_PIPE || op == TOK_CARET || op == TOK_LT_LT ||
-        op == TOK_GT_GT) {
+    if (op == TOK_AMP || op == TOK_PIPE || op == TOK_CARET || op == TOK_LT_LT || op == TOK_GT_GT) {
         if (!type_is_integer(left) || !type_is_integer(right)) {
             check_error(checker, node->line, node->column,
                         "Bitwise operators require integer operands");
@@ -902,6 +963,15 @@ static Type* check_index_expr(Checker* checker, Node* node) {
         }
         return object->as.array.elem;
     }
+    if (object->kind == TYPE_SPAN) {
+        if (!type_is_integer(index)) {
+            check_error(checker, node->line, node->column,
+                        "Span index must be an integer, got '%s'", type_name(index));
+            return type_error;
+        }
+        node->as.index.is_span_index = 1;
+        return object->as.span.elem;
+    }
     if (object->kind == TYPE_STRING) {
         if (!type_is_integer(index)) {
             check_error(checker, node->line, node->column,
@@ -931,6 +1001,46 @@ static Type* check_index_expr(Checker* checker, Node* node) {
     return type_error;
 }
 
+static Type* check_slice_expr(Checker* checker, Node* node) {
+    Type* object = check_expression(checker, node->as.slice.object);
+
+    if (object->kind == TYPE_ERROR)
+        return type_error;
+
+    // Slicing works on arrays and spans
+    Type* elem_type = NULL;
+    if (object->kind == TYPE_ARRAY) {
+        elem_type               = object->as.array.elem;
+        node->as.slice.is_array = 1;
+    } else if (object->kind == TYPE_SPAN) {
+        elem_type               = object->as.span.elem;
+        node->as.slice.is_array = 0;
+    } else {
+        check_error(checker, node->line, node->column, "Cannot slice type '%s'", type_name(object));
+        return type_error;
+    }
+
+    // Check bounds are integers (if present)
+    if (node->as.slice.start) {
+        Type* t = check_expression(checker, node->as.slice.start);
+        if (!type_is_integer(t) && t->kind != TYPE_ERROR) {
+            check_error(checker, node->as.slice.start->line, node->as.slice.start->column,
+                        "Slice start index must be an integer, got '%s'", type_name(t));
+        }
+    }
+    if (node->as.slice.end) {
+        Type* t = check_expression(checker, node->as.slice.end);
+        if (!type_is_integer(t) && t->kind != TYPE_ERROR) {
+            check_error(checker, node->as.slice.end->line, node->as.slice.end->column,
+                        "Slice end index must be an integer, got '%s'", type_name(t));
+        }
+    }
+
+    Type* result_type            = type_span(elem_type);
+    node->as.slice.resolved_type = result_type;
+    return result_type;
+}
+
 static Type* check_member_expr(Checker* checker, Node* node) {
     // Check for module-qualified access first (e.g., std.print)
     if (node->as.member.object->type == NODE_IDENT) {
@@ -951,13 +1061,29 @@ static Type* check_member_expr(Checker* checker, Node* node) {
     if (object->kind == TYPE_ERROR)
         return type_error;
 
+    // Handle span member access
+    if (object->kind == TYPE_SPAN) {
+        const char* member_name = node->as.member.name;
+        node->as.member.is_ref  = 0; // Spans are value types, use . not ->
+        if (strcmp(member_name, "count") == 0) {
+            return type_uint64;
+        }
+        if (strcmp(member_name, "data") == 0) {
+            check_error(checker, node->line, node->column,
+                        "Span 'data' field is private; use indexing");
+            return type_error;
+        }
+        check_error(checker, node->line, node->column, "Span has no member '%s'", member_name);
+        return type_error;
+    }
+
     if (object->kind != TYPE_STRUCT) {
         check_error(checker, node->line, node->column,
                     "Member access requires struct type, got '%s'", type_name(object));
         return type_error;
     }
 
-    node->as.member.is_ref = 1;
+    node->as.member.is_ref  = 1;
     const char* member_name = node->as.member.name;
 
     // Find field first
@@ -1146,6 +1272,9 @@ static Type* check_expression(Checker* checker, Node* node) {
     case NODE_INDEX:
         return check_index_expr(checker, node);
 
+    case NODE_SLICE:
+        return check_slice_expr(checker, node);
+
     case NODE_MEMBER:
         return check_member_expr(checker, node);
 
@@ -1164,6 +1293,40 @@ static Type* check_expression(Checker* checker, Node* node) {
             elems[i] = check_expression(checker, node->as.tuple_lit.elements.nodes[i]);
         }
         return type_tuple(elems, count);
+    }
+
+    case NODE_ARRAY_LIT: {
+        int count = node->as.array_lit.elements.count;
+        if (count == 0) {
+            check_error(checker, node->line, node->column,
+                        "Empty array literal requires type annotation");
+            return type_error;
+        }
+
+        // Check first element to get the element type
+        Type* elem_type = check_expression(checker, node->as.array_lit.elements.nodes[0]);
+        if (elem_type->kind == TYPE_ERROR) {
+            return type_error;
+        }
+
+        // Check remaining elements have compatible types
+        for (int i = 1; i < count; i++) {
+            Type* t = check_expression(checker, node->as.array_lit.elements.nodes[i]);
+            if (t->kind == TYPE_ERROR) {
+                return type_error;
+            }
+            if (!type_assignable(elem_type, t)) {
+                check_error(checker, node->as.array_lit.elements.nodes[i]->line,
+                            node->as.array_lit.elements.nodes[i]->column,
+                            "Array element type mismatch: expected '%s', got '%s'",
+                            type_name(elem_type), type_name(t));
+                return type_error;
+            }
+        }
+
+        // Store resolved element type for codegen
+        node->as.array_lit.resolved_type = elem_type;
+        return type_array(elem_type, count);
     }
 
     default:

@@ -33,9 +33,13 @@ typedef struct {
     // Generic instances from checker (not owned, do not free)
     GenericInstance* generic_instances;
     int              generic_instance_count;
+    // Span instances from checker (not owned, do not free)
+    SpanInstance* span_instances;
+    int           span_instance_count;
 } CodeGen;
 
-void codegen_init(CodeGen* gen, FILE* out, GenericInstance* instances, int instance_count);
+void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,
+                  SpanInstance* span_instances, int span_count);
 void codegen_emit(CodeGen* gen, Node* ast);
 
 #endif

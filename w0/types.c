@@ -121,6 +121,12 @@ Type* type_generic_param(const char* name) {
     return type;
 }
 
+Type* type_span(Type* elem) {
+    Type* type         = type_new(TYPE_SPAN);
+    type->as.span.elem = elem;
+    return type;
+}
+
 void type_free(Type* type) {
     if (!type)
         return;
@@ -181,6 +187,8 @@ int type_equals(Type* a, Type* b) {
     case TYPE_ARRAY:
         return a->as.array.size == b->as.array.size &&
                type_equals(a->as.array.elem, b->as.array.elem);
+    case TYPE_SPAN:
+        return type_equals(a->as.span.elem, b->as.span.elem);
     case TYPE_STRUCT:
         return strcmp(a->as.struc.name, b->as.struc.name) == 0;
     case TYPE_ENUM:
@@ -308,6 +316,9 @@ const char* type_name(Type* type) {
             snprintf(type_name_buf, sizeof(type_name_buf), "[]%s", type_name(type->as.array.elem));
         }
         return type_name_buf;
+    case TYPE_SPAN:
+        snprintf(type_name_buf, sizeof(type_name_buf), "Span<%s>", type_name(type->as.span.elem));
+        return type_name_buf;
     case TYPE_STRUCT:
         return type->as.struc.name;
     case TYPE_ENUM:
@@ -388,6 +399,9 @@ int type_is_builtin_name(const char* name) {
     return type_builtin_from_name(name) != NULL;
 }
 
+// Buffer for mangled span names
+static char type_mangle_buf[256];
+
 // Helper to get a simple name for mangling (without spaces or special chars)
 static const char* type_mangle_name(Type* type) {
     if (!type)
@@ -422,6 +436,10 @@ static const char* type_mangle_name(Type* type) {
         return "char";
     case TYPE_STRING:
         return "string";
+    case TYPE_SPAN:
+        snprintf(type_mangle_buf, sizeof(type_mangle_buf), "Span_%s",
+                 type_mangle_name(type->as.span.elem));
+        return type_mangle_buf;
     case TYPE_STRUCT:
         return type->as.struc.name;
     case TYPE_ENUM:
