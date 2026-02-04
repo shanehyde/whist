@@ -17,6 +17,13 @@ static Type* check_expression(Checker* checker, Node* node);
 static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
 static Type* resolve_type(Checker* checker, Node* type_node);
 
+// Forward declarations for expression checking helpers
+static Type* check_binary_expr(Checker* checker, Node* node);
+static Type* check_unary_expr(Checker* checker, Node* node);
+static Type* check_index_expr(Checker* checker, Node* node);
+static Type* check_member_expr(Checker* checker, Node* node);
+static Type* check_assign_expr(Checker* checker, Node* node);
+
 // Forward declarations for destructuring pattern checking
 static int  check_destruct_pattern_redefinitions(Checker* checker, DestructPattern* pattern,
                                                  int line, int col);
@@ -762,6 +769,262 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
 }
 
 // =============================================================================
+// Expression checking helpers
+// =============================================================================
+
+static Type* check_binary_expr(Checker* checker, Node* node) {
+    Type* left  = check_expression(checker, node->as.binary.left);
+    Type* right = check_expression(checker, node->as.binary.right);
+
+    if (left->kind == TYPE_ERROR || right->kind == TYPE_ERROR) {
+        return type_error;
+    }
+
+    TokenType op = node->as.binary.op;
+
+    // Comparison operators return bool
+    if (op == TOK_EQ_EQ || op == TOK_BANG_EQ || op == TOK_LT || op == TOK_GT ||
+        op == TOK_LT_EQ || op == TOK_GT_EQ) {
+        if (type_equals(left, right))
+            return type_bool;
+        if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
+            (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
+            return type_bool;
+        }
+        check_error(checker, node->line, node->column, "Cannot compare '%s' and '%s'",
+                    type_name(left), type_name(right));
+        return type_error;
+    }
+
+    // Logical operators
+    if (op == TOK_AMP_AMP || op == TOK_PIPE_PIPE) {
+        if (left->kind != TYPE_BOOL || right->kind != TYPE_BOOL) {
+            check_error(checker, node->line, node->column,
+                        "Logical operators require bool operands");
+            return type_error;
+        }
+        return type_bool;
+    }
+
+    // Arithmetic operators
+    if (op == TOK_PLUS || op == TOK_MINUS || op == TOK_STAR || op == TOK_SLASH ||
+        op == TOK_PERCENT) {
+        if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
+            (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
+            if (left->kind == TYPE_F64 || right->kind == TYPE_F64)
+                return type_f64;
+            if (left->kind == TYPE_F32 || right->kind == TYPE_F32)
+                return type_f32;
+            if (type_equals(left, right))
+                return left;
+            return type_int64;
+        }
+        check_error(checker, node->line, node->column,
+                    "Invalid operands to '%s': '%s' and '%s'", token_type_name(op),
+                    type_name(left), type_name(right));
+        return type_error;
+    }
+
+    // Bitwise operators
+    if (op == TOK_AMP || op == TOK_PIPE || op == TOK_CARET || op == TOK_LT_LT ||
+        op == TOK_GT_GT) {
+        if (!type_is_integer(left) || !type_is_integer(right)) {
+            check_error(checker, node->line, node->column,
+                        "Bitwise operators require integer operands");
+            return type_error;
+        }
+        if (type_equals(left, right))
+            return left;
+        return type_int64;
+    }
+
+    check_error(checker, node->line, node->column, "Unknown binary operator");
+    return type_error;
+}
+
+static Type* check_unary_expr(Checker* checker, Node* node) {
+    Type*     operand = check_expression(checker, node->as.unary.operand);
+    TokenType op      = node->as.unary.op;
+
+    if (operand->kind == TYPE_ERROR)
+        return type_error;
+
+    switch (op) {
+    case TOK_MINUS:
+        if (!type_is_integer(operand) && operand->kind != TYPE_F32 && operand->kind != TYPE_F64) {
+            check_error(checker, node->line, node->column, "Unary '-' requires numeric operand");
+            return type_error;
+        }
+        return operand;
+    case TOK_BANG:
+        if (operand->kind != TYPE_BOOL) {
+            check_error(checker, node->line, node->column, "Unary '!' requires bool operand");
+            return type_error;
+        }
+        return type_bool;
+    case TOK_TILDE:
+        if (!type_is_integer(operand)) {
+            check_error(checker, node->line, node->column, "Unary '~' requires integer operand");
+            return type_error;
+        }
+        return operand;
+    default:
+        check_error(checker, node->line, node->column, "Unknown unary operator");
+        return type_error;
+    }
+}
+
+static Type* check_index_expr(Checker* checker, Node* node) {
+    Type* object = check_expression(checker, node->as.index.object);
+    Type* index  = check_expression(checker, node->as.index.index);
+
+    if (object->kind == TYPE_ERROR || index->kind == TYPE_ERROR)
+        return type_error;
+
+    if (object->kind == TYPE_ARRAY) {
+        if (!type_is_integer(index)) {
+            check_error(checker, node->line, node->column,
+                        "Array index must be an integer, got '%s'", type_name(index));
+            return type_error;
+        }
+        return object->as.array.elem;
+    }
+    if (object->kind == TYPE_STRING) {
+        if (!type_is_integer(index)) {
+            check_error(checker, node->line, node->column,
+                        "String index must be an integer, got '%s'", type_name(index));
+            return type_error;
+        }
+        return type_char;
+    }
+    if (object->kind == TYPE_TUPLE) {
+        if (node->as.index.index->type != NODE_INT_LIT) {
+            check_error(checker, node->line, node->column,
+                        "Tuple index must be a compile-time constant");
+            return type_error;
+        }
+        int idx = (int)node->as.index.index->as.int_lit.value;
+        if (idx < 0 || idx >= object->as.tuple.elem_count) {
+            check_error(checker, node->line, node->column,
+                        "Tuple index %d out of bounds (tuple has %d elements)", idx,
+                        object->as.tuple.elem_count);
+            return type_error;
+        }
+        node->as.index.is_tuple_index = 1;
+        return object->as.tuple.elem_types[idx];
+    }
+
+    check_error(checker, node->line, node->column, "Cannot index type '%s'", type_name(object));
+    return type_error;
+}
+
+static Type* check_member_expr(Checker* checker, Node* node) {
+    // Check for module-qualified access first (e.g., std.print)
+    if (node->as.member.object->type == NODE_IDENT) {
+        const char* name = node->as.member.object->as.ident.name;
+        if (is_imported_module(checker, name)) {
+            Symbol* sym = checker_lookup_in_module(checker, name, node->as.member.name);
+            if (!sym) {
+                check_error(checker, node->line, node->column,
+                            "Module '%s' has no public symbol '%s'", name, node->as.member.name);
+                return type_error;
+            }
+            node->as.member.module_name = xstrdup(name);
+            return sym->type;
+        }
+    }
+
+    Type* object = check_expression(checker, node->as.member.object);
+    if (object->kind == TYPE_ERROR)
+        return type_error;
+
+    if (object->kind != TYPE_STRUCT) {
+        check_error(checker, node->line, node->column,
+                    "Member access requires struct type, got '%s'", type_name(object));
+        return type_error;
+    }
+
+    node->as.member.is_ref = 1;
+    const char* member_name = node->as.member.name;
+
+    // Find field first
+    for (int i = 0; i < object->as.struc.field_count; i++) {
+        if (strcmp(object->as.struc.field_names[i], member_name) == 0) {
+            node->as.member.struct_name = NULL;
+            return object->as.struc.field_types[i];
+        }
+    }
+
+    // If not a field, check for method
+    for (int i = 0; i < object->as.struc.method_count; i++) {
+        if (strcmp(object->as.struc.method_names[i], member_name) == 0) {
+            node->as.member.struct_name = xstrdup(object->as.struc.name);
+            return object->as.struc.method_types[i];
+        }
+    }
+
+    check_error(checker, node->line, node->column, "Struct '%s' has no field or method '%s'",
+                object->as.struc.name, member_name);
+    return type_error;
+}
+
+static Type* check_assign_expr(Checker* checker, Node* node) {
+    Type* target = check_expression(checker, node->as.assign.target);
+
+    if (node->as.assign.value && node->as.assign.value->type == NODE_STRUCT_INIT) {
+        check_error(checker, node->line, node->column,
+                    "Struct initializers are only allowed in variable declarations");
+        return type_error;
+    }
+
+    Type* value = check_expression(checker, node->as.assign.value);
+
+    if (target->kind == TYPE_ERROR || value->kind == TYPE_ERROR)
+        return type_error;
+
+    // Check if target is assignable (lvalue check)
+    Node* t = node->as.assign.target;
+    if (t->type == NODE_IDENT) {
+        Symbol* sym = checker_lookup(checker, t->as.ident.name);
+        if (sym && sym->is_const) {
+            check_error(checker, node->line, node->column, "Cannot assign to const '%s'",
+                        t->as.ident.name);
+            return type_error;
+        }
+    } else if (t->type == NODE_MEMBER) {
+        Node* obj = t->as.member.object;
+        if (obj->type == NODE_IDENT) {
+            Symbol* sym = checker_lookup(checker, obj->as.ident.name);
+            if (sym && sym->is_const) {
+                check_error(checker, node->line, node->column,
+                            "Cannot modify field '%s' through const '%s'", t->as.member.name,
+                            obj->as.ident.name);
+                return type_error;
+            }
+        }
+    }
+
+    // For compound assignment, check operation is valid
+    TokenType op = node->as.assign.op;
+    if (op != TOK_EQ) {
+        if ((!type_is_integer(target) && target->kind != TYPE_F32 && target->kind != TYPE_F64) ||
+            (!type_is_integer(value) && value->kind != TYPE_F32 && value->kind != TYPE_F64)) {
+            check_error(checker, node->line, node->column,
+                        "Invalid operands for compound assignment");
+            return type_error;
+        }
+    }
+
+    if (!type_assignable(target, value)) {
+        check_error(checker, node->line, node->column, "Cannot assign '%s' to '%s'",
+                    type_name(value), type_name(target));
+        return type_error;
+    }
+
+    return target;
+}
+
+// =============================================================================
 // Expression checking
 // =============================================================================
 
@@ -828,125 +1091,11 @@ static Type* check_expression(Checker* checker, Node* node) {
         return enum_type;
     }
 
-    case NODE_BINARY: {
-        Type* left  = check_expression(checker, node->as.binary.left);
-        Type* right = check_expression(checker, node->as.binary.right);
+    case NODE_BINARY:
+        return check_binary_expr(checker, node);
 
-        if (left->kind == TYPE_ERROR || right->kind == TYPE_ERROR) {
-            return type_error;
-        }
-
-        TokenType op = node->as.binary.op;
-
-        // Comparison operators return bool
-        if (op == TOK_EQ_EQ || op == TOK_BANG_EQ || op == TOK_LT || op == TOK_GT ||
-            op == TOK_LT_EQ || op == TOK_GT_EQ) {
-            // Allow comparing same types or numeric types
-            if (type_equals(left, right))
-                return type_bool;
-            if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
-                (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
-                return type_bool;
-            }
-            check_error(checker, node->line, node->column, "Cannot compare '%s' and '%s'",
-                        type_name(left), type_name(right));
-            return type_error;
-        }
-
-        // Logical operators
-        if (op == TOK_AMP_AMP || op == TOK_PIPE_PIPE) {
-            if (left->kind != TYPE_BOOL || right->kind != TYPE_BOOL) {
-                check_error(checker, node->line, node->column,
-                            "Logical operators require bool operands");
-                return type_error;
-            }
-            return type_bool;
-        }
-
-        // Arithmetic operators
-        if (op == TOK_PLUS || op == TOK_MINUS || op == TOK_STAR || op == TOK_SLASH ||
-            op == TOK_PERCENT) {
-            // Numeric operands
-            if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
-                (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
-                // Promote to float if either operand is f32/f64
-                if (left->kind == TYPE_F64 || right->kind == TYPE_F64) {
-                    return type_f64;
-                }
-                if (left->kind == TYPE_F32 || right->kind == TYPE_F32) {
-                    return type_f32;
-                }
-                // For integer types, return the larger/common type
-                // If they're the same type, return that type
-                if (type_equals(left, right)) {
-                    return left;
-                }
-                // Otherwise default to i64
-                return type_int64;
-            }
-
-            check_error(checker, node->line, node->column,
-                        "Invalid operands to '%s': '%s' and '%s'", token_type_name(op),
-                        type_name(left), type_name(right));
-            return type_error;
-        }
-
-        // Bitwise operators
-        if (op == TOK_AMP || op == TOK_PIPE || op == TOK_CARET || op == TOK_LT_LT ||
-            op == TOK_GT_GT) {
-            if (!type_is_integer(left) || !type_is_integer(right)) {
-                check_error(checker, node->line, node->column,
-                            "Bitwise operators require integer operands");
-                return type_error;
-            }
-            // Return common type or promote to i64
-            if (type_equals(left, right)) {
-                return left;
-            }
-            return type_int64;
-        }
-
-        check_error(checker, node->line, node->column, "Unknown binary operator");
-        return type_error;
-    }
-
-    case NODE_UNARY: {
-        Type*     operand = check_expression(checker, node->as.unary.operand);
-        TokenType op      = node->as.unary.op;
-
-        if (operand->kind == TYPE_ERROR)
-            return type_error;
-
-        switch (op) {
-        case TOK_MINUS:
-            if (!type_is_integer(operand) && operand->kind != TYPE_F32 &&
-                operand->kind != TYPE_F64) {
-                check_error(checker, node->line, node->column,
-                            "Unary '-' requires numeric operand");
-                return type_error;
-            }
-            return operand;
-
-        case TOK_BANG:
-            if (operand->kind != TYPE_BOOL) {
-                check_error(checker, node->line, node->column, "Unary '!' requires bool operand");
-                return type_error;
-            }
-            return type_bool;
-
-        case TOK_TILDE:
-            if (!type_is_integer(operand)) {
-                check_error(checker, node->line, node->column,
-                            "Unary '~' requires integer operand");
-                return type_error;
-            }
-            return operand;
-
-        default:
-            check_error(checker, node->line, node->column, "Unknown unary operator");
-            return type_error;
-        }
-    }
+    case NODE_UNARY:
+        return check_unary_expr(checker, node);
 
     case NODE_CALL: {
         Type* func_type = check_expression(checker, node->as.call.func);
@@ -983,170 +1132,14 @@ static Type* check_expression(Checker* checker, Node* node) {
         return func_type->as.func.return_type;
     }
 
-    case NODE_INDEX: {
-        Type* object = check_expression(checker, node->as.index.object);
-        Type* index  = check_expression(checker, node->as.index.index);
+    case NODE_INDEX:
+        return check_index_expr(checker, node);
 
-        if (object->kind == TYPE_ERROR || index->kind == TYPE_ERROR) {
-            return type_error;
-        }
+    case NODE_MEMBER:
+        return check_member_expr(checker, node);
 
-        if (object->kind == TYPE_ARRAY) {
-            if (!type_is_integer(index)) {
-                check_error(checker, node->line, node->column,
-                            "Array index must be an integer, got '%s'", type_name(index));
-                return type_error;
-            }
-            return object->as.array.elem;
-        }
-        if (object->kind == TYPE_STRING) {
-            if (!type_is_integer(index)) {
-                check_error(checker, node->line, node->column,
-                            "String index must be an integer, got '%s'", type_name(index));
-                return type_error;
-            }
-            return type_char;
-        }
-        if (object->kind == TYPE_TUPLE) {
-            // Tuple index must be a compile-time constant integer
-            if (node->as.index.index->type != NODE_INT_LIT) {
-                check_error(checker, node->line, node->column,
-                            "Tuple index must be a compile-time constant");
-                return type_error;
-            }
-            int idx = (int)node->as.index.index->as.int_lit.value;
-            if (idx < 0 || idx >= object->as.tuple.elem_count) {
-                check_error(checker, node->line, node->column,
-                            "Tuple index %d out of bounds (tuple has %d elements)", idx,
-                            object->as.tuple.elem_count);
-                return type_error;
-            }
-            // Mark this as a tuple index for codegen
-            node->as.index.is_tuple_index = 1;
-            return object->as.tuple.elem_types[idx];
-        }
-
-        check_error(checker, node->line, node->column, "Cannot index type '%s'", type_name(object));
-        return type_error;
-    }
-
-    case NODE_MEMBER: {
-        // Check for module-qualified access first (e.g., std.print)
-        if (node->as.member.object->type == NODE_IDENT) {
-            const char* name = node->as.member.object->as.ident.name;
-            if (is_imported_module(checker, name)) {
-                Symbol* sym = checker_lookup_in_module(checker, name, node->as.member.name);
-                if (!sym) {
-                    check_error(checker, node->line, node->column,
-                                "Module '%s' has no public symbol '%s'", name,
-                                node->as.member.name);
-                    return type_error;
-                }
-                node->as.member.module_name = xstrdup(name);
-                return sym->type;
-            }
-        }
-
-        Type* object = check_expression(checker, node->as.member.object);
-
-        if (object->kind == TYPE_ERROR)
-            return type_error;
-
-        // Struct types are always references
-        if (object->kind != TYPE_STRUCT) {
-            check_error(checker, node->line, node->column,
-                        "Member access requires struct type, got '%s'", type_name(object));
-            return type_error;
-        }
-
-        // Mark as a reference for codegen (struct vars are always refs)
-        node->as.member.is_ref = 1;
-
-        // Find field first
-        const char* member_name = node->as.member.name;
-        for (int i = 0; i < object->as.struc.field_count; i++) {
-            if (strcmp(object->as.struc.field_names[i], member_name) == 0) {
-                node->as.member.struct_name = NULL; // Not a method
-                return object->as.struc.field_types[i];
-            }
-        }
-
-        // If not a field, check for method
-        for (int i = 0; i < object->as.struc.method_count; i++) {
-            if (strcmp(object->as.struc.method_names[i], member_name) == 0) {
-                // Store struct name for codegen to use
-                node->as.member.struct_name = xstrdup(object->as.struc.name);
-                // Return the method's function type
-                return object->as.struc.method_types[i];
-            }
-        }
-
-        check_error(checker, node->line, node->column, "Struct '%s' has no field or method '%s'",
-                    object->as.struc.name, member_name);
-        return type_error;
-    }
-
-    case NODE_ASSIGN: {
-        Type* target = check_expression(checker, node->as.assign.target);
-        Type* value  = NULL;
-
-        if (node->as.assign.value && node->as.assign.value->type == NODE_STRUCT_INIT) {
-            check_error(checker, node->line, node->column,
-                        "Struct initializers are only allowed in variable declarations");
-            return type_error;
-        }
-
-        value = check_expression(checker, node->as.assign.value);
-
-        if (target->kind == TYPE_ERROR || value->kind == TYPE_ERROR) {
-            return type_error;
-        }
-
-        // Check if target is assignable (lvalue check could be more thorough)
-        Node* t = node->as.assign.target;
-        if (t->type == NODE_IDENT) {
-            Symbol* sym = checker_lookup(checker, t->as.ident.name);
-            if (sym && sym->is_const) {
-                check_error(checker, node->line, node->column, "Cannot assign to const '%s'",
-                            t->as.ident.name);
-                return type_error;
-            }
-        } else if (t->type == NODE_MEMBER) {
-            // Check if assigning through a const pointer (e.g., self->x in a const method)
-            Node* obj = t->as.member.object;
-            if (obj->type == NODE_IDENT) {
-                Symbol* sym = checker_lookup(checker, obj->as.ident.name);
-                if (sym && sym->is_const) {
-                    check_error(checker, node->line, node->column,
-                                "Cannot modify field '%s' through const '%s'", t->as.member.name,
-                                obj->as.ident.name);
-                    return type_error;
-                }
-            }
-        }
-
-        // For compound assignment, check operation is valid
-        TokenType op = node->as.assign.op;
-        if (op != TOK_EQ) {
-            // Compound assignment: +=, -=, etc.
-            // Check types are compatible for arithmetic
-            if ((!type_is_integer(target) && target->kind != TYPE_F32 &&
-                 target->kind != TYPE_F64) ||
-                (!type_is_integer(value) && value->kind != TYPE_F32 && value->kind != TYPE_F64)) {
-                check_error(checker, node->line, node->column,
-                            "Invalid operands for compound assignment");
-                return type_error;
-            }
-        }
-
-        if (!type_assignable(target, value)) {
-            check_error(checker, node->line, node->column, "Cannot assign '%s' to '%s'",
-                        type_name(value), type_name(target));
-            return type_error;
-        }
-
-        return target;
-    }
+    case NODE_ASSIGN:
+        return check_assign_expr(checker, node);
 
     case NODE_STRUCT_INIT:
         check_error(checker, node->line, node->column,
