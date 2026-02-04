@@ -78,6 +78,9 @@ typedef enum {
     NODE_TUPLE_TYPE, // (T1, T2, ...)
     NODE_TUPLE_LIT,  // (e1, e2, ...)
 
+    // Generic types
+    NODE_GENERIC_TYPE, // Box<i64>, Pair<K, V>
+
     // Other
     NODE_PARAM,
     NODE_FIELD,
@@ -94,11 +97,14 @@ struct NodeList {
 };
 
 typedef struct {
-    int      is_public;
-    int      is_extern;
-    char*    receiver_type;     // Method receiver struct name (NULL for regular functions)
-    int      receiver_type_len; // Length of receiver type name
-    int      receiver_is_const; // 1 if const receiver, 0 if mutable
+    int   is_public;
+    int   is_extern;
+    char* receiver_type;     // Method receiver struct name (NULL for regular functions)
+    int   receiver_type_len; // Length of receiver type name
+    int   receiver_is_const; // 1 if const receiver, 0 if mutable
+    // For generic method receivers: func (Box<T>) get(): T
+    // or func (Pair<i32, Box<T>>) set(): void
+    NodeList receiver_type_args; // Type nodes for type arguments in receiver
     char*    name;
     int      name_length;
     NodeList params;
@@ -227,6 +233,13 @@ struct Node {
             NodeList elements;
         } tuple_lit;
 
+        // Generic type reference: Box<i64>, Pair<K, V>
+        struct {
+            char*    base_name;
+            int      base_name_length;
+            NodeList type_args; // list of type nodes
+        } generic_type;
+
         // Expression statement
         struct {
             Node* expr;
@@ -299,6 +312,9 @@ struct Node {
             int      name_length;
             NodeList fields;
             char*    source_module; // NULL = same module, else external module name
+            // Generic type parameters (NULL if not generic)
+            char** type_params; // ["T"] or ["K", "V"]
+            int    type_param_count;
         } struct_decl;
 
         // Field

@@ -45,9 +45,106 @@ static void defer_clear(CodeGen* gen) {
 
 // Check if a type node represents a struct (user-defined) type
 static int is_struct_type(Node* type_node) {
-    if (!type_node || type_node->type != NODE_IDENT)
+    if (!type_node)
+        return 0;
+    // Generic types (Box<i64>) are always struct types
+    if (type_node->type == NODE_GENERIC_TYPE)
+        return 1;
+    if (type_node->type != NODE_IDENT)
         return 0;
     return !type_is_builtin_name(type_node->as.ident.name);
+}
+
+// Type parameter substitution context for generic method emission
+typedef struct {
+    char** type_params; // Type parameter names ["T", "K", ...]
+    Type** type_args;   // Concrete types to substitute
+    int    count;
+} TypeSubstContext;
+
+static TypeSubstContext* g_subst_ctx = NULL; // Global substitution context
+
+// Helper to check if a name is a type variable (not a builtin type)
+static int codegen_is_type_variable(const char* name) {
+    return !type_is_builtin_name(name);
+}
+
+// Extract additional type bindings from matching a method's receiver pattern against concrete args
+// For example, matching <i32, Box<T>> against [i32, Box_i64] extracts T=i64
+// Returns 1 on match (and fills out_* params), 0 on no match
+static int codegen_extract_method_bindings(NodeList* pattern_args, Type** concrete_args,
+                                           int arg_count, char*** out_params, Type*** out_args,
+                                           int* out_count) {
+    int    capacity = 4;
+    int    count    = 0;
+    char** params   = xmalloc(capacity * sizeof(char*));
+    Type** args     = xmalloc(capacity * sizeof(Type*));
+
+    for (int i = 0; i < arg_count; i++) {
+        Node* pattern  = pattern_args->nodes[i];
+        Type* concrete = concrete_args[i];
+
+        if (pattern->type == NODE_IDENT) {
+            const char* name = pattern->as.ident.name;
+            // If it's a type variable, bind it
+            if (codegen_is_type_variable(name)) {
+                if (count >= capacity) {
+                    capacity *= 2;
+                    params = xrealloc(params, capacity * sizeof(char*));
+                    args   = xrealloc(args, capacity * sizeof(Type*));
+                }
+                params[count] = xstrdup(name);
+                args[count]   = concrete;
+                count++;
+            }
+            // If it's a concrete type, check it matches (for partial specialization)
+            // For now, we trust that the checker validated this
+        } else if (pattern->type == NODE_GENERIC_TYPE) {
+            // Pattern is like Box<T>, concrete is like Box_i64
+            if (concrete->kind != TYPE_STRUCT)
+                continue;
+
+            const char* pattern_base  = pattern->as.generic_type.base_name;
+            const char* concrete_name = concrete->as.struc.name;
+
+            // Check the base matches
+            size_t base_len = strlen(pattern_base);
+            if (strncmp(concrete_name, pattern_base, base_len) != 0 ||
+                concrete_name[base_len] != '_') {
+                free(params);
+                free(args);
+                return 0;
+            }
+
+            // For single type arg, extract the binding
+            if (pattern->as.generic_type.type_args.count == 1) {
+                Node* nested = pattern->as.generic_type.type_args.nodes[0];
+                if (nested->type == NODE_IDENT && codegen_is_type_variable(nested->as.ident.name)) {
+                    // Extract type from mangled name suffix
+                    const char* suffix    = concrete_name + base_len + 1;
+                    Type*       extracted = type_builtin_from_name(suffix);
+                    if (!extracted) {
+                        // Assume it's a struct type
+                        extracted = type_struct(suffix);
+                    }
+
+                    if (count >= capacity) {
+                        capacity *= 2;
+                        params = xrealloc(params, capacity * sizeof(char*));
+                        args   = xrealloc(args, capacity * sizeof(Type*));
+                    }
+                    params[count] = xstrdup(nested->as.ident.name);
+                    args[count]   = extracted;
+                    count++;
+                }
+            }
+        }
+    }
+
+    *out_params = params;
+    *out_args   = args;
+    *out_count  = count;
+    return 1;
 }
 
 // Helper to emit function name with appropriate prefix (method or module)
@@ -77,7 +174,19 @@ static void emit_type(CodeGen* gen, Node* type_node) {
 
     switch (type_node->type) {
     case NODE_IDENT: {
-        const char* name   = type_node->as.ident.name;
+        const char* name = type_node->as.ident.name;
+
+        // Check for type parameter substitution (for generic methods)
+        if (g_subst_ctx) {
+            for (int i = 0; i < g_subst_ctx->count; i++) {
+                if (strcmp(g_subst_ctx->type_params[i], name) == 0) {
+                    // Substitute with concrete type
+                    emit_resolved_type(gen, g_subst_ctx->type_args[i]);
+                    return;
+                }
+            }
+        }
+
         const char* c_type = type_c_name(name);
         if (c_type) {
             emit(gen, "%s", c_type);
@@ -125,9 +234,124 @@ static void emit_type(CodeGen* gen, Node* type_node) {
         }
         break;
     }
+    case NODE_GENERIC_TYPE: {
+        // Generic type instantiation - emit the mangled name as struct reference
+        // Build the mangled name: Box<i64> -> Box_i64, Box<T> -> Box_i64 (with subst)
+        const char* base = type_node->as.generic_type.base_name;
+        emit(gen, "%s", base);
+        for (int i = 0; i < type_node->as.generic_type.type_args.count; i++) {
+            emit(gen, "_");
+            // Get simple type name for mangling
+            Node* arg = type_node->as.generic_type.type_args.nodes[i];
+            if (arg->type == NODE_IDENT) {
+                const char* arg_name = arg->as.ident.name;
+                // Check for type parameter substitution
+                int substituted = 0;
+                if (g_subst_ctx) {
+                    for (int s = 0; s < g_subst_ctx->count; s++) {
+                        if (strcmp(g_subst_ctx->type_params[s], arg_name) == 0) {
+                            // Emit the substituted type's name for mangling
+                            Type*       subst_type  = g_subst_ctx->type_args[s];
+                            const char* mangle_name = type_name(subst_type);
+                            emit(gen, "%s", mangle_name);
+                            substituted = 1;
+                            break;
+                        }
+                    }
+                }
+                if (!substituted) {
+                    emit(gen, "%s", arg_name);
+                }
+            } else if (arg->type == NODE_GENERIC_TYPE) {
+                // Nested generic - recurse to get mangled name
+                emit(gen, "%s", arg->as.generic_type.base_name);
+                for (int j = 0; j < arg->as.generic_type.type_args.count; j++) {
+                    emit(gen, "_");
+                    Node* nested = arg->as.generic_type.type_args.nodes[j];
+                    if (nested->type == NODE_IDENT) {
+                        const char* nested_name = nested->as.ident.name;
+                        // Check for type parameter substitution
+                        int subst = 0;
+                        if (g_subst_ctx) {
+                            for (int s = 0; s < g_subst_ctx->count; s++) {
+                                if (strcmp(g_subst_ctx->type_params[s], nested_name) == 0) {
+                                    Type* subst_type = g_subst_ctx->type_args[s];
+                                    emit(gen, "%s", type_name(subst_type));
+                                    subst = 1;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!subst) {
+                            emit(gen, "%s", nested_name);
+                        }
+                    }
+                }
+            }
+        }
+        emit(gen, "*"); // Struct reference
+        break;
+    }
     default:
         emit(gen, "/* unknown type */");
         break;
+    }
+}
+
+// Emit a type node with type parameter substitution
+// Used when emitting generic method bodies
+static void emit_type_subst(CodeGen* gen, Node* type_node) {
+    if (!type_node) {
+        emit(gen, "void");
+        return;
+    }
+
+    // Check for type parameter substitution
+    if (g_subst_ctx && type_node->type == NODE_IDENT) {
+        const char* name = type_node->as.ident.name;
+        for (int i = 0; i < g_subst_ctx->count; i++) {
+            if (strcmp(g_subst_ctx->type_params[i], name) == 0) {
+                // Found a type parameter - emit the substituted type
+                emit_resolved_type(gen, g_subst_ctx->type_args[i]);
+                return;
+            }
+        }
+    }
+
+    // Not a type parameter or no substitution context - emit normally
+    emit_type(gen, type_node);
+}
+
+// Emit a type with name, applying type parameter substitution
+static void emit_type_with_name_subst(CodeGen* gen, Node* type_node, const char* name) {
+    if (!type_node) {
+        emit(gen, "int64_t %s", name);
+        return;
+    }
+
+    // Check if this is a struct type (needs to be a pointer)
+    int is_struct = is_struct_type(type_node);
+
+    // Check for type parameter substitution
+    if (g_subst_ctx && type_node->type == NODE_IDENT) {
+        const char* type_name = type_node->as.ident.name;
+        for (int i = 0; i < g_subst_ctx->count; i++) {
+            if (strcmp(g_subst_ctx->type_params[i], type_name) == 0) {
+                // Found a type parameter - emit the substituted type
+                emit_resolved_type(gen, g_subst_ctx->type_args[i]);
+                emit(gen, " %s", name);
+                return;
+            }
+        }
+    }
+
+    // Not a type parameter - emit normally
+    if (is_struct) {
+        emit_type(gen, type_node);
+        emit(gen, " %s", name);
+    } else {
+        emit_type(gen, type_node);
+        emit(gen, " %s", name);
     }
 }
 
@@ -704,11 +928,27 @@ static void emit_stmt(CodeGen* gen, Node* node) {
             if (struct_type && node->as.var_decl.init->type == NODE_STRUCT_INIT) {
                 // Struct type with struct init: allocate and initialize
                 // var p: Point = {...} => Point* p = malloc(sizeof(Point)); *p = (Point){...};
-                const char* type_name = node->as.var_decl.type->as.ident.name;
+                char* type_name = NULL;
+                if (node->as.var_decl.type->type == NODE_GENERIC_TYPE) {
+                    // Generic type: build mangled name (e.g., Box<i64> -> Box_i64)
+                    Node*  gtype     = node->as.var_decl.type;
+                    int    arg_count = gtype->as.generic_type.type_args.count;
+                    Type** args      = xmalloc(arg_count * sizeof(Type*));
+                    for (int i = 0; i < arg_count; i++) {
+                        args[i] = type_from_node(gtype->as.generic_type.type_args.nodes[i]);
+                    }
+                    type_name =
+                        type_mangle_generic(gtype->as.generic_type.base_name, args, arg_count);
+                    free(args);
+                } else {
+                    // Regular struct type
+                    type_name = xstrdup(node->as.var_decl.type->as.ident.name);
+                }
                 emit(gen, " = malloc(sizeof(%s));\n", type_name);
                 emit_indent(gen);
                 emit(gen, "*%s = (%s)", node->as.var_decl.name, type_name);
                 emit_struct_init(gen, node->as.var_decl.init);
+                free(type_name);
             } else if (struct_type && node->as.var_decl.init->type == NODE_NULL_LIT) {
                 // Struct type with null: just assign NULL
                 emit(gen, " = NULL");
@@ -916,6 +1156,10 @@ static void emit_decl(CodeGen* gen, Node* node) {
         break;
 
     case NODE_STRUCT_DECL:
+        // Skip generic struct templates - they get instantiated on use
+        if (node->as.struct_decl.type_param_count > 0) {
+            break;
+        }
         emit(gen, "typedef struct %s {\n", node->as.struct_decl.name);
         gen->indent++;
         for (int i = 0; i < node->as.struct_decl.fields.count; i++) {
@@ -946,6 +1190,11 @@ static void emit_decl(CodeGen* gen, Node* node) {
 
     case NODE_FUNC_DECL: {
         int is_method = (node->as.func_decl.receiver_type != NULL);
+
+        // Skip generic method templates - they get instantiated separately
+        if (is_method && node->as.func_decl.receiver_type_args.count > 0) {
+            break;
+        }
 
         // Check if function is void
         int is_void = !node->as.func_decl.return_type ||
@@ -1073,6 +1322,34 @@ static int tuple_types_equal(Type* a, Type* b) {
             return 0;
     }
     return 1;
+}
+
+// Check if a generic instance is already registered
+static int generic_instance_exists(CodeGen* gen, const char* mangled_name) {
+    for (int i = 0; i < gen->generic_instance_count; i++) {
+        if (strcmp(gen->generic_instances[i].mangled_name, mangled_name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Register a generic instance for codegen
+static void register_generic_instance(CodeGen* gen, const char* mangled_name, const char* base_name,
+                                      Type** type_args, int type_arg_count) {
+    if (generic_instance_exists(gen, mangled_name)) {
+        return;
+    }
+    VEC_GROW(gen->generic_instances, gen->generic_instance_count, gen->generic_instance_capacity);
+    GenericCodegenInfo* info = &gen->generic_instances[gen->generic_instance_count++];
+    info->mangled_name       = xstrdup(mangled_name);
+    info->base_name          = xstrdup(base_name);
+    info->type_args          = xmalloc(type_arg_count * sizeof(Type*));
+    for (int i = 0; i < type_arg_count; i++) {
+        info->type_args[i] = type_args[i];
+    }
+    info->type_arg_count = type_arg_count;
+    info->struct_type    = NULL; // Will be filled if we have access to it
 }
 
 // Register a tuple type and return its index (for typedef name)
@@ -1271,10 +1548,28 @@ static Type* type_from_node(Node* type_node) {
         }
         return type_tuple(elems, count);
     }
+    case NODE_GENERIC_TYPE: {
+        // For codegen, build a struct type with the mangled name
+        // Build mangled name
+        const char* base      = type_node->as.generic_type.base_name;
+        int         arg_count = type_node->as.generic_type.type_args.count;
+        Type**      args      = xmalloc(arg_count * sizeof(Type*));
+        for (int i = 0; i < arg_count; i++) {
+            args[i] = type_from_node(type_node->as.generic_type.type_args.nodes[i]);
+        }
+        char* mangled = type_mangle_generic(base, args, arg_count);
+        Type* result  = type_struct(mangled);
+        free(mangled);
+        free(args);
+        return result;
+    }
     default:
         return type_error;
     }
 }
+
+// Forward declare for finding generic struct declarations
+static Node* find_generic_struct_decl(Node* ast, const char* name);
 
 // Collect tuple types from a type node
 static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node) {
@@ -1291,7 +1586,79 @@ static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node) {
     } else if (type_node->type == NODE_INDEX) {
         // Array type - recurse into element type
         collect_tuple_types_from_node(gen, type_node->as.index.object);
+    } else if (type_node->type == NODE_GENERIC_TYPE) {
+        // Generic type - recurse into type arguments first
+        for (int i = 0; i < type_node->as.generic_type.type_args.count; i++) {
+            collect_tuple_types_from_node(gen, type_node->as.generic_type.type_args.nodes[i]);
+        }
+        // Then register this generic instance
+        const char* base      = type_node->as.generic_type.base_name;
+        int         arg_count = type_node->as.generic_type.type_args.count;
+        Type**      args      = xmalloc(arg_count * sizeof(Type*));
+        for (int i = 0; i < arg_count; i++) {
+            args[i] = type_from_node(type_node->as.generic_type.type_args.nodes[i]);
+        }
+        char* mangled = type_mangle_generic(base, args, arg_count);
+        register_generic_instance(gen, mangled, base, args, arg_count);
+        free(mangled);
+        free(args);
     }
+}
+
+// Find a generic struct declaration by name in the AST
+static Node* find_generic_struct_decl(Node* ast, const char* name) {
+    if (!ast || ast->type != NODE_PROGRAM)
+        return NULL;
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type == NODE_STRUCT_DECL && decl->as.struct_decl.type_param_count > 0 &&
+                strcmp(decl->as.struct_decl.name, name) == 0) {
+                return decl;
+            }
+        }
+    }
+    return NULL;
+}
+
+// Helper to get the type parameter name for mangling (currently unused)
+// static const char* type_arg_mangle_name(Type* type) {
+//     ... preserved for potential future use
+// }
+
+// Collect all generic methods for a given struct name
+static void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods_out,
+                                    int* count_out) {
+    *methods_out = NULL;
+    *count_out   = 0;
+
+    if (!ast || ast->type != NODE_PROGRAM)
+        return;
+
+    int    capacity = 0;
+    Node** methods  = NULL;
+    int    count    = 0;
+
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type != NULL &&
+                decl->as.func_decl.receiver_type_args.count > 0 &&
+                strcmp(decl->as.func_decl.receiver_type, struct_name) == 0) {
+                VEC_GROW(methods, count, capacity);
+                methods[count++] = decl;
+            }
+        }
+    }
+
+    *methods_out = methods;
+    *count_out   = count;
 }
 
 // Collect all tuple types from a declaration
@@ -1299,7 +1666,13 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
     if (!decl)
         return;
     switch (decl->type) {
-    case NODE_FUNC_DECL:
+    case NODE_FUNC_DECL: {
+        // Skip generic method templates - they contain type variables
+        // that shouldn't be instantiated as generic types
+        int is_method = (decl->as.func_decl.receiver_type != NULL);
+        if (is_method && decl->as.func_decl.receiver_type_args.count > 0) {
+            break;
+        }
         if (decl->as.func_decl.return_type)
             collect_tuple_types_from_node(gen, decl->as.func_decl.return_type);
         for (int i = 0; i < decl->as.func_decl.params.count; i++) {
@@ -1310,6 +1683,7 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
         if (decl->as.func_decl.body)
             collect_tuple_types_from_stmt(gen, decl->as.func_decl.body);
         break;
+    }
     case NODE_VAR_DECL:
         if (decl->as.var_decl.type)
             collect_tuple_types_from_node(gen, decl->as.var_decl.type);
@@ -1329,16 +1703,19 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
 }
 
 void codegen_init(CodeGen* gen, FILE* out) {
-    gen->out                 = out;
-    gen->indent              = 0;
-    gen->temp_count          = 0;
-    gen->defer_stack         = NULL;
-    gen->defer_count         = 0;
-    gen->defer_capacity      = 0;
-    gen->current_return_type = NULL;
-    gen->tuple_types         = NULL;
-    gen->tuple_type_count    = 0;
-    gen->tuple_type_capacity = 0;
+    gen->out                       = out;
+    gen->indent                    = 0;
+    gen->temp_count                = 0;
+    gen->defer_stack               = NULL;
+    gen->defer_count               = 0;
+    gen->defer_capacity            = 0;
+    gen->current_return_type       = NULL;
+    gen->tuple_types               = NULL;
+    gen->tuple_type_count          = 0;
+    gen->tuple_type_capacity       = 0;
+    gen->generic_instances         = NULL;
+    gen->generic_instance_count    = 0;
+    gen->generic_instance_capacity = 0;
 }
 
 void codegen_emit(CodeGen* gen, Node* ast) {
@@ -1376,7 +1753,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     if (gen->tuple_type_count > 0)
         emit(gen, "\n");
 
-    // Forward declarations for structs
+    // Forward declarations for structs (skip generic templates)
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
@@ -1384,12 +1761,66 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
             if (decl->type == NODE_STRUCT_DECL) {
+                // Skip generic struct templates
+                if (decl->as.struct_decl.type_param_count > 0) {
+                    continue;
+                }
                 emit(gen, "typedef struct %s %s;\n", decl->as.struct_decl.name,
                      decl->as.struct_decl.name);
             }
         }
     }
+    // Forward declarations for instantiated generic structs
+    for (int i = 0; i < gen->generic_instance_count; i++) {
+        emit(gen, "typedef struct %s %s;\n", gen->generic_instances[i].mangled_name,
+             gen->generic_instances[i].mangled_name);
+    }
     emit(gen, "\n");
+
+    // Emit typedefs for instantiated generic structs
+    for (int i = 0; i < gen->generic_instance_count; i++) {
+        GenericCodegenInfo* info     = &gen->generic_instances[i];
+        Node*               template = find_generic_struct_decl(ast, info->base_name);
+        if (!template) {
+            continue;
+        }
+        emit(gen, "typedef struct %s {\n", info->mangled_name);
+        gen->indent++;
+
+        // Build type substitution map
+        int param_count = template->as.struct_decl.type_param_count;
+        // Note: info->type_arg_count should equal param_count
+
+        // Emit fields with substituted types
+        for (int f = 0; f < template->as.struct_decl.fields.count; f++) {
+            Node* field = template->as.struct_decl.fields.nodes[f];
+            emit_indent(gen);
+
+            // Check if field type is a type parameter
+            if (field->as.field.type && field->as.field.type->type == NODE_IDENT) {
+                const char* type_name = field->as.field.type->as.ident.name;
+                int         found     = 0;
+                for (int p = 0; p < param_count; p++) {
+                    if (strcmp(template->as.struct_decl.type_params[p], type_name) == 0) {
+                        // Substitute with actual type
+                        emit_resolved_type(gen, info->type_args[p]);
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found) {
+                    emit_type(gen, field->as.field.type);
+                }
+            } else {
+                emit_type(gen, field->as.field.type);
+            }
+
+            emit(gen, " %s;\n", field->as.field.name);
+        }
+
+        gen->indent--;
+        emit(gen, "} %s;\n\n", info->mangled_name);
+    }
 
     // Forward declarations for functions and methods
     for (int m = 0; m < ast->as.program.modules.count; m++) {
@@ -1406,6 +1837,11 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             if (decl->type == NODE_FUNC_DECL) {
                 func_decl_node* fdn       = &decl->as.func_decl;
                 int             is_method = (fdn->receiver_type != NULL);
+
+                // Skip generic method templates (they get instantiated separately)
+                if (is_method && fdn->receiver_type_args.count > 0) {
+                    continue;
+                }
 
                 // Emit static for private functions (except main)
                 if (!fdn->is_public && strcmp(fdn->name, "main") != 0) {
@@ -1443,6 +1879,89 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             }
         }
     }
+
+    // Forward declarations for instantiated generic methods
+    for (int i = 0; i < gen->generic_instance_count; i++) {
+        GenericCodegenInfo* info = &gen->generic_instances[i];
+
+        // Find the generic struct template to get type params
+        Node* template = find_generic_struct_decl(ast, info->base_name);
+        if (!template)
+            continue;
+
+        // Find all methods for this generic struct
+        Node** methods      = NULL;
+        int    method_count = 0;
+        collect_generic_methods(ast, info->base_name, &methods, &method_count);
+
+        // Emit forward declaration for each method
+        for (int j = 0; j < method_count; j++) {
+            Node*           method = methods[j];
+            func_decl_node* fdn    = &method->as.func_decl;
+
+            // Extract method-specific type bindings
+            char** method_params     = NULL;
+            Type** method_args       = NULL;
+            int    method_bind_count = 0;
+            codegen_extract_method_bindings(&fdn->receiver_type_args, info->type_args,
+                                            info->type_arg_count, &method_params, &method_args,
+                                            &method_bind_count);
+
+            // Build combined substitution context
+            int    combined_count  = template->as.struct_decl.type_param_count + method_bind_count;
+            char** combined_params = xmalloc(combined_count * sizeof(char*));
+            Type** combined_args   = xmalloc(combined_count * sizeof(Type*));
+
+            for (int k = 0; k < template->as.struct_decl.type_param_count; k++) {
+                combined_params[k] = template->as.struct_decl.type_params[k];
+                combined_args[k]   = info->type_args[k];
+            }
+            for (int k = 0; k < method_bind_count; k++) {
+                combined_params[template->as.struct_decl.type_param_count + k] = method_params[k];
+                combined_args[template->as.struct_decl.type_param_count + k]   = method_args[k];
+            }
+
+            TypeSubstContext subst_ctx;
+            subst_ctx.type_params = combined_params;
+            subst_ctx.type_args   = combined_args;
+            subst_ctx.count       = combined_count;
+            g_subst_ctx           = &subst_ctx;
+
+            // Return type (with substitution)
+            emit_type_subst(gen, fdn->return_type);
+
+            // Method name: MangledStruct_methodname(
+            emit(gen, " %s_%s(", info->mangled_name, fdn->name);
+
+            // Self parameter
+            if (fdn->receiver_is_const) {
+                emit(gen, "const ");
+            }
+            emit(gen, "%s* self", info->mangled_name);
+
+            // Other parameters
+            for (int p = 0; p < fdn->params.count; p++) {
+                emit(gen, ", ");
+                Node* param = fdn->params.nodes[p];
+                if (param->as.param.is_const) {
+                    emit(gen, "const ");
+                }
+                emit_type_with_name_subst(gen, param->as.param.type, param->as.param.name);
+            }
+            emit(gen, ");\n");
+
+            g_subst_ctx = NULL;
+            free(combined_params);
+            free(combined_args);
+            for (int k = 0; k < method_bind_count; k++) {
+                free(method_params[k]);
+            }
+            free(method_params);
+            free(method_args);
+        }
+
+        free(methods);
+    }
     emit(gen, "\n");
 
     // Emit all declarations
@@ -1457,4 +1976,135 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         }
     }
     gen->current_module = NULL;
+
+    // Emit implementations for instantiated generic methods
+    for (int i = 0; i < gen->generic_instance_count; i++) {
+        GenericCodegenInfo* info = &gen->generic_instances[i];
+
+        // Find the generic struct template to get type params
+        Node* template = find_generic_struct_decl(ast, info->base_name);
+        if (!template)
+            continue;
+
+        // Find all methods for this generic struct
+        Node** methods      = NULL;
+        int    method_count = 0;
+        collect_generic_methods(ast, info->base_name, &methods, &method_count);
+
+        // Emit implementation for each method
+        for (int j = 0; j < method_count; j++) {
+            Node*           method = methods[j];
+            func_decl_node* fdn    = &method->as.func_decl;
+
+            // Extract method-specific type bindings
+            char** method_params     = NULL;
+            Type** method_args       = NULL;
+            int    method_bind_count = 0;
+            codegen_extract_method_bindings(&fdn->receiver_type_args, info->type_args,
+                                            info->type_arg_count, &method_params, &method_args,
+                                            &method_bind_count);
+
+            // Build combined substitution context
+            int    combined_count  = template->as.struct_decl.type_param_count + method_bind_count;
+            char** combined_params = xmalloc(combined_count * sizeof(char*));
+            Type** combined_args   = xmalloc(combined_count * sizeof(Type*));
+
+            for (int k = 0; k < template->as.struct_decl.type_param_count; k++) {
+                combined_params[k] = template->as.struct_decl.type_params[k];
+                combined_args[k]   = info->type_args[k];
+            }
+            for (int k = 0; k < method_bind_count; k++) {
+                combined_params[template->as.struct_decl.type_param_count + k] = method_params[k];
+                combined_args[template->as.struct_decl.type_param_count + k]   = method_args[k];
+            }
+
+            TypeSubstContext subst_ctx;
+            subst_ctx.type_params = combined_params;
+            subst_ctx.type_args   = combined_args;
+            subst_ctx.count       = combined_count;
+            g_subst_ctx           = &subst_ctx;
+
+            // Check if function is void
+            int is_void =
+                !fdn->return_type || (fdn->return_type->type == NODE_IDENT &&
+                                      strcmp(fdn->return_type->as.ident.name, "void") == 0);
+
+            // Return type (with substitution)
+            emit_type_subst(gen, fdn->return_type);
+
+            // Method name: MangledStruct_methodname(
+            emit(gen, " %s_%s(", info->mangled_name, fdn->name);
+
+            // Self parameter
+            if (fdn->receiver_is_const) {
+                emit(gen, "const ");
+            }
+            emit(gen, "%s* self", info->mangled_name);
+
+            // Other parameters
+            for (int p = 0; p < fdn->params.count; p++) {
+                emit(gen, ", ");
+                Node* param = fdn->params.nodes[p];
+                if (param->as.param.is_const) {
+                    emit(gen, "const ");
+                }
+                emit_type_with_name_subst(gen, param->as.param.type, param->as.param.name);
+            }
+            emit(gen, ") {\n");
+
+            // Clear defer stack for this function
+            defer_clear(gen);
+            gen->current_return_type = fdn->return_type;
+
+            // First pass: count defers to know if we need __ret
+            int has_defers = 0;
+            if (fdn->body) {
+                for (int s = 0; s < fdn->body->as.block.stmts.count; s++) {
+                    Node* stmt = fdn->body->as.block.stmts.nodes[s];
+                    if (stmt && stmt->type == NODE_DEFER) {
+                        has_defers = 1;
+                        break;
+                    }
+                }
+            }
+
+            // Body
+            gen->indent++;
+
+            // Declare __ret if function has defers and is non-void
+            if (has_defers && !is_void) {
+                emit_indent(gen);
+                emit_type_subst(gen, fdn->return_type);
+                emit(gen, " __ret;\n");
+            }
+
+            // Emit function body
+            if (fdn->body) {
+                for (int s = 0; s < fdn->body->as.block.stmts.count; s++) {
+                    emit_stmt(gen, fdn->body->as.block.stmts.nodes[s]);
+                }
+            }
+
+            // Emit any remaining defers at function end (for void functions or fallthrough)
+            if (has_defers) {
+                for (int d = gen->defer_count - 1; d >= 0; d--) {
+                    emit_stmt(gen, gen->defer_stack[d]);
+                }
+            }
+
+            gen->indent--;
+            emit(gen, "}\n\n");
+
+            g_subst_ctx = NULL;
+            free(combined_params);
+            free(combined_args);
+            for (int k = 0; k < method_bind_count; k++) {
+                free(method_params[k]);
+            }
+            free(method_params);
+            free(method_args);
+        }
+
+        free(methods);
+    }
 }

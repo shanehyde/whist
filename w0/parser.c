@@ -196,8 +196,52 @@ static Node* parse_type(Parser* parser) {
         return node;
     }
 
-    // Named type
+    // Named type (possibly generic)
     if (match_token(parser, TOK_IDENT)) {
+        // Check for generic type instantiation: Name<T1, T2, ...>
+        if (check_token(parser, TOK_LT)) {
+            advance_token(parser); // consume '<'
+
+            Node* node = node_new(NODE_GENERIC_TYPE, token.line, token.column);
+            if (!node) {
+                parse_error(parser, "Out of memory");
+                return NULL;
+            }
+            node->as.generic_type.base_name = copy_token_string(&token);
+            if (!node->as.generic_type.base_name) {
+                parse_error(parser, "Out of memory");
+                return NULL;
+            }
+            node->as.generic_type.base_name_length = token.length;
+            nodelist_init(&node->as.generic_type.type_args);
+
+            // Parse type arguments
+            do {
+                Node* type_arg = parse_type(parser);
+                if (!type_arg) {
+                    node_free(node);
+                    return NULL;
+                }
+                nodelist_push(&node->as.generic_type.type_args, type_arg);
+            } while (match_token(parser, TOK_COMMA));
+
+            // Handle >> ambiguity: when we expect > but see >>, consume as single >
+            if (check_token(parser, TOK_GT_GT)) {
+                // Consume >> as single > by manually advancing
+                // The lexer gave us >>, but we only want to consume one >
+                // We'll advance past >> and remember we owe a >
+                // Actually, simpler: just modify the token in place
+                // Change >> to > by adjusting the current position
+                parser->current.type   = TOK_GT;
+                parser->current.length = 1;
+            } else {
+                consume_token(parser, TOK_GT, "Expected '>' after generic type arguments");
+            }
+
+            return node;
+        }
+
+        // Regular named type (not generic)
         Node* node = node_new(NODE_IDENT, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");
@@ -1152,10 +1196,13 @@ static Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
 }
 
 static Node* parse_func_decl(Parser* parser, int is_public) {
-    // Check for method receiver: func (Type) or func (const Type)
-    char* receiver_type     = NULL;
-    int   receiver_type_len = 0;
-    int   receiver_is_const = 0;
+    // Check for method receiver: func (Type) or func (const Type) or func (Box<T>)
+    // or func (Pair<i32, Box<T>>)
+    char*    receiver_type     = NULL;
+    int      receiver_type_len = 0;
+    int      receiver_is_const = 0;
+    NodeList receiver_type_args;
+    nodelist_init(&receiver_type_args);
 
     if (check_token(parser, TOK_LPAREN)) {
         advance_token(parser); // consume '('
@@ -1175,6 +1222,21 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
         }
         receiver_type_len = recv_type.length;
 
+        // Check for generic type args: Box<T> or Pair<K, V> or Pair<i32, Box<T>>
+        if (match_token(parser, TOK_LT)) {
+            do {
+                // Parse full type (can be identifier, generic type, etc.)
+                Node* type_arg = parse_type(parser);
+                if (!type_arg) {
+                    free(receiver_type);
+                    return NULL;
+                }
+                nodelist_push(&receiver_type_args, type_arg);
+            } while (match_token(parser, TOK_COMMA));
+
+            consume_token(parser, TOK_GT, "Expected '>' after type arguments");
+        }
+
         consume_token(parser, TOK_RPAREN, "Expected ')' after receiver type");
     }
 
@@ -1189,12 +1251,13 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     }
     func_decl_node* fdn = &node->as.func_decl;
 
-    fdn->is_public         = is_public;
-    fdn->is_extern         = 0;
-    fdn->receiver_type     = receiver_type;
-    fdn->receiver_type_len = receiver_type_len;
-    fdn->receiver_is_const = receiver_is_const;
-    fdn->name              = copy_token_string(&name);
+    fdn->is_public          = is_public;
+    fdn->is_extern          = 0;
+    fdn->receiver_type      = receiver_type;
+    fdn->receiver_type_len  = receiver_type_len;
+    fdn->receiver_is_const  = receiver_is_const;
+    fdn->receiver_type_args = receiver_type_args;
+    fdn->name               = copy_token_string(&name);
     if (!fdn->name) {
         parse_error(parser, "Out of memory");
         return NULL;
@@ -1289,6 +1352,33 @@ static Node* parse_struct_decl(Parser* parser, int is_public) {
     }
     node->as.struct_decl.name_length = name.length;
     nodelist_init(&node->as.struct_decl.fields);
+
+    // Parse type parameters if present: struct Box<T> or struct Pair<K, V>
+    node->as.struct_decl.type_params      = NULL;
+    node->as.struct_decl.type_param_count = 0;
+
+    if (match_token(parser, TOK_LT)) {
+        // Parse type parameter names
+        int capacity                     = 4;
+        node->as.struct_decl.type_params = xmalloc(capacity * sizeof(char*));
+
+        do {
+            Token param_name = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected type parameter name");
+
+            // Grow array if needed
+            if (node->as.struct_decl.type_param_count >= capacity) {
+                capacity *= 2;
+                node->as.struct_decl.type_params =
+                    xrealloc(node->as.struct_decl.type_params, capacity * sizeof(char*));
+            }
+
+            node->as.struct_decl.type_params[node->as.struct_decl.type_param_count++] =
+                copy_token_string(&param_name);
+        } while (match_token(parser, TOK_COMMA));
+
+        consume_token(parser, TOK_GT, "Expected '>' after type parameters");
+    }
 
     consume_token(parser, TOK_LBRACE, "Expected '{' after struct name");
 

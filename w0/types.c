@@ -115,6 +115,12 @@ Type* type_tuple(Type** elems, int count) {
     return type;
 }
 
+Type* type_generic_param(const char* name) {
+    Type* type                  = type_new(TYPE_GENERIC_PARAM);
+    type->as.generic_param.name = xstrdup(name);
+    return type;
+}
+
 void type_free(Type* type) {
     if (!type)
         return;
@@ -153,6 +159,9 @@ void type_free(Type* type) {
         break;
     case TYPE_TUPLE:
         free(type->as.tuple.elem_types);
+        break;
+    case TYPE_GENERIC_PARAM:
+        free(type->as.generic_param.name);
         break;
     default:
         break;
@@ -196,6 +205,8 @@ int type_equals(Type* a, Type* b) {
             }
         }
         return 1;
+    case TYPE_GENERIC_PARAM:
+        return strcmp(a->as.generic_param.name, b->as.generic_param.name) == 0;
     default:
         return 1; // For primitives, kind equality is enough
     }
@@ -326,6 +337,8 @@ const char* type_name(Type* type) {
         *p = '\0';
         return type_name_buf;
     }
+    case TYPE_GENERIC_PARAM:
+        return type->as.generic_param.name;
     }
     return "<unknown>";
 }
@@ -373,6 +386,77 @@ const char* type_c_name(const char* name) {
 
 int type_is_builtin_name(const char* name) {
     return type_builtin_from_name(name) != NULL;
+}
+
+// Helper to get a simple name for mangling (without spaces or special chars)
+static const char* type_mangle_name(Type* type) {
+    if (!type)
+        return "void";
+
+    switch (type->kind) {
+    case TYPE_VOID:
+        return "void";
+    case TYPE_BOOL:
+        return "bool";
+    case TYPE_INT64:
+        return "i64";
+    case TYPE_INT8:
+        return "i8";
+    case TYPE_INT16:
+        return "i16";
+    case TYPE_INT32:
+        return "i32";
+    case TYPE_UINT64:
+        return "u64";
+    case TYPE_UINT8:
+        return "u8";
+    case TYPE_UINT16:
+        return "u16";
+    case TYPE_UINT32:
+        return "u32";
+    case TYPE_F32:
+        return "f32";
+    case TYPE_F64:
+        return "f64";
+    case TYPE_CHAR:
+        return "char";
+    case TYPE_STRING:
+        return "string";
+    case TYPE_STRUCT:
+        return type->as.struc.name;
+    case TYPE_ENUM:
+        return type->as.enm.name;
+    case TYPE_GENERIC_PARAM:
+        return type->as.generic_param.name;
+    default:
+        return "unknown";
+    }
+}
+
+char* type_mangle_generic(const char* base, Type** args, int count) {
+    // Calculate required buffer size
+    size_t len = strlen(base);
+    for (int i = 0; i < count; i++) {
+        len += 1 + strlen(type_mangle_name(args[i])); // underscore + type name
+    }
+
+    char* result = xmalloc(len + 1);
+    char* p      = result;
+
+    // Copy base name
+    strcpy(p, base);
+    p += strlen(base);
+
+    // Append each type argument with underscore
+    for (int i = 0; i < count; i++) {
+        *p++              = '_';
+        const char* tname = type_mangle_name(args[i]);
+        strcpy(p, tname);
+        p += strlen(tname);
+    }
+
+    *p = '\0';
+    return result;
 }
 
 void typelist_init(TypeList* list) {

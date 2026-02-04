@@ -23,8 +23,9 @@ typedef enum {
     TYPE_ENUM,
     TYPE_FUNC,
     TYPE_TUPLE,
-    TYPE_NULL,  // null reference type
-    TYPE_ERROR, // Used for error recovery
+    TYPE_NULL,          // null reference type
+    TYPE_GENERIC_PARAM, // Generic type parameter (T, K, V)
+    TYPE_ERROR,         // Used for error recovery
 } TypeKind;
 
 typedef struct Type     Type;
@@ -80,6 +81,11 @@ struct Type {
             Type** elem_types;
             int    elem_count;
         } tuple;
+
+        // Generic type parameter (T, K, V, etc.)
+        struct {
+            char* name;
+        } generic_param;
     } as;
 };
 
@@ -111,6 +117,10 @@ Type* type_struct(const char* name);
 Type* type_enum(const char* name);
 Type* type_func(Type** params, int param_count, Type* return_type);
 Type* type_tuple(Type** elems, int count);
+Type* type_generic_param(const char* name);
+
+// Generic type name mangling
+char* type_mangle_generic(const char* base, Type** args, int count);
 
 void        type_free(Type* type);
 int         type_equals(Type* a, Type* b);

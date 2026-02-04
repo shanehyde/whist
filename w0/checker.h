@@ -31,6 +31,24 @@ struct Scope {
     Scope*   parent;
 };
 
+// Generic struct definition (template)
+typedef struct {
+    char*  name;        // "Box", "Pair"
+    char** type_params; // ["T"] or ["K", "V"]
+    int    type_param_count;
+    Node*  decl; // Original AST node for field type resolution
+    // Methods on the generic struct
+    Node** methods; // Array of NODE_FUNC_DECL
+    int    method_count;
+    int    method_capacity;
+} GenericDef;
+
+// Instantiated generic struct
+typedef struct {
+    char* mangled_name; // "Box_i64", "Pair_i64_string"
+    Type* type;         // Concrete TYPE_STRUCT
+} GenericInstance;
+
 struct Checker {
     Scope* scope;
     Type*  current_func_return; // Return type of current function
@@ -48,6 +66,21 @@ struct Checker {
 
     // Current module being processed (NULL = main module)
     const char* current_module;
+
+    // Generic struct definitions (templates)
+    GenericDef* generic_defs;
+    int         generic_def_count;
+    int         generic_def_capacity;
+
+    // Instantiated generic structs
+    GenericInstance* generic_instances;
+    int              generic_instance_count;
+    int              generic_instance_capacity;
+
+    // Context for type parameter substitution during instantiation
+    char** current_type_params; // Type parameter names
+    Type** current_type_args;   // Concrete types for each param
+    int    current_type_param_count;
 };
 
 void checker_init(Checker* checker);

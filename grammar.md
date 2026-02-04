@@ -48,7 +48,7 @@ Import statements load declarations from external Whist source files. There are 
 <func-decl> ::= 'func' [ <receiver> ] <identifier> '(' [ <param-list> ] ')' [ ':' <type> ]
 <func-defn> ::= <func-decl> '{' <block> '}'
 
-<receiver> ::= '(' [ 'const' ] <identifier> ')'
+<receiver> ::= '(' [ 'const' ] <identifier> [ '<' <type-arg-list> '>' ] ')'
 
 <param-list> ::= <param> { ',' <param> }
 
@@ -57,13 +57,25 @@ Import statements load declarations from external Whist source files. There are 
 <extern-module> ::= 'extern' <identifier> '{' { <func-decl> ';' } '}'
 ```
 
+**Generic methods:** Methods can be defined on generic structs using type arguments in the receiver:
+- `func (Box<T>) get(): T` — method on any `Box<T>` instantiation
+- `func (Pair<i32, Box<T>>) set(v: Box<T>): void` — partially specialized method
+
 ### Struct Declaration
 
 ```bnf
-<struct-decl> ::= 'struct' <identifier> '{' { <field-decl> } '}'
+<struct-decl> ::= 'struct' <identifier> [ '<' <type-param-list> '>' ] '{' { <field-decl> } '}'
+
+<type-param-list> ::= <identifier> { ',' <identifier> }
 
 <field-decl> ::= <identifier> ':' <type> [ ',' ]
 ```
+
+**Generic structs:** Structs can be parameterized by one or more type parameters:
+- `struct Box<T> { value: T }` — single type parameter
+- `struct Pair<K, V> { key: K, value: V }` — multiple type parameters
+
+Generic structs are monomorphized at compile time, generating specialized C code for each instantiation (e.g., `Box<i64>` becomes `Box_i64`).
 
 ### Enum Declaration
 
@@ -93,10 +105,15 @@ Import statements load declarations from external Whist source files. There are 
 
 ```bnf
 <type> ::= <identifier>
+        | <identifier> '<' <type-arg-list> '>'
         | '*' <type>
         | '[' [ <expression> ] ']' <type>
         | '(' <type> ',' <type> { ',' <type> } ')'
+
+<type-arg-list> ::= <type> { ',' <type> }
 ```
+
+**Generic types:** `Box<i64>` or `Pair<i32, string>` instantiate a generic struct with concrete type arguments. Nested generics are supported: `Box<Pair<i32, i64>>`.
 
 **Tuple types:** `(T1, T2)` or `(T1, T2, T3, ...)` represent fixed-size heterogeneous collections. Tuples must have at least two elements.
 
