@@ -73,12 +73,20 @@ static GenericInstance* lookup_generic_instance(Checker* checker, const char* ma
 }
 
 // Register an instantiated generic struct
-static void register_generic_instance(Checker* checker, const char* mangled_name, Type* type) {
+static void register_generic_instance(Checker* checker, const char* mangled_name,
+                                      const char* base_name, Type* type, Type** type_args,
+                                      int type_arg_count) {
     VEC_GROW(checker->generic_instances, checker->generic_instance_count,
              checker->generic_instance_capacity);
     GenericInstance* inst = &checker->generic_instances[checker->generic_instance_count++];
     inst->mangled_name    = xstrdup(mangled_name);
+    inst->base_name       = xstrdup(base_name);
     inst->type            = type;
+    inst->type_args       = xmalloc(type_arg_count * sizeof(Type*));
+    for (int i = 0; i < type_arg_count; i++) {
+        inst->type_args[i] = type_args[i];
+    }
+    inst->type_arg_count = type_arg_count;
 }
 
 // =============================================================================
@@ -184,6 +192,8 @@ void checker_free(Checker* checker) {
     // Free generic instances
     for (int i = 0; i < checker->generic_instance_count; i++) {
         free(checker->generic_instances[i].mangled_name);
+        free(checker->generic_instances[i].base_name);
+        free(checker->generic_instances[i].type_args);
     }
     free(checker->generic_instances);
     types_cleanup();
@@ -582,7 +592,8 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
         Type* struct_type = type_struct(mangled);
 
         // Register early to handle recursive types
-        register_generic_instance(checker, mangled, struct_type);
+        register_generic_instance(checker, mangled, base_name, struct_type, resolved_args,
+                                  arg_count);
 
         // Set up substitution context
         char** old_params = checker->current_type_params;

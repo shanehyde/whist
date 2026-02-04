@@ -45,8 +45,11 @@ typedef struct {
 
 // Instantiated generic struct
 typedef struct {
-    char* mangled_name; // "Box_i64", "Pair_i64_string"
-    Type* type;         // Concrete TYPE_STRUCT
+    char*  mangled_name;  // "Box_i64", "Pair_i64_string"
+    char*  base_name;     // "Box", "Pair" (for finding template)
+    Type*  type;          // Concrete TYPE_STRUCT
+    Type** type_args;     // Resolved type arguments [i64], [i64, string]
+    int    type_arg_count;
 } GenericInstance;
 
 struct Checker {
