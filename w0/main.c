@@ -55,9 +55,9 @@ static int compile_and_run(const char* source_path, int argc, char** argv) {
     checker_init(&checker);
     checker_set_direct_imports(&checker, parser.direct_imports, parser.direct_imports_count);
     int ok = checker_check(&checker, ast);
-    checker_free(&checker);
 
     if (!ok) {
+        checker_free(&checker);
         fprintf(stderr, "Type check failed\n");
         node_free(ast);
         parser_free(&parser);
@@ -111,10 +111,11 @@ static int compile_and_run(const char* source_path, int argc, char** argv) {
     }
 
     CodeGen gen;
-    codegen_init(&gen, c_file);
+    codegen_init(&gen, c_file, checker.generic_instances, checker.generic_instance_count);
     codegen_emit(&gen, ast);
     fclose(c_file);
 
+    checker_free(&checker);
     node_free(ast);
     parser_free(&parser);
     free(source);
@@ -288,7 +289,7 @@ int main(int argc, char** argv) {
                 }
 
                 CodeGen gen;
-                codegen_init(&gen, out);
+                codegen_init(&gen, out, checker.generic_instances, checker.generic_instance_count);
                 codegen_emit(&gen, ast);
                 checker_free(&checker); // Free types after codegen
 

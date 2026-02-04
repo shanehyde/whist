@@ -365,158 +365,51 @@ Token lexer_next(Lexer* lexer) {
     return error_token(lexer, "Unexpected character");
 }
 
+// Token type names indexed by TokenType enum value (must match lexer.h order)
+static const char* token_names[] = {
+    [TOK_EOF] = "EOF",           [TOK_IDENT] = "IDENT",
+    [TOK_INT] = "INT",           [TOK_FLOAT] = "FLOAT",
+    [TOK_STRING] = "STRING",     [TOK_CHAR] = "CHAR",
+    [TOK_IF] = "IF",             [TOK_ELSE] = "ELSE",
+    [TOK_WHILE] = "WHILE",       [TOK_FOR] = "FOR",
+    [TOK_FOREACH] = "FOREACH",   [TOK_RETURN] = "RETURN",
+    [TOK_BREAK] = "BREAK",       [TOK_CONTINUE] = "CONTINUE",
+    [TOK_STRUCT] = "STRUCT",     [TOK_ENUM] = "ENUM",
+    [TOK_FUNC] = "FUNC",         [TOK_VAR] = "VAR",
+    [TOK_CONST] = "CONST",       [TOK_BY] = "BY",
+    [TOK_TRUE] = "TRUE",         [TOK_FALSE] = "FALSE",
+    [TOK_IN] = "IN",             [TOK_NULL] = "NULL",
+    [TOK_SELF] = "SELF",         [TOK_DEFER] = "DEFER",
+    [TOK_PUBLIC] = "PUBLIC",     [TOK_PRIVATE] = "PRIVATE",
+    [TOK_EXTERN] = "EXTERN",     [TOK_IMPORT] = "IMPORT",
+    [TOK_PLUS] = "PLUS",         [TOK_MINUS] = "MINUS",
+    [TOK_STAR] = "STAR",         [TOK_SLASH] = "SLASH",
+    [TOK_PERCENT] = "PERCENT",   [TOK_AMP] = "AMP",
+    [TOK_PIPE] = "PIPE",         [TOK_CARET] = "CARET",
+    [TOK_TILDE] = "TILDE",       [TOK_BANG] = "BANG",
+    [TOK_EQ] = "EQ",             [TOK_LT] = "LT",
+    [TOK_GT] = "GT",             [TOK_PLUS_EQ] = "PLUS_EQ",
+    [TOK_MINUS_EQ] = "MINUS_EQ", [TOK_STAR_EQ] = "STAR_EQ",
+    [TOK_SLASH_EQ] = "SLASH_EQ", [TOK_PERCENT_EQ] = "PERCENT_EQ",
+    [TOK_AMP_EQ] = "AMP_EQ",     [TOK_PIPE_EQ] = "PIPE_EQ",
+    [TOK_CARET_EQ] = "CARET_EQ", [TOK_EQ_EQ] = "EQ_EQ",
+    [TOK_BANG_EQ] = "BANG_EQ",   [TOK_LT_EQ] = "LT_EQ",
+    [TOK_GT_EQ] = "GT_EQ",       [TOK_AMP_AMP] = "AMP_AMP",
+    [TOK_PIPE_PIPE] = "PIPE_PIPE", [TOK_LT_LT] = "LT_LT",
+    [TOK_GT_GT] = "GT_GT",       [TOK_LT_LT_EQ] = "LT_LT_EQ",
+    [TOK_GT_GT_EQ] = "GT_GT_EQ", [TOK_ARROW] = "ARROW",
+    [TOK_LPAREN] = "LPAREN",     [TOK_RPAREN] = "RPAREN",
+    [TOK_LBRACE] = "LBRACE",     [TOK_RBRACE] = "RBRACE",
+    [TOK_LBRACKET] = "LBRACKET", [TOK_RBRACKET] = "RBRACKET",
+    [TOK_SEMICOLON] = "SEMICOLON", [TOK_COLON] = "COLON",
+    [TOK_COLON_COLON] = "COLON_COLON", [TOK_COMMA] = "COMMA",
+    [TOK_DOT] = "DOT",           [TOK_DOT_DOT] = "DOT_DOT",
+    [TOK_ERROR] = "ERROR",
+};
+
 const char* token_type_name(TokenType type) {
-    switch (type) {
-    case TOK_EOF:
-        return "EOF";
-    case TOK_IDENT:
-        return "IDENT";
-    case TOK_INT:
-        return "INT";
-    case TOK_FLOAT:
-        return "FLOAT";
-    case TOK_STRING:
-        return "STRING";
-    case TOK_CHAR:
-        return "CHAR";
-    case TOK_IF:
-        return "IF";
-    case TOK_ELSE:
-        return "ELSE";
-    case TOK_WHILE:
-        return "WHILE";
-    case TOK_FOR:
-        return "FOR";
-    case TOK_FOREACH:
-        return "FOREACH";
-    case TOK_RETURN:
-        return "RETURN";
-    case TOK_BREAK:
-        return "BREAK";
-    case TOK_CONTINUE:
-        return "CONTINUE";
-    case TOK_STRUCT:
-        return "STRUCT";
-    case TOK_ENUM:
-        return "ENUM";
-    case TOK_FUNC:
-        return "FUNC";
-    case TOK_IN:
-        return "IN";
-    case TOK_VAR:
-        return "VAR";
-    case TOK_CONST:
-        return "CONST";
-    case TOK_TRUE:
-        return "TRUE";
-    case TOK_FALSE:
-        return "FALSE";
-    case TOK_NULL:
-        return "NULL";
-    case TOK_SELF:
-        return "SELF";
-    case TOK_DEFER:
-        return "DEFER";
-    case TOK_PUBLIC:
-        return "PUBLIC";
-    case TOK_PRIVATE:
-        return "PRIVATE";
-    case TOK_PLUS:
-        return "PLUS";
-    case TOK_MINUS:
-        return "MINUS";
-    case TOK_STAR:
-        return "STAR";
-    case TOK_SLASH:
-        return "SLASH";
-    case TOK_PERCENT:
-        return "PERCENT";
-    case TOK_AMP:
-        return "AMP";
-    case TOK_PIPE:
-        return "PIPE";
-    case TOK_CARET:
-        return "CARET";
-    case TOK_TILDE:
-        return "TILDE";
-    case TOK_BANG:
-        return "BANG";
-    case TOK_EQ:
-        return "EQ";
-    case TOK_LT:
-        return "LT";
-    case TOK_GT:
-        return "GT";
-    case TOK_PLUS_EQ:
-        return "PLUS_EQ";
-    case TOK_MINUS_EQ:
-        return "MINUS_EQ";
-    case TOK_STAR_EQ:
-        return "STAR_EQ";
-    case TOK_SLASH_EQ:
-        return "SLASH_EQ";
-    case TOK_PERCENT_EQ:
-        return "PERCENT_EQ";
-    case TOK_AMP_EQ:
-        return "AMP_EQ";
-    case TOK_PIPE_EQ:
-        return "PIPE_EQ";
-    case TOK_CARET_EQ:
-        return "CARET_EQ";
-    case TOK_EQ_EQ:
-        return "EQ_EQ";
-    case TOK_BANG_EQ:
-        return "BANG_EQ";
-    case TOK_LT_EQ:
-        return "LT_EQ";
-    case TOK_GT_EQ:
-        return "GT_EQ";
-    case TOK_AMP_AMP:
-        return "AMP_AMP";
-    case TOK_PIPE_PIPE:
-        return "PIPE_PIPE";
-    case TOK_LT_LT:
-        return "LT_LT";
-    case TOK_GT_GT:
-        return "GT_GT";
-    case TOK_LT_LT_EQ:
-        return "LT_LT_EQ";
-    case TOK_GT_GT_EQ:
-        return "GT_GT_EQ";
-    case TOK_ARROW:
-        return "ARROW";
-    case TOK_LPAREN:
-        return "LPAREN";
-    case TOK_RPAREN:
-        return "RPAREN";
-    case TOK_LBRACE:
-        return "LBRACE";
-    case TOK_RBRACE:
-        return "RBRACE";
-    case TOK_LBRACKET:
-        return "LBRACKET";
-    case TOK_RBRACKET:
-        return "RBRACKET";
-    case TOK_SEMICOLON:
-        return "SEMICOLON";
-    case TOK_COLON:
-        return "COLON";
-    case TOK_COLON_COLON:
-        return "COLON_COLON";
-    case TOK_COMMA:
-        return "COMMA";
-    case TOK_DOT:
-        return "DOT";
-    case TOK_DOT_DOT:
-        return "DOT_DOT";
-    case TOK_ERROR:
-        return "ERROR";
-    case TOK_EXTERN:
-        return "EXTERN";
-    case TOK_IMPORT:
-        return "IMPORT";
-    case TOK_BY:
-        return "BY";
+    if (type >= 0 && type <= TOK_ERROR) {
+        return token_names[type];
     }
     return "UNKNOWN";
 }

@@ -7,14 +7,12 @@
 #include "checker.h"
 #include "types.h"
 
-// Generic struct instantiation info for codegen
+// Type parameter substitution context for generic method emission
 typedef struct {
-    char*  mangled_name; // "Box_i64"
-    char*  base_name;    // "Box"
-    Type** type_args;    // [i64]
-    int    type_arg_count;
-    Type*  struct_type; // The instantiated TYPE_STRUCT
-} GenericCodegenInfo;
+    char** type_params; // Type parameter names ["T", "K", ...]
+    Type** type_args;   // Concrete types to substitute
+    int    count;
+} TypeSubstContext;
 
 typedef struct {
     FILE* out;
@@ -26,17 +24,18 @@ typedef struct {
     int         defer_capacity;      // Capacity of defer stack
     Node*       current_return_type; // Return type of current function (for __ret variable)
     const char* current_module;      // Current module name (NULL for "main")
+    // Type substitution for generic methods
+    TypeSubstContext* subst_ctx;
     // Tuple typedef tracking
     Type** tuple_types; // Array of unique tuple types
     int    tuple_type_count;
     int    tuple_type_capacity;
-    // Generic type tracking
-    GenericCodegenInfo* generic_instances;
-    int                 generic_instance_count;
-    int                 generic_instance_capacity;
+    // Generic instances from checker (not owned, do not free)
+    GenericInstance* generic_instances;
+    int              generic_instance_count;
 } CodeGen;
 
-void codegen_init(CodeGen* gen, FILE* out);
+void codegen_init(CodeGen* gen, FILE* out, GenericInstance* instances, int instance_count);
 void codegen_emit(CodeGen* gen, Node* ast);
 
 #endif

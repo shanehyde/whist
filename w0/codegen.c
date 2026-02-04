@@ -55,14 +55,6 @@ static int is_struct_type(Node* type_node) {
     return !type_is_builtin_name(type_node->as.ident.name);
 }
 
-// Type parameter substitution context for generic method emission
-typedef struct {
-    char** type_params; // Type parameter names ["T", "K", ...]
-    Type** type_args;   // Concrete types to substitute
-    int    count;
-} TypeSubstContext;
-
-static TypeSubstContext* g_subst_ctx = NULL; // Global substitution context
 
 // Helper to check if a name is a type variable (not a builtin type)
 static int codegen_is_type_variable(const char* name) {
@@ -177,11 +169,11 @@ static void emit_type(CodeGen* gen, Node* type_node) {
         const char* name = type_node->as.ident.name;
 
         // Check for type parameter substitution (for generic methods)
-        if (g_subst_ctx) {
-            for (int i = 0; i < g_subst_ctx->count; i++) {
-                if (strcmp(g_subst_ctx->type_params[i], name) == 0) {
+        if (gen->subst_ctx) {
+            for (int i = 0; i < gen->subst_ctx->count; i++) {
+                if (strcmp(gen->subst_ctx->type_params[i], name) == 0) {
                     // Substitute with concrete type
-                    emit_resolved_type(gen, g_subst_ctx->type_args[i]);
+                    emit_resolved_type(gen, gen->subst_ctx->type_args[i]);
                     return;
                 }
             }
@@ -247,11 +239,11 @@ static void emit_type(CodeGen* gen, Node* type_node) {
                 const char* arg_name = arg->as.ident.name;
                 // Check for type parameter substitution
                 int substituted = 0;
-                if (g_subst_ctx) {
-                    for (int s = 0; s < g_subst_ctx->count; s++) {
-                        if (strcmp(g_subst_ctx->type_params[s], arg_name) == 0) {
+                if (gen->subst_ctx) {
+                    for (int s = 0; s < gen->subst_ctx->count; s++) {
+                        if (strcmp(gen->subst_ctx->type_params[s], arg_name) == 0) {
                             // Emit the substituted type's name for mangling
-                            Type*       subst_type  = g_subst_ctx->type_args[s];
+                            Type*       subst_type  = gen->subst_ctx->type_args[s];
                             const char* mangle_name = type_name(subst_type);
                             emit(gen, "%s", mangle_name);
                             substituted = 1;
@@ -272,10 +264,10 @@ static void emit_type(CodeGen* gen, Node* type_node) {
                         const char* nested_name = nested->as.ident.name;
                         // Check for type parameter substitution
                         int subst = 0;
-                        if (g_subst_ctx) {
-                            for (int s = 0; s < g_subst_ctx->count; s++) {
-                                if (strcmp(g_subst_ctx->type_params[s], nested_name) == 0) {
-                                    Type* subst_type = g_subst_ctx->type_args[s];
+                        if (gen->subst_ctx) {
+                            for (int s = 0; s < gen->subst_ctx->count; s++) {
+                                if (strcmp(gen->subst_ctx->type_params[s], nested_name) == 0) {
+                                    Type* subst_type = gen->subst_ctx->type_args[s];
                                     emit(gen, "%s", type_name(subst_type));
                                     subst = 1;
                                     break;
@@ -298,62 +290,6 @@ static void emit_type(CodeGen* gen, Node* type_node) {
     }
 }
 
-// Emit a type node with type parameter substitution
-// Used when emitting generic method bodies
-static void emit_type_subst(CodeGen* gen, Node* type_node) {
-    if (!type_node) {
-        emit(gen, "void");
-        return;
-    }
-
-    // Check for type parameter substitution
-    if (g_subst_ctx && type_node->type == NODE_IDENT) {
-        const char* name = type_node->as.ident.name;
-        for (int i = 0; i < g_subst_ctx->count; i++) {
-            if (strcmp(g_subst_ctx->type_params[i], name) == 0) {
-                // Found a type parameter - emit the substituted type
-                emit_resolved_type(gen, g_subst_ctx->type_args[i]);
-                return;
-            }
-        }
-    }
-
-    // Not a type parameter or no substitution context - emit normally
-    emit_type(gen, type_node);
-}
-
-// Emit a type with name, applying type parameter substitution
-static void emit_type_with_name_subst(CodeGen* gen, Node* type_node, const char* name) {
-    if (!type_node) {
-        emit(gen, "int64_t %s", name);
-        return;
-    }
-
-    // Check if this is a struct type (needs to be a pointer)
-    int is_struct = is_struct_type(type_node);
-
-    // Check for type parameter substitution
-    if (g_subst_ctx && type_node->type == NODE_IDENT) {
-        const char* type_name = type_node->as.ident.name;
-        for (int i = 0; i < g_subst_ctx->count; i++) {
-            if (strcmp(g_subst_ctx->type_params[i], type_name) == 0) {
-                // Found a type parameter - emit the substituted type
-                emit_resolved_type(gen, g_subst_ctx->type_args[i]);
-                emit(gen, " %s", name);
-                return;
-            }
-        }
-    }
-
-    // Not a type parameter - emit normally
-    if (is_struct) {
-        emit_type(gen, type_node);
-        emit(gen, " %s", name);
-    } else {
-        emit_type(gen, type_node);
-        emit(gen, " %s", name);
-    }
-}
 
 // Emit a resolved Type* (used for inferred types like tuples)
 static void emit_resolved_type(CodeGen* gen, Type* type) {
@@ -1324,34 +1260,6 @@ static int tuple_types_equal(Type* a, Type* b) {
     return 1;
 }
 
-// Check if a generic instance is already registered
-static int generic_instance_exists(CodeGen* gen, const char* mangled_name) {
-    for (int i = 0; i < gen->generic_instance_count; i++) {
-        if (strcmp(gen->generic_instances[i].mangled_name, mangled_name) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-// Register a generic instance for codegen
-static void register_generic_instance(CodeGen* gen, const char* mangled_name, const char* base_name,
-                                      Type** type_args, int type_arg_count) {
-    if (generic_instance_exists(gen, mangled_name)) {
-        return;
-    }
-    VEC_GROW(gen->generic_instances, gen->generic_instance_count, gen->generic_instance_capacity);
-    GenericCodegenInfo* info = &gen->generic_instances[gen->generic_instance_count++];
-    info->mangled_name       = xstrdup(mangled_name);
-    info->base_name          = xstrdup(base_name);
-    info->type_args          = xmalloc(type_arg_count * sizeof(Type*));
-    for (int i = 0; i < type_arg_count; i++) {
-        info->type_args[i] = type_args[i];
-    }
-    info->type_arg_count = type_arg_count;
-    info->struct_type    = NULL; // Will be filled if we have access to it
-}
-
 // Register a tuple type and return its index (for typedef name)
 static int register_tuple_type(CodeGen* gen, Type* type) {
     // Check if already registered
@@ -1587,21 +1495,11 @@ static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node) {
         // Array type - recurse into element type
         collect_tuple_types_from_node(gen, type_node->as.index.object);
     } else if (type_node->type == NODE_GENERIC_TYPE) {
-        // Generic type - recurse into type arguments first
+        // Generic type - recurse into type arguments for any tuple types
         for (int i = 0; i < type_node->as.generic_type.type_args.count; i++) {
             collect_tuple_types_from_node(gen, type_node->as.generic_type.type_args.nodes[i]);
         }
-        // Then register this generic instance
-        const char* base      = type_node->as.generic_type.base_name;
-        int         arg_count = type_node->as.generic_type.type_args.count;
-        Type**      args      = xmalloc(arg_count * sizeof(Type*));
-        for (int i = 0; i < arg_count; i++) {
-            args[i] = type_from_node(type_node->as.generic_type.type_args.nodes[i]);
-        }
-        char* mangled = type_mangle_generic(base, args, arg_count);
-        register_generic_instance(gen, mangled, base, args, arg_count);
-        free(mangled);
-        free(args);
+        // Note: generic instances are passed from checker, no need to collect here
     }
 }
 
@@ -1702,20 +1600,21 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
     }
 }
 
-void codegen_init(CodeGen* gen, FILE* out) {
-    gen->out                       = out;
-    gen->indent                    = 0;
-    gen->temp_count                = 0;
-    gen->defer_stack               = NULL;
-    gen->defer_count               = 0;
-    gen->defer_capacity            = 0;
-    gen->current_return_type       = NULL;
-    gen->tuple_types               = NULL;
-    gen->tuple_type_count          = 0;
-    gen->tuple_type_capacity       = 0;
-    gen->generic_instances         = NULL;
-    gen->generic_instance_count    = 0;
-    gen->generic_instance_capacity = 0;
+void codegen_init(CodeGen* gen, FILE* out, GenericInstance* instances, int instance_count) {
+    gen->out                    = out;
+    gen->indent                 = 0;
+    gen->temp_count             = 0;
+    gen->defer_stack            = NULL;
+    gen->defer_count            = 0;
+    gen->defer_capacity         = 0;
+    gen->current_return_type    = NULL;
+    gen->current_module         = NULL;
+    gen->subst_ctx              = NULL;
+    gen->tuple_types            = NULL;
+    gen->tuple_type_count       = 0;
+    gen->tuple_type_capacity    = 0;
+    gen->generic_instances      = instances;
+    gen->generic_instance_count = instance_count;
 }
 
 void codegen_emit(CodeGen* gen, Node* ast) {
@@ -1779,7 +1678,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
 
     // Emit typedefs for instantiated generic structs
     for (int i = 0; i < gen->generic_instance_count; i++) {
-        GenericCodegenInfo* info     = &gen->generic_instances[i];
+        GenericInstance* info     = &gen->generic_instances[i];
         Node*               template = find_generic_struct_decl(ast, info->base_name);
         if (!template) {
             continue;
@@ -1882,7 +1781,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
 
     // Forward declarations for instantiated generic methods
     for (int i = 0; i < gen->generic_instance_count; i++) {
-        GenericCodegenInfo* info = &gen->generic_instances[i];
+        GenericInstance* info = &gen->generic_instances[i];
 
         // Find the generic struct template to get type params
         Node* template = find_generic_struct_decl(ast, info->base_name);
@@ -1925,10 +1824,10 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             subst_ctx.type_params = combined_params;
             subst_ctx.type_args   = combined_args;
             subst_ctx.count       = combined_count;
-            g_subst_ctx           = &subst_ctx;
+            gen->subst_ctx           = &subst_ctx;
 
             // Return type (with substitution)
-            emit_type_subst(gen, fdn->return_type);
+            emit_type(gen, fdn->return_type);
 
             // Method name: MangledStruct_methodname(
             emit(gen, " %s_%s(", info->mangled_name, fdn->name);
@@ -1946,11 +1845,11 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                 if (param->as.param.is_const) {
                     emit(gen, "const ");
                 }
-                emit_type_with_name_subst(gen, param->as.param.type, param->as.param.name);
+                emit_type_with_name(gen, param->as.param.type, param->as.param.name);
             }
             emit(gen, ");\n");
 
-            g_subst_ctx = NULL;
+            gen->subst_ctx = NULL;
             free(combined_params);
             free(combined_args);
             for (int k = 0; k < method_bind_count; k++) {
@@ -1979,7 +1878,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
 
     // Emit implementations for instantiated generic methods
     for (int i = 0; i < gen->generic_instance_count; i++) {
-        GenericCodegenInfo* info = &gen->generic_instances[i];
+        GenericInstance* info = &gen->generic_instances[i];
 
         // Find the generic struct template to get type params
         Node* template = find_generic_struct_decl(ast, info->base_name);
@@ -2022,7 +1921,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             subst_ctx.type_params = combined_params;
             subst_ctx.type_args   = combined_args;
             subst_ctx.count       = combined_count;
-            g_subst_ctx           = &subst_ctx;
+            gen->subst_ctx           = &subst_ctx;
 
             // Check if function is void
             int is_void =
@@ -2030,7 +1929,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                                       strcmp(fdn->return_type->as.ident.name, "void") == 0);
 
             // Return type (with substitution)
-            emit_type_subst(gen, fdn->return_type);
+            emit_type(gen, fdn->return_type);
 
             // Method name: MangledStruct_methodname(
             emit(gen, " %s_%s(", info->mangled_name, fdn->name);
@@ -2048,7 +1947,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                 if (param->as.param.is_const) {
                     emit(gen, "const ");
                 }
-                emit_type_with_name_subst(gen, param->as.param.type, param->as.param.name);
+                emit_type_with_name(gen, param->as.param.type, param->as.param.name);
             }
             emit(gen, ") {\n");
 
@@ -2074,7 +1973,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             // Declare __ret if function has defers and is non-void
             if (has_defers && !is_void) {
                 emit_indent(gen);
-                emit_type_subst(gen, fdn->return_type);
+                emit_type(gen, fdn->return_type);
                 emit(gen, " __ret;\n");
             }
 
@@ -2095,7 +1994,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             gen->indent--;
             emit(gen, "}\n\n");
 
-            g_subst_ctx = NULL;
+            gen->subst_ctx = NULL;
             free(combined_params);
             free(combined_args);
             for (int k = 0; k < method_bind_count; k++) {
