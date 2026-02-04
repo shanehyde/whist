@@ -1427,7 +1427,8 @@ static void check_decl(Checker* checker, Node* node) {
         int         is_method     = (receiver_type != NULL);
 
         // Check if this is a method on a generic struct: func (Box<T>) get(): T
-        if (is_method && fdn->receiver_type_param_count > 0) {
+        // or func (Pair<i32, Box<T>>) set(): void
+        if (is_method && fdn->receiver_type_args.count > 0) {
             // Look up the generic definition
             GenericDef* def = lookup_generic_def(checker, receiver_type);
             if (!def) {
@@ -1435,11 +1436,11 @@ static void check_decl(Checker* checker, Node* node) {
                             receiver_type);
                 return;
             }
-            // Verify type param arity matches
-            if (fdn->receiver_type_param_count != def->type_param_count) {
+            // Verify type arg arity matches
+            if (fdn->receiver_type_args.count != def->type_param_count) {
                 check_error(checker, node->line, node->column,
                             "Generic type '%s' expects %d type parameters, got %d", receiver_type,
-                            def->type_param_count, fdn->receiver_type_param_count);
+                            def->type_param_count, fdn->receiver_type_args.count);
                 return;
             }
             // Store the method on the generic definition - will be instantiated later

@@ -103,8 +103,8 @@ typedef struct {
     int   receiver_type_len; // Length of receiver type name
     int   receiver_is_const; // 1 if const receiver, 0 if mutable
     // For generic method receivers: func (Box<T>) get(): T
-    char**   receiver_type_params; // ["T"] for Box<T>, NULL for non-generic
-    int      receiver_type_param_count;
+    // or func (Pair<i32, Box<T>>) set(): void
+    NodeList receiver_type_args; // Type nodes for type arguments in receiver
     char*    name;
     int      name_length;
     NodeList params;

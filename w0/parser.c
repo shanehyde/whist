@@ -1197,11 +1197,12 @@ static Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
 
 static Node* parse_func_decl(Parser* parser, int is_public) {
     // Check for method receiver: func (Type) or func (const Type) or func (Box<T>)
-    char*  receiver_type             = NULL;
-    int    receiver_type_len         = 0;
-    int    receiver_is_const         = 0;
-    char** receiver_type_params      = NULL;
-    int    receiver_type_param_count = 0;
+    // or func (Pair<i32, Box<T>>)
+    char*    receiver_type     = NULL;
+    int      receiver_type_len = 0;
+    int      receiver_is_const = 0;
+    NodeList receiver_type_args;
+    nodelist_init(&receiver_type_args);
 
     if (check_token(parser, TOK_LPAREN)) {
         advance_token(parser); // consume '('
@@ -1221,24 +1222,19 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
         }
         receiver_type_len = recv_type.length;
 
-        // Check for generic type params: Box<T> or Pair<K, V>
+        // Check for generic type args: Box<T> or Pair<K, V> or Pair<i32, Box<T>>
         if (match_token(parser, TOK_LT)) {
-            int capacity         = 4;
-            receiver_type_params = xmalloc(capacity * sizeof(char*));
-
             do {
-                Token param_name = parser->current;
-                consume_token(parser, TOK_IDENT, "Expected type parameter name");
-
-                if (receiver_type_param_count >= capacity) {
-                    capacity *= 2;
-                    receiver_type_params = xrealloc(receiver_type_params, capacity * sizeof(char*));
+                // Parse full type (can be identifier, generic type, etc.)
+                Node* type_arg = parse_type(parser);
+                if (!type_arg) {
+                    free(receiver_type);
+                    return NULL;
                 }
-
-                receiver_type_params[receiver_type_param_count++] = copy_token_string(&param_name);
+                nodelist_push(&receiver_type_args, type_arg);
             } while (match_token(parser, TOK_COMMA));
 
-            consume_token(parser, TOK_GT, "Expected '>' after type parameters");
+            consume_token(parser, TOK_GT, "Expected '>' after type arguments");
         }
 
         consume_token(parser, TOK_RPAREN, "Expected ')' after receiver type");
@@ -1255,14 +1251,13 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     }
     func_decl_node* fdn = &node->as.func_decl;
 
-    fdn->is_public                 = is_public;
-    fdn->is_extern                 = 0;
-    fdn->receiver_type             = receiver_type;
-    fdn->receiver_type_len         = receiver_type_len;
-    fdn->receiver_is_const         = receiver_is_const;
-    fdn->receiver_type_params      = receiver_type_params;
-    fdn->receiver_type_param_count = receiver_type_param_count;
-    fdn->name                      = copy_token_string(&name);
+    fdn->is_public          = is_public;
+    fdn->is_extern          = 0;
+    fdn->receiver_type      = receiver_type;
+    fdn->receiver_type_len  = receiver_type_len;
+    fdn->receiver_is_const  = receiver_is_const;
+    fdn->receiver_type_args = receiver_type_args;
+    fdn->name               = copy_token_string(&name);
     if (!fdn->name) {
         parse_error(parser, "Out of memory");
         return NULL;

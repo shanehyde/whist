@@ -176,11 +176,8 @@ void node_free(Node* node) {
         break;
     case NODE_FUNC_DECL:
         free(node->as.func_decl.receiver_type);
-        // Free receiver type params if present
-        for (int i = 0; i < node->as.func_decl.receiver_type_param_count; i++) {
-            free(node->as.func_decl.receiver_type_params[i]);
-        }
-        free(node->as.func_decl.receiver_type_params);
+        // Free receiver type args if present
+        nodelist_free(&node->as.func_decl.receiver_type_args);
         free(node->as.func_decl.name);
         nodelist_free(&node->as.func_decl.params);
         node_free(node->as.func_decl.return_type);

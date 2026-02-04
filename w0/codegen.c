@@ -1084,7 +1084,7 @@ static void emit_decl(CodeGen* gen, Node* node) {
         int is_method = (node->as.func_decl.receiver_type != NULL);
 
         // Skip generic method templates - they get instantiated separately
-        if (is_method && node->as.func_decl.receiver_type_param_count > 0) {
+        if (is_method && node->as.func_decl.receiver_type_args.count > 0) {
             break;
         }
 
@@ -1541,7 +1541,7 @@ static void collect_generic_methods(Node* ast, const char* struct_name, Node*** 
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
             if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type != NULL &&
-                decl->as.func_decl.receiver_type_param_count > 0 &&
+                decl->as.func_decl.receiver_type_args.count > 0 &&
                 strcmp(decl->as.func_decl.receiver_type, struct_name) == 0) {
                 VEC_GROW(methods, count, capacity);
                 methods[count++] = decl;
@@ -1558,7 +1558,13 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
     if (!decl)
         return;
     switch (decl->type) {
-    case NODE_FUNC_DECL:
+    case NODE_FUNC_DECL: {
+        // Skip generic method templates - they contain type variables
+        // that shouldn't be instantiated as generic types
+        int is_method = (decl->as.func_decl.receiver_type != NULL);
+        if (is_method && decl->as.func_decl.receiver_type_args.count > 0) {
+            break;
+        }
         if (decl->as.func_decl.return_type)
             collect_tuple_types_from_node(gen, decl->as.func_decl.return_type);
         for (int i = 0; i < decl->as.func_decl.params.count; i++) {
@@ -1569,6 +1575,7 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
         if (decl->as.func_decl.body)
             collect_tuple_types_from_stmt(gen, decl->as.func_decl.body);
         break;
+    }
     case NODE_VAR_DECL:
         if (decl->as.var_decl.type)
             collect_tuple_types_from_node(gen, decl->as.var_decl.type);
@@ -1724,7 +1731,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                 int             is_method = (fdn->receiver_type != NULL);
 
                 // Skip generic method templates (they get instantiated separately)
-                if (is_method && fdn->receiver_type_param_count > 0) {
+                if (is_method && fdn->receiver_type_args.count > 0) {
                     continue;
                 }
 
