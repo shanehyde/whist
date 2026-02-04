@@ -3,14 +3,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "alloc.h"
+#include "vec.h"
+
 // ============================================================================
 // DestructPattern functions
 // ============================================================================
 
 DestructPattern* pattern_new_ident(const char* name, int length) {
-    DestructPattern* pattern = calloc(1, sizeof(DestructPattern));
+    DestructPattern* pattern = xcalloc(1, sizeof(DestructPattern));
     pattern->kind            = PATTERN_IDENT;
-    pattern->as.ident.name   = malloc(length + 1);
+    pattern->as.ident.name   = xmalloc(length + 1);
     memcpy(pattern->as.ident.name, name, length);
     pattern->as.ident.name[length] = '\0';
     pattern->as.ident.name_length  = length;
@@ -19,9 +22,9 @@ DestructPattern* pattern_new_ident(const char* name, int length) {
 }
 
 DestructPattern* pattern_new_tuple(int capacity) {
-    DestructPattern* pattern   = calloc(1, sizeof(DestructPattern));
+    DestructPattern* pattern   = xcalloc(1, sizeof(DestructPattern));
     pattern->kind              = PATTERN_TUPLE;
-    pattern->as.tuple.elements = malloc(capacity * sizeof(DestructPattern*));
+    pattern->as.tuple.elements = xmalloc(capacity * sizeof(DestructPattern*));
     pattern->as.tuple.count    = 0;
     pattern->resolved_type     = NULL;
     return pattern;
@@ -55,7 +58,7 @@ void pattern_free(DestructPattern* pattern) {
 // ============================================================================
 
 Node* node_new(NodeType type, int line, int column) {
-    Node* node   = calloc(1, sizeof(Node));
+    Node* node   = xcalloc(1, sizeof(Node));
     node->type   = type;
     node->line   = line;
     node->column = column;
@@ -69,11 +72,7 @@ void nodelist_init(NodeList* list) {
 }
 
 void nodelist_push(NodeList* list, Node* node) {
-    if (list->count >= list->capacity) {
-        int new_cap    = list->capacity == 0 ? 8 : list->capacity * 2;
-        list->nodes    = realloc(list->nodes, new_cap * sizeof(Node*));
-        list->capacity = new_cap;
-    }
+    VEC_GROW(list->nodes, list->count, list->capacity);
     list->nodes[list->count++] = node;
 }
 

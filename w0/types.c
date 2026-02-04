@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "vec.h"
+
 // Built-in type singletons
 static Type builtin_void   = {TYPE_VOID, {{NULL}}};
 static Type builtin_bool   = {TYPE_BOOL, {{NULL}}};
@@ -45,11 +47,7 @@ static int    allocated_count    = 0;
 static int    allocated_capacity = 0;
 
 static void track_type(Type* type) {
-    if (allocated_count >= allocated_capacity) {
-        int new_cap        = allocated_capacity == 0 ? 64 : allocated_capacity * 2;
-        allocated_types    = realloc(allocated_types, new_cap * sizeof(Type*));
-        allocated_capacity = new_cap;
-    }
+    VEC_GROW_N(allocated_types, allocated_count, allocated_capacity, 64);
     allocated_types[allocated_count++] = type;
 }
 
@@ -68,7 +66,7 @@ void types_cleanup(void) {
 }
 
 Type* type_new(TypeKind kind) {
-    Type* type = calloc(1, sizeof(Type));
+    Type* type = xcalloc(1, sizeof(Type));
     type->kind = kind;
     track_type(type);
     return type;
@@ -83,7 +81,7 @@ Type* type_array(Type* elem, int size) {
 
 Type* type_struct(const char* name) {
     Type* type                     = type_new(TYPE_STRUCT);
-    type->as.struc.name            = strdup(name);
+    type->as.struc.name            = xstrdup(name);
     type->as.struc.field_names     = NULL;
     type->as.struc.field_types     = NULL;
     type->as.struc.field_count     = 0;
@@ -96,7 +94,7 @@ Type* type_struct(const char* name) {
 
 Type* type_enum(const char* name) {
     Type* type               = type_new(TYPE_ENUM);
-    type->as.enm.name        = strdup(name);
+    type->as.enm.name        = xstrdup(name);
     type->as.enm.value_names = NULL;
     type->as.enm.value_count = 0;
     return type;
@@ -332,6 +330,51 @@ const char* type_name(Type* type) {
     return "<unknown>";
 }
 
+// Builtin type lookup table
+static struct {
+    const char* whist_name;
+    Type**      type_ptr;
+    const char* c_name;
+} builtin_types[] = {
+    {"void", &type_void, "void"},
+    {"bool", &type_bool, "bool"},
+    {"i64", &type_int64, "int64_t"},
+    {"i8", &type_int8, "int8_t"},
+    {"i16", &type_int16, "int16_t"},
+    {"i32", &type_int32, "int32_t"},
+    {"u64", &type_uint64, "uint64_t"},
+    {"u8", &type_uint8, "uint8_t"},
+    {"u16", &type_uint16, "uint16_t"},
+    {"u32", &type_uint32, "uint32_t"},
+    {"f32", &type_f32, "float"},
+    {"f64", &type_f64, "double"},
+    {"char", &type_char, "char"},
+    {"string", &type_string, "const char*"},
+    {NULL, NULL, NULL},
+};
+
+Type* type_builtin_from_name(const char* name) {
+    for (int i = 0; builtin_types[i].whist_name; i++) {
+        if (strcmp(name, builtin_types[i].whist_name) == 0) {
+            return *builtin_types[i].type_ptr;
+        }
+    }
+    return NULL;
+}
+
+const char* type_c_name(const char* name) {
+    for (int i = 0; builtin_types[i].whist_name; i++) {
+        if (strcmp(name, builtin_types[i].whist_name) == 0) {
+            return builtin_types[i].c_name;
+        }
+    }
+    return NULL;
+}
+
+int type_is_builtin_name(const char* name) {
+    return type_builtin_from_name(name) != NULL;
+}
+
 void typelist_init(TypeList* list) {
     list->types    = NULL;
     list->count    = 0;
@@ -339,11 +382,7 @@ void typelist_init(TypeList* list) {
 }
 
 void typelist_push(TypeList* list, Type* type) {
-    if (list->count >= list->capacity) {
-        int new_cap    = list->capacity == 0 ? 8 : list->capacity * 2;
-        list->types    = realloc(list->types, new_cap * sizeof(Type*));
-        list->capacity = new_cap;
-    }
+    VEC_GROW(list->types, list->count, list->capacity);
     list->types[list->count++] = type;
 }
 

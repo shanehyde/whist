@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "alloc.h"
+#include "vec.h"
+
 // ============================================================================
 // Parser Utilities
 // ============================================================================
@@ -106,10 +109,7 @@ void synchronize(Parser* parser) {
 }
 
 char* copy_token_string(Token* token) {
-    char* str = malloc(token->length + 1);
-    if (!str) {
-        return NULL;
-    }
+    char* str = xmalloc(token->length + 1);
     memcpy(str, token->start, token->length);
     str[token->length] = '\0';
     return str;
@@ -321,11 +321,7 @@ static Node* parse_primary_expression(Parser* parser) {
         }
         // Allocate max possible size (actual size may be smaller due to escapes)
         size_t max_len            = token.length - 2; // Skip quotes
-        node->as.string_lit.value = malloc(max_len + 1);
-        if (!node->as.string_lit.value) {
-            parse_error(parser, "Out of memory");
-            return NULL;
-        }
+        node->as.string_lit.value = xmalloc(max_len + 1);
         // Process escape sequences
         const char* src = token.start + 1;
         const char* end = token.start + token.length - 1;
@@ -474,11 +470,7 @@ static Node* parse_primary_expression(Parser* parser) {
             parse_error(parser, "Out of memory");
             return NULL;
         }
-        node->as.ident.name = strdup("self");
-        if (!node->as.ident.name) {
-            parse_error(parser, "Out of memory");
-            return NULL;
-        }
+        node->as.ident.name   = xstrdup("self");
         node->as.ident.length = 4;
         return node;
     }
@@ -1269,11 +1261,9 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     // This determines which library modules this function can access
     fdn->accessible_modules_count = parser->direct_imports_count;
     if (parser->direct_imports_count > 0) {
-        fdn->accessible_modules = malloc(parser->direct_imports_count * sizeof(char*));
-        if (fdn->accessible_modules) {
-            for (int i = 0; i < parser->direct_imports_count; i++) {
-                fdn->accessible_modules[i] = strdup(parser->direct_imports[i]);
-            }
+        fdn->accessible_modules = xmalloc(parser->direct_imports_count * sizeof(char*));
+        for (int i = 0; i < parser->direct_imports_count; i++) {
+            fdn->accessible_modules[i] = xstrdup(parser->direct_imports[i]);
         }
     } else {
         fdn->accessible_modules = NULL;
@@ -1441,14 +1431,9 @@ static char* read_file(const char* path) {
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    char* buffer = malloc(size + 1);
-    if (!buffer) {
-        fclose(file);
-        return NULL;
-    }
-
-    size_t read  = fread(buffer, 1, size, file);
-    buffer[read] = '\0';
+    char*  buffer = xmalloc(size + 1);
+    size_t read   = fread(buffer, 1, size, file);
+    buffer[read]  = '\0';
     fclose(file);
     return buffer;
 }
@@ -1466,21 +1451,11 @@ static int is_module_imported(Parser* parser, const char* module_name, size_t le
 
 // Add a module name to the imported list
 static void add_imported_module(Parser* parser, const char* module_name, size_t length) {
-    // Grow array if needed
-    if (parser->imported_modules_count >= parser->imported_modules_capacity) {
-        int new_capacity =
-            parser->imported_modules_capacity == 0 ? 8 : parser->imported_modules_capacity * 2;
-        char** new_array = realloc(parser->imported_modules, new_capacity * sizeof(char*));
-        if (!new_array)
-            return;
-        parser->imported_modules          = new_array;
-        parser->imported_modules_capacity = new_capacity;
-    }
+    VEC_GROW(parser->imported_modules, parser->imported_modules_count,
+             parser->imported_modules_capacity);
 
     // Copy the module name
-    char* name_copy = malloc(length + 1);
-    if (!name_copy)
-        return;
+    char* name_copy = xmalloc(length + 1);
     memcpy(name_copy, module_name, length);
     name_copy[length]                                          = '\0';
     parser->imported_modules[parser->imported_modules_count++] = name_copy;
@@ -1488,36 +1463,17 @@ static void add_imported_module(Parser* parser, const char* module_name, size_t 
 
 // Add source buffer to parser's list (keeps it alive for AST references)
 static void add_imported_source(Parser* parser, char* source) {
-    // Grow array if needed
-    if (parser->imported_sources_count >= parser->imported_sources_capacity) {
-        int new_capacity =
-            parser->imported_sources_capacity == 0 ? 8 : parser->imported_sources_capacity * 2;
-        char** new_array = realloc(parser->imported_sources, new_capacity * sizeof(char*));
-        if (!new_array)
-            return;
-        parser->imported_sources          = new_array;
-        parser->imported_sources_capacity = new_capacity;
-    }
+    VEC_GROW(parser->imported_sources, parser->imported_sources_count,
+             parser->imported_sources_capacity);
     parser->imported_sources[parser->imported_sources_count++] = source;
 }
 
 // Add a direct import (library module directly imported by current file)
 static void add_direct_import(Parser* parser, const char* module_name, size_t length) {
-    // Grow array if needed
-    if (parser->direct_imports_count >= parser->direct_imports_capacity) {
-        int new_capacity =
-            parser->direct_imports_capacity == 0 ? 8 : parser->direct_imports_capacity * 2;
-        char** new_array = realloc(parser->direct_imports, new_capacity * sizeof(char*));
-        if (!new_array)
-            return;
-        parser->direct_imports          = new_array;
-        parser->direct_imports_capacity = new_capacity;
-    }
+    VEC_GROW(parser->direct_imports, parser->direct_imports_count, parser->direct_imports_capacity);
 
     // Copy the module name
-    char* name_copy = malloc(length + 1);
-    if (!name_copy)
-        return;
+    char* name_copy = xmalloc(length + 1);
     memcpy(name_copy, module_name, length);
     name_copy[length]                                      = '\0';
     parser->direct_imports[parser->direct_imports_count++] = name_copy;
@@ -1552,13 +1508,11 @@ static void build_import_path(Parser* parser, char* path, size_t path_size, cons
     if (is_relative) {
         // Relative import: resolve relative to source file's directory
         if (parser->source_path) {
-            char* path_copy = strdup(parser->source_path);
-            if (path_copy) {
-                char* dir = dirname(path_copy);
-                snprintf(path, path_size, "%s/%.*s", dir, (int)module_length, module_name);
-                free(path_copy);
-                return;
-            }
+            char* path_copy = xstrdup(parser->source_path);
+            char* dir       = dirname(path_copy);
+            snprintf(path, path_size, "%s/%.*s", dir, (int)module_length, module_name);
+            free(path_copy);
+            return;
         }
         // Fallback if no source path: use path as-is relative to cwd
         snprintf(path, path_size, "%.*s", (int)module_length, module_name);
@@ -1568,16 +1522,14 @@ static void build_import_path(Parser* parser, char* path, size_t path_size, cons
     // Standard library import: try lib/ directories
     if (parser->source_path) {
         // Make a copy because dirname may modify its argument
-        char* path_copy = strdup(parser->source_path);
-        if (path_copy) {
-            char* dir = dirname(path_copy);
-            snprintf(path, path_size, "%s/lib/%.*s.w", dir, (int)module_length, module_name);
-            free(path_copy);
-            if (file_exists(path)) {
-                return;
-            }
-            // Fall through to try cwd-relative path
+        char* path_copy = xstrdup(parser->source_path);
+        char* dir       = dirname(path_copy);
+        snprintf(path, path_size, "%s/lib/%.*s.w", dir, (int)module_length, module_name);
+        free(path_copy);
+        if (file_exists(path)) {
+            return;
         }
+        // Fall through to try cwd-relative path
     }
     // Fallback: use lib/ relative to current working directory
     snprintf(path, path_size, "lib/%.*s.w", (int)module_length, module_name);
@@ -1730,12 +1682,10 @@ static int parse_import_stmt(Parser* parser, Node* program, Node* current_module
                     // Rename "main" module to the library name
                     if (strcmp(imported_module->as.module.name, "main") == 0) {
                         free(imported_module->as.module.name);
-                        imported_module->as.module.name = malloc(module_length + 1);
-                        if (imported_module->as.module.name) {
-                            memcpy(imported_module->as.module.name, module_name, module_length);
-                            imported_module->as.module.name[module_length] = '\0';
-                            imported_module->as.module.name_length         = (int)module_length;
-                        }
+                        imported_module->as.module.name = xmalloc(module_length + 1);
+                        memcpy(imported_module->as.module.name, module_name, module_length);
+                        imported_module->as.module.name[module_length] = '\0';
+                        imported_module->as.module.name_length         = (int)module_length;
                     }
                     nodelist_push(&program->as.program.modules, imported_module);
                 }
@@ -1855,7 +1805,7 @@ Node* parser_parse(Parser* parser) {
         node_free(program);
         return NULL;
     }
-    main_module->as.module.name        = strdup("main");
+    main_module->as.module.name        = xstrdup("main");
     main_module->as.module.name_length = 4;
     nodelist_init(&main_module->as.module.decls);
     nodelist_push(&program->as.program.modules, main_module);

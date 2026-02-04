@@ -4,7 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "alloc.h"
 #include "types.h"
+#include "vec.h"
 
 static void emit_indent(CodeGen* gen) {
     for (int i = 0; i < gen->indent; i++) {
@@ -33,11 +35,7 @@ static int   tuple_types_equal(Type* a, Type* b);
 static Type* type_from_node(Node* type_node);
 
 static void defer_push(CodeGen* gen, Node* node) {
-    if (gen->defer_count >= gen->defer_capacity) {
-        int new_cap         = gen->defer_capacity == 0 ? 8 : gen->defer_capacity * 2;
-        gen->defer_stack    = realloc(gen->defer_stack, new_cap * sizeof(Node*));
-        gen->defer_capacity = new_cap;
-    }
+    VEC_GROW(gen->defer_stack, gen->defer_count, gen->defer_capacity);
     gen->defer_stack[gen->defer_count++] = node;
 }
 
@@ -49,13 +47,7 @@ static void defer_clear(CodeGen* gen) {
 static int is_struct_type(Node* type_node) {
     if (!type_node || type_node->type != NODE_IDENT)
         return 0;
-    const char* name = type_node->as.ident.name;
-    // Check against all built-in type names
-    return strcmp(name, "void") != 0 && strcmp(name, "bool") != 0 && strcmp(name, "i64") != 0 &&
-           strcmp(name, "i8") != 0 && strcmp(name, "i16") != 0 && strcmp(name, "i32") != 0 &&
-           strcmp(name, "u64") != 0 && strcmp(name, "u8") != 0 && strcmp(name, "u16") != 0 &&
-           strcmp(name, "u32") != 0 && strcmp(name, "f32") != 0 && strcmp(name, "f64") != 0 &&
-           strcmp(name, "char") != 0 && strcmp(name, "string") != 0;
+    return !type_is_builtin_name(type_node->as.ident.name);
 }
 
 // Helper to emit function name with appropriate prefix (method or module)
@@ -85,36 +77,10 @@ static void emit_type(CodeGen* gen, Node* type_node) {
 
     switch (type_node->type) {
     case NODE_IDENT: {
-        const char* name = type_node->as.ident.name;
-        // Map whist types to C types
-        if (strcmp(name, "void") == 0) {
-            emit(gen, "void");
-        } else if (strcmp(name, "bool") == 0) {
-            emit(gen, "bool");
-        } else if (strcmp(name, "i64") == 0) {
-            emit(gen, "int64_t");
-        } else if (strcmp(name, "i8") == 0) {
-            emit(gen, "int8_t");
-        } else if (strcmp(name, "i16") == 0) {
-            emit(gen, "int16_t");
-        } else if (strcmp(name, "i32") == 0) {
-            emit(gen, "int32_t");
-        } else if (strcmp(name, "u64") == 0) {
-            emit(gen, "uint64_t");
-        } else if (strcmp(name, "u8") == 0) {
-            emit(gen, "uint8_t");
-        } else if (strcmp(name, "u16") == 0) {
-            emit(gen, "uint16_t");
-        } else if (strcmp(name, "u32") == 0) {
-            emit(gen, "uint32_t");
-        } else if (strcmp(name, "f32") == 0) {
-            emit(gen, "float");
-        } else if (strcmp(name, "f64") == 0) {
-            emit(gen, "double");
-        } else if (strcmp(name, "char") == 0) {
-            emit(gen, "char");
-        } else if (strcmp(name, "string") == 0) {
-            emit(gen, "const char*");
+        const char* name   = type_node->as.ident.name;
+        const char* c_type = type_c_name(name);
+        if (c_type) {
+            emit(gen, "%s", c_type);
         } else {
             // User-defined struct type - emit as pointer (struct references)
             emit(gen, "%s*", name);
@@ -675,7 +641,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 case NODE_TUPLE_LIT: {
                     // Build a tuple type from the literal's elements
                     int    count = node->as.var_decl.init->as.tuple_lit.elements.count;
-                    Type** elems = malloc(count * sizeof(Type*));
+                    Type** elems = xmalloc(count * sizeof(Type*));
                     for (int i = 0; i < count; i++) {
                         Node* elem = node->as.var_decl.init->as.tuple_lit.elements.nodes[i];
                         switch (elem->type) {
@@ -1117,11 +1083,7 @@ static int register_tuple_type(CodeGen* gen, Type* type) {
             return i;
     }
     // Add new
-    if (gen->tuple_type_count >= gen->tuple_type_capacity) {
-        int new_cap              = gen->tuple_type_capacity == 0 ? 8 : gen->tuple_type_capacity * 2;
-        gen->tuple_types         = realloc(gen->tuple_types, new_cap * sizeof(Type*));
-        gen->tuple_type_capacity = new_cap;
-    }
+    VEC_GROW(gen->tuple_types, gen->tuple_type_count, gen->tuple_type_capacity);
     gen->tuple_types[gen->tuple_type_count] = type;
     return gen->tuple_type_count++;
 }
@@ -1132,7 +1094,7 @@ static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node);
 // Build a Type* from a tuple literal (for type collection)
 static Type* type_from_tuple_lit(Node* node) {
     int    count = node->as.tuple_lit.elements.count;
-    Type** elems = malloc(count * sizeof(Type*));
+    Type** elems = xmalloc(count * sizeof(Type*));
     for (int i = 0; i < count; i++) {
         Node* elem = node->as.tuple_lit.elements.nodes[i];
         switch (elem->type) {
@@ -1286,35 +1248,10 @@ static Type* type_from_node(Node* type_node) {
 
     switch (type_node->type) {
     case NODE_IDENT: {
-        const char* name = type_node->as.ident.name;
-        if (strcmp(name, "void") == 0)
-            return type_void;
-        if (strcmp(name, "bool") == 0)
-            return type_bool;
-        if (strcmp(name, "i64") == 0)
-            return type_int64;
-        if (strcmp(name, "i8") == 0)
-            return type_int8;
-        if (strcmp(name, "i16") == 0)
-            return type_int16;
-        if (strcmp(name, "i32") == 0)
-            return type_int32;
-        if (strcmp(name, "u64") == 0)
-            return type_uint64;
-        if (strcmp(name, "u8") == 0)
-            return type_uint8;
-        if (strcmp(name, "u16") == 0)
-            return type_uint16;
-        if (strcmp(name, "u32") == 0)
-            return type_uint32;
-        if (strcmp(name, "f32") == 0)
-            return type_f32;
-        if (strcmp(name, "f64") == 0)
-            return type_f64;
-        if (strcmp(name, "char") == 0)
-            return type_char;
-        if (strcmp(name, "string") == 0)
-            return type_string;
+        const char* name    = type_node->as.ident.name;
+        Type*       builtin = type_builtin_from_name(name);
+        if (builtin)
+            return builtin;
         // User-defined type - return a struct type
         return type_struct(name);
     }
@@ -1328,7 +1265,7 @@ static Type* type_from_node(Node* type_node) {
     }
     case NODE_TUPLE_TYPE: {
         int    count = type_node->as.tuple_type.elem_types.count;
-        Type** elems = malloc(count * sizeof(Type*));
+        Type** elems = xmalloc(count * sizeof(Type*));
         for (int i = 0; i < count; i++) {
             elems[i] = type_from_node(type_node->as.tuple_type.elem_types.nodes[i]);
         }

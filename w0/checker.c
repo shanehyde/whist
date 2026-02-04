@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "alloc.h"
+
 #define SCOPE_SIZE 64
 
 // Forward declarations for mutually recursive functions
@@ -69,17 +71,8 @@ void checker_set_direct_imports(Checker* checker, char** direct_imports, int cou
 }
 
 void checker_push_scope(Checker* checker) {
-    Scope* scope = calloc(1, sizeof(Scope));
-    if (!scope) {
-        fprintf(stderr, "Out of memory\n");
-        return;
-    }
-    scope->symbols = calloc(SCOPE_SIZE, sizeof(Symbol*));
-    if (!scope->symbols) {
-        fprintf(stderr, "Out of memory\n");
-        free(scope);
-        return;
-    }
+    Scope* scope   = xcalloc(1, sizeof(Scope));
+    scope->symbols = xcalloc(SCOPE_SIZE, sizeof(Symbol*));
     scope->size    = SCOPE_SIZE;
     scope->parent  = checker->scope;
     checker->scope = scope;
@@ -129,13 +122,13 @@ Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type
         }
     }
 
-    Symbol* sym           = calloc(1, sizeof(Symbol));
+    Symbol* sym           = xcalloc(1, sizeof(Symbol));
     sym->kind             = kind;
-    sym->name             = strdup(name);
+    sym->name             = xstrdup(name);
     sym->type             = type;
     sym->is_const         = is_const;
     sym->is_public        = is_public;
-    sym->source_module    = source_module ? strdup(source_module) : NULL;
+    sym->source_module    = source_module ? xstrdup(source_module) : NULL;
     sym->next             = scope->symbols[index];
     scope->symbols[index] = sym;
     return sym;
@@ -272,34 +265,11 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
     switch (type_node->type) {
     case NODE_IDENT: {
         const char* name = type_node->as.ident.name;
-        if (strcmp(name, "void") == 0)
-            return type_void;
-        if (strcmp(name, "bool") == 0)
-            return type_bool;
-        if (strcmp(name, "i64") == 0)
-            return type_int64;
-        if (strcmp(name, "i8") == 0)
-            return type_int8;
-        if (strcmp(name, "i16") == 0)
-            return type_int16;
-        if (strcmp(name, "i32") == 0)
-            return type_int32;
-        if (strcmp(name, "u64") == 0)
-            return type_uint64;
-        if (strcmp(name, "u8") == 0)
-            return type_uint8;
-        if (strcmp(name, "u16") == 0)
-            return type_uint16;
-        if (strcmp(name, "u32") == 0)
-            return type_uint32;
-        if (strcmp(name, "f32") == 0)
-            return type_f32;
-        if (strcmp(name, "f64") == 0)
-            return type_f64;
-        if (strcmp(name, "char") == 0)
-            return type_char;
-        if (strcmp(name, "string") == 0)
-            return type_string;
+
+        // Check for builtin type
+        Type* builtin = type_builtin_from_name(name);
+        if (builtin)
+            return builtin;
 
         // Look up user-defined type
         Symbol* sym = checker_lookup(checker, name);
@@ -329,7 +299,7 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
         }
     case NODE_TUPLE_TYPE: {
         int    count = type_node->as.tuple_type.elem_types.count;
-        Type** elems = malloc(count * sizeof(Type*));
+        Type** elems = xmalloc(count * sizeof(Type*));
         for (int i = 0; i < count; i++) {
             elems[i] = resolve_type(checker, type_node->as.tuple_type.elem_types.nodes[i]);
         }
@@ -624,7 +594,7 @@ static Type* check_expression(Checker* checker, Node* node) {
                                 node->as.member.name);
                     return type_error;
                 }
-                node->as.member.module_name = strdup(name);
+                node->as.member.module_name = xstrdup(name);
                 return sym->type;
             }
         }
@@ -657,12 +627,7 @@ static Type* check_expression(Checker* checker, Node* node) {
         for (int i = 0; i < object->as.struc.method_count; i++) {
             if (strcmp(object->as.struc.method_names[i], member_name) == 0) {
                 // Store struct name for codegen to use
-                char* sname = strdup(object->as.struc.name);
-                if (!sname) {
-                    check_error(checker, node->line, node->column, "Out of memory");
-                    return type_error;
-                }
-                node->as.member.struct_name = sname;
+                node->as.member.struct_name = xstrdup(object->as.struc.name);
                 // Return the method's function type
                 return object->as.struc.method_types[i];
             }
@@ -742,7 +707,7 @@ static Type* check_expression(Checker* checker, Node* node) {
 
     case NODE_TUPLE_LIT: {
         int    count = node->as.tuple_lit.elements.count;
-        Type** elems = malloc(count * sizeof(Type*));
+        Type** elems = xmalloc(count * sizeof(Type*));
         for (int i = 0; i < count; i++) {
             elems[i] = check_expression(checker, node->as.tuple_lit.elements.nodes[i]);
         }
@@ -766,12 +731,8 @@ static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type) 
     }
 
     int  field_count = struct_type->as.struc.field_count;
-    int* seen        = calloc(field_count, sizeof(int));
-    if (!seen) {
-        check_error(checker, init->line, init->column, "Out of memory");
-        return type_error;
-    }
-    int had_error = 0;
+    int* seen        = xcalloc(field_count, sizeof(int));
+    int  had_error   = 0;
 
     for (int i = 0; i < init->as.struct_init.fields.count; i++) {
         Node* field = init->as.struct_init.fields.nodes[i];
@@ -1188,11 +1149,7 @@ static Type* get_function_type(Checker* checker, Node* node) {
     int    param_count = fdn->params.count;
     Type** param_types = NULL;
     if (param_count > 0) {
-        param_types = malloc(param_count * sizeof(Type*));
-        if (!param_types) {
-            check_error(checker, node->line, node->column, "Out of memory");
-            return type_error;
-        }
+        param_types = xmalloc(param_count * sizeof(Type*));
     }
 
     Type* return_type = type_void;
@@ -1246,18 +1203,10 @@ static void check_decl(Checker* checker, Node* node) {
         char* mangled_name = NULL;
         if (is_method) {
             size_t len   = strlen(receiver_type) + 1 + strlen(name) + 1;
-            mangled_name = malloc(len);
-            if (!mangled_name) {
-                check_error(checker, node->line, node->column, "Out of memory");
-                return;
-            }
+            mangled_name = xmalloc(len);
             snprintf(mangled_name, len, "%s_%s", receiver_type, name);
         } else {
-            mangled_name = strdup(name);
-            if (!mangled_name) {
-                check_error(checker, node->line, node->column, "Out of memory");
-                return;
-            }
+            mangled_name = xstrdup(name);
         }
 
         // if main function, ensure correct signature
@@ -1302,38 +1251,14 @@ static void check_decl(Checker* checker, Node* node) {
                 Type* st = struct_sym->type;
                 int   n  = st->as.struc.method_count;
 
-                char** new_names = realloc(st->as.struc.method_names, (n + 1) * sizeof(char*));
-                if (!new_names) {
-                    check_error(checker, node->line, node->column, "Out of memory");
-                    free(mangled_name);
-                    return;
-                }
-                st->as.struc.method_names = new_names;
+                st->as.struc.method_names =
+                    xrealloc(st->as.struc.method_names, (n + 1) * sizeof(char*));
+                st->as.struc.method_types =
+                    xrealloc(st->as.struc.method_types, (n + 1) * sizeof(Type*));
+                st->as.struc.method_is_const =
+                    xrealloc(st->as.struc.method_is_const, (n + 1) * sizeof(int));
 
-                Type** new_types = realloc(st->as.struc.method_types, (n + 1) * sizeof(Type*));
-                if (!new_types) {
-                    check_error(checker, node->line, node->column, "Out of memory");
-                    free(mangled_name);
-                    return;
-                }
-                st->as.struc.method_types = new_types;
-
-                int* new_const = realloc(st->as.struc.method_is_const, (n + 1) * sizeof(int));
-                if (!new_const) {
-                    check_error(checker, node->line, node->column, "Out of memory");
-                    free(mangled_name);
-                    return;
-                }
-                st->as.struc.method_is_const = new_const;
-
-                char* method_name = strdup(name);
-                if (!method_name) {
-                    check_error(checker, node->line, node->column, "Out of memory");
-                    free(mangled_name);
-                    return;
-                }
-
-                st->as.struc.method_names[n]    = method_name;
+                st->as.struc.method_names[n]    = xstrdup(name);
                 st->as.struc.method_types[n]    = func_type;
                 st->as.struc.method_is_const[n] = fdn->receiver_is_const;
                 st->as.struc.method_count       = n + 1;
@@ -1406,12 +1331,12 @@ static void check_decl(Checker* checker, Node* node) {
         int   field_count = node->as.struct_decl.fields.count;
 
         struct_type->as.struc.field_count = field_count;
-        struct_type->as.struc.field_names = malloc(field_count * sizeof(char*));
-        struct_type->as.struc.field_types = malloc(field_count * sizeof(Type*));
+        struct_type->as.struc.field_names = xmalloc(field_count * sizeof(char*));
+        struct_type->as.struc.field_types = xmalloc(field_count * sizeof(Type*));
 
         for (int i = 0; i < field_count; i++) {
             Node* field                          = node->as.struct_decl.fields.nodes[i];
-            struct_type->as.struc.field_names[i] = strdup(field->as.field.name);
+            struct_type->as.struc.field_names[i] = xstrdup(field->as.field.name);
             struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
         }
 
@@ -1432,7 +1357,7 @@ static void check_decl(Checker* checker, Node* node) {
         int   value_count = node->as.enum_decl.values.count;
 
         enum_type->as.enm.value_count = value_count;
-        enum_type->as.enm.value_names = malloc(value_count * sizeof(char*));
+        enum_type->as.enm.value_names = xmalloc(value_count * sizeof(char*));
 
         checker_define(checker, name, SYM_TYPE, enum_type, 0, node->as.enum_decl.is_public,
                        checker->current_module);
@@ -1440,7 +1365,7 @@ static void check_decl(Checker* checker, Node* node) {
         // Define enum values as constants
         for (int i = 0; i < value_count; i++) {
             Node* val                        = node->as.enum_decl.values.nodes[i];
-            enum_type->as.enm.value_names[i] = strdup(val->as.ident.name);
+            enum_type->as.enm.value_names[i] = xstrdup(val->as.ident.name);
             // Note: enum values are NOT registered in scope - they must be accessed via
             // EnumName::ValueName
         }
