@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "alloc.h"
+#include "vec.h"
 
 #define SCOPE_SIZE 64
 
@@ -23,6 +24,62 @@ static int  check_destruct_pattern_against_type(Checker* checker, DestructPatter
                                                 Type* type, int line, int col);
 static void define_destruct_pattern_vars(Checker* checker, DestructPattern* pattern, Type* type,
                                          int is_const, int is_public);
+
+// =============================================================================
+// Generic struct helpers
+// =============================================================================
+
+// Register a generic struct definition
+static void register_generic_def(Checker* checker, const char* name, char** type_params,
+                                 int type_param_count, Node* decl) {
+    VEC_GROW(checker->generic_defs, checker->generic_def_count, checker->generic_def_capacity);
+    GenericDef* def  = &checker->generic_defs[checker->generic_def_count++];
+    def->name        = xstrdup(name);
+    def->type_params = xmalloc(type_param_count * sizeof(char*));
+    for (int i = 0; i < type_param_count; i++) {
+        def->type_params[i] = xstrdup(type_params[i]);
+    }
+    def->type_param_count = type_param_count;
+    def->decl             = decl;
+    def->methods          = NULL;
+    def->method_count     = 0;
+    def->method_capacity  = 0;
+}
+
+// Register a method on a generic struct definition
+static void register_generic_method(GenericDef* def, Node* method) {
+    VEC_GROW(def->methods, def->method_count, def->method_capacity);
+    def->methods[def->method_count++] = method;
+}
+
+// Look up a generic struct definition by name
+static GenericDef* lookup_generic_def(Checker* checker, const char* name) {
+    for (int i = 0; i < checker->generic_def_count; i++) {
+        if (strcmp(checker->generic_defs[i].name, name) == 0) {
+            return &checker->generic_defs[i];
+        }
+    }
+    return NULL;
+}
+
+// Look up an already-instantiated generic struct by mangled name
+static GenericInstance* lookup_generic_instance(Checker* checker, const char* mangled_name) {
+    for (int i = 0; i < checker->generic_instance_count; i++) {
+        if (strcmp(checker->generic_instances[i].mangled_name, mangled_name) == 0) {
+            return &checker->generic_instances[i];
+        }
+    }
+    return NULL;
+}
+
+// Register an instantiated generic struct
+static void register_generic_instance(Checker* checker, const char* mangled_name, Type* type) {
+    VEC_GROW(checker->generic_instances, checker->generic_instance_count,
+             checker->generic_instance_capacity);
+    GenericInstance* inst = &checker->generic_instances[checker->generic_instance_count++];
+    inst->mangled_name    = xstrdup(mangled_name);
+    inst->type            = type;
+}
 
 // =============================================================================
 // Utility functions
@@ -62,6 +119,16 @@ void checker_init(Checker* checker) {
     checker->current_accessible_modules       = NULL;
     checker->current_accessible_modules_count = 0;
     checker->current_module                   = NULL;
+    // Generic support
+    checker->generic_defs              = NULL;
+    checker->generic_def_count         = 0;
+    checker->generic_def_capacity      = 0;
+    checker->generic_instances         = NULL;
+    checker->generic_instance_count    = 0;
+    checker->generic_instance_capacity = 0;
+    checker->current_type_params       = NULL;
+    checker->current_type_args         = NULL;
+    checker->current_type_param_count  = 0;
     types_init();
 }
 
@@ -103,6 +170,22 @@ void checker_free(Checker* checker) {
     while (checker->scope) {
         checker_pop_scope(checker);
     }
+    // Free generic definitions
+    for (int i = 0; i < checker->generic_def_count; i++) {
+        free(checker->generic_defs[i].name);
+        for (int j = 0; j < checker->generic_defs[i].type_param_count; j++) {
+            free(checker->generic_defs[i].type_params[j]);
+        }
+        free(checker->generic_defs[i].type_params);
+        // Note: methods array contains pointers to AST nodes, don't free them
+        free(checker->generic_defs[i].methods);
+    }
+    free(checker->generic_defs);
+    // Free generic instances
+    for (int i = 0; i < checker->generic_instance_count; i++) {
+        free(checker->generic_instances[i].mangled_name);
+    }
+    free(checker->generic_instances);
     types_cleanup();
 }
 
@@ -271,6 +354,15 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
         if (builtin)
             return builtin;
 
+        // Check for type parameter substitution (when instantiating generics)
+        if (checker->current_type_params) {
+            for (int i = 0; i < checker->current_type_param_count; i++) {
+                if (strcmp(checker->current_type_params[i], name) == 0) {
+                    return checker->current_type_args[i];
+                }
+            }
+        }
+
         // Look up user-defined type
         Symbol* sym = checker_lookup(checker, name);
         if (sym && sym->kind == SYM_TYPE) {
@@ -278,6 +370,141 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
         }
         check_error(checker, type_node->line, type_node->column, "Unknown type '%s'", name);
         return type_error;
+    }
+    case NODE_GENERIC_TYPE: {
+        // Generic type instantiation: Box<i64>, Pair<K, V>
+        const char* base_name = type_node->as.generic_type.base_name;
+        int         arg_count = type_node->as.generic_type.type_args.count;
+
+        // Look up the generic definition
+        GenericDef* def = lookup_generic_def(checker, base_name);
+        if (!def) {
+            // Maybe it's not a generic - error
+            check_error(checker, type_node->line, type_node->column, "Unknown generic type '%s'",
+                        base_name);
+            return type_error;
+        }
+
+        // Check arity
+        if (arg_count != def->type_param_count) {
+            check_error(checker, type_node->line, type_node->column,
+                        "Generic type '%s' expects %d type arguments, got %d", base_name,
+                        def->type_param_count, arg_count);
+            return type_error;
+        }
+
+        // Resolve all type arguments
+        Type** resolved_args = xmalloc(arg_count * sizeof(Type*));
+        for (int i = 0; i < arg_count; i++) {
+            resolved_args[i] = resolve_type(checker, type_node->as.generic_type.type_args.nodes[i]);
+            if (resolved_args[i] == type_error) {
+                free(resolved_args);
+                return type_error;
+            }
+        }
+
+        // Generate mangled name
+        char* mangled = type_mangle_generic(base_name, resolved_args, arg_count);
+
+        // Check if already instantiated
+        GenericInstance* existing = lookup_generic_instance(checker, mangled);
+        if (existing) {
+            free(mangled);
+            free(resolved_args);
+            return existing->type;
+        }
+
+        // Instantiate: create a new TYPE_STRUCT with substituted field types
+        Type* struct_type = type_struct(mangled);
+
+        // Register early to handle recursive types
+        register_generic_instance(checker, mangled, struct_type);
+
+        // Set up substitution context
+        char** old_params = checker->current_type_params;
+        Type** old_args   = checker->current_type_args;
+        int    old_count  = checker->current_type_param_count;
+
+        checker->current_type_params      = def->type_params;
+        checker->current_type_args        = resolved_args;
+        checker->current_type_param_count = def->type_param_count;
+
+        // Resolve field types with substitution
+        Node* decl        = def->decl;
+        int   field_count = decl->as.struct_decl.fields.count;
+
+        struct_type->as.struc.field_count = field_count;
+        struct_type->as.struc.field_names = xmalloc(field_count * sizeof(char*));
+        struct_type->as.struc.field_types = xmalloc(field_count * sizeof(Type*));
+
+        for (int i = 0; i < field_count; i++) {
+            Node* field                          = decl->as.struct_decl.fields.nodes[i];
+            struct_type->as.struc.field_names[i] = xstrdup(field->as.field.name);
+            struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
+        }
+
+        // Instantiate methods on the generic struct
+        for (int m = 0; m < def->method_count; m++) {
+            Node*           method_decl = def->methods[m];
+            func_decl_node* mfdn        = &method_decl->as.func_decl;
+
+            // Build function type with substituted types
+            int    param_count = mfdn->params.count;
+            Type** param_types = NULL;
+            if (param_count > 0) {
+                param_types = xmalloc(param_count * sizeof(Type*));
+                for (int p = 0; p < param_count; p++) {
+                    Node* param    = mfdn->params.nodes[p];
+                    param_types[p] = param->as.param.type
+                                         ? resolve_type(checker, param->as.param.type)
+                                         : type_void;
+                }
+            }
+
+            Type* return_type =
+                mfdn->return_type ? resolve_type(checker, mfdn->return_type) : type_void;
+
+            Type* method_type = type_func(param_types, param_count, return_type);
+
+            // Register the method on the struct type
+            int n = struct_type->as.struc.method_count;
+            struct_type->as.struc.method_names =
+                xrealloc(struct_type->as.struc.method_names, (n + 1) * sizeof(char*));
+            struct_type->as.struc.method_types =
+                xrealloc(struct_type->as.struc.method_types, (n + 1) * sizeof(Type*));
+            struct_type->as.struc.method_is_const =
+                xrealloc(struct_type->as.struc.method_is_const, (n + 1) * sizeof(int));
+
+            struct_type->as.struc.method_names[n]    = xstrdup(mfdn->name);
+            struct_type->as.struc.method_types[n]    = method_type;
+            struct_type->as.struc.method_is_const[n] = mfdn->receiver_is_const;
+            struct_type->as.struc.method_count       = n + 1;
+
+            // Also register the mangled function name in the symbol table
+            char* method_mangled =
+                type_mangle_generic(mfdn->receiver_type, resolved_args, arg_count);
+            size_t method_name_len  = strlen(method_mangled) + 1 + strlen(mfdn->name) + 1;
+            char*  full_method_name = xmalloc(method_name_len);
+            snprintf(full_method_name, method_name_len, "%s_%s", method_mangled, mfdn->name);
+
+            checker_define(checker, full_method_name, SYM_FUNC, method_type, 1, mfdn->is_public,
+                           checker->current_module);
+
+            free(method_mangled);
+            free(full_method_name);
+        }
+
+        // Restore substitution context
+        checker->current_type_params      = old_params;
+        checker->current_type_args        = old_args;
+        checker->current_type_param_count = old_count;
+
+        // Register in symbol table so it can be looked up
+        checker_define(checker, mangled, SYM_TYPE, struct_type, 0, 1, checker->current_module);
+
+        free(mangled);
+        free(resolved_args);
+        return struct_type;
     }
     case NODE_UNARY:
         // Pointer types no longer supported
@@ -1199,6 +1426,27 @@ static void check_decl(Checker* checker, Node* node) {
         const char* receiver_type = fdn->receiver_type;
         int         is_method     = (receiver_type != NULL);
 
+        // Check if this is a method on a generic struct: func (Box<T>) get(): T
+        if (is_method && fdn->receiver_type_param_count > 0) {
+            // Look up the generic definition
+            GenericDef* def = lookup_generic_def(checker, receiver_type);
+            if (!def) {
+                check_error(checker, node->line, node->column, "Unknown generic type '%s'",
+                            receiver_type);
+                return;
+            }
+            // Verify type param arity matches
+            if (fdn->receiver_type_param_count != def->type_param_count) {
+                check_error(checker, node->line, node->column,
+                            "Generic type '%s' expects %d type parameters, got %d", receiver_type,
+                            def->type_param_count, fdn->receiver_type_param_count);
+                return;
+            }
+            // Store the method on the generic definition - will be instantiated later
+            register_generic_method(def, node);
+            return;
+        }
+
         // For methods, use mangled name: StructName_methodName
         char* mangled_name = NULL;
         if (is_method) {
@@ -1322,11 +1570,21 @@ static void check_decl(Checker* checker, Node* node) {
     case NODE_STRUCT_DECL: {
         const char* name = node->as.struct_decl.name;
 
+        // Check for redefinition
         if (checker_lookup(checker, name)) {
             check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
             return;
         }
 
+        // Check if this is a generic struct definition
+        if (node->as.struct_decl.type_param_count > 0) {
+            // Register as generic template - don't create concrete type yet
+            register_generic_def(checker, name, node->as.struct_decl.type_params,
+                                 node->as.struct_decl.type_param_count, node);
+            return;
+        }
+
+        // Non-generic struct: create concrete type as before
         Type* struct_type = type_struct(name);
         int   field_count = node->as.struct_decl.fields.count;
 

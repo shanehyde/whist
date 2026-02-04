@@ -176,6 +176,11 @@ void node_free(Node* node) {
         break;
     case NODE_FUNC_DECL:
         free(node->as.func_decl.receiver_type);
+        // Free receiver type params if present
+        for (int i = 0; i < node->as.func_decl.receiver_type_param_count; i++) {
+            free(node->as.func_decl.receiver_type_params[i]);
+        }
+        free(node->as.func_decl.receiver_type_params);
         free(node->as.func_decl.name);
         nodelist_free(&node->as.func_decl.params);
         node_free(node->as.func_decl.return_type);
@@ -188,6 +193,11 @@ void node_free(Node* node) {
     case NODE_STRUCT_DECL:
         free(node->as.struct_decl.name);
         nodelist_free(&node->as.struct_decl.fields);
+        // Free type parameters if present
+        for (int i = 0; i < node->as.struct_decl.type_param_count; i++) {
+            free(node->as.struct_decl.type_params[i]);
+        }
+        free(node->as.struct_decl.type_params);
         break;
     case NODE_FIELD:
         free(node->as.field.name);
@@ -202,6 +212,10 @@ void node_free(Node* node) {
         break;
     case NODE_TUPLE_LIT:
         nodelist_free(&node->as.tuple_lit.elements);
+        break;
+    case NODE_GENERIC_TYPE:
+        free(node->as.generic_type.base_name);
+        nodelist_free(&node->as.generic_type.type_args);
         break;
     case NODE_PROGRAM:
         nodelist_free(&node->as.program.modules);
