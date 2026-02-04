@@ -110,6 +110,19 @@ static void check_error(Checker* checker, int line, int col, const char* fmt, ..
     va_end(args);
 }
 
+// Helper for type mismatch errors with consistent "expected X, got Y" format
+static void check_error_type(Checker* checker, int line, int col, const char* context,
+                             Type* expected, Type* got) {
+    check_error(checker, line, col, "%s: expected '%s', got '%s'", context, type_name(expected),
+                type_name(got));
+}
+
+// Helper for "cannot do X to type Y" errors
+static void check_error_cannot(Checker* checker, int line, int col, const char* action,
+                               Type* type) {
+    check_error(checker, line, col, "Cannot %s type '%s'", action, type_name(type));
+}
+
 static unsigned int hash_string(const char* str) {
     unsigned int hash = 5381;
     int          c;
@@ -914,7 +927,7 @@ static Type* check_index_expr(Checker* checker, Node* node) {
         return object->as.tuple.elem_types[idx];
     }
 
-    check_error(checker, node->line, node->column, "Cannot index type '%s'", type_name(object));
+    check_error_cannot(checker, node->line, node->column, "index", object);
     return type_error;
 }
 
@@ -1016,8 +1029,7 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
     }
 
     if (!type_assignable(target, value)) {
-        check_error(checker, node->line, node->column, "Cannot assign '%s' to '%s'",
-                    type_name(value), type_name(target));
+        check_error_type(checker, node->line, node->column, "Assignment", target, value);
         return type_error;
     }
 
@@ -1104,8 +1116,7 @@ static Type* check_expression(Checker* checker, Node* node) {
             return type_error;
 
         if (func_type->kind != TYPE_FUNC) {
-            check_error(checker, node->line, node->column, "Cannot call non-function type '%s'",
-                        type_name(func_type));
+            check_error_cannot(checker, node->line, node->column, "call", func_type);
             return type_error;
         }
 
@@ -1122,10 +1133,10 @@ static Type* check_expression(Checker* checker, Node* node) {
             Type* param_type = func_type->as.func.param_types[i];
 
             if (!type_assignable(param_type, arg_type)) {
-                check_error(checker, node->as.call.args.nodes[i]->line,
-                            node->as.call.args.nodes[i]->column,
-                            "Argument %d: expected '%s', got '%s'", i + 1, type_name(param_type),
-                            type_name(arg_type));
+                char ctx[32];
+                snprintf(ctx, sizeof(ctx), "Argument %d", i + 1);
+                check_error_type(checker, node->as.call.args.nodes[i]->line,
+                                 node->as.call.args.nodes[i]->column, ctx, param_type, arg_type);
             }
         }
 
@@ -1211,9 +1222,8 @@ static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type) 
         Type* field_type = struct_type->as.struc.field_types[field_index];
 
         if (!type_assignable(field_type, value_type)) {
-            check_error(checker, field->line, field->column,
-                        "Cannot initialize field '%s' of type '%s' with '%s'", field_name,
-                        type_name(field_type), type_name(value_type));
+            check_error_type(checker, field->line, field->column, field_name, field_type,
+                             value_type);
             had_error = 1;
         }
     }
@@ -1415,9 +1425,7 @@ static void check_statement(Checker* checker, Node* node) {
         if (decl_type && init_type) {
             // Both specified - check compatibility
             if (!type_assignable(decl_type, init_type)) {
-                check_error(checker, node->line, node->column,
-                            "Cannot initialize '%s' of type '%s' with '%s'", name,
-                            type_name(decl_type), type_name(init_type));
+                check_error_type(checker, node->line, node->column, name, decl_type, init_type);
             }
             var_type = decl_type;
         } else if (decl_type) {
@@ -1543,9 +1551,7 @@ static void check_statement(Checker* checker, Node* node) {
         if (node->as.return_stmt.value) {
             Type* actual = check_expression(checker, node->as.return_stmt.value);
             if (!type_assignable(expected, actual)) {
-                check_error(checker, node->line, node->column,
-                            "Return type mismatch: expected '%s', got '%s'", type_name(expected),
-                            type_name(actual));
+                check_error_type(checker, node->line, node->column, "Return", expected, actual);
             }
         } else if (expected->kind != TYPE_VOID) {
             check_error(checker, node->line, node->column,

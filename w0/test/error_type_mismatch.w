@@ -1,5 +1,5 @@
 // ERROR TEST: Type mismatch in return
-// Expected error: Return type mismatch: expected 'i32', got 'string'
+// Expected error: Return: expected 'i32', got 'string'
 
 func foo(): i32 {
     return "hello";
