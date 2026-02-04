@@ -45,12 +45,19 @@ typedef struct {
 
 // Instantiated generic struct
 typedef struct {
-    char*  mangled_name;  // "Box_i64", "Pair_i64_string"
-    char*  base_name;     // "Box", "Pair" (for finding template)
-    Type*  type;          // Concrete TYPE_STRUCT
-    Type** type_args;     // Resolved type arguments [i64], [i64, string]
+    char*  mangled_name; // "Box_i64", "Pair_i64_string"
+    char*  base_name;    // "Box", "Pair" (for finding template)
+    Type*  type;         // Concrete TYPE_STRUCT
+    Type** type_args;    // Resolved type arguments [i64], [i64, string]
     int    type_arg_count;
 } GenericInstance;
+
+// Instantiated span type
+typedef struct {
+    char* mangled_name; // "Span_i64"
+    Type* elem_type;    // The element type
+    Type* type;         // The TYPE_SPAN instance
+} SpanInstance;
 
 struct Checker {
     Scope* scope;
@@ -84,6 +91,11 @@ struct Checker {
     char** current_type_params; // Type parameter names
     Type** current_type_args;   // Concrete types for each param
     int    current_type_param_count;
+
+    // Instantiated span types
+    SpanInstance* span_instances;
+    int           span_instance_count;
+    int           span_instance_capacity;
 };
 
 void checker_init(Checker* checker);

@@ -117,6 +117,13 @@ Generic structs are monomorphized at compile time, generating specialized C code
 
 **Tuple types:** `(T1, T2)` or `(T1, T2, T3, ...)` represent fixed-size heterogeneous collections. Tuples must have at least two elements.
 
+**Span types:** `Span<T>` is a builtin generic type representing an immutable view into contiguous memory (array or another span). Spans have:
+- `span.count` — number of elements (read-only)
+- `span[i]` — bounds-checked element access (panics if out of bounds)
+- `span.data` — private (compile error if accessed directly)
+
+Create spans using slice syntax: `var s: Span<i64> = arr[:];`
+
 ---
 
 ## Statements
@@ -213,6 +220,7 @@ Generic structs are monomorphized at compile time, generating specialized C code
 
 <postfix-op> ::= '(' [ <arg-list> ] ')'       (* function call *)
               | '[' <expression> ']'           (* index *)
+              | '[' [ <expression> ] ':' [ <expression> ] ']'  (* slice *)
               | '.' <identifier>               (* member access *)
               | '->' <identifier>              (* pointer member access *)
 
@@ -235,8 +243,11 @@ Generic structs are monomorphized at compile time, generating specialized C code
                 | '(' <expression> ')'
                 | <struct-init>
                 | <tuple-literal>
+                | <array-literal>
 
 <enum-value-access> ::= <identifier> '::' <identifier>
+
+<array-literal> ::= '[' [ <expression> { ',' <expression> } [ ',' ] ] ']'
 
 <struct-init> ::= '{' [ <field-init-list> ] '}'
 
@@ -248,6 +259,14 @@ Generic structs are monomorphized at compile time, generating specialized C code
 ```
 
 **Tuple literals:** `(1, "hello")` creates a tuple value. Tuples must have at least two elements. Access elements by index: `t[0]`, `t[1]`.
+
+**Array literals:** `[1, 2, 3, 4, 5]` creates an array. The element type is inferred from the first element. All elements must have compatible types. Trailing commas are allowed.
+
+**Slice expressions:** `arr[start:end]` creates a `Span<T>` view into an array or span. Both bounds are optional:
+- `arr[:]` — full span (all elements)
+- `arr[1:]` — from index 1 to end
+- `arr[:3]` — from start to index 3 (exclusive)
+- `arr[1:3]` — from index 1 to 3 (exclusive)
 
 ---
 

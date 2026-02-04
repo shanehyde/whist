@@ -47,6 +47,7 @@ typedef enum {
     NODE_UNARY,
     NODE_CALL,
     NODE_INDEX,
+    NODE_SLICE,
     NODE_MEMBER,
     NODE_ASSIGN,
     NODE_STRUCT_INIT,
@@ -77,6 +78,9 @@ typedef enum {
     // Tuple types
     NODE_TUPLE_TYPE, // (T1, T2, ...)
     NODE_TUPLE_LIT,  // (e1, e2, ...)
+
+    // Array literal
+    NODE_ARRAY_LIT, // [e1, e2, ...]
 
     // Generic types
     NODE_GENERIC_TYPE, // Box<i64>, Pair<K, V>
@@ -184,7 +188,17 @@ struct Node {
             Node* object;
             Node* index;
             int   is_tuple_index; // Set by checker if indexing a tuple
+            int   is_span_index;  // Set by checker if indexing a span
         } index;
+
+        // Slice expression: arr[start:end]
+        struct {
+            Node* object;        // Array or span being sliced
+            Node* start;         // Start index (NULL if omitted)
+            Node* end;           // End index (NULL if omitted)
+            void* resolved_type; // Type* set by checker (cast to void* to avoid dep)
+            int   is_array;      // Set by checker: 1 if slicing array, 0 if slicing span
+        } slice;
 
         // Member access: obj.member
         struct {
@@ -232,6 +246,12 @@ struct Node {
         struct {
             NodeList elements;
         } tuple_lit;
+
+        // Array literal: [e1, e2, ...]
+        struct {
+            NodeList elements;
+            void*    resolved_type; // Type* set by checker (element type)
+        } array_lit;
 
         // Generic type reference: Box<i64>, Pair<K, V>
         struct {

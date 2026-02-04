@@ -55,7 +55,6 @@ static int is_struct_type(Node* type_node) {
     return !type_is_builtin_name(type_node->as.ident.name);
 }
 
-
 // Helper to check if a name is a type variable (not a builtin type)
 static int codegen_is_type_variable(const char* name) {
     return !type_is_builtin_name(name);
@@ -227,9 +226,39 @@ static void emit_type(CodeGen* gen, Node* type_node) {
         break;
     }
     case NODE_GENERIC_TYPE: {
-        // Generic type instantiation - emit the mangled name as struct reference
+        // Generic type instantiation - emit the mangled name
         // Build the mangled name: Box<i64> -> Box_i64, Box<T> -> Box_i64 (with subst)
         const char* base = type_node->as.generic_type.base_name;
+
+        // Special case: Span<T> is a value type, not a pointer
+        int is_span = (strcmp(base, "Span") == 0);
+
+        if (is_span) {
+            emit(gen, "__Span_");
+            // Emit the element type name
+            Node* arg = type_node->as.generic_type.type_args.nodes[0];
+            if (arg->type == NODE_IDENT) {
+                const char* arg_name    = arg->as.ident.name;
+                int         substituted = 0;
+                if (gen->subst_ctx) {
+                    for (int s = 0; s < gen->subst_ctx->count; s++) {
+                        if (strcmp(gen->subst_ctx->type_params[s], arg_name) == 0) {
+                            Type* subst_type = gen->subst_ctx->type_args[s];
+                            emit(gen, "%s", type_name(subst_type));
+                            substituted = 1;
+                            break;
+                        }
+                    }
+                }
+                if (!substituted) {
+                    emit(gen, "%s", arg_name);
+                }
+            }
+            // No * for spans - they are value types
+            break;
+        }
+
+        // Regular generic struct (Box, Pair, etc.) - emit as pointer
         emit(gen, "%s", base);
         for (int i = 0; i < type_node->as.generic_type.type_args.count; i++) {
             emit(gen, "_");
@@ -289,7 +318,6 @@ static void emit_type(CodeGen* gen, Node* type_node) {
         break;
     }
 }
-
 
 // Emit a resolved Type* (used for inferred types like tuples)
 static void emit_resolved_type(CodeGen* gen, Type* type) {
@@ -351,6 +379,9 @@ static void emit_resolved_type(CodeGen* gen, Type* type) {
         break;
     case TYPE_STRUCT:
         emit(gen, "%s*", type->as.struc.name);
+        break;
+    case TYPE_SPAN:
+        emit(gen, "__Span_%s", type_name(type->as.span.elem));
         break;
     case TYPE_ENUM:
         emit(gen, "%s", type->as.enm.name);
@@ -621,23 +652,117 @@ static void emit_expr(CodeGen* gen, Node* node) {
     }
 
     case NODE_INDEX:
-        emit_expr(gen, node->as.index.object);
-        if (node->as.index.is_tuple_index) {
+        if (node->as.index.is_span_index) {
+            // Bounds-checked span access
+            emit(gen, "(__w0_span_check(");
+            emit_expr(gen, node->as.index.object);
+            emit(gen, ".count, ");
+            emit_expr(gen, node->as.index.index);
+            emit(gen, ", %d, %d), ", node->line, node->column);
+            emit_expr(gen, node->as.index.object);
+            emit(gen, ".data[");
+            emit_expr(gen, node->as.index.index);
+            emit(gen, "])");
+        } else if (node->as.index.is_tuple_index) {
             // Tuple indexing: obj._N
+            emit_expr(gen, node->as.index.object);
             emit(gen, "._%ld", node->as.index.index->as.int_lit.value);
         } else {
             // Array/string indexing: obj[index]
+            emit_expr(gen, node->as.index.object);
             emit(gen, "[");
             emit_expr(gen, node->as.index.index);
             emit(gen, "]");
         }
         break;
 
-    case NODE_MEMBER:
-        emit_expr(gen, node->as.member.object);
-        // With struct references, always use -> for member access
-        emit(gen, "->%.*s", node->as.member.length, node->as.member.name);
+    case NODE_SLICE: {
+        // Slice produces a span: (__Span_T){ .data = ..., .count = ... }
+        Type* span_type = (Type*)node->as.slice.resolved_type;
+        Type* elem_type = span_type->as.span.elem;
+
+        // Emit compound literal
+        emit(gen, "((__Span_%s){ .data = ", type_name(elem_type));
+
+        if (node->as.slice.is_array) {
+            // Array slicing: .data = &arr[start]
+            emit(gen, "&(");
+            emit_expr(gen, node->as.slice.object);
+            emit(gen, ")[");
+            if (node->as.slice.start) {
+                emit_expr(gen, node->as.slice.start);
+            } else {
+                emit(gen, "0");
+            }
+            emit(gen, "]");
+        } else {
+            // Span slicing: .data = span.data + start
+            emit_expr(gen, node->as.slice.object);
+            emit(gen, ".data + ");
+            if (node->as.slice.start) {
+                emit_expr(gen, node->as.slice.start);
+            } else {
+                emit(gen, "0");
+            }
+        }
+
+        emit(gen, ", .count = ");
+
+        // Calculate count: end - start
+        // For omitted end, use array length or span.count
+        if (node->as.slice.end) {
+            emit(gen, "(");
+            emit_expr(gen, node->as.slice.end);
+            emit(gen, ")");
+        } else {
+            // Use full length
+            if (node->as.slice.is_array) {
+                emit(gen, "(sizeof(");
+                emit_expr(gen, node->as.slice.object);
+                emit(gen, ")/sizeof((");
+                emit_expr(gen, node->as.slice.object);
+                emit(gen, ")[0]))");
+            } else {
+                emit_expr(gen, node->as.slice.object);
+                emit(gen, ".count");
+            }
+        }
+
+        // Subtract start if present
+        if (node->as.slice.start) {
+            emit(gen, " - (");
+            emit_expr(gen, node->as.slice.start);
+            emit(gen, ")");
+        }
+
+        emit(gen, " })");
         break;
+    }
+
+    case NODE_MEMBER: {
+        // Check if this is module-qualified access (already handled struct_name case)
+        if (node->as.member.struct_name == NULL && node->as.member.module_name == NULL) {
+            // Check if object is 'self' - always a pointer in methods
+            // This handles generic methods where is_ref isn't set because body isn't type-checked
+            int is_self = (node->as.member.object->type == NODE_IDENT &&
+                           strcmp(node->as.member.object->as.ident.name, "self") == 0);
+
+            if (node->as.member.is_ref || is_self) {
+                // Struct reference or self - use ->
+                emit_expr(gen, node->as.member.object);
+                emit(gen, "->%.*s", node->as.member.length, node->as.member.name);
+            } else {
+                // Value type member access (tuples, spans) - use .
+                emit_expr(gen, node->as.member.object);
+                emit(gen, ".%.*s", node->as.member.length, node->as.member.name);
+            }
+        } else {
+            // Struct method or module access
+            emit_expr(gen, node->as.member.object);
+            emit(gen, "->%.*s", node->as.member.length, node->as.member.name);
+        }
+        break;
+    }
 
     case NODE_ASSIGN:
         emit(gen, "(");
@@ -658,6 +783,17 @@ static void emit_expr(CodeGen* gen, Node* node) {
             if (i > 0)
                 emit(gen, ", ");
             emit_expr(gen, node->as.tuple_lit.elements.nodes[i]);
+        }
+        emit(gen, "}");
+        break;
+
+    case NODE_ARRAY_LIT:
+        // Array literal: [e1, e2, ...] -> {e1, e2, ...}
+        emit(gen, "{");
+        for (int i = 0; i < node->as.array_lit.elements.count; i++) {
+            if (i > 0)
+                emit(gen, ", ");
+            emit_expr(gen, node->as.array_lit.elements.nodes[i]);
         }
         emit(gen, "}");
         break;
@@ -849,6 +985,15 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                         }
                         emit(gen, "} %s", node->as.var_decl.name);
                     }
+                    break;
+                }
+                case NODE_ARRAY_LIT: {
+                    // Use the resolved element type from checker
+                    Node* init      = node->as.var_decl.init;
+                    Type* elem_type = (Type*)init->as.array_lit.resolved_type;
+                    int   count     = init->as.array_lit.elements.count;
+                    emit_resolved_type(gen, elem_type);
+                    emit(gen, " %s[%d]", node->as.var_decl.name, count);
                     break;
                 }
                 default:
@@ -1600,7 +1745,8 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
     }
 }
 
-void codegen_init(CodeGen* gen, FILE* out, GenericInstance* instances, int instance_count) {
+void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,
+                  SpanInstance* span_instances, int span_count) {
     gen->out                    = out;
     gen->indent                 = 0;
     gen->temp_count             = 0;
@@ -1613,8 +1759,10 @@ void codegen_init(CodeGen* gen, FILE* out, GenericInstance* instances, int insta
     gen->tuple_types            = NULL;
     gen->tuple_type_count       = 0;
     gen->tuple_type_capacity    = 0;
-    gen->generic_instances      = instances;
-    gen->generic_instance_count = instance_count;
+    gen->generic_instances      = generic_instances;
+    gen->generic_instance_count = generic_count;
+    gen->span_instances         = span_instances;
+    gen->span_instance_count    = span_count;
 }
 
 void codegen_emit(CodeGen* gen, Node* ast) {
@@ -1637,7 +1785,32 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit(gen, "#include <stdbool.h>\n");
     emit(gen, "#include <stddef.h>\n");
     emit(gen, "#include <stdlib.h>\n");
+    emit(gen, "#include <stdio.h>\n");
     emit(gen, "\n");
+
+    // Emit span bounds check helper (only if we have span instances)
+    if (gen->span_instance_count > 0) {
+        emit(gen, "static inline void __w0_span_check(uint64_t count, int64_t idx, int line, int "
+                  "col) {\n");
+        emit(gen, "    if (idx < 0 || (uint64_t)idx >= count) {\n");
+        emit(gen, "        fprintf(stderr, \"Panic: span index %%lld out of bounds (count=%%llu) "
+                  "at %%d:%%d\\n\",\n");
+        emit(gen, "                (long long)idx, (unsigned long long)count, line, col);\n");
+        emit(gen, "        exit(1);\n");
+        emit(gen, "    }\n");
+        emit(gen, "}\n\n");
+    }
+
+    // Emit span struct typedefs
+    for (int i = 0; i < gen->span_instance_count; i++) {
+        SpanInstance* inst = &gen->span_instances[i];
+        emit(gen, "typedef struct {\n");
+        emit(gen, "    const ");
+        emit_resolved_type(gen, inst->elem_type);
+        emit(gen, "* data;\n");
+        emit(gen, "    uint64_t count;\n");
+        emit(gen, "} __Span_%s;\n\n", type_name(inst->elem_type));
+    }
 
     // Emit tuple typedefs
     for (int i = 0; i < gen->tuple_type_count; i++) {
@@ -1679,7 +1852,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     // Emit typedefs for instantiated generic structs
     for (int i = 0; i < gen->generic_instance_count; i++) {
         GenericInstance* info     = &gen->generic_instances[i];
-        Node*               template = find_generic_struct_decl(ast, info->base_name);
+        Node*            template = find_generic_struct_decl(ast, info->base_name);
         if (!template) {
             continue;
         }
@@ -1824,7 +1997,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             subst_ctx.type_params = combined_params;
             subst_ctx.type_args   = combined_args;
             subst_ctx.count       = combined_count;
-            gen->subst_ctx           = &subst_ctx;
+            gen->subst_ctx        = &subst_ctx;
 
             // Return type (with substitution)
             emit_type(gen, fdn->return_type);
@@ -1921,7 +2094,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             subst_ctx.type_params = combined_params;
             subst_ctx.type_args   = combined_args;
             subst_ctx.count       = combined_count;
-            gen->subst_ctx           = &subst_ctx;
+            gen->subst_ctx        = &subst_ctx;
 
             // Check if function is void
             int is_void =
