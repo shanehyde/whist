@@ -78,6 +78,13 @@ void print_ast(Node* node, int depth) {
             printf("FuncDecl: %.*s\n", node->as.func_decl.name_length, node->as.func_decl.name);
         }
         print_visibility(depth + 1, node->as.func_decl.is_public);
+        if (node->as.func_decl.receiver_type_args.count > 0) {
+            print_indent(depth + 1);
+            printf("ReceiverTypeArgs:\n");
+            for (int i = 0; i < node->as.func_decl.receiver_type_args.count; i++) {
+                print_ast(node->as.func_decl.receiver_type_args.nodes[i], depth + 2);
+            }
+        }
         if (node->as.func_decl.params.count > 0) {
             print_indent(depth + 1);
             printf("Params:\n");
@@ -110,6 +117,16 @@ void print_ast(Node* node, int depth) {
     case NODE_STRUCT_DECL:
         printf("StructDecl: %.*s\n", node->as.struct_decl.name_length, node->as.struct_decl.name);
         print_visibility(depth + 1, node->as.struct_decl.is_public);
+        if (node->as.struct_decl.type_param_count > 0) {
+            print_indent(depth + 1);
+            printf("TypeParams: <");
+            for (int i = 0; i < node->as.struct_decl.type_param_count; i++) {
+                if (i > 0)
+                    printf(", ");
+                printf("%s", node->as.struct_decl.type_params[i]);
+            }
+            printf(">\n");
+        }
         for (int i = 0; i < node->as.struct_decl.fields.count; i++) {
             print_ast(node->as.struct_decl.fields.nodes[i], depth + 1);
         }
@@ -329,6 +346,16 @@ void print_ast(Node* node, int depth) {
         printf("TupleLit\n");
         for (int i = 0; i < node->as.tuple_lit.elements.count; i++) {
             print_ast(node->as.tuple_lit.elements.nodes[i], depth + 1);
+        }
+        break;
+
+    case NODE_GENERIC_TYPE:
+        printf("GenericType: %.*s\n", node->as.generic_type.base_name_length,
+               node->as.generic_type.base_name);
+        print_indent(depth + 1);
+        printf("TypeArgs:\n");
+        for (int i = 0; i < node->as.generic_type.type_args.count; i++) {
+            print_ast(node->as.generic_type.type_args.nodes[i], depth + 2);
         }
         break;
 
