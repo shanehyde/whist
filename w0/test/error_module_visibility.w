@@ -1,5 +1,5 @@
 // Test that symbols from library imports are not accessible through relative imports
-// EXPECT_ERROR: Undefined identifier 'abs_i64'
+// Expected error: Undefined identifier 'abs_i64'
 
 import "./util/std_helper.w";
 
