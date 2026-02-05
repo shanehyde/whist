@@ -1,6 +1,7 @@
 # Whist Compiler Future Plans
 
 This document outlines potential directions for the Whist compiler and language.
+See the [plans/](plans/) directory for detailed design documents.
 
 ## Current State
 
@@ -18,6 +19,8 @@ The w0 bootstrap compiler is feature-complete with:
 ## Proposed Language Features
 
 ### Closures / Lambdas
+[Detailed design →](plans/closures.md)
+
 Anonymous functions with variable capture:
 ```whist
 var add = |a: i64, b: i64| -> i64 { return a + b; };
@@ -25,6 +28,8 @@ var items = filter(list, |x| x > 0);
 ```
 
 ### Traits / Interfaces
+[Detailed design →](plans/traits.md)
+
 Polymorphism beyond generics:
 ```whist
 trait Printable {
@@ -39,6 +44,8 @@ impl Printable for Point {
 ```
 
 ### Pattern Matching
+[Detailed design →](plans/pattern-matching.md)
+
 `match` expressions with exhaustiveness checking:
 ```whist
 match value {
@@ -50,6 +57,8 @@ match value {
 ```
 
 ### Result / Option Types
+[Detailed design →](plans/result-option.md)
+
 Structured error handling:
 ```whist
 func divide(a: i64, b: i64): Result<i64, string> {
@@ -63,6 +72,8 @@ var result = divide(10, 2)?;  // propagate errors
 ```
 
 ### String Interpolation
+[Detailed design →](plans/string-interpolation.md)
+
 Embedded expressions in strings:
 ```whist
 var name = "world";
@@ -73,12 +84,16 @@ print("2 + 2 = {2 + 2}");
 ## Type System
 
 ### Union Types
+[Detailed design →](plans/union-types.md)
+
 Values that can be one of several types:
 ```whist
 type JsonValue = null | bool | i64 | f64 | string | JsonArray | JsonObject;
 ```
 
 ### Type Aliases
+[Detailed design →](plans/type-aliases.md)
+
 Named aliases for complex types:
 ```whist
 type UserId = i64;
@@ -87,6 +102,8 @@ type StringMap<V> = Map<string, V>;
 ```
 
 ### Nullable Types
+[Detailed design →](plans/nullable-types.md)
+
 Explicit null safety:
 ```whist
 var name: ?string = null;
@@ -96,9 +113,16 @@ if name != null {
 var len = name?.length() ?? 0;  // optional chaining
 ```
 
+### Memory Management
+[Detailed design →](plans/memory-management.md)
+
+Reference counting with owner/borrower semantics for automatic memory management.
+
 ## Compiler Infrastructure
 
 ### Self-Hosting (wc)
+[Detailed design →](plans/self-hosting.md)
+
 Rewrite the compiler in Whist itself:
 - Validates language expressiveness
 - Enables bootstrapping
@@ -106,6 +130,8 @@ Rewrite the compiler in Whist itself:
 - Milestone for language maturity
 
 ### LLVM Backend
+[Detailed design →](plans/llvm-backend.md)
+
 Native code generation via LLVM:
 - Direct machine code output
 - Access to LLVM optimizations
@@ -113,12 +139,16 @@ Native code generation via LLVM:
 - Multiple target architectures
 
 ### WebAssembly Target
+[Detailed design →](plans/webassembly.md)
+
 Compile to WASM for:
 - Browser execution
 - Sandboxed environments
 - Portable binaries
 
 ### LSP Server
+[Detailed design →](plans/lsp-server.md)
+
 Language Server Protocol implementation:
 - IDE integration (VS Code, etc.)
 - Go to definition
@@ -128,6 +158,8 @@ Language Server Protocol implementation:
 - Auto-completion
 
 ### Incremental Compilation
+[Detailed design →](plans/incremental-compilation.md)
+
 Only recompile changed files:
 - Dependency tracking
 - Cached intermediate representations
@@ -136,6 +168,8 @@ Only recompile changed files:
 ## Tooling & Ecosystem
 
 ### Package Manager
+[Detailed design →](plans/package-manager.md)
+
 Dependency management:
 - Package registry
 - Version resolution
@@ -143,12 +177,16 @@ Dependency management:
 - Build integration
 
 ### REPL
+[Detailed design →](plans/repl.md)
+
 Interactive evaluation:
 - Expression evaluation
 - State inspection
 - Quick prototyping
 
 ### Debugger Support
+[Detailed design →](plans/debugger.md)
+
 Debug info and tooling:
 - Source maps
 - Breakpoints
@@ -156,6 +194,8 @@ Debug info and tooling:
 - Stack traces
 
 ### Better Error Messages
+[Detailed design →](plans/error-messages.md)
+
 Improved diagnostics:
 - Suggested fixes
 - Similar name hints
@@ -165,6 +205,8 @@ Improved diagnostics:
 ## Standard Library
 
 ### Collections
+[Detailed design →](plans/stdlib-collections.md)
+
 - `HashMap<K, V>` - hash-based key-value store
 - `HashSet<T>` - unique element collection
 - `Vec<T>` - growable array
@@ -172,23 +214,31 @@ Improved diagnostics:
 - `Queue<T>` / `Stack<T>` - FIFO/LIFO collections
 
 ### File I/O
+[Detailed design →](plans/stdlib-io.md)
+
 - File reading/writing
 - Directory operations
 - Path manipulation
 - Streaming I/O
 
 ### Networking
+[Detailed design →](plans/stdlib-networking.md)
+
 - TCP/UDP sockets
 - HTTP client
 - URL parsing
 
 ### String Manipulation
+[Detailed design →](plans/stdlib-strings.md)
+
 - Split, join, trim
 - Search and replace
 - Unicode support
 - Formatting
 
 ### Math
+[Detailed design →](plans/stdlib-math.md)
+
 - Trigonometry
 - Random numbers
 - Big integers
