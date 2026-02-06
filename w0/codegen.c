@@ -86,6 +86,15 @@ static void rc_clear_all(CodeGen* gen) {
     gen->rc_scope_depth = 0;
 }
 
+// Check if a variable name is in the RC tracking list
+static int rc_is_tracked(CodeGen* gen, const char* name) {
+    for (int i = 0; i < gen->rc_var_count; i++) {
+        if (strcmp(gen->rc_vars[i].name, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 // Check if a type node represents a struct (user-defined) type
 static int is_struct_type(Node* type_node) {
     if (!type_node)
@@ -934,11 +943,33 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         return;
 
     switch (node->type) {
-    case NODE_EXPR_STMT:
+    case NODE_EXPR_STMT: {
+        // Handle RC reassignment: p = new_value
+        // Must inc new value, dec old value, then assign
+        Node* expr = node->as.expr_stmt.expr;
+        if (expr->type == NODE_ASSIGN && expr->as.assign.op == TOK_EQ &&
+            expr->as.assign.target->type == NODE_IDENT &&
+            rc_is_tracked(gen, expr->as.assign.target->as.ident.name)) {
+            const char* var_name = expr->as.assign.target->as.ident.name;
+            // Evaluate new value into a temp (in case it references the old value)
+            int temp_id = gen->temp_count++;
+            emit_indent(gen);
+            emit(gen, "void* __rc_tmp%d = (void*)", temp_id);
+            emit_expr(gen, expr->as.assign.value);
+            emit(gen, ";\n");
+            emit_indent(gen);
+            emit(gen, "__rc_inc(__rc_tmp%d);\n", temp_id);
+            emit_indent(gen);
+            emit(gen, "__rc_dec(%s);\n", var_name);
+            emit_indent(gen);
+            emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
+            break;
+        }
         emit_indent(gen);
-        emit_expr(gen, node->as.expr_stmt.expr);
+        emit_expr(gen, expr);
         emit(gen, ";\n");
         break;
+    }
 
     case NODE_VAR_DECL: {
         // Handle destructuring: var (a, b) = tuple; or var (a, (b, c)) = nested;
