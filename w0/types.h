@@ -23,6 +23,7 @@ typedef enum {
     TYPE_SPAN,
     TYPE_STRUCT,
     TYPE_ENUM,
+    TYPE_TRAIT,
     TYPE_FUNC,
     TYPE_TUPLE,
     TYPE_NULL,          // null reference type
@@ -76,6 +77,14 @@ struct Type {
             int    value_count;
         } enm;
 
+        // Trait
+        struct {
+            char*  name;
+            char** method_names;
+            Type** method_types; // Function types (signatures without receiver)
+            int    method_count;
+        } trait;
+
         // Function
         struct {
             Type** param_types;
@@ -124,6 +133,7 @@ Type* type_new(TypeKind kind);
 Type* type_array(Type* elem, int size);
 Type* type_struct(const char* name);
 Type* type_enum(const char* name);
+Type* type_trait(const char* name);
 Type* type_func(Type** params, int param_count, Type* return_type, int is_varargs);
 Type* type_tuple(Type** elems, int count);
 Type* type_generic_param(const char* name);

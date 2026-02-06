@@ -1497,6 +1497,17 @@ static void emit_decl(CodeGen* gen, Node* node) {
         emit(gen, "} %s;\n\n", node->as.enum_decl.name);
         break;
 
+    case NODE_TRAIT_DECL:
+        // Traits produce no C code - they are purely a type-checking concept
+        break;
+
+    case NODE_IMPL_DECL:
+        // Emit each method in the impl block as a regular function
+        for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
+            emit_decl(gen, node->as.impl_decl.methods.nodes[i]);
+        }
+        break;
+
     case NODE_FUNC_DECL: {
         int is_method = (node->as.func_decl.receiver_type != NULL);
 
@@ -1969,6 +1980,11 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
                 collect_tuple_types_from_node(gen, field->as.field.type);
         }
         break;
+    case NODE_IMPL_DECL:
+        for (int i = 0; i < decl->as.impl_decl.methods.count; i++) {
+            collect_tuple_types_from_decl(gen, decl->as.impl_decl.methods.nodes[i]);
+        }
+        break;
     default:
         break;
     }
@@ -2185,8 +2201,25 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         }
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
+
+            // Collect func_decl nodes: either top-level or inside impl blocks
+            Node** funcs      = NULL;
+            int    func_count = 0;
+            int    func_cap   = 0;
+
             if (decl->type == NODE_FUNC_DECL) {
-                func_decl_node* fdn       = &decl->as.func_decl;
+                VEC_GROW(funcs, func_count, func_cap);
+                funcs[func_count++] = decl;
+            } else if (decl->type == NODE_IMPL_DECL) {
+                for (int k = 0; k < decl->as.impl_decl.methods.count; k++) {
+                    VEC_GROW(funcs, func_count, func_cap);
+                    funcs[func_count++] = decl->as.impl_decl.methods.nodes[k];
+                }
+            }
+
+            for (int fi = 0; fi < func_count; fi++) {
+                Node*           fdecl     = funcs[fi];
+                func_decl_node* fdn       = &fdecl->as.func_decl;
                 int             is_method = (fdn->receiver_type != NULL);
 
                 // Skip generic method templates (they get instantiated separately)
@@ -2228,6 +2261,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                 }
                 emit(gen, ");\n");
             }
+            free(funcs);
         }
     }
 

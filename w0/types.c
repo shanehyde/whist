@@ -102,6 +102,15 @@ Type* type_enum(const char* name) {
     return type;
 }
 
+Type* type_trait(const char* name) {
+    Type* type                  = type_new(TYPE_TRAIT);
+    type->as.trait.name         = xstrdup(name);
+    type->as.trait.method_names = NULL;
+    type->as.trait.method_types = NULL;
+    type->as.trait.method_count = 0;
+    return type;
+}
+
 Type* type_func(Type** params, int param_count, Type* return_type, int is_varargs) {
     Type* type                = type_new(TYPE_FUNC);
     type->as.func.param_types = params;
@@ -164,6 +173,14 @@ void type_free(Type* type) {
         }
         free(type->as.enm.value_names);
         break;
+    case TYPE_TRAIT:
+        free(type->as.trait.name);
+        for (int i = 0; i < type->as.trait.method_count; i++) {
+            free(type->as.trait.method_names[i]);
+        }
+        free(type->as.trait.method_names);
+        free(type->as.trait.method_types);
+        break;
     case TYPE_FUNC:
         free(type->as.func.param_types);
         break;
@@ -197,6 +214,8 @@ int type_equals(Type* a, Type* b) {
         return strcmp(a->as.struc.name, b->as.struc.name) == 0;
     case TYPE_ENUM:
         return strcmp(a->as.enm.name, b->as.enm.name) == 0;
+    case TYPE_TRAIT:
+        return strcmp(a->as.trait.name, b->as.trait.name) == 0;
     case TYPE_FUNC:
         if (a->as.func.param_count != b->as.func.param_count)
             return 0;
@@ -336,6 +355,8 @@ const char* type_name(Type* type) {
         return type->as.struc.name;
     case TYPE_ENUM:
         return type->as.enm.name;
+    case TYPE_TRAIT:
+        return type->as.trait.name;
     case TYPE_FUNC:
         snprintf(type_name_buf, sizeof(type_name_buf), "func(...): %s",
                  type_name(type->as.func.return_type));
@@ -452,6 +473,8 @@ static const char* type_mangle_name(Type* type) {
         return type->as.struc.name;
     case TYPE_ENUM:
         return type->as.enm.name;
+    case TYPE_TRAIT:
+        return type->as.trait.name;
     case TYPE_GENERIC_PARAM:
         return type->as.generic_param.name;
     default:

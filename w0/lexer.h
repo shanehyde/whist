@@ -25,6 +25,8 @@ typedef enum {
     TOK_CONTINUE,
     TOK_STRUCT,
     TOK_ENUM,
+    TOK_TRAIT,
+    TOK_IMPL,
     TOK_FUNC,
     TOK_VAR,
     TOK_CONST,
