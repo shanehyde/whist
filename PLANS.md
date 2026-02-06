@@ -124,7 +124,7 @@ Reference counting with owner/borrower semantics for automatic memory management
 Compile-time reflection via a phased approach:
 1. **Built-in derives** — `@[derive(Debug, Eq, Clone, ...)]` generates implementations from struct/enum definitions
 2. **Type descriptor tables** — `@[reflect]` emits static metadata for runtime introspection
-3. **User source generators** — extensible generators that receive the semantic model and produce code
+3. **Comptime** (wc only) — AST interpreter for user-extensible compile-time code generation
 
 ```whist
 @[derive(Debug, Eq, Serialize)]
@@ -145,6 +145,23 @@ Rewrite the compiler in Whist itself:
 - Enables bootstrapping
 - Dogfooding finds language gaps
 - Milestone for language maturity
+
+### Comptime (wc only)
+[Detailed design →](plans/comptime.md)
+
+Compile-time execution via an AST interpreter in the self-hosted compiler:
+- Comptime functions introspect types via `@type_info`, `@fields` builtins
+- `@emit` injects generated source into the compilation
+- No separate plugin system — comptime functions are ordinary Whist
+- Not in w0 (avoids dual-maintenance of interpreter + codegen in C)
+
+```whist
+comptime func gen_eq(comptime T: type): string {
+    var info = @type_info(T);
+    // ... generate equality function by walking fields ...
+}
+@emit(gen_eq(Point))
+```
 
 ### LLVM Backend
 [Detailed design →](plans/llvm-backend.md)

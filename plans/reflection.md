@@ -18,9 +18,9 @@ Attribute-triggered code generation for a fixed set of compiler-known traits. Th
 
 Compiler-emitted static metadata structs for types annotated with `@[reflect]`, enabling runtime type introspection where needed (serialization, debugging, ORMs).
 
-### Phase 3: User-Defined Source Generators
+### Phase 3: Comptime (wc only)
 
-An extensible system where user-written generators receive a read-only semantic model and produce additional source code that is compiled into the program.
+User-extensible compile-time code generation via [comptime](comptime.md) — an AST interpreter in the self-hosted compiler. Comptime subsumes the need for a separate source generator plugin system.
 
 ---
 
@@ -288,140 +288,30 @@ This enables generic serialization, ORM mapping, and config loading without manu
 
 ---
 
-## Phase 3: User-Defined Source Generators
+## Phase 3: Comptime (wc only)
 
-### Concept
+Phase 3 is not implemented in w0. Instead, it is provided by the self-hosted compiler (wc) via [comptime](comptime.md) — an AST interpreter that can introspect types and generate code at compile time.
 
-A source generator is a Whist module that:
-1. Is registered as a generator in the build configuration
-2. Receives a read-only **semantic model** (type info, symbol tables, AST metadata)
-3. Produces Whist source text that is compiled into the program
-
-### Generator Definition
+Comptime replaces the need for a separate source generator plugin system. Users write comptime functions in ordinary Whist that use compiler builtins (`@type_info`, `@fields`) to introspect types and return generated source:
 
 ```whist
-// generators/json_generator.w
-import std;
-import compiler.model;  // Semantic model API
-
-@[generator]
-func generate(model: *compiler.model.SemanticModel): string {
-    var output = "";
-
-    foreach type in model.types_with_attribute("json") {
-        output += "func " + type.name + "_to_json(self: *" + type.name + "): string {\n";
-        output += "    var result = \"{\";\n";
-
-        foreach i in 0..type.field_count {
-            var field = type.fields[i];
-            if i > 0 { output += "    result += \", \";\n"; }
-            output += "    result += \"\\\"" + field.name + "\\\": \";\n";
-            output += "    result += " + json_encode_expr(field) + ";\n";
-        }
-
-        output += "    result += \"}\";\n";
-        output += "    return result;\n";
-        output += "}\n\n";
+comptime func generate_to_json(comptime T: type): string {
+    var info = @type_info(T);
+    var out = "func " + info.name + "_to_json(self: *" + info.name + "): string {\n";
+    out += "    var result = \"{\";\n";
+    foreach i in 0..info.field_count {
+        if i > 0 { out += "    result += \", \";\n"; }
+        out += "    result += \"\\\"" + info.fields[i].name + "\\\": \";\n";
+        out += "    result += to_string(self->" + info.fields[i].name + ");\n";
     }
-
-    return output;
+    out += "    result += \"}\";\n";
+    out += "    return result;\n";
+    out += "}\n";
+    return out;
 }
 ```
 
-### Semantic Model API
-
-The compiler exposes a read-only view of its internal state:
-
-```whist
-// compiler.model — provided by the compiler, not user-writable
-struct SemanticModel {
-    types: Span<TypeDescriptor>,
-    functions: Span<FuncDescriptor>,
-    enums: Span<EnumDescriptor>,
-}
-
-struct TypeDescriptor {
-    name: string,
-    fields: Span<FieldDescriptor>,
-    field_count: i32,
-    attributes: Span<AttributeDescriptor>,
-    methods: Span<FuncDescriptor>,
-    type_params: Span<string>,
-    source_file: string,
-    line: i32,
-}
-
-struct FieldDescriptor {
-    name: string,
-    type_name: string,
-    type_kind: u8,
-    attributes: Span<AttributeDescriptor>,
-}
-
-struct AttributeDescriptor {
-    name: string,
-    args: Span<string>,
-}
-
-func (SemanticModel) types_with_attribute(attr: string): Span<TypeDescriptor>;
-func (SemanticModel) functions_with_attribute(attr: string): Span<FuncDescriptor>;
-func (SemanticModel) lookup_type(name: string): ?TypeDescriptor;
-```
-
-### Generator Execution Model
-
-Generators run in a sandboxed compilation sub-phase:
-
-```
-                    ┌─────────────────────────────┐
-lexer → parser →    │  checker                    │
-                    │    ↓                        │
-                    │  semantic model (read-only) │
-                    │    ↓                        │
-                    │  run generators             │
-                    │    ↓                        │
-                    │  parse generated source     │
-                    │    ↓                        │
-                    │  re-check (merged AST)      │
-                    └─────────────────────────────┘
-                              ↓
-                           codegen
-```
-
-Key constraints:
-- Generators receive a **read-only** snapshot of the semantic model
-- Generators can only **add** new declarations, not modify existing ones
-- Generated source is parsed and type-checked normally
-- Generators cannot invoke other generators (no cascading)
-- Generator execution is deterministic — same input always produces same output
-
-### Build Configuration
-
-```json
-{
-    "generators": [
-        { "source": "generators/json_generator.w", "attribute": "json" },
-        { "source": "generators/orm_generator.w",  "attribute": "table" }
-    ]
-}
-```
-
-### Usage
-
-```whist
-@[json]
-struct User {
-    name: string,
-    age: i64,
-}
-
-func main(): i32 {
-    var user = User { name: "Alice", age: 30 };
-    var json = User_to_json(&user);  // Generated by json_generator
-    std.print(json);
-    return 0;
-}
-```
+See the [Comptime design document](comptime.md) for full details on the AST interpreter, builtins, and execution model.
 
 ---
 
@@ -506,11 +396,9 @@ For debugging, `w0 --ast` or a new `w0 --derived` flag can show the generated co
 1. **Attribute syntax**: `@[derive(...)]` vs `#[derive(...)]` vs `@derive(...)` — `@[...]` is proposed here, but alternatives exist
 2. **Field-level attributes**: Should individual fields support attributes? e.g., `@[json(rename = "user_name")] name: string` — useful for serialization but adds parser complexity
 3. **Derive ordering**: Does the order of derives matter? (Probably not, but some languages enforce it)
-4. **Custom derive names**: In Phase 1, should we allow `@[derive(MyCustom)]` that looks for a function `derive_MyCustom`? Or strictly limit to built-in derives until Phase 3?
+4. **Custom derive names**: In Phase 1, should we allow `@[derive(MyCustom)]` that looks for a function `derive_MyCustom`? Or strictly limit to built-in derives until comptime is available in wc?
 5. **Conditional derives**: Should derives be conditional on feature flags or target platform?
 6. **Phase 2 timing**: Should `@[reflect]` imply certain derives automatically (e.g., always derive Debug for reflected types)?
-7. **Generator sandboxing** (Phase 3): How to prevent generators from performing I/O or having side effects? Run in a WASM sandbox? Or trust the developer?
-8. **Generated code caching** (Phase 3): Should generated output be cached on disk to avoid re-running generators on unchanged input?
 
 ## Examples
 
@@ -578,29 +466,30 @@ func print_type_info(): void {
 //   email: string
 ```
 
-### Custom Generator (Phase 3)
+### Comptime Source Generation (Phase 3, wc only)
 
 ```whist
-// Usage:
-@[table("users")]
+@[json]
 struct User {
     id: i64,
     name: string,
     email: string,
 }
 
+// comptime generates User_to_json(), User_from_json(), etc.
+
 func main(): i32 {
-    var db = db.connect("sqlite:///app.db");
-    var users = User_find_all(&db);   // Generated by ORM generator
-    foreach i in 0..users.count {
-        std.print(users[i].name + "\n");
-    }
+    var user = User { id: 1, name: "Alice", email: "alice@example.com" };
+    std.print(User_to_json(&user));
     return 0;
 }
 ```
 
+See [Comptime](comptime.md) for more examples.
+
 ## Related Features
 
+- [Comptime](comptime.md) — User-extensible compile-time code generation (Phase 3, wc only)
 - [Traits](traits.md) — Derives generate trait implementations; standard traits define the derivable interfaces
 - [String Interpolation](string-interpolation.md) — Debug derive benefits from string interpolation
 - [Pattern Matching](pattern-matching.md) — Enum derives may need pattern matching for data variants
