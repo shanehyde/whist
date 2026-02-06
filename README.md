@@ -25,7 +25,7 @@ See [w0/README.md](w0/README.md) for full compiler usage.
 ## Implemented Features
 
 ### Type System
-- **Primitive types** — `void`, `bool`, `i8`–`i64`, `u8`–`u64`, `f32`, `f64`, `char`, `string`
+- **Primitive types** — `void`, `bool`, `i8`–`i64`, `u8`–`u64`, `f32`, `f64`, `char`, `string`, `voidptr`
 - **Pointers** — `*T`, address-of (`&`), dereference (`*`), member access (`->`)
 - **Fixed-size arrays** — `[n]T` with array literals
 - **Spans** — `Span<T>` immutable views into arrays with bounds-checked access and slicing (`arr[1:3]`)

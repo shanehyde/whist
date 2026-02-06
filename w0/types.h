@@ -18,6 +18,7 @@ typedef enum {
     TYPE_F64,
     TYPE_CHAR,
     TYPE_STRING,
+    TYPE_VOIDPTR,
     TYPE_ARRAY,
     TYPE_SPAN,
     TYPE_STRUCT,
@@ -111,6 +112,7 @@ extern Type* type_f32;
 extern Type* type_f64;
 extern Type* type_char;
 extern Type* type_string;
+extern Type* type_voidptr;
 extern Type* type_error;
 extern Type* type_null;
 

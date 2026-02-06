@@ -2,8 +2,8 @@
  * fs.h — File services for the Whist standard library
  *
  * Static inline functions using whist-compatible types.
- * FILE* handles are passed as uint64_t (cast via uintptr_t).
- * A handle value of 0 represents an invalid/null file handle.
+ * FILE* handles are passed as void* (opaque pointers).
+ * A handle value of NULL represents an invalid/null file handle.
  *
  * Public functions use the fs__ prefix (double underscore) to avoid
  * colliding with the module-prefixed wrapper names (fs_*) generated
@@ -22,16 +22,6 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/stat.h>
-
-/* ---------- Handle helpers ---------- */
-
-static inline uint64_t fs__to_handle(FILE* fp) {
-    return (uint64_t)(uintptr_t)fp;
-}
-
-static inline FILE* fs__from_handle(uint64_t handle) {
-    return (FILE*)(uintptr_t)handle;
-}
 
 /* ---------- Convenience API (no handles) ---------- */
 
@@ -100,20 +90,20 @@ static inline int64_t fs__file_size(const char* path) {
 
 /* ---------- Handle-based API ---------- */
 
-static inline uint64_t fs__open(const char* path, const char* mode) {
+static inline void* fs__open(const char* path, const char* mode) {
     FILE* fp = fopen(path, mode);
-    if (!fp) return 0;
-    return fs__to_handle(fp);
+    if (!fp) return NULL;
+    return (void*)fp;
 }
 
-static inline int32_t fs__close(uint64_t handle) {
-    FILE* fp = fs__from_handle(handle);
+static inline int32_t fs__close(void* handle) {
+    FILE* fp = (FILE*)handle;
     if (!fp) return -1;
     return (fclose(fp) == 0) ? 0 : -1;
 }
 
-static inline const char* fs__read_line(uint64_t handle) {
-    FILE* fp = fs__from_handle(handle);
+static inline const char* fs__read_line(void* handle) {
+    FILE* fp = (FILE*)handle;
     if (!fp) return NULL;
 
     size_t cap = 256;
@@ -142,8 +132,8 @@ static inline const char* fs__read_line(uint64_t handle) {
     return buf;
 }
 
-static inline int32_t fs__write_string(uint64_t handle, const char* content) {
-    FILE* fp = fs__from_handle(handle);
+static inline int32_t fs__write_string(void* handle, const char* content) {
+    FILE* fp = (FILE*)handle;
     if (!fp) return -1;
 
     size_t len = strlen(content);
@@ -151,14 +141,14 @@ static inline int32_t fs__write_string(uint64_t handle, const char* content) {
     return (written == len) ? 0 : -1;
 }
 
-static inline int32_t fs__flush(uint64_t handle) {
-    FILE* fp = fs__from_handle(handle);
+static inline int32_t fs__flush(void* handle) {
+    FILE* fp = (FILE*)handle;
     if (!fp) return -1;
     return (fflush(fp) == 0) ? 0 : -1;
 }
 
-static inline int32_t fs__seek(uint64_t handle, int64_t offset, int32_t whence) {
-    FILE* fp = fs__from_handle(handle);
+static inline int32_t fs__seek(void* handle, int64_t offset, int32_t whence) {
+    FILE* fp = (FILE*)handle;
     if (!fp) return -1;
 
     int w;
@@ -171,14 +161,14 @@ static inline int32_t fs__seek(uint64_t handle, int64_t offset, int32_t whence) 
     return (fseek(fp, (long)offset, w) == 0) ? 0 : -1;
 }
 
-static inline int64_t fs__tell(uint64_t handle) {
-    FILE* fp = fs__from_handle(handle);
+static inline int64_t fs__tell(void* handle) {
+    FILE* fp = (FILE*)handle;
     if (!fp) return -1;
     return (int64_t)ftell(fp);
 }
 
-static inline bool fs__eof(uint64_t handle) {
-    FILE* fp = fs__from_handle(handle);
+static inline bool fs__eof(void* handle) {
+    FILE* fp = (FILE*)handle;
     if (!fp) return true;
     return feof(fp) != 0;
 }
