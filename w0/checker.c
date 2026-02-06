@@ -1303,6 +1303,22 @@ static Type* check_expression(Checker* checker, Node* node) {
     case NODE_ASSIGN:
         return check_assign_expr(checker, node);
 
+    case NODE_NEW_EXPR: {
+        Type* struct_type = resolve_type(checker, node->as.new_expr.type_node);
+        if (struct_type == type_error)
+            return type_error;
+        if (struct_type->kind != TYPE_STRUCT) {
+            check_error(checker, node->line, node->column, "'new' requires a struct type, got '%s'",
+                        type_name(struct_type));
+            return type_error;
+        }
+        Type* init_type = check_struct_init(checker, node->as.new_expr.init, struct_type);
+        if (init_type == type_error)
+            return type_error;
+        node->as.new_expr.resolved_type = struct_type;
+        return struct_type;
+    }
+
     case NODE_STRUCT_INIT:
         check_error(checker, node->line, node->column,
                     "Struct initializer requires a contextual struct type");
@@ -1623,8 +1639,24 @@ static void check_statement(Checker* checker, Node* node) {
             var_type = type_error;
         }
 
-        checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const,
-                       node->as.var_decl.is_public, checker->current_module);
+        Symbol* sym = checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const,
+                                     node->as.var_decl.is_public, checker->current_module);
+
+        // Propagate RC tracking
+        if (sym && node->as.var_decl.init) {
+            if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
+                node->as.var_decl.is_rc         = 1;
+                node->as.var_decl.resolved_type = node->as.var_decl.init->as.new_expr.resolved_type;
+                sym->is_rc                      = 1;
+            } else if (node->as.var_decl.init->type == NODE_IDENT) {
+                Symbol* src = checker_lookup(checker, node->as.var_decl.init->as.ident.name);
+                if (src && src->is_rc) {
+                    node->as.var_decl.is_rc         = 1;
+                    node->as.var_decl.resolved_type = src->type;
+                    sym->is_rc                      = 1;
+                }
+            }
+        }
         break;
     }
 

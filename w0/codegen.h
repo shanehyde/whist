@@ -24,6 +24,14 @@ typedef struct {
     int         defer_capacity;      // Capacity of defer stack
     Node*       current_return_type; // Return type of current function (for __ret variable)
     const char* current_module;      // Current module name (NULL for "main")
+    // RC variable tracking
+    struct {
+        char* name;
+        int   scope_depth;
+    }*  rc_vars;
+    int rc_var_count;
+    int rc_var_capacity;
+    int rc_scope_depth;
     // Type substitution for generic methods
     TypeSubstContext* subst_ctx;
     // Tuple typedef tracking

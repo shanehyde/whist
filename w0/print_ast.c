@@ -335,6 +335,16 @@ void print_ast(Node* node, int depth) {
                node->as.enum_value.value_name);
         break;
 
+    case NODE_NEW_EXPR:
+        printf("NewExpr\n");
+        print_indent(depth + 1);
+        printf("Type:\n");
+        print_ast(node->as.new_expr.type_node, depth + 2);
+        print_indent(depth + 1);
+        printf("Init:\n");
+        print_ast(node->as.new_expr.init, depth + 2);
+        break;
+
     case NODE_TUPLE_TYPE:
         printf("TupleType\n");
         for (int i = 0; i < node->as.tuple_type.elem_types.count; i++) {

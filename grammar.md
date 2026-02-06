@@ -244,9 +244,12 @@ Create spans using slice syntax: `var s: Span<i64> = arr[:];`
                 | <identifier>
                 | <enum-value-access>
                 | '(' <expression> ')'
+                | <new-expr>
                 | <struct-init>
                 | <tuple-literal>
                 | <array-literal>
+
+<new-expr> ::= 'new' <type> '{' [ <field-init-list> ] '}'
 
 <enum-value-access> ::= <identifier> '::' <identifier>
 
@@ -265,6 +268,8 @@ Create spans using slice syntax: `var s: Span<i64> = arr[:];`
 
 **Array literals:** `[1, 2, 3, 4, 5]` creates an array. The element type is inferred from the first element. All elements must have compatible types. Trailing commas are allowed.
 
+**New expressions:** `new Point { x: 1, y: 2 }` heap-allocates a struct with reference counting. The returned pointer is automatically freed when its reference count drops to zero. Copies of RC pointers (`var q = p`) increment the reference count. RC variables are automatically decremented when they go out of scope.
+
 **Slice expressions:** `arr[start:end]` creates a `Span<T>` view into an array or span. Both bounds are optional:
 - `arr[:]` — full span (all elements)
 - `arr[1:]` — from index 1 to end
@@ -280,8 +285,8 @@ Create spans using slice syntax: `var s: Span<i64> = arr[:];`
 ```
 break    const    continue    defer     else      enum
 extern   false    for         foreach   func      if
-import   in       null        public    private   return
-self     struct   true        var       while
+import   in       new         null      public    private
+return   self     struct      true      var       while
 ```
 
 ### Identifiers

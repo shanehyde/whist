@@ -43,6 +43,49 @@ static void defer_clear(CodeGen* gen) {
     gen->defer_count = 0;
 }
 
+// RC variable tracking helpers
+static void rc_push_var(CodeGen* gen, const char* name) {
+    VEC_GROW(gen->rc_vars, gen->rc_var_count, gen->rc_var_capacity);
+    gen->rc_vars[gen->rc_var_count].name        = xstrdup(name);
+    gen->rc_vars[gen->rc_var_count].scope_depth = gen->rc_scope_depth;
+    gen->rc_var_count++;
+}
+
+// Emit __rc_dec for vars at the given depth, remove them from list
+static void rc_cleanup_scope(CodeGen* gen, int depth) {
+    int dst = 0;
+    for (int i = 0; i < gen->rc_var_count; i++) {
+        if (gen->rc_vars[i].scope_depth == depth) {
+            emit_indent(gen);
+            emit(gen, "__rc_dec(%s);\n", gen->rc_vars[i].name);
+            free(gen->rc_vars[i].name);
+        } else {
+            gen->rc_vars[dst++] = gen->rc_vars[i];
+        }
+    }
+    gen->rc_var_count = dst;
+}
+
+// Emit __rc_dec for ALL remaining vars (skip one by name). Does NOT modify list.
+static void rc_cleanup_all(CodeGen* gen, const char* skip_name) {
+    for (int i = 0; i < gen->rc_var_count; i++) {
+        if (skip_name && strcmp(gen->rc_vars[i].name, skip_name) == 0) {
+            continue;
+        }
+        emit_indent(gen);
+        emit(gen, "__rc_dec(%s);\n", gen->rc_vars[i].name);
+    }
+}
+
+// Free and reset the RC var list (at function boundary)
+static void rc_clear_all(CodeGen* gen) {
+    for (int i = 0; i < gen->rc_var_count; i++) {
+        free(gen->rc_vars[i].name);
+    }
+    gen->rc_var_count   = 0;
+    gen->rc_scope_depth = 0;
+}
+
 // Check if a type node represents a struct (user-defined) type
 static int is_struct_type(Node* type_node) {
     if (!type_node)
@@ -801,6 +844,18 @@ static void emit_expr(CodeGen* gen, Node* node) {
         emit(gen, "}");
         break;
 
+    case NODE_NEW_EXPR: {
+        // new Type { fields } as inline expression using GCC statement expression
+        Type*       stype = (Type*)node->as.new_expr.resolved_type;
+        const char* tname = stype->as.struc.name;
+        int         tmp   = gen->temp_count++;
+        emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s)); *__rc_tmp%d = (%s)", tname, tmp,
+             tname, tname, tmp, tname);
+        emit_struct_init(gen, node->as.new_expr.init);
+        emit(gen, "; __rc_tmp%d; })", tmp);
+        break;
+    }
+
     default:
         emit(gen, "/* unknown expr %d */", node->type);
         break;
@@ -904,6 +959,46 @@ static void emit_stmt(CodeGen* gen, Node* node) {
             snprintf(temp_prefix, sizeof(temp_prefix), "__tuple%d", temp_id);
             emit_destruct_pattern(gen, pattern, temp_prefix, node->as.var_decl.is_const);
             break;
+        }
+
+        // Handle RC-managed variable declarations
+        if (node->as.var_decl.is_rc && node->as.var_decl.init) {
+            if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
+                // var p = new Point { x: 1, y: 2 }
+                // => Point* p = (Point*)__rc_alloc(sizeof(Point));
+                //    *p = (Point){ .x = 1, .y = 2 };
+                Type*       stype = (Type*)node->as.var_decl.init->as.new_expr.resolved_type;
+                const char* tname = stype->as.struc.name;
+                emit_indent(gen);
+                emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s));\n", tname, node->as.var_decl.name,
+                     tname, tname);
+                emit_indent(gen);
+                emit(gen, "*%s = (%s)", node->as.var_decl.name, tname);
+                emit_struct_init(gen, node->as.var_decl.init->as.new_expr.init);
+                emit(gen, ";\n");
+                rc_push_var(gen, node->as.var_decl.name);
+                break;
+            } else {
+                // var q = p (copy of RC var)
+                // => Type* q = p; __rc_inc(q);
+                emit_indent(gen);
+                if (node->as.var_decl.type) {
+                    emit_type_with_name(gen, node->as.var_decl.type, node->as.var_decl.name);
+                } else if (node->as.var_decl.resolved_type) {
+                    // Use resolved struct type from checker
+                    Type* stype = (Type*)node->as.var_decl.resolved_type;
+                    emit(gen, "%s* %s", stype->as.struc.name, node->as.var_decl.name);
+                } else {
+                    emit(gen, "void* %s", node->as.var_decl.name);
+                }
+                emit(gen, " = ");
+                emit_expr(gen, node->as.var_decl.init);
+                emit(gen, ";\n");
+                emit_indent(gen);
+                emit(gen, "__rc_inc(%s);\n", node->as.var_decl.name);
+                rc_push_var(gen, node->as.var_decl.name);
+                break;
+            }
         }
 
         emit_indent(gen);
@@ -1049,9 +1144,12 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         emit_indent(gen);
         emit(gen, "{\n");
         gen->indent++;
+        gen->rc_scope_depth++;
         for (int i = 0; i < node->as.block.stmts.count; i++) {
             emit_stmt(gen, node->as.block.stmts.nodes[i]);
         }
+        rc_cleanup_scope(gen, gen->rc_scope_depth);
+        gen->rc_scope_depth--;
         gen->indent--;
         emit_indent(gen);
         emit(gen, "}\n");
@@ -1186,27 +1284,69 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         emit_indent(gen);
         emit(gen, "}\n");
         break;
-    case NODE_RETURN:
-        emit_indent(gen);
+    case NODE_RETURN: {
+        // Determine if we're returning an RC var (skip it in cleanup)
+        const char* skip_name = NULL;
+        if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_IDENT) {
+            // Check if the returned identifier is an RC var
+            const char* ret_name = node->as.return_stmt.value->as.ident.name;
+            for (int i = 0; i < gen->rc_var_count; i++) {
+                if (strcmp(gen->rc_vars[i].name, ret_name) == 0) {
+                    skip_name = ret_name;
+                    break;
+                }
+            }
+        }
+
         if (gen->defer_count > 0) {
-            // With defers: store value in __ret and goto cleanup
+            // With defers: store value in __ret, cleanup RC, goto cleanup
+            emit_indent(gen);
             if (node->as.return_stmt.value) {
                 emit(gen, "__ret = ");
                 emit_expr(gen, node->as.return_stmt.value);
                 emit(gen, ";\n");
             }
+            if (gen->rc_var_count > 0) {
+                rc_cleanup_all(gen, skip_name);
+            }
             emit_indent(gen);
             emit(gen, "goto __cleanup;\n");
         } else {
-            // No defers: normal return
-            emit(gen, "return");
-            if (node->as.return_stmt.value) {
-                emit(gen, " ");
-                emit_expr(gen, node->as.return_stmt.value);
+            // No defers: cleanup RC, then return
+            if (gen->rc_var_count > 0) {
+                if (node->as.return_stmt.value && !skip_name) {
+                    // Complex expression: evaluate to temp first
+                    emit_indent(gen);
+                    emit(gen, "typeof(");
+                    emit_expr(gen, node->as.return_stmt.value);
+                    emit(gen, ") __rc_ret = ");
+                    emit_expr(gen, node->as.return_stmt.value);
+                    emit(gen, ";\n");
+                    rc_cleanup_all(gen, NULL);
+                    emit_indent(gen);
+                    emit(gen, "return __rc_ret;\n");
+                } else {
+                    rc_cleanup_all(gen, skip_name);
+                    emit_indent(gen);
+                    emit(gen, "return");
+                    if (node->as.return_stmt.value) {
+                        emit(gen, " ");
+                        emit_expr(gen, node->as.return_stmt.value);
+                    }
+                    emit(gen, ";\n");
+                }
+            } else {
+                emit_indent(gen);
+                emit(gen, "return");
+                if (node->as.return_stmt.value) {
+                    emit(gen, " ");
+                    emit_expr(gen, node->as.return_stmt.value);
+                }
+                emit(gen, ";\n");
             }
-            emit(gen, ";\n");
         }
         break;
+    }
 
     case NODE_DEFER:
         // Don't emit anything here - just push to defer stack
@@ -1214,11 +1354,13 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         break;
 
     case NODE_BREAK:
+        rc_cleanup_scope(gen, gen->rc_scope_depth);
         emit_indent(gen);
         emit(gen, "break;\n");
         break;
 
     case NODE_CONTINUE:
+        rc_cleanup_scope(gen, gen->rc_scope_depth);
         emit_indent(gen);
         emit(gen, "continue;\n");
         break;
@@ -1376,8 +1518,9 @@ static void emit_decl(CodeGen* gen, Node* node) {
         gen->indent--;
         emit(gen, "}\n\n");
 
-        // Clear defer stack
+        // Clear defer stack and RC tracking
         defer_clear(gen);
+        rc_clear_all(gen);
         gen->current_return_type = NULL;
         break;
     }
@@ -1758,6 +1901,10 @@ void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, i
     gen->defer_capacity         = 0;
     gen->current_return_type    = NULL;
     gen->current_module         = NULL;
+    gen->rc_vars                = NULL;
+    gen->rc_var_count           = 0;
+    gen->rc_var_capacity        = 0;
+    gen->rc_scope_depth         = 0;
     gen->subst_ctx              = NULL;
     gen->tuple_types            = NULL;
     gen->tuple_type_count       = 0;
@@ -1790,6 +1937,24 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit(gen, "#include <stdlib.h>\n");
     emit(gen, "#include <stdio.h>\n");
     emit(gen, "\n");
+
+    // Emit RC runtime helpers
+    emit(gen, "typedef struct { size_t refcount; } __RcHeader;\n\n");
+    emit(gen, "static inline void* __rc_alloc(size_t size) {\n");
+    emit(gen, "    __RcHeader* h = (__RcHeader*)malloc(sizeof(__RcHeader) + size);\n");
+    emit(gen, "    if (!h) { fprintf(stderr, \"Panic: out of memory\\n\"); exit(1); }\n");
+    emit(gen, "    h->refcount = 1;\n");
+    emit(gen, "    return (void*)(h + 1);\n");
+    emit(gen, "}\n\n");
+    emit(gen, "static inline void __rc_inc(void* ptr) {\n");
+    emit(gen, "    if (!ptr) return;\n");
+    emit(gen, "    ((__RcHeader*)ptr - 1)->refcount++;\n");
+    emit(gen, "}\n\n");
+    emit(gen, "static inline void __rc_dec(void* ptr) {\n");
+    emit(gen, "    if (!ptr) return;\n");
+    emit(gen, "    __RcHeader* h = (__RcHeader*)ptr - 1;\n");
+    emit(gen, "    if (--h->refcount == 0) free(h);\n");
+    emit(gen, "}\n\n");
 
     // Emit span bounds check helper (only if we have span instances)
     if (gen->span_instance_count > 0) {
@@ -2169,6 +2334,9 @@ void codegen_emit(CodeGen* gen, Node* ast) {
 
             gen->indent--;
             emit(gen, "}\n\n");
+
+            // Clear RC tracking for generic method
+            rc_clear_all(gen);
 
             gen->subst_ctx = NULL;
             free(combined_params);

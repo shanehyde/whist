@@ -101,6 +101,10 @@ void node_free(Node* node) {
         free(node->as.enum_value.enum_name);
         free(node->as.enum_value.value_name);
         break;
+    case NODE_NEW_EXPR:
+        node_free(node->as.new_expr.type_node);
+        node_free(node->as.new_expr.init);
+        break;
     case NODE_BINARY:
         node_free(node->as.binary.left);
         node_free(node->as.binary.right);

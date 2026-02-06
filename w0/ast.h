@@ -53,6 +53,7 @@ typedef enum {
     NODE_STRUCT_INIT,
     NODE_FIELD_INIT,
     NODE_ENUM_VALUE,
+    NODE_NEW_EXPR,
 
     // Statements
     NODE_EXPR_STMT,
@@ -133,6 +134,8 @@ typedef struct {
 
     // Destructuring support: var (a, b) = tuple; or var (a, (b, c)) = nested;
     DestructPattern* destruct_pattern; // NULL if not destructuring
+    int              is_rc; // Set by checker: 1 if init is a new expression or copy of RC var
+    void*            resolved_type; // Type* set by checker for RC vars (the struct type)
 } var_decl_node;
 
 struct Node {
@@ -237,6 +240,13 @@ struct Node {
             char* value_name;
             int   value_name_length;
         } enum_value;
+
+        // New expression: new Type { fields }
+        struct {
+            Node* type_node;     // NODE_IDENT or NODE_GENERIC_TYPE
+            Node* init;          // NODE_STRUCT_INIT
+            void* resolved_type; // Type* set by checker
+        } new_expr;
 
         // Tuple type: (T1, T2, ...)
         struct {
