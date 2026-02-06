@@ -438,11 +438,12 @@ impl Drop for FileHandle {
 
 For the bootstrap compiler, consider starting simple:
 
-**Phase 1: Simple RC**
-- All heap allocations are reference counted
-- No owner/borrower distinction
+**Phase 1: Simple RC** ✅ COMPLETE (branch: `feature/mem_management_1`)
+- `new Type { fields }` allocates with inline `__RcHeader` (refcount=1)
+- Refcount increments on variable copy, decrements at scope exit
+- Freed when refcount reaches 0; no owner/borrower distinction
 - Programmer handles cycles manually
-- Focus: get something working
+- Known limitations: no deep cleanup (needs Drop trait), anonymous `new` in function args leaks, RC not tracked through function call returns
 
 **Phase 2: Add ownership annotations**
 - `owned` and `&` syntax
