@@ -861,7 +861,18 @@ static void emit_expr(CodeGen* gen, Node* node) {
         emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s)); *__rc_tmp%d = (%s)", tname, tmp,
              tname, tname, tmp, tname);
         emit_struct_init(gen, node->as.new_expr.init);
-        emit(gen, "; __rc_tmp%d; })", tmp);
+        emit(gen, ";");
+        // Increment refcount for any RC-tracked idents stored in struct fields
+        Node* rc_init = node->as.new_expr.init;
+        for (int i = 0; i < rc_init->as.struct_init.fields.count; i++) {
+            Node* field = rc_init->as.struct_init.fields.nodes[i];
+            if (field && field->type == NODE_FIELD_INIT &&
+                field->as.field_init.value->type == NODE_IDENT &&
+                rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
+                emit(gen, " __rc_inc(%s);", field->as.field_init.value->as.ident.name);
+            }
+        }
+        emit(gen, " __rc_tmp%d; })", tmp);
         break;
     }
 
@@ -965,6 +976,33 @@ static void emit_stmt(CodeGen* gen, Node* node) {
             emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
             break;
         }
+        // Handle RC member assignment: line1.start = z
+        if (expr->type == NODE_ASSIGN && expr->as.assign.op == TOK_EQ &&
+            expr->as.assign.target->type == NODE_MEMBER) {
+            Node* member = expr->as.assign.target;
+            int value_is_rc = (expr->as.assign.value->type == NODE_IDENT &&
+                               rc_is_tracked(gen, expr->as.assign.value->as.ident.name)) ||
+                              expr->as.assign.value->type == NODE_NEW_EXPR;
+            int obj_is_rc = member->as.member.object->type == NODE_IDENT &&
+                            rc_is_tracked(gen, member->as.member.object->as.ident.name);
+            if (value_is_rc && obj_is_rc) {
+                int tmp = gen->temp_count++;
+                emit_indent(gen);
+                emit(gen, "void* __rc_tmp%d = (void*)", tmp);
+                emit_expr(gen, expr->as.assign.value);
+                emit(gen, ";\n");
+                emit_indent(gen);
+                emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
+                emit_indent(gen);
+                emit(gen, "__rc_dec(");
+                emit_expr(gen, member);
+                emit(gen, ");\n");
+                emit_indent(gen);
+                emit_expr(gen, member);
+                emit(gen, " = __rc_tmp%d;\n", tmp);
+                break;
+            }
+        }
         emit_indent(gen);
         emit_expr(gen, expr);
         emit(gen, ";\n");
@@ -1007,6 +1045,17 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 emit(gen, "*%s = (%s)", node->as.var_decl.name, tname);
                 emit_struct_init(gen, node->as.var_decl.init->as.new_expr.init);
                 emit(gen, ";\n");
+                // Increment refcount for any RC-tracked idents stored in struct fields
+                Node* rc_init = node->as.var_decl.init->as.new_expr.init;
+                for (int i = 0; i < rc_init->as.struct_init.fields.count; i++) {
+                    Node* field = rc_init->as.struct_init.fields.nodes[i];
+                    if (field && field->type == NODE_FIELD_INIT &&
+                        field->as.field_init.value->type == NODE_IDENT &&
+                        rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
+                        emit_indent(gen);
+                        emit(gen, "__rc_inc(%s);\n", field->as.field_init.value->as.ident.name);
+                    }
+                }
                 rc_push_var(gen, node->as.var_decl.name);
                 break;
             } else {
