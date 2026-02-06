@@ -11,7 +11,8 @@
 #include "parser.h"
 #include "print_ast.h"
 
-static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path);
+static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path,
+                           int rc_debug);
 
 static char* read_file(const char* path) {
     FILE* file = fopen(path, "rb");
@@ -31,7 +32,8 @@ static char* read_file(const char* path) {
     return buffer;
 }
 
-static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path) {
+static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path,
+                           int rc_debug) {
     // Read source file
     char* source = read_file(source_path);
     if (!source)
@@ -112,7 +114,7 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
 
     CodeGen gen;
     codegen_init(&gen, c_file, checker.generic_instances, checker.generic_instance_count,
-                 checker.span_instances, checker.span_instance_count);
+                 checker.span_instances, checker.span_instance_count, rc_debug);
     codegen_emit(&gen, ast);
     fclose(c_file);
 
@@ -168,20 +170,22 @@ int main(int argc, char** argv) {
     int         parse_only     = 0;
     int         check_only     = 0;
     int         print_ast_flag = 0;
+    int         rc_debug       = 0;
     const char* output_file    = NULL;
     const char* lib_path       = NULL;
 
-    // Pre-scan for --lib-path (needed before 'run' subcommand)
+    // Pre-scan for --lib-path and --rc-debug (needed before 'run' subcommand)
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--lib-path") == 0 && i + 1 < argc) {
             lib_path = argv[i + 1];
-            break;
+        } else if (strcmp(argv[i], "--rc-debug") == 0) {
+            rc_debug = 1;
         }
     }
 
     // Check for 'run' subcommand
     if (argc >= 3 && strcmp(argv[1], "run") == 0) {
-        return compile_and_run(argv[2], argc - 2, argv + 2, lib_path);
+        return compile_and_run(argv[2], argc - 2, argv + 2, lib_path, rc_debug);
     }
 
     // Parse args
@@ -198,6 +202,8 @@ int main(int argc, char** argv) {
         } else if (strcmp(argv[arg_idx], "--lib-path") == 0 && arg_idx + 1 < argc) {
             arg_idx++;
             lib_path = argv[arg_idx];
+        } else if (strcmp(argv[arg_idx], "--rc-debug") == 0) {
+            rc_debug = 1;
         } else if (strcmp(argv[arg_idx], "-o") == 0 && arg_idx + 1 < argc) {
             arg_idx++;
             output_file = argv[arg_idx];
@@ -222,6 +228,8 @@ int main(int argc, char** argv) {
         fprintf(stderr, "  --ast     Print AST\n");
         fprintf(stderr, "  --lib-path <dir>\n");
         fprintf(stderr, "            Library search path for module imports\n");
+        fprintf(stderr, "  --rc-debug\n");
+        fprintf(stderr, "            Emit RC tracking debug output to stderr\n");
         fprintf(stderr, "  -o <file> Output file\n");
         fprintf(stderr, "Commands:\n");
         fprintf(stderr, "  run       Compile and run the program\n");
@@ -305,7 +313,7 @@ int main(int argc, char** argv) {
 
                 CodeGen gen;
                 codegen_init(&gen, out, checker.generic_instances, checker.generic_instance_count,
-                             checker.span_instances, checker.span_instance_count);
+                             checker.span_instances, checker.span_instance_count, rc_debug);
                 codegen_emit(&gen, ast);
                 checker_free(&checker); // Free types after codegen
 

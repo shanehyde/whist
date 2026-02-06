@@ -1655,6 +1655,12 @@ static void check_statement(Checker* checker, Node* node) {
                     node->as.var_decl.resolved_type = src->type;
                     sym->is_rc                      = 1;
                 }
+            } else if (node->as.var_decl.init->type == NODE_CALL && var_type &&
+                       var_type->kind == TYPE_STRUCT) {
+                // Function call returning a struct transfers RC ownership
+                node->as.var_decl.is_rc         = 1;
+                node->as.var_decl.resolved_type = var_type;
+                sym->is_rc                      = 1;
             }
         }
         break;

@@ -20,6 +20,7 @@ bin/w0 -o out.c <file.w>               # Compile to C file
 bin/w0 --check <file.w>                # Type check only
 bin/w0 --ast <file.w>                  # Print AST
 bin/w0 --lib-path ../lib <file.w>      # Specify library path
+bin/w0 --rc-debug <file.w>              # Generate RC debug info
 ```
 
 Compile and run a program:
@@ -30,15 +31,15 @@ bin/w0 --lib-path ../lib program.w | cc -x c -I../lib/include -o program - && ./
 
 ## Architecture
 
-| File | Purpose |
-|------|---------|
-| `lexer.c/h` | Tokenization |
-| `parser.c/h` | AST construction |
-| `checker.c/h` | Type checking and validation |
-| `codegen.c/h` | C code generation |
-| `types.c/h` | Type system implementation |
-| `ast.c/h` | AST node definitions |
-| `print_ast.c/h` | AST pretty-printing |
+| File            | Purpose                      |
+| --------------- | ---------------------------- |
+| `lexer.c/h`     | Tokenization                 |
+| `parser.c/h`    | AST construction             |
+| `checker.c/h`   | Type checking and validation |
+| `codegen.c/h`   | C code generation            |
+| `types.c/h`     | Type system implementation   |
+| `ast.c/h`       | AST node definitions         |
+| `print_ast.c/h` | AST pretty-printing          |
 
 ## Test Suite
 
