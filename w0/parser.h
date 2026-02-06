@@ -15,6 +15,9 @@ typedef struct {
     // Source file path for resolving imports
     const char* source_path;
 
+    // Library path for resolving module imports (--lib-path flag)
+    const char* lib_path;
+
     // Imported source buffers (kept alive for AST string references)
     char** imported_sources;
     int    imported_sources_count;
@@ -54,7 +57,8 @@ extern int parse_depth;
 
 // Parser lifecycle
 void  parser_init(Parser* parser, const char* source);
-void  parser_init_with_path(Parser* parser, const char* source, const char* source_path);
+void  parser_init_with_path(Parser* parser, const char* source, const char* source_path,
+                            const char* lib_path);
 void  parser_free(Parser* parser);
 Node* parser_parse(Parser* parser);
 

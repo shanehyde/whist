@@ -20,6 +20,7 @@ bin/w0 <file.w>              # Compile to C (stdout)
 bin/w0 -o out.c <file.w>     # Compile to C file
 bin/w0 --check <file.w>      # Type check only
 bin/w0 --ast <file.w>        # Print AST
+bin/w0 --lib-path ../lib <file.w>  # Specify library search path
 ```
 
 Compile and run:
