@@ -59,6 +59,26 @@ func main(): i32 {
 }
 ```
 
+### Standard Library (`lib/`)
+
+The Whist standard library lives in the top-level `lib/` directory and is loaded via `--lib-path`:
+
+```bash
+bin/w0 --lib-path ../lib program.w | cc -x c -Ilib/include -o program -
+```
+
+**`std.w`** — Core utilities (imported as `import std;`):
+- `std.print(s: string)` — print a string
+- `std.abs_i64(x: i64)`, `std.max_i64(a, b)`, `std.min_i64(a, b)` — integer math
+
+**`fs.w`** — File I/O (imported as `import fs;`):
+- Convenience: `fs.read_file`, `fs.write_file`, `fs.append_file`, `fs.file_exists`, `fs.remove_file`, `fs.rename_file`, `fs.file_size`
+- Handle-based: `fs.open`, `fs.close`, `fs.read_line`, `fs.write_string`, `fs.flush`, `fs.seek`, `fs.tell`, `fs.eof`
+- Handles are `u64` (opaque FILE* pointers cast via uintptr_t); `0` means invalid
+- Requires `-Ilib/include` when compiling the generated C (for `fs.h` runtime)
+
+**`lib/include/`** — C header implementations backing extern modules (e.g., `fs.h`).
+
 ### Basic Example
 
 ```whist

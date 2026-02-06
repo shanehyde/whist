@@ -41,10 +41,31 @@ TEST SUITE ENHANCEMENTS (January 2026):
 
 ---
 
+STANDARD LIBRARY (`lib/`):
+
+The Whist standard library lives in the top-level `lib/` directory (not inside `w0/`).
+Use `--lib-path` to point the compiler at it:
+
+```bash
+cd w0 && bin/w0 --lib-path ../lib program.w | cc -x c -I../lib/include -o program -
+```
+
+Modules:
+- `lib/std.w` — Core utilities: print, abs_i64, max_i64, min_i64
+- `lib/fs.w` — File I/O: read_file, write_file, open/close, read_line, etc.
+- `lib/include/` — C header implementations for extern modules (e.g., `fs.h`)
+
+Programs import stdlib modules with `import std;` or `import fs;` and call
+functions qualified (e.g., `std.print("hello\n");`, `fs.read_file("config.txt");`).
+
+---
+
 Short guidance
 
 - Work from the `w0/` directory: all build, test, and runtime actions should be
   performed there. Use `cd w0` first.
+- The standard library is at the top-level `lib/` directory — use `--lib-path ../lib`
+  when compiling programs that import stdlib modules.
 - Use `make` to build `bin/w0` and `make test` to run the enhanced test suite.
 - Test suite provides color-coded feedback with comprehensive error validation.
 - Use `make test-help` to see all available test commands and options.
