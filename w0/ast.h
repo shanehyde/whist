@@ -112,6 +112,7 @@ typedef struct {
     char*    name;
     int      name_length;
     NodeList params;
+    int      is_varargs;
     Node*    return_type;
     Node*    body;
     char*    source_module; // NULL = same module, else external module name

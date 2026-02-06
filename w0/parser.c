@@ -1344,42 +1344,56 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
         return NULL;
     }
     fdn->name_length = name.length;
+    fdn->is_varargs  = 0;
     nodelist_init(&fdn->params);
 
     consume_token(parser, TOK_LPAREN, "Expected '(' after function name");
 
     // Parameters
     if (!check_token(parser, TOK_RPAREN)) {
-        do {
-            // Check for 'const' modifier
-            int param_is_const = 0;
-            if (match_token(parser, TOK_CONST)) {
-                param_is_const = 1;
-            }
+        // Check for leading ... (no named params)
+        if (check_token(parser, TOK_ELLIPSIS)) {
+            fdn->is_varargs = 1;
+            advance_token(parser);
+        } else {
+            do {
+                // Check for ... after a comma (varargs after named params)
+                if (check_token(parser, TOK_ELLIPSIS)) {
+                    fdn->is_varargs = 1;
+                    advance_token(parser);
+                    break;
+                }
 
-            Token param_name = parser->current;
-            consume_token(parser, TOK_IDENT, "Expected parameter name");
+                // Check for 'const' modifier
+                int param_is_const = 0;
+                if (match_token(parser, TOK_CONST)) {
+                    param_is_const = 1;
+                }
 
-            Node* param = node_new(NODE_PARAM, param_name.line, param_name.column);
-            if (!param) {
-                parse_error(parser, "Out of memory");
-                return NULL;
-            }
-            param->as.param.name = copy_token_string(&param_name);
-            if (!param->as.param.name) {
-                parse_error(parser, "Out of memory");
-                return NULL;
-            }
-            param->as.param.name_length = param_name.length;
-            param->as.param.type        = NULL;
-            param->as.param.is_const    = param_is_const;
+                Token param_name = parser->current;
+                consume_token(parser, TOK_IDENT, "Expected parameter name");
 
-            if (match_token(parser, TOK_COLON)) {
-                param->as.param.type = parse_type(parser);
-            }
+                Node* param = node_new(NODE_PARAM, param_name.line, param_name.column);
+                if (!param) {
+                    parse_error(parser, "Out of memory");
+                    return NULL;
+                }
+                param->as.param.name = copy_token_string(&param_name);
+                if (!param->as.param.name) {
+                    parse_error(parser, "Out of memory");
+                    return NULL;
+                }
+                param->as.param.name_length = param_name.length;
+                param->as.param.type        = NULL;
+                param->as.param.is_const    = param_is_const;
 
-            nodelist_push(&fdn->params, param);
-        } while (match_token(parser, TOK_COMMA));
+                if (match_token(parser, TOK_COLON)) {
+                    param->as.param.type = parse_type(parser);
+                }
+
+                nodelist_push(&fdn->params, param);
+            } while (match_token(parser, TOK_COMMA));
+        }
     }
 
     consume_token(parser, TOK_RPAREN, "Expected ')' after parameters");

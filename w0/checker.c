@@ -768,7 +768,7 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
             free(method_params);
             free(method_args);
 
-            Type* method_type = type_func(param_types, param_count, return_type);
+            Type* method_type = type_func(param_types, param_count, return_type, 0);
 
             // Register the method on the struct type
             int n = struct_type->as.struc.method_count;
@@ -1247,14 +1247,24 @@ static Type* check_expression(Checker* checker, Node* node) {
         }
 
         // Check argument count
-        if (node->as.call.args.count != func_type->as.func.param_count) {
-            check_error(checker, node->line, node->column, "Expected %d arguments, got %d",
-                        func_type->as.func.param_count, node->as.call.args.count);
-            return type_error;
+        if (func_type->as.func.is_varargs) {
+            // Varargs: require at least param_count arguments
+            if (node->as.call.args.count < func_type->as.func.param_count) {
+                check_error(checker, node->line, node->column,
+                            "Expected at least %d arguments, got %d",
+                            func_type->as.func.param_count, node->as.call.args.count);
+                return type_error;
+            }
+        } else {
+            if (node->as.call.args.count != func_type->as.func.param_count) {
+                check_error(checker, node->line, node->column, "Expected %d arguments, got %d",
+                            func_type->as.func.param_count, node->as.call.args.count);
+                return type_error;
+            }
         }
 
-        // Check argument types
-        for (int i = 0; i < node->as.call.args.count; i++) {
+        // Check argument types (only for named params)
+        for (int i = 0; i < func_type->as.func.param_count; i++) {
             Type* arg_type   = check_expression(checker, node->as.call.args.nodes[i]);
             Type* param_type = func_type->as.func.param_types[i];
 
@@ -1264,6 +1274,11 @@ static Type* check_expression(Checker* checker, Node* node) {
                 check_error_type(checker, node->as.call.args.nodes[i]->line,
                                  node->as.call.args.nodes[i]->column, ctx, param_type, arg_type);
             }
+        }
+
+        // Type-check extra variadic arguments (but don't check against param types)
+        for (int i = func_type->as.func.param_count; i < node->as.call.args.count; i++) {
+            check_expression(checker, node->as.call.args.nodes[i]);
         }
 
         return func_type->as.func.return_type;
@@ -1777,7 +1792,7 @@ static Type* get_function_type(Checker* checker, Node* node) {
         param_types[i] = ptype;
     }
 
-    Type* func_type = type_func(param_types, param_count, return_type);
+    Type* func_type = type_func(param_types, param_count, return_type, fdn->is_varargs);
 
     return func_type;
 }

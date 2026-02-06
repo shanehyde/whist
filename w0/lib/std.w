@@ -1,7 +1,7 @@
 // Standard library for Whist
 
 private extern stdio {
-    func printf(fmt:string, s: string): void;
+    func printf(fmt: string, ...): i32;
 }
 
 func print(s: string): void {

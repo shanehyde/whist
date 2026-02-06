@@ -80,6 +80,7 @@ struct Type {
             Type** param_types;
             int    param_count;
             Type*  return_type;
+            int    is_varargs;
         } func;
 
         // Tuple
@@ -121,7 +122,7 @@ Type* type_new(TypeKind kind);
 Type* type_array(Type* elem, int size);
 Type* type_struct(const char* name);
 Type* type_enum(const char* name);
-Type* type_func(Type** params, int param_count, Type* return_type);
+Type* type_func(Type** params, int param_count, Type* return_type, int is_varargs);
 Type* type_tuple(Type** elems, int count);
 Type* type_generic_param(const char* name);
 Type* type_span(Type* elem);

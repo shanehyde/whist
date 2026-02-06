@@ -50,7 +50,8 @@ Import statements load declarations from external Whist source files. There are 
 
 <receiver> ::= '(' [ 'const' ] <identifier> [ '<' <type-arg-list> '>' ] ')'
 
-<param-list> ::= <param> { ',' <param> }
+<param-list> ::= <param> { ',' <param> } [ ',' '...' ]
+               | '...'
 
 <param> ::= <identifier> [ ':' <type> ]
 
