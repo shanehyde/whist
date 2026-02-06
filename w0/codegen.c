@@ -1059,8 +1059,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 rc_push_var(gen, node->as.var_decl.name);
                 break;
             } else {
-                // var q = p (copy of RC var)
-                // => Type* q = p; __rc_inc(q);
+                // RC copy or ownership transfer from function call
                 emit_indent(gen);
                 if (node->as.var_decl.type) {
                     emit_type_with_name(gen, node->as.var_decl.type, node->as.var_decl.name);
@@ -1074,8 +1073,12 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 emit(gen, " = ");
                 emit_expr(gen, node->as.var_decl.init);
                 emit(gen, ";\n");
-                emit_indent(gen);
-                emit(gen, "__rc_inc(%s);\n", node->as.var_decl.name);
+                if (node->as.var_decl.init->type != NODE_CALL) {
+                    // Copy of existing RC var: increment refcount
+                    emit_indent(gen);
+                    emit(gen, "__rc_inc(%s);\n", node->as.var_decl.name);
+                }
+                // Function calls transfer ownership (rc already 1), no inc needed
                 rc_push_var(gen, node->as.var_decl.name);
                 break;
             }
