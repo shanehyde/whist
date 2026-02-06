@@ -307,7 +307,10 @@ Token lexer_next(Lexer* lexer) {
     case ',':
         return make_token(lexer, TOK_COMMA);
     case '.':
-        return make_token(lexer, match(lexer, '.') ? TOK_DOT_DOT : TOK_DOT);
+        if (match(lexer, '.')) {
+            return make_token(lexer, match(lexer, '.') ? TOK_ELLIPSIS : TOK_DOT_DOT);
+        }
+        return make_token(lexer, TOK_DOT);
     case '~':
         return make_token(lexer, TOK_TILDE);
     case '^':
@@ -441,6 +444,7 @@ static const char* token_names[] = {
     [TOK_COMMA]       = "COMMA",
     [TOK_DOT]         = "DOT",
     [TOK_DOT_DOT]     = "DOT_DOT",
+    [TOK_ELLIPSIS]    = "ELLIPSIS",
     [TOK_ERROR]       = "ERROR",
 };
 

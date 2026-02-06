@@ -89,6 +89,7 @@ typedef enum {
     TOK_COMMA,       // ,
     TOK_DOT,         // .
     TOK_DOT_DOT,     // ..
+    TOK_ELLIPSIS,    // ...
 
     // Error
     TOK_ERROR

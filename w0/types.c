@@ -100,11 +100,12 @@ Type* type_enum(const char* name) {
     return type;
 }
 
-Type* type_func(Type** params, int param_count, Type* return_type) {
+Type* type_func(Type** params, int param_count, Type* return_type, int is_varargs) {
     Type* type                = type_new(TYPE_FUNC);
     type->as.func.param_types = params;
     type->as.func.param_count = param_count;
     type->as.func.return_type = return_type;
+    type->as.func.is_varargs  = is_varargs;
     return type;
 }
 
@@ -195,6 +196,8 @@ int type_equals(Type* a, Type* b) {
         return strcmp(a->as.enm.name, b->as.enm.name) == 0;
     case TYPE_FUNC:
         if (a->as.func.param_count != b->as.func.param_count)
+            return 0;
+        if (a->as.func.is_varargs != b->as.func.is_varargs)
             return 0;
         if (!type_equals(a->as.func.return_type, b->as.func.return_type))
             return 0;
