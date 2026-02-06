@@ -1,240 +1,115 @@
-# Whist Bootstrap Compiler (w0)
+# Whist
 
-A bootstrap compiler for the Whist programming language, written in C. Generates C code that can be compiled with any C compiler.
+A statically-typed systems programming language that compiles to C.
 
-## Build & Run
+Whist aims to be a practical language with modern features — generics, a module system, tuples, defer — while staying close to the metal through C code generation. The compiler is currently bootstrapped in C, with a self-hosted compiler planned.
 
-```bash
-make              # Build bin/w0
-make test         # Run test suite
-make format       # Format source files
-```
-
-### Usage
-
-```bash
-bin/w0 <file.w>              # Compile to C (stdout)
-bin/w0 -o out.c <file.w>     # Compile to C file
-bin/w0 --check <file.w>      # Type check only
-bin/w0 --ast <file.w>        # Print AST
-```
-
-Compile and run a program:
-
-```bash
-bin/w0 program.w | cc -x c -o program - && ./program
-```
-
-## Language Features
-
-### Types
-
-**Primitive types:**
-- `void`, `bool`
-- Signed integers: `i8`, `i16`, `i32`, `i64`
-- Unsigned integers: `u8`, `u16`, `u32`, `u64`
-- Floating point: `f32`, `f64`
-- `char`, `string`
-
-**Compound types:**
-- Pointers: `*T`
-- Arrays: `[n]T` (fixed size)
-- Tuples: `(T1, T2, ...)` (heterogeneous, 2+ elements)
-- Structs and enums
-- Generic structs: `Box<T>`, `Pair<K, V>`
-- Spans: `Span<T>` (immutable view into arrays)
-
-### Variables
-
-```whist
-var x = 42;              // Type inferred
-var y: i64 = 100;        // Explicit type
-const PI = 3.14159;      // Immutable constant
-var (a, b) = (1, 2);     // Tuple destructuring
-```
-
-### Functions
-
-```whist
-func add(a: i64, b: i64): i64 {
-    return a + b;
-}
-
-func greet(): void {
-    std.print("Hello!\n");
-}
-```
-
-### Structs & Methods
-
-```whist
-struct Point { x: i64, y: i64 }
-
-func (Point) move(dx: i64, dy: i64): void {
-    self->x += dx;
-    self->y += dy;
-}
-
-func (const Point) distance(): f64 {
-    return sqrt(self->x * self->x + self->y * self->y);
-}
-```
-
-### Generic Structs
-
-```whist
-struct Box<T> { value: T }
-
-struct Pair<K, V> { key: K, value: V }
-
-func (Box<T>) get(): T {
-    return self->value;
-}
-
-func main(): i32 {
-    var b: Box<i64> = { value: 42 };
-    var p: Pair<string, i64> = { key: "count", value: 10 };
-    return 0;
-}
-```
-
-Generic structs are monomorphized at compile time.
-
-### Enums
-
-```whist
-enum Color { Red, Green, Blue }
-
-func main(): i32 {
-    var c = Color::Red;
-    return 0;
-}
-```
-
-### Arrays & Spans
-
-```whist
-var arr: [5]i64 = [1, 2, 3, 4, 5];    // Fixed-size array
-var span: Span<i64> = arr[:];          // Full span
-var slice = arr[1:3];                  // Partial span (indices 1, 2)
-
-// Span operations
-var len = span.count;                  // Length
-var elem = span[0];                    // Bounds-checked access
-```
-
-### Tuples
-
-```whist
-var t = (42, "hello", true);   // Create tuple
-var first = t[0];              // Access by index
-var (x, y, z) = t;             // Destructure
-```
-
-### Control Flow
-
-```whist
-// If-else
-if (x > 0) {
-    // ...
-} else if (x < 0) {
-    // ...
-} else {
-    // ...
-}
-
-// While loop
-while (condition) {
-    if (done) { break; }
-    if (skip) { continue; }
-}
-
-// C-style for loop
-for (var i = 0; i < 10; i += 1) {
-    // ...
-}
-
-// Foreach range loop
-foreach (const i in 0..10) {
-    // i goes from 0 to 9
-}
-
-foreach (const i in 0..100 by 2) {
-    // i goes 0, 2, 4, ..., 98
-}
-```
-
-### Defer
-
-```whist
-func example(): void {
-    var handle = open_file();
-    defer close_file(handle);   // Runs when function exits
-    // ... use handle ...
-}
-```
-
-### Imports
-
-**Module imports** (from `lib/` directory):
 ```whist
 import std;
 
 func main(): i32 {
-    std.print("Hello!\n");       // Module-qualified access
-    var x = std.abs_i64(-42);
+    std.print("Hello, world!\n");
     return 0;
 }
 ```
 
-**Relative imports** (merge into current namespace):
-```whist
-import "./helper.w";
+## Getting Started
 
-func main(): i32 {
-    helper_function();   // Direct access
-    return 0;
-}
+```bash
+cd w0 && make                    # Build the bootstrap compiler
+bin/w0 --lib-path ../lib hello.w | cc -x c -I../lib/include -o hello - && ./hello
 ```
 
-### Visibility
+See [w0/README.md](w0/README.md) for full compiler usage.
 
-Declarations are private by default. Use `public` for external linkage:
+## Implemented Features
 
-```whist
-public func api_function(): void { }    // Visible externally
-func internal_helper(): void { }         // File-local (static in C)
-```
+### Type System
+- **Primitive types** — `void`, `bool`, `i8`–`i64`, `u8`–`u64`, `f32`, `f64`, `char`, `string`
+- **Pointers** — `*T`, address-of (`&`), dereference (`*`), member access (`->`)
+- **Fixed-size arrays** — `[n]T` with array literals
+- **Spans** — `Span<T>` immutable views into arrays with bounds-checked access and slicing (`arr[1:3]`)
+- **Tuples** — `(T1, T2, ...)` with indexed access and destructuring
+- **Structs** — with methods (mutable and const receivers)
+- **Enums** — `enum Color { Red, Green, Blue }` with `::` access
+- **Generics** — generic structs (`Box<T>`, `Pair<K, V>`) with monomorphization
+
+### Functions & Methods
+- Top-level functions with explicit return types
+- Methods on structs via `func (Type) method()` syntax
+- Const receiver methods via `func (const Type) method()`
+- Generic methods on generic structs
+- `public` / `private` visibility (private by default)
+
+### Control Flow
+- `if` / `else if` / `else`
+- `while` loops with `break` / `continue`
+- C-style `for` loops
+- `foreach` range loops — `foreach (const i in 0..100 by 2)`
+- `defer` statements (LIFO cleanup on function exit)
+
+### Module System
+- Library imports — `import std;` with qualified access (`std.print(...)`)
+- Relative imports — `import "./helper.w";`
+- Standard library with `std` (print, abs, max, min) and `fs` (file I/O)
+
+### C Interop
+- `extern` blocks for FFI with C libraries
+- Varargs support for extern C functions
+- Direct C header inclusion for library implementations
 
 ### Operators
+- Arithmetic: `+` `-` `*` `/` `%`
+- Comparison: `==` `!=` `<` `>` `<=` `>=`
+- Logical: `&&` `||` `!`
+- Bitwise: `&` `|` `^` `~` `<<` `>>`
+- Compound assignment: `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=` `>>=`
 
-**Arithmetic:** `+`, `-`, `*`, `/`, `%`
+## Planned Features
 
-**Comparison:** `==`, `!=`, `<`, `>`, `<=`, `>=`
+### Language
+- [ ] **Closures / lambdas** — anonymous functions with variable capture ([design](plans/closures.md))
+- [ ] **Pattern matching** — `match` expressions with exhaustiveness checking ([design](plans/pattern-matching.md))
+- [ ] **Result / Option types** — structured error handling with `?` propagation ([design](plans/result-option.md))
+- [ ] **Traits / interfaces** — shared behavior across types, static and dynamic dispatch ([design](plans/traits.md))
+- [ ] **String interpolation** — `"Hello {name}!"` ([design](plans/string-interpolation.md))
+- [ ] **Union types** — `type JsonValue = null | bool | i64 | string` ([design](plans/union-types.md))
+- [ ] **Type aliases** — `type UserId = i64;` ([design](plans/type-aliases.md))
+- [ ] **Nullable types** — `?string` with optional chaining ([design](plans/nullable-types.md))
+- [ ] **Memory management** — reference counting with owner/borrower semantics ([design](plans/memory-management.md))
+- [ ] **Reflection & comptime** — derive macros, type metadata, compile-time execution ([design](plans/reflection.md))
 
-**Logical:** `&&`, `||`, `!`
+### Compiler
+- [ ] **Self-hosted compiler (wc)** — rewrite the compiler in Whist ([design](plans/self-hosting.md))
+- [ ] **LLVM backend** — native code generation and optimizations ([design](plans/llvm-backend.md))
+- [ ] **WebAssembly target** — browser and sandboxed execution ([design](plans/webassembly.md))
+- [ ] **Incremental compilation** — dependency tracking and caching ([design](plans/incremental-compilation.md))
+- [ ] **Better error messages** — suggested fixes, colored output ([design](plans/error-messages.md))
 
-**Bitwise:** `&`, `|`, `^`, `~`, `<<`, `>>`
+### Tooling
+- [ ] **LSP server** — IDE integration with go-to-definition, completions, diagnostics ([design](plans/lsp-server.md))
+- [ ] **Package manager** — dependency management and registry ([design](plans/package-manager.md))
+- [ ] **REPL** — interactive evaluation and prototyping ([design](plans/repl.md))
+- [ ] **Debugger support** — source maps, breakpoints, stack traces ([design](plans/debugger.md))
 
-**Assignment:** `=`, `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`
+### Standard Library
+- [ ] **Collections** — `Vec<T>`, `HashMap<K, V>`, `HashSet<T>`, `Queue<T>`, `Stack<T>` ([design](plans/stdlib-collections.md))
+- [ ] **Strings** — split, join, trim, search, Unicode support ([design](plans/stdlib-strings.md))
+- [ ] **Networking** — TCP/UDP sockets, HTTP client ([design](plans/stdlib-networking.md))
+- [ ] **Math** — trigonometry, random numbers, big integers ([design](plans/stdlib-math.md))
+- [ ] **Extended I/O** — directory operations, path manipulation, streaming ([design](plans/stdlib-io.md))
 
-**Pointer:** `&` (address-of), `*` (dereference), `->` (member via pointer)
+## Project Structure
 
-### FFI with C
-
-```whist
-extern libc {
-    func malloc(size: u64): *void;
-    func free(ptr: *void): void;
-}
-
-func main(): i32 {
-    var ptr = libc.malloc(1024);
-    defer libc.free(ptr);
-    return 0;
-}
+```
+whist/
+├── w0/          Bootstrap compiler (C)
+├── wc/          Self-hosted compiler (planned)
+├── lib/         Standard library
+├── plans/       Design documents for future features
+└── grammar.md   BNF grammar specification
 ```
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE) for details.
