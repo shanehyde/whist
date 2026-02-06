@@ -21,12 +21,22 @@ bin/w0 -o out.c <file.w>     # Compile to C file
 bin/w0 --check <file.w>      # Type check only
 bin/w0 --ast <file.w>        # Print AST
 bin/w0 --lib-path ../lib <file.w>  # Specify library search path
+bin/w0 --rc-debug <file.w>        # Emit RC debug tracing in generated code
 ```
 
 Compile and run:
 
 ```bash
 bin/w0 program.w | cc -x c -o program -
+```
+
+The `--rc-debug` flag adds `fprintf(stderr, ...)` calls to the generated `__rc_alloc`, `__rc_inc`, and `__rc_dec` functions, producing a trace like:
+
+```
+RC_ALLOC: 0x600003a04010 (size=16, rc=1)
+RC_INC: 0x600003a04010 (rc=2)
+RC_DEC: 0x600003a04010 (rc=1)
+RC_FREE: 0x600003a04010
 ```
 
 ## Whist Language
