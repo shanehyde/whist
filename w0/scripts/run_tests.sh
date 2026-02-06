@@ -24,8 +24,9 @@ run_valid=false
 run_errors=false
 verbose=false
 
-# Find w0 binary
+# Find w0 binary and lib path
 W0="${W0:-bin/w0}"
+LIB_PATH="${LIB_PATH:-../lib}"
 
 usage() {
     echo -e "${BLUE}W0 Test Suite${RESET}"
@@ -47,7 +48,7 @@ run_valid_test() {
 
     if $verbose; then
         echo -e "${YELLOW}--- Testing $file ---${RESET}"
-        if "$W0" --check "$file" 2>&1; then
+        if "$W0" --lib-path "$LIB_PATH" --check "$file" 2>&1; then
             echo -e "${GREEN}✓ PASS${RESET}"
             ((valid_passed++))
         else
@@ -57,12 +58,12 @@ run_valid_test() {
         echo ""
     else
         printf "${BOLD}%-35s${RESET}" "$name:"
-        if "$W0" --check "$file" >/dev/null 2>&1; then
+        if "$W0" --lib-path "$LIB_PATH" --check "$file" >/dev/null 2>&1; then
             echo -e " ${GREEN}✓ PASS${RESET}"
             ((valid_passed++))
         else
             echo -e " ${RED}✗ FAIL${RESET}"
-            "$W0" --check "$file" 2>&1 | sed "s/^/  ${RED}/" | sed "s/$/${RESET}/"
+            "$W0" --lib-path "$LIB_PATH" --check "$file" 2>&1 | sed "s/^/  ${RED}/" | sed "s/$/${RESET}/"
             ((valid_failed++))
         fi
     fi
@@ -81,7 +82,7 @@ run_error_test() {
     fi
 
     local output
-    if output=$("$W0" --check "$file" 2>&1); then
+    if output=$("$W0" --lib-path "$LIB_PATH" --check "$file" 2>&1); then
         # Test passed when it should have failed
         if $verbose; then
             echo -e "${RED}✗ FAIL (should have failed)${RESET}"

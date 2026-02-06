@@ -1705,6 +1705,14 @@ static void build_import_path(Parser* parser, char* path, size_t path_size, cons
     }
 
     // Standard library import: try lib/ directories
+    // Highest priority: --lib-path flag
+    if (parser->lib_path) {
+        snprintf(path, path_size, "%s/%.*s.w", parser->lib_path, (int)module_length, module_name);
+        if (file_exists(path)) {
+            return;
+        }
+    }
+
     if (parser->source_path) {
         // Make a copy because dirname may modify its argument
         char* path_copy = xstrdup(parser->source_path);
@@ -1787,7 +1795,7 @@ static int parse_import_stmt(Parser* parser, Node* program, Node* current_module
 
     // Parse the imported file (inherits source_path for nested imports)
     Parser import_parser;
-    parser_init_with_path(&import_parser, source, path);
+    parser_init_with_path(&import_parser, source, path, parser->lib_path);
 
     // Share the imported modules list with the sub-parser to handle transitive imports
     import_parser.imported_modules          = parser->imported_modules;
@@ -1925,10 +1933,11 @@ static Node* parse_declaration(Parser* parser) {
 // ============================================================================
 
 void parser_init(Parser* parser, const char* source) {
-    parser_init_with_path(parser, source, NULL);
+    parser_init_with_path(parser, source, NULL, NULL);
 }
 
-void parser_init_with_path(Parser* parser, const char* source, const char* source_path) {
+void parser_init_with_path(Parser* parser, const char* source, const char* source_path,
+                           const char* lib_path) {
     lexer_init(&parser->lexer, source);
     parser->had_error    = 0;
     parser->panic_mode   = 0;
@@ -1936,6 +1945,7 @@ void parser_init_with_path(Parser* parser, const char* source, const char* sourc
     parse_depth          = 0; // Reset recursion depth
 
     parser->source_path = source_path;
+    parser->lib_path    = lib_path;
 
     // Initialize imported sources tracking
     parser->imported_sources          = NULL;

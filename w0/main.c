@@ -11,7 +11,7 @@
 #include "parser.h"
 #include "print_ast.h"
 
-static int compile_and_run(const char* source_path, int argc, char** argv);
+static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path);
 
 static char* read_file(const char* path) {
     FILE* file = fopen(path, "rb");
@@ -31,7 +31,7 @@ static char* read_file(const char* path) {
     return buffer;
 }
 
-static int compile_and_run(const char* source_path, int argc, char** argv) {
+static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path) {
     // Read source file
     char* source = read_file(source_path);
     if (!source)
@@ -39,7 +39,7 @@ static int compile_and_run(const char* source_path, int argc, char** argv) {
 
     // Parse
     Parser parser;
-    parser_init_with_path(&parser, source, source_path);
+    parser_init_with_path(&parser, source, source_path, lib_path);
     Node* ast = parser_parse(&parser);
 
     if (parser.had_error) {
@@ -169,10 +169,19 @@ int main(int argc, char** argv) {
     int         check_only     = 0;
     int         print_ast_flag = 0;
     const char* output_file    = NULL;
+    const char* lib_path       = NULL;
+
+    // Pre-scan for --lib-path (needed before 'run' subcommand)
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--lib-path") == 0 && i + 1 < argc) {
+            lib_path = argv[i + 1];
+            break;
+        }
+    }
 
     // Check for 'run' subcommand
     if (argc >= 3 && strcmp(argv[1], "run") == 0) {
-        return compile_and_run(argv[2], argc - 2, argv + 2);
+        return compile_and_run(argv[2], argc - 2, argv + 2, lib_path);
     }
 
     // Parse args
@@ -186,6 +195,9 @@ int main(int argc, char** argv) {
             check_only = 1;
         } else if (strcmp(argv[arg_idx], "--ast") == 0) {
             print_ast_flag = 1;
+        } else if (strcmp(argv[arg_idx], "--lib-path") == 0 && arg_idx + 1 < argc) {
+            arg_idx++;
+            lib_path = argv[arg_idx];
         } else if (strcmp(argv[arg_idx], "-o") == 0 && arg_idx + 1 < argc) {
             arg_idx++;
             output_file = argv[arg_idx];
@@ -208,6 +220,8 @@ int main(int argc, char** argv) {
         fprintf(stderr, "  --parse   Parse only (no type checking)\n");
         fprintf(stderr, "  --check   Type check only (no code generation)\n");
         fprintf(stderr, "  --ast     Print AST\n");
+        fprintf(stderr, "  --lib-path <dir>\n");
+        fprintf(stderr, "            Library search path for module imports\n");
         fprintf(stderr, "  -o <file> Output file\n");
         fprintf(stderr, "Commands:\n");
         fprintf(stderr, "  run       Compile and run the program\n");
@@ -237,7 +251,7 @@ int main(int argc, char** argv) {
         } while (token.type != TOK_EOF);
     } else {
         Parser parser;
-        parser_init_with_path(&parser, source, source_file);
+        parser_init_with_path(&parser, source, source_file, lib_path);
         Node* ast = parser_parse(&parser);
 
         if (parser.had_error) {
