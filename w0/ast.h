@@ -72,6 +72,8 @@ typedef enum {
     NODE_FUNC_DECL,
     NODE_STRUCT_DECL,
     NODE_ENUM_DECL,
+    NODE_TRAIT_DECL,
+    NODE_IMPL_DECL,
 
     NODE_EXTERN_MODULE,
     NODE_MODULE,
@@ -353,8 +355,10 @@ struct Node {
             NodeList fields;
             char*    source_module; // NULL = same module, else external module name
             // Generic type parameters (NULL if not generic)
-            char** type_params; // ["T"] or ["K", "V"]
-            int    type_param_count;
+            char** type_params;       // ["T"] or ["K", "V"]
+            char** type_param_bounds; // Trait bounds parallel to type_params (NULL entries =
+                                      // unbounded)
+            int type_param_count;
         } struct_decl;
 
         // Field
@@ -372,6 +376,25 @@ struct Node {
             NodeList values;        // list of ident nodes
             char*    source_module; // NULL = same module, else external module name
         } enum_decl;
+
+        // Trait declaration
+        struct {
+            int      is_public;
+            char*    name;
+            int      name_length;
+            NodeList methods; // List of func_decl nodes (signatures only, no body)
+            char*    source_module;
+        } trait_decl;
+
+        // Impl block: impl Trait for Type { methods }
+        struct {
+            char*    trait_name;
+            int      trait_name_length;
+            char*    type_name;
+            int      type_name_length;
+            NodeList methods; // List of func_decl nodes (with bodies and receivers)
+            char*    source_module;
+        } impl_decl;
 
         struct {
             char*    module_name;

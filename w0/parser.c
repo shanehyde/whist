@@ -113,6 +113,8 @@ void synchronize(Parser* parser) {
         case TOK_FUNC:
         case TOK_STRUCT:
         case TOK_ENUM:
+        case TOK_TRAIT:
+        case TOK_IMPL:
         case TOK_VAR:
         case TOK_CONST:
         case TOK_IF:
@@ -1446,27 +1448,44 @@ static Node* parse_struct_decl(Parser* parser, int is_public) {
     nodelist_init(&node->as.struct_decl.fields);
 
     // Parse type parameters if present: struct Box<T> or struct Pair<K, V>
-    node->as.struct_decl.type_params      = NULL;
-    node->as.struct_decl.type_param_count = 0;
+    node->as.struct_decl.type_params       = NULL;
+    node->as.struct_decl.type_param_bounds = NULL;
+    node->as.struct_decl.type_param_count  = 0;
 
     if (match_token(parser, TOK_LT)) {
         // Parse type parameter names
-        int capacity                     = 4;
-        node->as.struct_decl.type_params = xmalloc(capacity * sizeof(char*));
+        int capacity                           = 4;
+        node->as.struct_decl.type_params       = xmalloc(capacity * sizeof(char*));
+        node->as.struct_decl.type_param_bounds = xmalloc(capacity * sizeof(char*));
 
         do {
             Token param_name = parser->current;
             consume_token(parser, TOK_IDENT, "Expected type parameter name");
 
-            // Grow array if needed
+            // Grow arrays if needed
             if (node->as.struct_decl.type_param_count >= capacity) {
                 capacity *= 2;
                 node->as.struct_decl.type_params =
                     xrealloc(node->as.struct_decl.type_params, capacity * sizeof(char*));
+                node->as.struct_decl.type_param_bounds =
+                    xrealloc(node->as.struct_decl.type_param_bounds, capacity * sizeof(char*));
             }
 
-            node->as.struct_decl.type_params[node->as.struct_decl.type_param_count++] =
+            node->as.struct_decl.type_params[node->as.struct_decl.type_param_count] =
                 copy_token_string(&param_name);
+
+            // Check for trait bound: T: TraitName
+            if (match_token(parser, TOK_COLON)) {
+                Token bound_name = parser->current;
+                consume_token(parser, TOK_IDENT, "Expected trait name after ':'");
+                node->as.struct_decl.type_param_bounds[node->as.struct_decl.type_param_count] =
+                    copy_token_string(&bound_name);
+            } else {
+                node->as.struct_decl.type_param_bounds[node->as.struct_decl.type_param_count] =
+                    NULL;
+            }
+
+            node->as.struct_decl.type_param_count++;
         } while (match_token(parser, TOK_COMMA));
 
         consume_token(parser, TOK_GT, "Expected '>' after type parameters");
@@ -1503,6 +1522,86 @@ static Node* parse_struct_decl(Parser* parser, int is_public) {
     }
 
     consume_token(parser, TOK_RBRACE, "Expected '}' after struct fields");
+    return node;
+}
+
+static Node* parse_trait_decl(Parser* parser, int is_public) {
+    Token name = parser->current;
+    consume_token(parser, TOK_IDENT, "Expected trait name");
+
+    Node* node = node_new(NODE_TRAIT_DECL, name.line, name.column);
+    if (!node) {
+        parse_error(parser, "Out of memory");
+        return NULL;
+    }
+    node->as.trait_decl.is_public = is_public;
+    node->as.trait_decl.name      = copy_token_string(&name);
+    if (!node->as.trait_decl.name) {
+        parse_error(parser, "Out of memory");
+        return NULL;
+    }
+    node->as.trait_decl.name_length = name.length;
+    nodelist_init(&node->as.trait_decl.methods);
+
+    consume_token(parser, TOK_LBRACE, "Expected '{' after trait name");
+
+    while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
+        if (!match_token(parser, TOK_FUNC)) {
+            parse_error(parser, "Expected 'func' in trait declaration");
+            return NULL;
+        }
+        Node* method = parse_func_decl(parser, 0);
+        if (method) {
+            nodelist_push(&node->as.trait_decl.methods, method);
+        }
+    }
+
+    consume_token(parser, TOK_RBRACE, "Expected '}' after trait methods");
+    return node;
+}
+
+static Node* parse_impl_decl(Parser* parser) {
+    Token trait_name = parser->current;
+    consume_token(parser, TOK_IDENT, "Expected trait name after 'impl'");
+
+    consume_token(parser, TOK_FOR, "Expected 'for' after trait name in impl block");
+
+    Token type_name = parser->current;
+    consume_token(parser, TOK_IDENT, "Expected type name after 'for'");
+
+    Node* node = node_new(NODE_IMPL_DECL, trait_name.line, trait_name.column);
+    if (!node) {
+        parse_error(parser, "Out of memory");
+        return NULL;
+    }
+    node->as.impl_decl.trait_name = copy_token_string(&trait_name);
+    if (!node->as.impl_decl.trait_name) {
+        parse_error(parser, "Out of memory");
+        return NULL;
+    }
+    node->as.impl_decl.trait_name_length = trait_name.length;
+    node->as.impl_decl.type_name         = copy_token_string(&type_name);
+    if (!node->as.impl_decl.type_name) {
+        parse_error(parser, "Out of memory");
+        return NULL;
+    }
+    node->as.impl_decl.type_name_length = type_name.length;
+    nodelist_init(&node->as.impl_decl.methods);
+
+    consume_token(parser, TOK_LBRACE, "Expected '{' after type name in impl block");
+
+    while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
+        if (!match_token(parser, TOK_FUNC)) {
+            parse_error(parser, "Expected 'func' in impl block");
+            return NULL;
+        }
+        Node* method = parse_func_decl(parser, 0);
+        if (method) {
+            nodelist_push(&node->as.impl_decl.methods, method);
+        }
+    }
+
+    consume_token(parser, TOK_RBRACE, "Expected '}' after impl methods");
     return node;
 }
 
@@ -1913,6 +2012,12 @@ static Node* parse_declaration(Parser* parser) {
     }
     if (match_token(parser, TOK_ENUM)) {
         return parse_enum_decl(parser, is_public);
+    }
+    if (match_token(parser, TOK_TRAIT)) {
+        return parse_trait_decl(parser, is_public);
+    }
+    if (match_token(parser, TOK_IMPL)) {
+        return parse_impl_decl(parser);
     }
     if (match_token(parser, TOK_VAR)) {
         return parse_var_decl(parser, 0, is_public);

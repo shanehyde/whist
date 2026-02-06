@@ -32,10 +32,17 @@ struct Scope {
     Scope*   parent;
 };
 
+// Trait implementation record
+typedef struct {
+    char* trait_name;
+    char* type_name;
+} TraitImpl;
+
 // Generic struct definition (template)
 typedef struct {
-    char*  name;        // "Box", "Pair"
-    char** type_params; // ["T"] or ["K", "V"]
+    char*  name;              // "Box", "Pair"
+    char** type_params;       // ["T"] or ["K", "V"]
+    char** type_param_bounds; // Trait bounds (NULL entries = unbounded)
     int    type_param_count;
     Node*  decl; // Original AST node for field type resolution
     // Methods on the generic struct
@@ -97,6 +104,11 @@ struct Checker {
     SpanInstance* span_instances;
     int           span_instance_count;
     int           span_instance_capacity;
+
+    // Trait implementations
+    TraitImpl* trait_impls;
+    int        trait_impl_count;
+    int        trait_impl_capacity;
 };
 
 void checker_init(Checker* checker);

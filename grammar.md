@@ -21,7 +21,9 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 <declaration> ::= [ 'public' | 'private' ] <func-defn>
                | [ 'public' | 'private' ] <struct-decl>
                | [ 'public' | 'private' ] <enum-decl>
+               | [ 'public' | 'private' ] <trait-decl>
                | [ 'public' | 'private' ] <var-decl>
+               | <impl-decl>
                | <extern-module>
 ```
 
@@ -67,7 +69,9 @@ Import statements load declarations from external Whist source files. There are 
 ```bnf
 <struct-decl> ::= 'struct' <identifier> [ '<' <type-param-list> '>' ] '{' { <field-decl> } '}'
 
-<type-param-list> ::= <identifier> { ',' <identifier> }
+<type-param-list> ::= <type-param> { ',' <type-param> }
+
+<type-param> ::= <identifier> [ ':' <identifier> ]
 
 <field-decl> ::= <identifier> ':' <type> [ ',' ]
 ```
@@ -75,8 +79,9 @@ Import statements load declarations from external Whist source files. There are 
 **Generic structs:** Structs can be parameterized by one or more type parameters:
 - `struct Box<T> { value: T }` — single type parameter
 - `struct Pair<K, V> { key: K, value: V }` — multiple type parameters
+- `struct Box<T: HasValue> { item: T }` — type parameter with trait bound
 
-Generic structs are monomorphized at compile time, generating specialized C code for each instantiation (e.g., `Box<i64>` becomes `Box_i64`).
+Generic structs are monomorphized at compile time, generating specialized C code for each instantiation (e.g., `Box<i64>` becomes `Box_i64`). When a type parameter has a trait bound, the concrete type argument must implement that trait.
 
 ### Enum Declaration
 
@@ -85,6 +90,22 @@ Generic structs are monomorphized at compile time, generating specialized C code
 
 <enum-value> ::= <identifier> [ ',' ]
 ```
+
+### Trait Declaration
+
+```bnf
+<trait-decl> ::= 'trait' <identifier> '{' { <func-decl> ';' } '}'
+```
+
+Traits define a set of required method signatures that types can implement. Trait methods are declared without a receiver or body — just the function signature followed by a semicolon.
+
+### Impl Declaration
+
+```bnf
+<impl-decl> ::= 'impl' <identifier> 'for' <identifier> '{' { <func-defn> } '}'
+```
+
+An `impl` block provides concrete method implementations for a trait on a specific type. Each method must have a receiver matching the target type and a signature matching the trait's requirements. All trait methods must be implemented.
 
 ### Variable Declaration
 
@@ -285,8 +306,9 @@ Create spans using slice syntax: `var s: Span<i64> = arr[:];`
 ```
 break    const    continue    defer     else      enum
 extern   false    for         foreach   func      if
-import   in       new         null      public    private
-return   self     struct      true      var       while
+impl     import   in          new       null      public
+private  return   self        struct    trait     true
+var      while
 ```
 
 ### Identifiers

@@ -38,13 +38,16 @@ static void define_destruct_pattern_vars(Checker* checker, DestructPattern* patt
 
 // Register a generic struct definition
 static void register_generic_def(Checker* checker, const char* name, char** type_params,
-                                 int type_param_count, Node* decl) {
+                                 char** type_param_bounds, int type_param_count, Node* decl) {
     VEC_GROW(checker->generic_defs, checker->generic_def_count, checker->generic_def_capacity);
-    GenericDef* def  = &checker->generic_defs[checker->generic_def_count++];
-    def->name        = xstrdup(name);
-    def->type_params = xmalloc(type_param_count * sizeof(char*));
+    GenericDef* def        = &checker->generic_defs[checker->generic_def_count++];
+    def->name              = xstrdup(name);
+    def->type_params       = xmalloc(type_param_count * sizeof(char*));
+    def->type_param_bounds = xmalloc(type_param_count * sizeof(char*));
     for (int i = 0; i < type_param_count; i++) {
         def->type_params[i] = xstrdup(type_params[i]);
+        def->type_param_bounds[i] =
+            (type_param_bounds && type_param_bounds[i]) ? xstrdup(type_param_bounds[i]) : NULL;
     }
     def->type_param_count = type_param_count;
     def->decl             = decl;
@@ -182,6 +185,10 @@ void checker_init(Checker* checker) {
     checker->span_instances         = NULL;
     checker->span_instance_count    = 0;
     checker->span_instance_capacity = 0;
+    // Trait support
+    checker->trait_impls         = NULL;
+    checker->trait_impl_count    = 0;
+    checker->trait_impl_capacity = 0;
     types_init();
 }
 
@@ -228,8 +235,10 @@ void checker_free(Checker* checker) {
         free(checker->generic_defs[i].name);
         for (int j = 0; j < checker->generic_defs[i].type_param_count; j++) {
             free(checker->generic_defs[i].type_params[j]);
+            free(checker->generic_defs[i].type_param_bounds[j]);
         }
         free(checker->generic_defs[i].type_params);
+        free(checker->generic_defs[i].type_param_bounds);
         // Note: methods array contains pointers to AST nodes, don't free them
         free(checker->generic_defs[i].methods);
     }
@@ -246,6 +255,12 @@ void checker_free(Checker* checker) {
         free(checker->span_instances[i].mangled_name);
     }
     free(checker->span_instances);
+    // Free trait implementations
+    for (int i = 0; i < checker->trait_impl_count; i++) {
+        free(checker->trait_impls[i].trait_name);
+        free(checker->trait_impls[i].type_name);
+    }
+    free(checker->trait_impls);
     types_cleanup();
 }
 
@@ -657,6 +672,33 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
             if (resolved_args[i] == type_error) {
                 free(resolved_args);
                 return type_error;
+            }
+        }
+
+        // Check trait bounds on type arguments
+        for (int i = 0; i < arg_count; i++) {
+            if (def->type_param_bounds[i]) {
+                const char* bound             = def->type_param_bounds[i];
+                const char* arg_type_name_str = (resolved_args[i]->kind == TYPE_STRUCT)
+                                                    ? resolved_args[i]->as.struc.name
+                                                    : NULL;
+                int         satisfied         = 0;
+                if (arg_type_name_str) {
+                    for (int t = 0; t < checker->trait_impl_count; t++) {
+                        if (strcmp(checker->trait_impls[t].trait_name, bound) == 0 &&
+                            strcmp(checker->trait_impls[t].type_name, arg_type_name_str) == 0) {
+                            satisfied = 1;
+                            break;
+                        }
+                    }
+                }
+                if (!satisfied) {
+                    check_error(checker, type_node->line, type_node->column,
+                                "Type '%s' does not implement trait '%s'",
+                                type_name(resolved_args[i]), bound);
+                    free(resolved_args);
+                    return type_error;
+                }
             }
         }
 
@@ -2022,6 +2064,7 @@ static void check_decl(Checker* checker, Node* node) {
         if (node->as.struct_decl.type_param_count > 0) {
             // Register as generic template - don't create concrete type yet
             register_generic_def(checker, name, node->as.struct_decl.type_params,
+                                 node->as.struct_decl.type_param_bounds,
                                  node->as.struct_decl.type_param_count, node);
             return;
         }
@@ -2072,6 +2115,141 @@ static void check_decl(Checker* checker, Node* node) {
         break;
     }
 
+    case NODE_TRAIT_DECL: {
+        const char* name = node->as.trait_decl.name;
+
+        // Check for redefinition
+        if (checker_lookup(checker, name)) {
+            check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+            return;
+        }
+
+        // Create TYPE_TRAIT with method signatures
+        Type* trait_type   = type_trait(name);
+        int   method_count = node->as.trait_decl.methods.count;
+
+        trait_type->as.trait.method_count = method_count;
+        trait_type->as.trait.method_names = xmalloc(method_count * sizeof(char*));
+        trait_type->as.trait.method_types = xmalloc(method_count * sizeof(Type*));
+
+        for (int i = 0; i < method_count; i++) {
+            Node* method                         = node->as.trait_decl.methods.nodes[i];
+            trait_type->as.trait.method_names[i] = xstrdup(method->as.func_decl.name);
+            trait_type->as.trait.method_types[i] = get_function_type(checker, method);
+        }
+
+        checker_define(checker, name, SYM_TYPE, trait_type, 0, node->as.trait_decl.is_public,
+                       checker->current_module);
+        break;
+    }
+
+    case NODE_IMPL_DECL: {
+        const char* trait_name    = node->as.impl_decl.trait_name;
+        const char* type_name_str = node->as.impl_decl.type_name;
+
+        // Look up the trait
+        Symbol* trait_sym = checker_lookup(checker, trait_name);
+        if (!trait_sym || trait_sym->kind != SYM_TYPE || trait_sym->type->kind != TYPE_TRAIT) {
+            check_error(checker, node->line, node->column, "Unknown trait '%s'", trait_name);
+            return;
+        }
+        Type* trait_type = trait_sym->type;
+
+        // Look up the target type
+        Symbol* type_sym = checker_lookup(checker, type_name_str);
+        if (!type_sym || type_sym->kind != SYM_TYPE || type_sym->type->kind != TYPE_STRUCT) {
+            check_error(checker, node->line, node->column,
+                        "Cannot implement trait for unknown struct type '%s'", type_name_str);
+            return;
+        }
+
+        // Process each method in the impl block as a regular NODE_FUNC_DECL
+        // This registers the method on the struct type and checks the body
+        for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
+            Node* method = node->as.impl_decl.methods.nodes[i];
+
+            // Verify this method exists in the trait
+            const char* method_name      = method->as.func_decl.name;
+            int         found_in_trait   = 0;
+            int         trait_method_idx = -1;
+            for (int j = 0; j < trait_type->as.trait.method_count; j++) {
+                if (strcmp(trait_type->as.trait.method_names[j], method_name) == 0) {
+                    found_in_trait   = 1;
+                    trait_method_idx = j;
+                    break;
+                }
+            }
+
+            if (!found_in_trait) {
+                check_error(checker, method->line, method->column,
+                            "Method '%s' is not declared in trait '%s'", method_name, trait_name);
+                continue;
+            }
+
+            // Verify the method signature matches the trait signature
+            Type* impl_func_type  = get_function_type(checker, method);
+            Type* trait_func_type = trait_type->as.trait.method_types[trait_method_idx];
+
+            // Check return type
+            if (!type_equals(impl_func_type->as.func.return_type,
+                             trait_func_type->as.func.return_type)) {
+                check_error(checker, method->line, method->column,
+                            "Method '%s' return type mismatch: trait '%s' expects '%s', got '%s'",
+                            method_name, trait_name,
+                            type_name(trait_func_type->as.func.return_type),
+                            type_name(impl_func_type->as.func.return_type));
+                continue;
+            }
+
+            // Check parameter types
+            if (impl_func_type->as.func.param_count != trait_func_type->as.func.param_count) {
+                check_error(checker, method->line, method->column,
+                            "Method '%s' parameter count mismatch: trait '%s' expects %d, got %d",
+                            method_name, trait_name, trait_func_type->as.func.param_count,
+                            impl_func_type->as.func.param_count);
+                continue;
+            }
+
+            for (int p = 0; p < trait_func_type->as.func.param_count; p++) {
+                if (!type_equals(impl_func_type->as.func.param_types[p],
+                                 trait_func_type->as.func.param_types[p])) {
+                    check_error(
+                        checker, method->line, method->column,
+                        "Method '%s' parameter %d type mismatch: trait '%s' expects '%s', got '%s'",
+                        method_name, p + 1, trait_name,
+                        type_name(trait_func_type->as.func.param_types[p]),
+                        type_name(impl_func_type->as.func.param_types[p]));
+                }
+            }
+
+            // Process the method as a regular func_decl (registers on struct, checks body)
+            check_decl(checker, method);
+        }
+
+        // Verify all required trait methods are implemented
+        for (int j = 0; j < trait_type->as.trait.method_count; j++) {
+            const char* required    = trait_type->as.trait.method_names[j];
+            int         implemented = 0;
+            for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
+                if (strcmp(node->as.impl_decl.methods.nodes[i]->as.func_decl.name, required) == 0) {
+                    implemented = 1;
+                    break;
+                }
+            }
+            if (!implemented) {
+                check_error(checker, node->line, node->column,
+                            "Missing required method '%s' from trait '%s'", required, trait_name);
+            }
+        }
+
+        // Record the trait implementation
+        VEC_GROW(checker->trait_impls, checker->trait_impl_count, checker->trait_impl_capacity);
+        TraitImpl* impl  = &checker->trait_impls[checker->trait_impl_count++];
+        impl->trait_name = xstrdup(trait_name);
+        impl->type_name  = xstrdup(type_name_str);
+        break;
+    }
+
     case NODE_VAR_DECL:
         // Global variable
         check_statement(checker, node);
@@ -2104,7 +2282,8 @@ int checker_check(Checker* checker, Node* ast) {
             strcmp(mod->as.module.name, "main") == 0 ? NULL : mod->as.module.name;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type == NODE_STRUCT_DECL || decl->type == NODE_ENUM_DECL) {
+            if (decl->type == NODE_STRUCT_DECL || decl->type == NODE_ENUM_DECL ||
+                decl->type == NODE_TRAIT_DECL) {
                 check_decl(checker, decl);
             }
         }
@@ -2123,7 +2302,8 @@ int checker_check(Checker* checker, Node* ast) {
         checker->current_module = mod->as.module.name;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type != NODE_STRUCT_DECL && decl->type != NODE_ENUM_DECL) {
+            if (decl->type != NODE_STRUCT_DECL && decl->type != NODE_ENUM_DECL &&
+                decl->type != NODE_TRAIT_DECL) {
                 check_decl(checker, decl);
             }
         }
@@ -2139,7 +2319,8 @@ int checker_check(Checker* checker, Node* ast) {
         checker->current_module = NULL;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type != NODE_STRUCT_DECL && decl->type != NODE_ENUM_DECL) {
+            if (decl->type != NODE_STRUCT_DECL && decl->type != NODE_ENUM_DECL &&
+                decl->type != NODE_TRAIT_DECL) {
                 check_decl(checker, decl);
             }
         }
