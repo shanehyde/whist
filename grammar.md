@@ -114,6 +114,8 @@ Generic structs are monomorphized at compile time, generating specialized C code
 <type-arg-list> ::= <type> { ',' <type> }
 ```
 
+**Built-in types** are resolved as identifiers: `void`, `bool`, `i8`–`i64`, `u8`–`u64`, `f32`, `f64`, `char`, `string`, `voidptr`. `voidptr` maps to `void*` in C and is used for opaque pointer handles. It supports `null` assignment and equality comparison (`==`/`!=`) with `null`, but no arithmetic.
+
 **Generic types:** `Box<i64>` or `Pair<i32, string>` instantiate a generic struct with concrete type arguments. Nested generics are supported: `Box<Pair<i32, i64>>`.
 
 **Tuple types:** `(T1, T2)` or `(T1, T2, T3, ...)` represent fixed-size heterogeneous collections. Tuples must have at least two elements.

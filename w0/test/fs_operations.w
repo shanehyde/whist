@@ -66,7 +66,7 @@ func test_remove(): void {
 func test_handle_write_read(): void {
     // Write via handle
     var wh = fs.open("/tmp/whist_fs_ops_handle.txt", "w");
-    assert(wh != 0, "open for write should return non-zero handle");
+    assert(wh != null, "open for write should return non-null handle");
 
     var rc = fs.write_string(wh, "line one\n");
     assert(rc == 0, "write_string should return 0");
@@ -76,7 +76,7 @@ func test_handle_write_read(): void {
 
     // Read back via handle
     var rh = fs.open("/tmp/whist_fs_ops_handle.txt", "r");
-    assert(rh != 0, "open for read should return non-zero handle");
+    assert(rh != null, "open for read should return non-null handle");
 
     assert(fs.eof(rh) == false, "should not be at eof initially");
 
@@ -97,7 +97,7 @@ func test_seek_tell(): void {
     fs.write_file("/tmp/whist_fs_ops_seek.txt", "abcdefghij");
 
     var h = fs.open("/tmp/whist_fs_ops_seek.txt", "r");
-    assert(h != 0, "open for seek test should succeed");
+    assert(h != null, "open for seek test should succeed");
 
     var pos0 = fs.tell(h);
     assert(pos0 == 0, "initial position should be 0");
@@ -140,7 +140,7 @@ func test_error_cases(): void {
 
     // Opening non-existent for read should return 0 (null handle)
     var h = fs.open("/tmp/whist_fs_ops_nonexistent.txt", "r");
-    assert(h == 0, "open nonexistent for read should return 0");
+    assert(h == null, "open nonexistent for read should return null");
 
     // Remove on non-existent should fail
     var rc = fs.remove_file("/tmp/whist_fs_ops_nonexistent.txt");

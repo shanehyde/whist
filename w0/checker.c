@@ -863,6 +863,13 @@ static Type* check_binary_expr(Checker* checker, Node* node) {
         op == TOK_GT_EQ) {
         if (type_equals(left, right))
             return type_bool;
+        // voidptr == null and null == voidptr (only for == and !=)
+        if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
+            if ((left->kind == TYPE_VOIDPTR && right->kind == TYPE_NULL) ||
+                (left->kind == TYPE_NULL && right->kind == TYPE_VOIDPTR)) {
+                return type_bool;
+            }
+        }
         if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
             (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
             return type_bool;

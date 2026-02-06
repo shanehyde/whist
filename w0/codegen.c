@@ -369,6 +369,9 @@ static void emit_resolved_type(CodeGen* gen, Type* type) {
     case TYPE_STRING:
         emit(gen, "const char*");
         break;
+    case TYPE_VOIDPTR:
+        emit(gen, "void*");
+        break;
     case TYPE_ARRAY:
         emit_resolved_type(gen, type->as.array.elem);
         if (type->as.array.size >= 0) {
