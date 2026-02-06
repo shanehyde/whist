@@ -118,6 +118,23 @@ var len = name?.length() ?? 0;  // optional chaining
 
 Reference counting with owner/borrower semantics for automatic memory management.
 
+### Reflection & Source Generation
+[Detailed design →](plans/reflection.md)
+
+Compile-time reflection via a phased approach:
+1. **Built-in derives** — `@[derive(Debug, Eq, Clone, ...)]` generates implementations from struct/enum definitions
+2. **Type descriptor tables** — `@[reflect]` emits static metadata for runtime introspection
+3. **User source generators** — extensible generators that receive the semantic model and produce code
+
+```whist
+@[derive(Debug, Eq, Serialize)]
+struct User { name: string, age: i64 }
+
+@[reflect]
+struct Config { host: string, port: i64 }
+var info = @type_info(Config);  // static type metadata
+```
+
 ## Compiler Infrastructure
 
 ### Self-Hosting (wc)
