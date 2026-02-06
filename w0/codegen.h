@@ -32,6 +32,7 @@ typedef struct {
     int rc_var_count;
     int rc_var_capacity;
     int rc_scope_depth;
+    int rc_debug;
     // Type substitution for generic methods
     TypeSubstContext* subst_ctx;
     // Tuple typedef tracking
@@ -47,7 +48,7 @@ typedef struct {
 } CodeGen;
 
 void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,
-                  SpanInstance* span_instances, int span_count);
+                  SpanInstance* span_instances, int span_count, int rc_debug);
 void codegen_emit(CodeGen* gen, Node* ast);
 
 #endif

@@ -979,8 +979,8 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         // Handle RC member assignment: line1.start = z
         if (expr->type == NODE_ASSIGN && expr->as.assign.op == TOK_EQ &&
             expr->as.assign.target->type == NODE_MEMBER) {
-            Node* member = expr->as.assign.target;
-            int value_is_rc = (expr->as.assign.value->type == NODE_IDENT &&
+            Node* member      = expr->as.assign.target;
+            int   value_is_rc = (expr->as.assign.value->type == NODE_IDENT &&
                                rc_is_tracked(gen, expr->as.assign.value->as.ident.name)) ||
                               expr->as.assign.value->type == NODE_NEW_EXPR;
             int obj_is_rc = member->as.member.object->type == NODE_IDENT &&
@@ -1972,7 +1972,7 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
 }
 
 void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,
-                  SpanInstance* span_instances, int span_count) {
+                  SpanInstance* span_instances, int span_count, int rc_debug) {
     gen->out                    = out;
     gen->indent                 = 0;
     gen->temp_count             = 0;
@@ -1985,6 +1985,7 @@ void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, i
     gen->rc_var_count           = 0;
     gen->rc_var_capacity        = 0;
     gen->rc_scope_depth         = 0;
+    gen->rc_debug               = rc_debug;
     gen->subst_ctx              = NULL;
     gen->tuple_types            = NULL;
     gen->tuple_type_count       = 0;
@@ -2020,21 +2021,48 @@ void codegen_emit(CodeGen* gen, Node* ast) {
 
     // Emit RC runtime helpers
     emit(gen, "typedef struct { size_t refcount; } __RcHeader;\n\n");
-    emit(gen, "static inline void* __rc_alloc(size_t size) {\n");
-    emit(gen, "    __RcHeader* h = (__RcHeader*)malloc(sizeof(__RcHeader) + size);\n");
-    emit(gen, "    if (!h) { fprintf(stderr, \"Panic: out of memory\\n\"); exit(1); }\n");
-    emit(gen, "    h->refcount = 1;\n");
-    emit(gen, "    return (void*)(h + 1);\n");
-    emit(gen, "}\n\n");
-    emit(gen, "static inline void __rc_inc(void* ptr) {\n");
-    emit(gen, "    if (!ptr) return;\n");
-    emit(gen, "    ((__RcHeader*)ptr - 1)->refcount++;\n");
-    emit(gen, "}\n\n");
-    emit(gen, "static inline void __rc_dec(void* ptr) {\n");
-    emit(gen, "    if (!ptr) return;\n");
-    emit(gen, "    __RcHeader* h = (__RcHeader*)ptr - 1;\n");
-    emit(gen, "    if (--h->refcount == 0) free(h);\n");
-    emit(gen, "}\n\n");
+    if (gen->rc_debug) {
+        emit(gen, "static inline void* __rc_alloc(size_t size) {\n");
+        emit(gen, "    __RcHeader* h = (__RcHeader*)malloc(sizeof(__RcHeader) + size);\n");
+        emit(gen, "    if (!h) { fprintf(stderr, \"Panic: out of memory\\n\"); exit(1); }\n");
+        emit(gen, "    h->refcount = 1;\n");
+        emit(gen, "    void* ptr = (void*)(h + 1);\n");
+        emit(gen, "    fprintf(stderr, \"RC_ALLOC: %%p (size=%%zu, rc=1)\\n\", ptr, size);\n");
+        emit(gen, "    return ptr;\n");
+        emit(gen, "}\n\n");
+        emit(gen, "static inline void __rc_inc(void* ptr) {\n");
+        emit(gen, "    if (!ptr) return;\n");
+        emit(gen, "    __RcHeader* h = ((__RcHeader*)ptr - 1);\n");
+        emit(gen, "    h->refcount++;\n");
+        emit(gen, "    fprintf(stderr, \"RC_INC: %%p (rc=%%zu)\\n\", ptr, h->refcount);\n");
+        emit(gen, "}\n\n");
+        emit(gen, "static inline void __rc_dec(void* ptr) {\n");
+        emit(gen, "    if (!ptr) return;\n");
+        emit(gen, "    __RcHeader* h = (__RcHeader*)ptr - 1;\n");
+        emit(gen, "    if (--h->refcount == 0) {\n");
+        emit(gen, "        fprintf(stderr, \"RC_FREE: %%p\\n\", ptr);\n");
+        emit(gen, "        free(h);\n");
+        emit(gen, "    } else {\n");
+        emit(gen, "        fprintf(stderr, \"RC_DEC: %%p (rc=%%zu)\\n\", ptr, h->refcount);\n");
+        emit(gen, "    }\n");
+        emit(gen, "}\n\n");
+    } else {
+        emit(gen, "static inline void* __rc_alloc(size_t size) {\n");
+        emit(gen, "    __RcHeader* h = (__RcHeader*)malloc(sizeof(__RcHeader) + size);\n");
+        emit(gen, "    if (!h) { fprintf(stderr, \"Panic: out of memory\\n\"); exit(1); }\n");
+        emit(gen, "    h->refcount = 1;\n");
+        emit(gen, "    return (void*)(h + 1);\n");
+        emit(gen, "}\n\n");
+        emit(gen, "static inline void __rc_inc(void* ptr) {\n");
+        emit(gen, "    if (!ptr) return;\n");
+        emit(gen, "    ((__RcHeader*)ptr - 1)->refcount++;\n");
+        emit(gen, "}\n\n");
+        emit(gen, "static inline void __rc_dec(void* ptr) {\n");
+        emit(gen, "    if (!ptr) return;\n");
+        emit(gen, "    __RcHeader* h = (__RcHeader*)ptr - 1;\n");
+        emit(gen, "    if (--h->refcount == 0) free(h);\n");
+        emit(gen, "}\n\n");
+    }
 
     // Emit span bounds check helper (only if we have span instances)
     if (gen->span_instance_count > 0) {
