@@ -564,6 +564,32 @@ static Node* parse_primary_expression(Parser* parser) {
         return first;
     }
 
+    // New expression: new Type { fields }
+    if (match_token(parser, TOK_NEW)) {
+        Token new_token = parser->previous;
+        Node* type_node = parse_type(parser);
+        if (!type_node) {
+            return NULL;
+        }
+        consume_token(parser, TOK_LBRACE, "Expected '{' after type in new expression");
+        Node* init = parse_struct_init(parser);
+        if (!init) {
+            node_free(type_node);
+            return NULL;
+        }
+        Node* node = node_new(NODE_NEW_EXPR, new_token.line, new_token.column);
+        if (!node) {
+            parse_error(parser, "Out of memory");
+            node_free(type_node);
+            node_free(init);
+            return NULL;
+        }
+        node->as.new_expr.type_node     = type_node;
+        node->as.new_expr.init          = init;
+        node->as.new_expr.resolved_type = NULL;
+        return node;
+    }
+
     if (match_token(parser, TOK_LBRACE)) {
         return parse_struct_init(parser);
     }

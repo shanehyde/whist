@@ -21,6 +21,7 @@ struct Symbol {
     Type*      type;
     int        is_const;
     int        is_public;
+    int        is_rc;         // 1 if variable is RC-managed (allocated with new)
     char*      source_module; // NULL = same module, else external module name
     Symbol*    next;          // Hash chain
 };
