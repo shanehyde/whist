@@ -359,6 +359,18 @@ void print_ast(Node* node, int depth) {
         }
         break;
 
+    case NODE_ARRAY_TYPE:
+        printf("ArrayType\n");
+        print_indent(depth + 1);
+        printf("ElemType:\n");
+        print_ast(node->as.array_type.elem_type, depth + 2);
+        if (node->as.array_type.size) {
+            print_indent(depth + 1);
+            printf("Size:\n");
+            print_ast(node->as.array_type.size, depth + 2);
+        }
+        break;
+
     case NODE_GENERIC_TYPE:
         printf("GenericType: %.*s\n", node->as.generic_type.base_name_length,
                node->as.generic_type.base_name);

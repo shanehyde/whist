@@ -815,19 +815,17 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
         check_error(checker, type_node->line, type_node->column,
                     "Pointer types are no longer supported");
         return type_error;
-    case NODE_INDEX:
-        // Array type: [n]T
-        {
-            Type* elem = resolve_type(checker, type_node->as.index.object);
-            int   size = -1;
-            if (type_node->as.index.index) {
-                // For now, only support constant integer sizes
-                if (type_node->as.index.index->type == NODE_INT_LIT) {
-                    size = (int)type_node->as.index.index->as.int_lit.value;
-                }
+    case NODE_ARRAY_TYPE: {
+        Type* elem = resolve_type(checker, type_node->as.array_type.elem_type);
+        int   size = -1;
+        if (type_node->as.array_type.size) {
+            // For now, only support constant integer sizes
+            if (type_node->as.array_type.size->type == NODE_INT_LIT) {
+                size = (int)type_node->as.array_type.size->as.int_lit.value;
             }
-            return type_array(elem, size);
         }
+        return type_array(elem, size);
+    }
     case NODE_TUPLE_TYPE: {
         int    count = type_node->as.tuple_type.elem_types.count;
         Type** elems = xmalloc(count * sizeof(Type*));

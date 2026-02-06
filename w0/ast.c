@@ -120,6 +120,10 @@ void node_free(Node* node) {
         node_free(node->as.index.object);
         node_free(node->as.index.index);
         break;
+    case NODE_ARRAY_TYPE:
+        node_free(node->as.array_type.elem_type);
+        node_free(node->as.array_type.size);
+        break;
     case NODE_SLICE:
         node_free(node->as.slice.object);
         node_free(node->as.slice.start);

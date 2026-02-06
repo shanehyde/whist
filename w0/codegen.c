@@ -243,12 +243,12 @@ static void emit_type(CodeGen* gen, Node* type_node) {
         // Pointer types no longer supported in the language
         emit(gen, "/* pointer types not supported */");
         break;
-    case NODE_INDEX:
+    case NODE_ARRAY_TYPE:
         // Array type: [n]T -> T[n] or T*
-        emit_type(gen, type_node->as.index.object);
-        if (type_node->as.index.index) {
+        emit_type(gen, type_node->as.array_type.elem_type);
+        if (type_node->as.array_type.size) {
             emit(gen, "[");
-            emit_expr(gen, type_node->as.index.index);
+            emit_expr(gen, type_node->as.array_type.size);
             emit(gen, "]");
         } else {
             emit(gen, "*");
@@ -476,11 +476,11 @@ static void emit_type_with_name(CodeGen* gen, Node* type_node, const char* name)
         return;
     }
 
-    if (type_node->type == NODE_INDEX && type_node->as.index.index) {
+    if (type_node->type == NODE_ARRAY_TYPE && type_node->as.array_type.size) {
         // Array: T name[n]
-        emit_type(gen, type_node->as.index.object);
+        emit_type(gen, type_node->as.array_type.elem_type);
         emit(gen, " %s[", name);
-        emit_expr(gen, type_node->as.index.index);
+        emit_expr(gen, type_node->as.array_type.size);
         emit(gen, "]");
     } else {
         emit_type(gen, type_node);
@@ -1814,11 +1814,11 @@ static Type* type_from_node(Node* type_node) {
         // User-defined type - return a struct type
         return type_struct(name);
     }
-    case NODE_INDEX: {
-        Type* elem = type_from_node(type_node->as.index.object);
+    case NODE_ARRAY_TYPE: {
+        Type* elem = type_from_node(type_node->as.array_type.elem_type);
         int   size = -1;
-        if (type_node->as.index.index && type_node->as.index.index->type == NODE_INT_LIT) {
-            size = (int)type_node->as.index.index->as.int_lit.value;
+        if (type_node->as.array_type.size && type_node->as.array_type.size->type == NODE_INT_LIT) {
+            size = (int)type_node->as.array_type.size->as.int_lit.value;
         }
         return type_array(elem, size);
     }
@@ -1865,9 +1865,9 @@ static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node) {
         for (int i = 0; i < type_node->as.tuple_type.elem_types.count; i++) {
             collect_tuple_types_from_node(gen, type_node->as.tuple_type.elem_types.nodes[i]);
         }
-    } else if (type_node->type == NODE_INDEX) {
+    } else if (type_node->type == NODE_ARRAY_TYPE) {
         // Array type - recurse into element type
-        collect_tuple_types_from_node(gen, type_node->as.index.object);
+        collect_tuple_types_from_node(gen, type_node->as.array_type.elem_type);
     } else if (type_node->type == NODE_GENERIC_TYPE) {
         // Generic type - recurse into type arguments for any tuple types
         for (int i = 0; i < type_node->as.generic_type.type_args.count; i++) {

@@ -14,8 +14,27 @@
 // Parser Utilities
 // ============================================================================
 
-// Current recursion depth for expression parsing
-int parse_depth = 0;
+// Decode a single escape character (the character after the backslash)
+static char decode_escape(char c) {
+    switch (c) {
+    case 'n':
+        return '\n';
+    case 't':
+        return '\t';
+    case 'r':
+        return '\r';
+    case '0':
+        return '\0';
+    case '\\':
+        return '\\';
+    case '"':
+        return '"';
+    case '\'':
+        return '\'';
+    default:
+        return c;
+    }
+}
 
 void advance_token(Parser* parser) {
     parser->previous = parser->current;
@@ -186,13 +205,13 @@ static Node* parse_type(Parser* parser) {
         consume_token(parser, TOK_RBRACKET, "Expected ']' in array type");
         Node* elem = parse_type(parser);
 
-        Node* node = node_new(NODE_INDEX, token.line, token.column);
+        Node* node = node_new(NODE_ARRAY_TYPE, token.line, token.column);
         if (!node) {
             parse_error(parser, "Out of memory");
             return NULL;
         }
-        node->as.index.object = elem;
-        node->as.index.index  = size;
+        node->as.array_type.elem_type = elem;
+        node->as.array_type.size      = size;
         return node;
     }
 
@@ -373,33 +392,7 @@ static Node* parse_primary_expression(Parser* parser) {
         while (src < end) {
             if (*src == '\\' && src + 1 < end) {
                 src++;
-                switch (*src) {
-                case 'n':
-                    *dst++ = '\n';
-                    break;
-                case 't':
-                    *dst++ = '\t';
-                    break;
-                case 'r':
-                    *dst++ = '\r';
-                    break;
-                case '0':
-                    *dst++ = '\0';
-                    break;
-                case '\\':
-                    *dst++ = '\\';
-                    break;
-                case '"':
-                    *dst++ = '"';
-                    break;
-                case '\'':
-                    *dst++ = '\'';
-                    break;
-                default:
-                    *dst++ = *src;
-                    break;
-                }
-                src++;
+                *dst++ = decode_escape(*src++);
             } else {
                 *dst++ = *src++;
             }
@@ -417,29 +410,7 @@ static Node* parse_primary_expression(Parser* parser) {
         }
         // Handle escape sequences
         if (token.start[1] == '\\') {
-            switch (token.start[2]) {
-            case 'n':
-                node->as.char_lit.value = '\n';
-                break;
-            case 't':
-                node->as.char_lit.value = '\t';
-                break;
-            case 'r':
-                node->as.char_lit.value = '\r';
-                break;
-            case '0':
-                node->as.char_lit.value = '\0';
-                break;
-            case '\\':
-                node->as.char_lit.value = '\\';
-                break;
-            case '\'':
-                node->as.char_lit.value = '\'';
-                break;
-            default:
-                node->as.char_lit.value = token.start[2];
-                break;
-            }
+            node->as.char_lit.value = decode_escape(token.start[2]);
         } else {
             node->as.char_lit.value = token.start[1];
         }
@@ -800,16 +771,16 @@ static Precedence get_precedence(TokenType type) {
 }
 
 static Node* parse_binary(Parser* parser, Precedence min_prec) {
-    parse_depth++;
-    if (parse_depth > MAX_PARSE_DEPTH) {
+    parser->parse_depth++;
+    if (parser->parse_depth > MAX_PARSE_DEPTH) {
         parse_error(parser, "Maximum expression nesting depth exceeded");
-        parse_depth--;
+        parser->parse_depth--;
         return NULL;
     }
 
     Node* left = parse_unary(parser);
     if (!left) {
-        parse_depth--;
+        parser->parse_depth--;
         return NULL;
     }
 
@@ -823,7 +794,7 @@ static Node* parse_binary(Parser* parser, Precedence min_prec) {
         Node* binary = node_new(NODE_BINARY, op.line, op.column);
         if (!binary) {
             parse_error(parser, "Out of memory");
-            parse_depth--;
+            parser->parse_depth--;
             return NULL;
         }
         binary->as.binary.op    = op.type;
@@ -832,7 +803,7 @@ static Node* parse_binary(Parser* parser, Precedence min_prec) {
         left                    = binary;
     }
 
-    parse_depth--;
+    parser->parse_depth--;
     return left;
 }
 
@@ -1180,7 +1151,7 @@ static DestructPattern* parse_destruct_pattern_element(Parser* parser) {
             if (pattern->as.tuple.count >= 4) {
                 int new_cap = pattern->as.tuple.count * 2;
                 pattern->as.tuple.elements =
-                    realloc(pattern->as.tuple.elements, new_cap * sizeof(DestructPattern*));
+                    xrealloc(pattern->as.tuple.elements, new_cap * sizeof(DestructPattern*));
             }
             DestructPattern* elem = parse_destruct_pattern_element(parser);
             if (!elem) {
@@ -1968,7 +1939,7 @@ void parser_init_with_path(Parser* parser, const char* source, const char* sourc
     parser->had_error    = 0;
     parser->panic_mode   = 0;
     parser->error_msg[0] = '\0';
-    parse_depth          = 0; // Reset recursion depth
+    parser->parse_depth  = 0; // Reset recursion depth
 
     parser->source_path = source_path;
     parser->lib_path    = lib_path;
