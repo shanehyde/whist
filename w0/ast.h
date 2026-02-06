@@ -83,6 +83,9 @@ typedef enum {
     // Array literal
     NODE_ARRAY_LIT, // [e1, e2, ...]
 
+    // Array type: [n]T or []T
+    NODE_ARRAY_TYPE,
+
     // Generic types
     NODE_GENERIC_TYPE, // Box<i64>, Pair<K, V>
 
@@ -263,6 +266,12 @@ struct Node {
             NodeList elements;
             void*    resolved_type; // Type* set by checker (element type)
         } array_lit;
+
+        // Array type: [n]T or []T
+        struct {
+            Node* elem_type; // Element type
+            Node* size;      // Size expression (NULL for unsized/span)
+        } array_type;
 
         // Generic type reference: Box<i64>, Pair<K, V>
         struct {

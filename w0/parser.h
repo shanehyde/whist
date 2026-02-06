@@ -32,6 +32,9 @@ typedef struct {
     char** direct_imports;
     int    direct_imports_count;
     int    direct_imports_capacity;
+
+    // Current recursion depth for expression parsing
+    int parse_depth;
 } Parser;
 
 // Precedence levels for binary operators
@@ -51,9 +54,6 @@ typedef enum {
 
 // Maximum recursion depth to prevent stack overflow
 #define MAX_PARSE_DEPTH 256
-
-// Current recursion depth for expression parsing
-extern int parse_depth;
 
 // Parser lifecycle
 void  parser_init(Parser* parser, const char* source);
