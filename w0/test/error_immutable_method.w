@@ -13,7 +13,7 @@ func (const Point) move(dx: i64, dy: i64): void {
 }
 
 func main(): i64 {
-    var p: Point = {x: 10, y: 20};
+    var p = new Point {x: 10, y: 20};
     p.move(5, 5);
 
     return 0;

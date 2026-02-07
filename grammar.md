@@ -266,7 +266,6 @@ Create spans using slice syntax: `var s: Span<i64> = arr[:];`
                 | <enum-value-access>
                 | '(' <expression> ')'
                 | <new-expr>
-                | <struct-init>
                 | <tuple-literal>
                 | <array-literal>
 
@@ -275,8 +274,6 @@ Create spans using slice syntax: `var s: Span<i64> = arr[:];`
 <enum-value-access> ::= <identifier> '::' <identifier>
 
 <array-literal> ::= '[' [ <expression> { ',' <expression> } [ ',' ] ] ']'
-
-<struct-init> ::= '{' [ <field-init-list> ] '}'
 
 <field-init-list> ::= <field-init> { ',' <field-init> } [ ',' ]
 

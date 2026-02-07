@@ -5,7 +5,7 @@ struct Box<T> {
 }
 
 func main(): i32 {
-    var b: Box<i64> = {value: 42};
+    var b = new Box<i64> {value: 42};
     if (b.value != 42) {
         return 1;
     }

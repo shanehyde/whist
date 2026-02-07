@@ -1264,31 +1264,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
             }
         }
         if (node->as.var_decl.init) {
-            if (struct_type && node->as.var_decl.init->type == NODE_STRUCT_INIT) {
-                // Struct type with struct init: allocate and initialize
-                // var p: Point = {...} => Point* p = malloc(sizeof(Point)); *p = (Point){...};
-                char* type_name = NULL;
-                if (node->as.var_decl.type->type == NODE_GENERIC_TYPE) {
-                    // Generic type: build mangled name (e.g., Box<i64> -> Box_i64)
-                    Node*  gtype     = node->as.var_decl.type;
-                    int    arg_count = gtype->as.generic_type.type_args.count;
-                    Type** args      = xmalloc(arg_count * sizeof(Type*));
-                    for (int i = 0; i < arg_count; i++) {
-                        args[i] = type_from_node(gtype->as.generic_type.type_args.nodes[i]);
-                    }
-                    type_name =
-                        type_mangle_generic(gtype->as.generic_type.base_name, args, arg_count);
-                    free(args);
-                } else {
-                    // Regular struct type
-                    type_name = xstrdup(node->as.var_decl.type->as.ident.name);
-                }
-                emit(gen, " = malloc(sizeof(%s));\n", type_name);
-                emit_indent(gen);
-                emit(gen, "*%s = (%s)", node->as.var_decl.name, type_name);
-                emit_struct_init(gen, node->as.var_decl.init);
-                free(type_name);
-            } else if (struct_type && node->as.var_decl.init->type == NODE_NULL_LIT) {
+            if (struct_type && node->as.var_decl.init->type == NODE_NULL_LIT) {
                 // Struct type with null: just assign NULL
                 emit(gen, " = NULL");
             } else {

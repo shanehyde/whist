@@ -563,10 +563,6 @@ static Node* parse_primary_expression(Parser* parser) {
         return node;
     }
 
-    if (match_token(parser, TOK_LBRACE)) {
-        return parse_struct_init(parser);
-    }
-
     // Array literal: [e1, e2, ...]
     if (match_token(parser, TOK_LBRACKET)) {
         Node* node = node_new(NODE_ARRAY_LIT, token.line, token.column);
