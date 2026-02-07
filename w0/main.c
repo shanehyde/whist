@@ -59,8 +59,9 @@ static int compile_to_c(const char* source, const char* source_path, const char*
 
     CodeGen gen;
     codegen_init(&gen, out, checker.generic_instances, checker.generic_instance_count,
-                 checker.span_instances, checker.span_instance_count, checker.trait_impls,
-                 checker.trait_impl_count, rc_debug);
+                 checker.span_instances, checker.span_instance_count, checker.vec_instances,
+                 checker.vec_instance_count, checker.trait_impls, checker.trait_impl_count,
+                 rc_debug);
     codegen_emit(&gen, ast);
 
     checker_free(&checker);
@@ -373,7 +374,8 @@ int main(int argc, char** argv) {
                 CodeGen gen;
                 codegen_init(&gen, out, checker.generic_instances, checker.generic_instance_count,
                              checker.span_instances, checker.span_instance_count,
-                             checker.trait_impls, checker.trait_impl_count, rc_debug);
+                             checker.vec_instances, checker.vec_instance_count, checker.trait_impls,
+                             checker.trait_impl_count, rc_debug);
                 codegen_emit(&gen, ast);
                 checker_free(&checker);
 

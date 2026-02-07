@@ -108,6 +108,26 @@ static void register_span_instance(Checker* checker, const char* mangled_name, T
     inst->type         = span_type;
 }
 
+// Look up an already-instantiated vec type by mangled name
+static VecInstance* lookup_vec_instance(Checker* checker, const char* mangled_name) {
+    for (int i = 0; i < checker->vec_instance_count; i++) {
+        if (strcmp(checker->vec_instances[i].mangled_name, mangled_name) == 0) {
+            return &checker->vec_instances[i];
+        }
+    }
+    return NULL;
+}
+
+// Register an instantiated vec type
+static void register_vec_instance(Checker* checker, const char* mangled_name, Type* elem_type,
+                                  Type* vec_type) {
+    VEC_GROW(checker->vec_instances, checker->vec_instance_count, checker->vec_instance_capacity);
+    VecInstance* inst  = &checker->vec_instances[checker->vec_instance_count++];
+    inst->mangled_name = xstrdup(mangled_name);
+    inst->elem_type    = elem_type;
+    inst->type         = vec_type;
+}
+
 // Register an instantiated generic struct
 static void register_generic_instance(Checker* checker, const char* mangled_name,
                                       const char* base_name, Type* type, Type** type_args,
@@ -190,6 +210,10 @@ void checker_init(Checker* checker) {
     checker->span_instances         = NULL;
     checker->span_instance_count    = 0;
     checker->span_instance_capacity = 0;
+    // Vec support
+    checker->vec_instances         = NULL;
+    checker->vec_instance_count    = 0;
+    checker->vec_instance_capacity = 0;
     // Trait support
     checker->trait_impls         = NULL;
     checker->trait_impl_count    = 0;
@@ -262,6 +286,11 @@ void checker_free(Checker* checker) {
         free(checker->span_instances[i].mangled_name);
     }
     free(checker->span_instances);
+    // Free vec instances
+    for (int i = 0; i < checker->vec_instance_count; i++) {
+        free(checker->vec_instances[i].mangled_name);
+    }
+    free(checker->vec_instances);
     // Free trait implementations
     for (int i = 0; i < checker->trait_impl_count; i++) {
         free(checker->trait_impls[i].trait_name);
@@ -688,6 +717,47 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
         // Generic type instantiation: Box<i64>, Pair<K, V>, Span<T>
         const char* base_name = type_node->as.generic_type.base_name;
         int         arg_count = type_node->as.generic_type.type_args.count;
+
+        // Handle builtin Vec<T> type
+        if (strcmp(base_name, "Vec") == 0) {
+            if (arg_count != 1) {
+                check_error(checker, type_node->line, type_node->column,
+                            "Vec requires exactly 1 type argument, got %d", arg_count);
+                return type_error;
+            }
+
+            // Resolve element type
+            Type* elem_type = resolve_type(checker, type_node->as.generic_type.type_args.nodes[0]);
+            if (elem_type == type_error) {
+                return type_error;
+            }
+
+            // Generate mangled name for the vec instance
+            char mangled[256];
+            snprintf(mangled, sizeof(mangled), "Vec_%s", type_name(elem_type));
+
+            // Check if already instantiated
+            VecInstance* existing = lookup_vec_instance(checker, mangled);
+            if (existing) {
+                return existing->type;
+            }
+
+            // Create the vec type
+            Type* vec_type = type_vec(elem_type);
+
+            // Register for codegen
+            register_vec_instance(checker, mangled, elem_type, vec_type);
+
+            // Also ensure a Span instance for the same element type exists (for slicing)
+            char span_mangled[256];
+            snprintf(span_mangled, sizeof(span_mangled), "Span_%s", type_name(elem_type));
+            if (!lookup_span_instance(checker, span_mangled)) {
+                Type* span_type = type_span(elem_type);
+                register_span_instance(checker, span_mangled, elem_type, span_type);
+            }
+
+            return vec_type;
+        }
 
         // Handle builtin Span<T> type
         if (strcmp(base_name, "Span") == 0) {
@@ -1149,6 +1219,15 @@ static Type* check_index_expr(Checker* checker, Node* node) {
         node->as.index.is_span_index = 1;
         return object->as.span.elem;
     }
+    if (object->kind == TYPE_VEC) {
+        if (!type_is_integer(index)) {
+            check_error(checker, node->line, node->column, "Vec index must be an integer, got '%s'",
+                        type_name(index));
+            return type_error;
+        }
+        node->as.index.is_vec_index = 1;
+        return object->as.vec.elem;
+    }
     if (object->kind == TYPE_STRING) {
         if (!type_is_integer(index)) {
             check_error(checker, node->line, node->column,
@@ -1192,6 +1271,9 @@ static Type* check_slice_expr(Checker* checker, Node* node) {
     } else if (object->kind == TYPE_SPAN) {
         elem_type               = object->as.span.elem;
         node->as.slice.is_array = 0;
+    } else if (object->kind == TYPE_VEC) {
+        elem_type             = object->as.vec.elem;
+        node->as.slice.is_vec = 1;
     } else {
         check_error(checker, node->line, node->column, "Cannot slice type '%s'", type_name(object));
         return type_error;
@@ -1263,6 +1345,46 @@ static Type* check_member_expr(Checker* checker, Node* node) {
         }
         check_error(checker, node->line, node->column, "Enum '%s' has no member '%s'",
                     object->as.enm.name, member_name);
+        return type_error;
+    }
+
+    // Handle Vec member access
+    if (object->kind == TYPE_VEC) {
+        const char* member_name = node->as.member.name;
+        node->as.member.is_ref  = 1; // Vec is a pointer (RC-managed)
+        Type* elem_type         = object->as.vec.elem;
+
+        if (strcmp(member_name, "count") == 0) {
+            return type_int64;
+        }
+        if (strcmp(member_name, "capacity") == 0) {
+            return type_int64;
+        }
+        if (strcmp(member_name, "data") == 0) {
+            check_error(checker, node->line, node->column,
+                        "Vec 'data' field is private; use indexing");
+            return type_error;
+        }
+        // Methods: push, pop, clear
+        if (strcmp(member_name, "push") == 0 || strcmp(member_name, "pop") == 0 ||
+            strcmp(member_name, "clear") == 0) {
+            // Build mangled vec name for method dispatch
+            char mangled[256];
+            snprintf(mangled, sizeof(mangled), "__Vec_%s", type_name(elem_type));
+            node->as.member.struct_name = xstrdup(mangled);
+
+            if (strcmp(member_name, "push") == 0) {
+                Type** params = xmalloc(1 * sizeof(Type*));
+                params[0]     = elem_type;
+                return type_func(params, 1, type_void, 0);
+            }
+            if (strcmp(member_name, "pop") == 0) {
+                return type_func(NULL, 0, elem_type, 0);
+            }
+            // clear
+            return type_func(NULL, 0, type_void, 0);
+        }
+        check_error(checker, node->line, node->column, "Vec has no member '%s'", member_name);
         return type_error;
     }
 
@@ -1675,19 +1797,37 @@ static Type* check_expression(Checker* checker, Node* node) {
         return check_assign_expr(checker, node);
 
     case NODE_NEW_EXPR: {
-        Type* struct_type = resolve_type(checker, node->as.new_expr.type_node);
-        if (struct_type == type_error)
+        Type* resolved = resolve_type(checker, node->as.new_expr.type_node);
+        if (resolved == type_error)
             return type_error;
-        if (struct_type->kind != TYPE_STRUCT) {
+        if (resolved->kind == TYPE_VEC) {
+            // new Vec<T>{} or new Vec<T>{1, 2, 3}
+            Type* elem_type = resolved->as.vec.elem;
+            Node* init      = node->as.new_expr.init;
+            // Check each element expression against the element type
+            for (int i = 0; i < init->as.struct_init.fields.count; i++) {
+                Node* field = init->as.struct_init.fields.nodes[i];
+                if (field->type != NODE_FIELD_INIT)
+                    continue;
+                Type* val_type = check_expression(checker, field->as.field_init.value);
+                if (val_type->kind != TYPE_ERROR && !type_assignable(elem_type, val_type)) {
+                    check_error_type(checker, field->line, field->column, "Vec element", elem_type,
+                                     val_type);
+                }
+            }
+            node->as.new_expr.resolved_type = resolved;
+            return resolved;
+        }
+        if (resolved->kind != TYPE_STRUCT) {
             check_error(checker, node->line, node->column, "'new' requires a struct type, got '%s'",
-                        type_name(struct_type));
+                        type_name(resolved));
             return type_error;
         }
-        Type* init_type = check_struct_init(checker, node->as.new_expr.init, struct_type);
+        Type* init_type = check_struct_init(checker, node->as.new_expr.init, resolved);
         if (init_type == type_error)
             return type_error;
-        node->as.new_expr.resolved_type = struct_type;
-        return struct_type;
+        node->as.new_expr.resolved_type = resolved;
+        return resolved;
     }
 
     case NODE_STRUCT_INIT:

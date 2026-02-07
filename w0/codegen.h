@@ -47,6 +47,9 @@ typedef struct {
     // Span instances from checker (not owned, do not free)
     SpanInstance* span_instances;
     int           span_instance_count;
+    // Vec instances from checker (not owned, do not free)
+    VecInstance* vec_instances;
+    int          vec_instance_count;
     // Trait implementations from checker (not owned, do not free)
     TraitImpl* trait_impls;
     int        trait_impl_count;
@@ -63,8 +66,8 @@ typedef struct {
 } CodeGen;
 
 void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,
-                  SpanInstance* span_instances, int span_count, TraitImpl* trait_impls,
-                  int trait_impl_count, int rc_debug);
+                  SpanInstance* span_instances, int span_count, VecInstance* vec_instances,
+                  int vec_count, TraitImpl* trait_impls, int trait_impl_count, int rc_debug);
 void codegen_emit(CodeGen* gen, Node* ast);
 
 #endif

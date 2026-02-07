@@ -268,26 +268,70 @@ static Node* parse_struct_init(Parser* parser) {
     nodelist_init(&node->as.struct_init.fields);
 
     if (!check_token(parser, TOK_RBRACE)) {
-        for (;;) {
-            Token field_name = parser->current;
-            consume_token(parser, TOK_IDENT, "Expected field name in struct initializer");
-
-            Node* field = node_new(NODE_FIELD_INIT, field_name.line, field_name.column);
-            field->as.field_init.name        = copy_token_string(&field_name);
-            field->as.field_init.name_length = field_name.length;
-
-            consume_token(parser, TOK_COLON, "Expected ':' after field name");
-            field->as.field_init.value = parse_expression(parser);
-
-            nodelist_push(&node->as.struct_init.fields, field);
-
-            if (match_token(parser, TOK_COMMA)) {
-                if (check_token(parser, TOK_RBRACE)) {
-                    break; // trailing comma
-                }
-                continue;
+        // Peek ahead to determine mode: if first token is NOT ident followed by ':',
+        // parse as bare expression list (for Vec element initializers)
+        int is_element_list = 0;
+        if (parser->current.type != TOK_IDENT) {
+            is_element_list = 1;
+        } else {
+            // Peek: if next token after ident is not ':', it's an element list
+            // We need to check if the token after the identifier is ':'
+            // Use a simple lookahead: save state, advance, check, restore
+            Lexer saved_lexer   = parser->lexer;
+            Token saved_current = parser->current;
+            int   saved_error   = parser->had_error;
+            advance_token(parser);
+            if (!check_token(parser, TOK_COLON)) {
+                is_element_list = 1;
             }
-            break;
+            // Restore parser state
+            parser->lexer     = saved_lexer;
+            parser->current   = saved_current;
+            parser->had_error = saved_error;
+        }
+
+        if (is_element_list) {
+            // Parse bare expressions (for Vec initializers like {1, 2, 3})
+            for (;;) {
+                Token elem_token = parser->current;
+                Node* field      = node_new(NODE_FIELD_INIT, elem_token.line, elem_token.column);
+                field->as.field_init.name        = NULL;
+                field->as.field_init.name_length = 0;
+                field->as.field_init.value       = parse_expression(parser);
+
+                nodelist_push(&node->as.struct_init.fields, field);
+
+                if (match_token(parser, TOK_COMMA)) {
+                    if (check_token(parser, TOK_RBRACE)) {
+                        break; // trailing comma
+                    }
+                    continue;
+                }
+                break;
+            }
+        } else {
+            // Parse named fields (standard struct init: {name: expr, ...})
+            for (;;) {
+                Token field_name = parser->current;
+                consume_token(parser, TOK_IDENT, "Expected field name in struct initializer");
+
+                Node* field = node_new(NODE_FIELD_INIT, field_name.line, field_name.column);
+                field->as.field_init.name        = copy_token_string(&field_name);
+                field->as.field_init.name_length = field_name.length;
+
+                consume_token(parser, TOK_COLON, "Expected ':' after field name");
+                field->as.field_init.value = parse_expression(parser);
+
+                nodelist_push(&node->as.struct_init.fields, field);
+
+                if (match_token(parser, TOK_COMMA)) {
+                    if (check_token(parser, TOK_RBRACE)) {
+                        break; // trailing comma
+                    }
+                    continue;
+                }
+                break;
+            }
         }
     }
 

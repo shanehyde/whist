@@ -453,8 +453,8 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
 }
 
 void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,
-                  SpanInstance* span_instances, int span_count, TraitImpl* trait_impls,
-                  int trait_impl_count, int rc_debug) {
+                  SpanInstance* span_instances, int span_count, VecInstance* vec_instances,
+                  int vec_count, TraitImpl* trait_impls, int trait_impl_count, int rc_debug) {
     gen->out                    = out;
     gen->indent                 = 0;
     gen->temp_count             = 0;
@@ -476,6 +476,8 @@ void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, i
     gen->generic_instance_count = generic_count;
     gen->span_instances         = span_instances;
     gen->span_instance_count    = span_count;
+    gen->vec_instances          = vec_instances;
+    gen->vec_instance_count     = vec_count;
     gen->trait_impls            = trait_impls;
     gen->trait_impl_count       = trait_impl_count;
     gen->enum_names             = NULL;
@@ -580,15 +582,17 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         emit(gen, "}\n\n");
     }
 
-    // Emit span struct typedefs
-    for (int i = 0; i < gen->span_instance_count; i++) {
-        SpanInstance* inst = &gen->span_instances[i];
-        emit(gen, "typedef struct {\n");
-        emit(gen, "    const ");
-        emit_resolved_type(gen, inst->elem_type);
-        emit(gen, "* data;\n");
-        emit(gen, "    uint64_t count;\n");
-        emit(gen, "} __Span_%s;\n\n", type_name(inst->elem_type));
+    // Emit Vec bounds check helper (only if we have vec instances)
+    if (gen->vec_instance_count > 0) {
+        emit(gen, "static inline void __w0_vec_check(int64_t count, int64_t idx, int line, int "
+                  "col) {\n");
+        emit(gen, "    if (idx < 0 || idx >= count) {\n");
+        emit(gen, "        fprintf(stderr, \"Panic: Vec index %%lld out of bounds (count=%%lld) "
+                  "at %%d:%%d\\n\",\n");
+        emit(gen, "                (long long)idx, (long long)count, line, col);\n");
+        emit(gen, "        exit(1);\n");
+        emit(gen, "    }\n");
+        emit(gen, "}\n\n");
     }
 
     // Emit tuple typedefs
@@ -701,6 +705,32 @@ void codegen_emit(CodeGen* gen, Node* ast) {
              gen->generic_instances[i].mangled_name);
     }
     emit(gen, "\n");
+
+    // Emit span struct typedefs (after struct forward declarations)
+    for (int i = 0; i < gen->span_instance_count; i++) {
+        SpanInstance* inst = &gen->span_instances[i];
+        emit(gen, "typedef struct {\n");
+        emit(gen, "    const ");
+        emit_resolved_type(gen, inst->elem_type);
+        emit(gen, "* data;\n");
+        emit(gen, "    uint64_t count;\n");
+        emit(gen, "} __Span_%s;\n\n", type_name(inst->elem_type));
+    }
+
+    // Emit Vec struct typedefs (after struct forward declarations)
+    for (int i = 0; i < gen->vec_instance_count; i++) {
+        VecInstance* inst       = &gen->vec_instances[i];
+        Type*        elem_type  = inst->elem_type;
+        const char*  elem_tname = type_name(elem_type);
+
+        emit(gen, "typedef struct {\n");
+        emit(gen, "    ");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, "* data;\n");
+        emit(gen, "    int64_t count;\n");
+        emit(gen, "    int64_t capacity;\n");
+        emit(gen, "} __Vec_%s;\n\n", elem_tname);
+    }
 
     // Emit enum typedefs (after struct forward declarations)
     for (int m = 0; m < ast->as.program.modules.count; m++) {
@@ -1353,6 +1383,96 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         }
     }
     emit(gen, "\n");
+
+    // Emit Vec method functions (after struct __rc_dec forward declarations)
+    for (int i = 0; i < gen->vec_instance_count; i++) {
+        VecInstance* inst        = &gen->vec_instances[i];
+        Type*        elem_type   = inst->elem_type;
+        const char*  elem_tname  = type_name(elem_type);
+        int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC);
+
+        // Push
+        emit(gen, "static inline void __Vec_%s_push(__Vec_%s* self, ", elem_tname, elem_tname);
+        emit_resolved_type(gen, elem_type);
+        emit(gen, " value) {\n");
+        emit(gen, "    if (self->count == self->capacity) {\n");
+        emit(gen, "        int64_t new_cap = self->capacity == 0 ? 4 : self->capacity * 2;\n");
+        emit(gen, "        self->data = realloc(self->data, new_cap * sizeof(");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, "));\n");
+        emit(gen, "        self->capacity = new_cap;\n");
+        emit(gen, "    }\n");
+        emit(gen, "    self->data[self->count] = value;\n");
+        emit(gen, "    self->count++;\n");
+        emit(gen, "}\n\n");
+
+        // Pop
+        emit(gen, "static inline ");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, " __Vec_%s_pop(__Vec_%s* self) {\n", elem_tname, elem_tname);
+        emit(gen, "    if (self->count == 0) {\n");
+        emit(gen, "        fprintf(stderr, \"Panic: pop from empty Vec\\n\");\n");
+        emit(gen, "        exit(1);\n");
+        emit(gen, "    }\n");
+        emit(gen, "    self->count--;\n");
+        emit(gen, "    return self->data[self->count];\n");
+        emit(gen, "}\n\n");
+
+        // Clear
+        emit(gen, "static inline void __Vec_%s_clear(__Vec_%s* self) {\n", elem_tname, elem_tname);
+        if (elem_is_ptr) {
+            emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
+            if (elem_type->kind == TYPE_VEC) {
+                emit(gen, "        __rc_dec_Vec_%s(self->data[i]);\n",
+                     type_name(elem_type->as.vec.elem));
+            } else if (elem_type->kind == TYPE_STRUCT &&
+                       (elem_type->as.struc.has_drop || elem_type->as.struc.has_rc_fields)) {
+                emit(gen, "        __rc_dec_%s(self->data[i]);\n", elem_type->as.struc.name);
+            } else {
+                emit(gen, "        __rc_dec(self->data[i]);\n");
+            }
+            emit(gen, "    }\n");
+        }
+        emit(gen, "    self->count = 0;\n");
+        emit(gen, "}\n\n");
+    }
+
+    // Emit __rc_dec_Vec_* forward declarations
+    for (int i = 0; i < gen->vec_instance_count; i++) {
+        VecInstance* inst       = &gen->vec_instances[i];
+        const char*  elem_tname = type_name(inst->elem_type);
+        emit(gen, "static inline void __rc_dec_Vec_%s(__Vec_%s* ptr);\n", elem_tname, elem_tname);
+    }
+
+    // Emit __rc_dec_Vec_* definitions
+    for (int i = 0; i < gen->vec_instance_count; i++) {
+        VecInstance* inst        = &gen->vec_instances[i];
+        Type*        elem_type   = inst->elem_type;
+        const char*  elem_tname  = type_name(elem_type);
+        int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC);
+
+        emit(gen, "static inline void __rc_dec_Vec_%s(__Vec_%s* ptr) {\n", elem_tname, elem_tname);
+        emit(gen, "    if (!ptr) return;\n");
+        emit(gen, "    __RcHeader* h = (__RcHeader*)ptr - 1;\n");
+        emit(gen, "    if (--h->refcount == 0) {\n");
+        if (elem_is_ptr) {
+            emit(gen, "        for (int64_t i = 0; i < ptr->count; i++) {\n");
+            if (elem_type->kind == TYPE_VEC) {
+                emit(gen, "            __rc_dec_Vec_%s(ptr->data[i]);\n",
+                     type_name(elem_type->as.vec.elem));
+            } else if (elem_type->kind == TYPE_STRUCT &&
+                       (elem_type->as.struc.has_drop || elem_type->as.struc.has_rc_fields)) {
+                emit(gen, "            __rc_dec_%s(ptr->data[i]);\n", elem_type->as.struc.name);
+            } else {
+                emit(gen, "            __rc_dec(ptr->data[i]);\n");
+            }
+            emit(gen, "        }\n");
+        }
+        emit(gen, "        free(ptr->data);\n");
+        emit(gen, "        free(h);\n");
+        emit(gen, "    }\n");
+        emit(gen, "}\n\n");
+    }
 
     // Emit type-specific __rc_dec_TypeName functions for structs with Drop or RC fields
     // Non-generic structs: scan modules for struct decls with resolved types
