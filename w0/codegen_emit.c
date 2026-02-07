@@ -859,6 +859,70 @@ static char* resolve_generic_method_target(CodeGen* gen, Node* member) {
     return mangled;
 }
 
+// Build the __rc_dec function name for a field type AST node in a generic method body.
+// Returns a malloc'd string, or NULL if the field is not RC-managed. Caller must free.
+static char* resolve_generic_field_dec_func(CodeGen* gen, Node* field_type_node) {
+    if (!field_type_node)
+        return NULL;
+    if (field_type_node->type == NODE_GENERIC_TYPE) {
+        const char* base = field_type_node->as.generic_type.base_name;
+        if (strcmp(base, "Vec") == 0) {
+            // Vec<T> → __rc_dec_Vec_T
+            Node* elem = field_type_node->as.generic_type.type_args.nodes[0];
+            char  buf[256];
+            if (elem->type == NODE_IDENT) {
+                const char* elem_name = elem->as.ident.name;
+                if (gen->subst_ctx) {
+                    for (int s = 0; s < gen->subst_ctx->count; s++) {
+                        if (strcmp(gen->subst_ctx->type_params[s], elem_name) == 0) {
+                            snprintf(buf, sizeof(buf), "__rc_dec_Vec_%s",
+                                     type_name(gen->subst_ctx->type_args[s]));
+                            return xstrdup(buf);
+                        }
+                    }
+                }
+                snprintf(buf, sizeof(buf), "__rc_dec_Vec_%s", elem_name);
+                return xstrdup(buf);
+            } else if (elem->type == NODE_GENERIC_TYPE) {
+                char* mangled = build_mangled_name_from_generic_node(gen, elem);
+                snprintf(buf, sizeof(buf), "__rc_dec_Vec_%s", mangled);
+                free(mangled);
+                return xstrdup(buf);
+            }
+            return NULL;
+        }
+        if (strcmp(base, "Span") == 0)
+            return NULL; // Spans are value types, not RC
+        // Generic struct → __rc_dec_MangledName
+        char* mangled = build_mangled_name_from_generic_node(gen, field_type_node);
+        char  buf[256];
+        snprintf(buf, sizeof(buf), "__rc_dec_%s", mangled);
+        free(mangled);
+        return xstrdup(buf);
+    }
+    if (field_type_node->type == NODE_IDENT) {
+        const char* name = field_type_node->as.ident.name;
+        // Check if it's a type param that resolves to a struct
+        if (gen->subst_ctx) {
+            for (int s = 0; s < gen->subst_ctx->count; s++) {
+                if (strcmp(gen->subst_ctx->type_params[s], name) == 0) {
+                    Type* resolved = gen->subst_ctx->type_args[s];
+                    if (resolved->kind == TYPE_STRUCT)
+                        return (char*)get_dec_func_for_type(resolved);
+                    return NULL;
+                }
+            }
+        }
+        // Non-generic struct field
+        if (!type_is_builtin_name(name) && !is_enum_type_name(gen, name)) {
+            char buf[256];
+            snprintf(buf, sizeof(buf), "__rc_dec_%s", name);
+            return xstrdup(buf);
+        }
+    }
+    return NULL;
+}
+
 static void emit_expr(CodeGen* gen, Node* node) {
     if (!node)
         return;
@@ -1521,6 +1585,32 @@ void emit_stmt(CodeGen* gen, Node* node) {
                     emit_expr(gen, member);
                     emit(gen, " = __rc_tmp%d;\n", tmp);
                     free(member_dec_owned);
+                    break;
+                }
+            }
+            // Handle self.field = new_value in method bodies (self is not RC-tracked)
+            if (!obj_is_rc && member->as.member.object->type == NODE_IDENT &&
+                strcmp(member->as.member.object->as.ident.name, "self") == 0) {
+                int   value_is_rc = expr->as.assign.value->type == NODE_NEW_EXPR;
+                char* dec_fn      = NULL;
+                if (value_is_rc && gen->current_generic_template) {
+                    // Generic method: look up field type from template
+                    Node* ftype =
+                        lookup_generic_template_field_type(gen, member->as.member.name);
+                    dec_fn = resolve_generic_field_dec_func(gen, ftype);
+                }
+                if (dec_fn) {
+                    // Dec the old field value, then assign the new one
+                    emit_indent(gen);
+                    emit(gen, "%s(", dec_fn);
+                    emit_expr(gen, member);
+                    emit(gen, ");\n");
+                    emit_indent(gen);
+                    emit_expr(gen, member);
+                    emit(gen, " = ");
+                    emit_expr(gen, expr->as.assign.value);
+                    emit(gen, ";\n");
+                    free(dec_fn);
                     break;
                 }
             }
