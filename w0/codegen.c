@@ -33,6 +33,7 @@ static void  emit_decl(CodeGen* gen, Node* node);
 static void  emit_struct_init(CodeGen* gen, Node* node);
 static int   tuple_types_equal(Type* a, Type* b);
 static Type* type_from_node(Node* type_node);
+static void  emit_block_contents(CodeGen* gen, Node* block);
 
 static void defer_push(CodeGen* gen, Node* node) {
     VEC_GROW(gen->defer_stack, gen->defer_count, gen->defer_capacity);
@@ -949,6 +950,19 @@ static void emit_destruct_pattern(CodeGen* gen, DestructPattern* pattern, const 
     }
 }
 
+// Emit statements within a block without emitting braces, but with RC scope handling
+static void emit_block_contents(CodeGen* gen, Node* block) {
+    if (!block || block->type != NODE_BLOCK)
+        return;
+
+    gen->rc_scope_depth++;
+    for (int i = 0; i < block->as.block.stmts.count; i++) {
+        emit_stmt(gen, block->as.block.stmts.nodes[i]);
+    }
+    rc_cleanup_scope(gen, gen->rc_scope_depth);
+    gen->rc_scope_depth--;
+}
+
 static void emit_stmt(CodeGen* gen, Node* node) {
     if (!node)
         return;
@@ -1246,9 +1260,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         gen->indent++;
         // Emit then block contents directly (it's already a block)
         if (node->as.if_stmt.then_block->type == NODE_BLOCK) {
-            for (int i = 0; i < node->as.if_stmt.then_block->as.block.stmts.count; i++) {
-                emit_stmt(gen, node->as.if_stmt.then_block->as.block.stmts.nodes[i]);
-            }
+            emit_block_contents(gen, node->as.if_stmt.then_block);
         } else {
             emit_stmt(gen, node->as.if_stmt.then_block);
         }
@@ -1268,9 +1280,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 emit(gen, " else {\n");
                 gen->indent++;
                 if (node->as.if_stmt.else_block->type == NODE_BLOCK) {
-                    for (int i = 0; i < node->as.if_stmt.else_block->as.block.stmts.count; i++) {
-                        emit_stmt(gen, node->as.if_stmt.else_block->as.block.stmts.nodes[i]);
-                    }
+                    emit_block_contents(gen, node->as.if_stmt.else_block);
                 } else {
                     emit_stmt(gen, node->as.if_stmt.else_block);
                 }
@@ -1290,9 +1300,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         emit(gen, ") {\n");
         gen->indent++;
         if (node->as.while_stmt.body->type == NODE_BLOCK) {
-            for (int i = 0; i < node->as.while_stmt.body->as.block.stmts.count; i++) {
-                emit_stmt(gen, node->as.while_stmt.body->as.block.stmts.nodes[i]);
-            }
+            emit_block_contents(gen, node->as.while_stmt.body);
         } else {
             emit_stmt(gen, node->as.while_stmt.body);
         }
@@ -1334,9 +1342,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         emit(gen, ") {\n");
         gen->indent++;
         if (node->as.for_stmt.body->type == NODE_BLOCK) {
-            for (int i = 0; i < node->as.for_stmt.body->as.block.stmts.count; i++) {
-                emit_stmt(gen, node->as.for_stmt.body->as.block.stmts.nodes[i]);
-            }
+            emit_block_contents(gen, node->as.for_stmt.body);
         } else {
             emit_stmt(gen, node->as.for_stmt.body);
         }
@@ -1357,9 +1363,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         emit(gen, ") {\n");
         gen->indent++;
         if (node->as.foreach_stmt.body->type == NODE_BLOCK) {
-            for (int i = 0; i < node->as.foreach_stmt.body->as.block.stmts.count; i++) {
-                emit_stmt(gen, node->as.foreach_stmt.body->as.block.stmts.nodes[i]);
-            }
+            emit_block_contents(gen, node->as.foreach_stmt.body);
         } else {
             emit_stmt(gen, node->as.foreach_stmt.body);
         }

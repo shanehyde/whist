@@ -23,12 +23,16 @@ static Type* check_unary_expr(Checker* checker, Node* node);
 static Type* check_index_expr(Checker* checker, Node* node);
 static Type* check_member_expr(Checker* checker, Node* node);
 static Type* check_assign_expr(Checker* checker, Node* node);
+static int   is_lvalue(Node* node);
 
 // Forward declarations for destructuring pattern checking
-static int  check_destruct_pattern_redefinitions(Checker* checker, DestructPattern* pattern,
-                                                 int line, int col);
-static int  check_destruct_pattern_against_type(Checker* checker, DestructPattern* pattern,
-                                                Type* type, int line, int col);
+static int check_destruct_pattern_redefinitions(Checker* checker, DestructPattern* pattern,
+                                                int line, int col);
+static int check_destruct_pattern_redefinitions_internal(Checker* checker, DestructPattern* pattern,
+                                                         int line, int col, char*** names,
+                                                         int* count, int* capacity);
+static int check_destruct_pattern_against_type(Checker* checker, DestructPattern* pattern,
+                                               Type* type, int line, int col);
 static void define_destruct_pattern_vars(Checker* checker, DestructPattern* pattern, Type* type,
                                          int is_const, int is_public);
 
@@ -1154,6 +1158,20 @@ static Type* check_member_expr(Checker* checker, Node* node) {
     return type_error;
 }
 
+static int is_lvalue(Node* node) {
+    if (!node)
+        return 0;
+
+    switch (node->type) {
+    case NODE_IDENT:
+    case NODE_MEMBER:
+    case NODE_INDEX:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static Type* check_assign_expr(Checker* checker, Node* node) {
     Type* target = check_expression(checker, node->as.assign.target);
 
@@ -1170,6 +1188,10 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
 
     // Check if target is assignable (lvalue check)
     Node* t = node->as.assign.target;
+    if (!is_lvalue(t)) {
+        check_error(checker, node->line, node->column, "Invalid assignment target");
+        return type_error;
+    }
     if (t->type == NODE_IDENT) {
         Symbol* sym = checker_lookup(checker, t->as.ident.name);
         if (sym && sym->is_const) {
@@ -1489,21 +1511,56 @@ static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type) 
 // Returns 1 if error found, 0 otherwise
 static int check_destruct_pattern_redefinitions(Checker* checker, DestructPattern* pattern,
                                                 int line, int col) {
+    int    name_count    = 0;
+    int    name_capacity = 4;
+    char** names         = xmalloc(name_capacity * sizeof(char*));
+
+    int had_error = check_destruct_pattern_redefinitions_internal(
+        checker, pattern, line, col, &names, &name_count, &name_capacity);
+
+    for (int i = 0; i < name_count; i++) {
+        free(names[i]);
+    }
+    free(names);
+
+    return had_error;
+}
+
+static int check_destruct_pattern_redefinitions_internal(Checker* checker, DestructPattern* pattern,
+                                                         int line, int col, char*** names,
+                                                         int* count, int* capacity) {
     if (!pattern)
         return 0;
 
     switch (pattern->kind) {
-    case PATTERN_IDENT:
-        if (checker_lookup_local(checker, pattern->as.ident.name)) {
-            check_error(checker, line, col, "Redefinition of '%s'", pattern->as.ident.name);
+    case PATTERN_IDENT: {
+        const char* name = pattern->as.ident.name;
+
+        if (checker_lookup_local(checker, name)) {
+            check_error(checker, line, col, "Redefinition of '%s'", name);
             return 1;
         }
+
+        for (int i = 0; i < *count; i++) {
+            if (strcmp((*names)[i], name) == 0) {
+                check_error(checker, line, col, "Redefinition of '%s'", name);
+                return 1;
+            }
+        }
+
+        if (*count >= *capacity) {
+            *capacity *= 2;
+            *names = xrealloc(*names, (*capacity) * sizeof(char*));
+        }
+        (*names)[*count] = xstrdup(name);
+        (*count)++;
         return 0;
+    }
 
     case PATTERN_TUPLE:
         for (int i = 0; i < pattern->as.tuple.count; i++) {
-            if (check_destruct_pattern_redefinitions(checker, pattern->as.tuple.elements[i], line,
-                                                     col)) {
+            if (check_destruct_pattern_redefinitions_internal(
+                    checker, pattern->as.tuple.elements[i], line, col, names, count, capacity)) {
                 return 1;
             }
         }

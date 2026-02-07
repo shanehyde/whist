@@ -18,6 +18,8 @@ valid_passed=0
 valid_failed=0
 error_passed=0
 error_failed=0
+rc_runtime_passed=0
+rc_runtime_failed=0
 
 # Options
 run_valid=false
@@ -136,6 +138,101 @@ run_error_test() {
     fi
 }
 
+run_rc_runtime_test() {
+    local file="$1"
+    local name=$(basename "$file")
+    local expected_free_order=$(grep "// Expected rc free order:" "$file" | sed 's|.*// Expected rc free order: *||' | head -1)
+
+    if $verbose; then
+        echo -e "${YELLOW}--- RC Runtime $file ---${RESET}"
+        if [ -n "$expected_free_order" ]; then
+            echo -e "${GRAY}Expected rc free order: $expected_free_order${RESET}"
+        fi
+    else
+        printf "${BOLD}%-35s${RESET}" "$name:"
+    fi
+
+    local tmp
+    tmp=$(mktemp /tmp/w0_rc_test_XXXXXX)
+    local compile_output
+    compile_output=$(("$W0" --lib-path "$LIB_PATH" --rc-debug "$file" | cc -x c -I"$LIB_PATH/include" -o "$tmp" -) 2>&1)
+    if [ $? -ne 0 ]; then
+        if $verbose; then
+            echo -e "${RED}✗ FAIL (compile)${RESET}"
+            echo "$compile_output"
+            echo ""
+        else
+            echo -e " ${RED}✗ FAIL (compile)${RESET}"
+        fi
+        rm -f "$tmp"
+        ((rc_runtime_failed++))
+        return
+    fi
+
+    local run_output
+    run_output=$("$tmp" 2>&1)
+    local run_status=$?
+    rm -f "$tmp"
+
+    if [ $run_status -ne 0 ]; then
+        if $verbose; then
+            echo -e "${RED}✗ FAIL (runtime exit $run_status)${RESET}"
+            echo "$run_output"
+            echo ""
+        else
+            echo -e " ${RED}✗ FAIL (runtime)${RESET}"
+        fi
+        ((rc_runtime_failed++))
+        return
+    fi
+
+    if [ -n "$expected_free_order" ]; then
+        local left_idx=$(echo "$expected_free_order" | awk -F" before " '{print $1}' | tr -d ' ')
+        local right_idx=$(echo "$expected_free_order" | awk -F" before " '{print $2}' | tr -d ' ')
+
+        local alloc_ptrs
+        alloc_ptrs=$(echo "$run_output" | awk '/RC_ALLOC:/ {print $2}')
+
+        local left_ptr=$(echo "$alloc_ptrs" | awk -v idx="$left_idx" 'NR==idx {print $1}')
+        local right_ptr=$(echo "$alloc_ptrs" | awk -v idx="$right_idx" 'NR==idx {print $1}')
+
+        if [ -z "$left_ptr" ] || [ -z "$right_ptr" ]; then
+            if $verbose; then
+                echo -e "${RED}✗ FAIL (alloc parse)${RESET}"
+                echo "$run_output"
+                echo ""
+            else
+                echo -e " ${RED}✗ FAIL (alloc parse)${RESET}"
+            fi
+            ((rc_runtime_failed++))
+            return
+        fi
+
+        local left_pos=$(echo "$run_output" | awk -v ptr="$left_ptr" '$0 ~ ("RC_FREE: " ptr) {print NR; exit}')
+        local right_pos=$(echo "$run_output" | awk -v ptr="$right_ptr" '$0 ~ ("RC_FREE: " ptr) {print NR; exit}')
+
+        if [ -z "$left_pos" ] || [ -z "$right_pos" ] || [ "$left_pos" -gt "$right_pos" ]; then
+            if $verbose; then
+                echo -e "${RED}✗ FAIL (free order)${RESET}"
+                echo "$run_output"
+                echo ""
+            else
+                echo -e " ${RED}✗ FAIL (free order)${RESET}"
+            fi
+            ((rc_runtime_failed++))
+            return
+        fi
+    fi
+
+    if $verbose; then
+        echo -e "${GREEN}✓ PASS${RESET}"
+        echo ""
+    else
+        echo -e " ${GREEN}✓ PASS${RESET}"
+    fi
+    ((rc_runtime_passed++))
+}
+
 print_summary() {
     echo ""
     echo -e "${BLUE}=== Test Summary ===${RESET}"
@@ -150,8 +247,15 @@ print_summary() {
         echo -e "${GREEN}Error Cases:    $error_passed/$error_total passed${RESET}"
     fi
 
-    local total_passed=$((valid_passed + error_passed))
-    local total_failed=$((valid_failed + error_failed))
+    if $run_valid; then
+        local rc_total=$((rc_runtime_passed + rc_runtime_failed))
+        if [ $rc_total -gt 0 ]; then
+            echo -e "${GREEN}RC Runtime:     $rc_runtime_passed/$rc_total passed${RESET}"
+        fi
+    fi
+
+    local total_passed=$((valid_passed + error_passed + rc_runtime_passed))
+    local total_failed=$((valid_failed + error_failed + rc_runtime_failed))
     local total=$((total_passed + total_failed))
 
     if $run_valid && $run_errors; then
@@ -203,6 +307,15 @@ if $run_valid; then
         run_valid_test "$f"
     done
     echo ""
+
+    if ls test/rc_runtime/*.w >/dev/null 2>&1; then
+        echo -e "${CYAN}=== RC Runtime Programs (should run) ===${RESET}"
+        for f in test/rc_runtime/*.w; do
+            [ -e "$f" ] || continue
+            run_rc_runtime_test "$f"
+        done
+        echo ""
+    fi
 fi
 
 if $run_errors; then
