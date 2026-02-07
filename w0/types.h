@@ -21,6 +21,7 @@ typedef enum {
     TYPE_VOIDPTR,
     TYPE_ARRAY,
     TYPE_SPAN,
+    TYPE_VEC,
     TYPE_STRUCT,
     TYPE_ENUM,
     TYPE_TRAIT,
@@ -56,6 +57,11 @@ struct Type {
         struct {
             Type* elem; // Element type T
         } span;
+
+        // Vec: Vec<T>
+        struct {
+            Type* elem; // Element type T
+        } vec;
 
         // Struct
         struct {
@@ -145,6 +151,7 @@ Type* type_func(Type** params, int param_count, Type* return_type, int is_vararg
 Type* type_tuple(Type** elems, int count);
 Type* type_generic_param(const char* name);
 Type* type_span(Type* elem);
+Type* type_vec(Type* elem);
 
 // Generic type name mangling
 char* type_mangle_generic(const char* base, Type** args, int count);

@@ -162,12 +162,25 @@ Aliases are fully interchangeable with the underlying type: `var id: UserId = 42
 
 **Tuple types:** `(T1, T2)` or `(T1, T2, T3, ...)` represent fixed-size heterogeneous collections. Tuples must have at least two elements.
 
-**Span types:** `Span<T>` is a builtin generic type representing an immutable view into contiguous memory (array or another span). Spans have:
+**Span types:** `Span<T>` is a builtin generic type representing an immutable view into contiguous memory (array, span, or vec). Spans have:
 - `span.count` — number of elements (read-only)
 - `span[i]` — bounds-checked element access (panics if out of bounds)
 - `span.data` — private (compile error if accessed directly)
 
 Create spans using slice syntax: `var s: Span<i64> = arr[:];`
+
+**Vec types:** `Vec<T>` is a builtin generic type representing a dynamically-growable array. Vecs are RC-managed (created with `new`) and have:
+- `vec.count` — number of elements (read-only, `i64`)
+- `vec.capacity` — current capacity (read-only, `i64`)
+- `vec[i]` — bounds-checked element access (panics if out of bounds)
+- `vec[i] = x` — bounds-checked element write
+- `vec.push(x)` — append an element
+- `vec.pop()` — remove and return the last element (panics if empty)
+- `vec.clear()` — remove all elements (decrements RC for struct elements)
+- `vec.data` — private (compile error if accessed directly)
+- Slice syntax produces a `Span<T>`: `vec[:]`, `vec[1:3]`, `vec[2:]`
+
+Create vecs: `var v = new Vec<i64>{};` or `var v = new Vec<i64>{1, 2, 3};`
 
 ---
 
@@ -290,7 +303,10 @@ Create spans using slice syntax: `var s: Span<i64> = arr[:];`
                 | <tuple-literal>
                 | <array-literal>
 
-<new-expr> ::= 'new' <type> '{' [ <field-init-list> ] '}'
+<new-expr> ::= 'new' <type> '{' [ <init-list> ] '}'
+
+<init-list> ::= <field-init-list>
+             | <element-list>
 
 <enum-value-access> ::= <identifier> '::' <identifier>
 
@@ -300,6 +316,8 @@ Create spans using slice syntax: `var s: Span<i64> = arr[:];`
 
 <field-init> ::= <identifier> ':' <expression>
 
+<element-list> ::= <expression> { ',' <expression> } [ ',' ]
+
 <tuple-literal> ::= '(' <expression> ',' <expression> { ',' <expression> } ')'
 ```
 
@@ -307,9 +325,9 @@ Create spans using slice syntax: `var s: Span<i64> = arr[:];`
 
 **Array literals:** `[1, 2, 3, 4, 5]` creates an array. The element type is inferred from the first element. All elements must have compatible types. Trailing commas are allowed.
 
-**New expressions:** `new Point { x: 1, y: 2 }` heap-allocates a struct with reference counting. The returned pointer is automatically freed when its reference count drops to zero. Copies of RC pointers (`var q = p`) increment the reference count. RC variables are automatically decremented when they go out of scope.
+**New expressions:** `new Point { x: 1, y: 2 }` heap-allocates a struct with reference counting. `new Vec<i64>{1, 2, 3}` heap-allocates a Vec with initial elements (or `new Vec<i64>{}` for empty). The returned pointer is automatically freed when its reference count drops to zero. Copies of RC pointers (`var q = p`) increment the reference count. RC variables are automatically decremented when they go out of scope.
 
-**Slice expressions:** `arr[start:end]` creates a `Span<T>` view into an array or span. Both bounds are optional:
+**Slice expressions:** `arr[start:end]` creates a `Span<T>` view into an array, span, or vec. Both bounds are optional:
 - `arr[:]` — full span (all elements)
 - `arr[1:]` — from index 1 to end
 - `arr[:3]` — from start to index 3 (exclusive)

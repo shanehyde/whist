@@ -68,6 +68,13 @@ typedef struct {
     Type* type;         // The TYPE_SPAN instance
 } SpanInstance;
 
+// Instantiated vec type
+typedef struct {
+    char* mangled_name; // "Vec_i64"
+    Type* elem_type;    // The element type
+    Type* type;         // The TYPE_VEC instance
+} VecInstance;
+
 struct Checker {
     Scope* scope;
     Type*  current_func_return; // Return type of current function
@@ -105,6 +112,11 @@ struct Checker {
     SpanInstance* span_instances;
     int           span_instance_count;
     int           span_instance_capacity;
+
+    // Instantiated vec types
+    VecInstance* vec_instances;
+    int          vec_instance_count;
+    int          vec_instance_capacity;
 
     // Trait implementations
     TraitImpl* trait_impls;

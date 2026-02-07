@@ -51,6 +51,13 @@ static const char* get_dec_func_for_type(Type* t) {
         snprintf(buf, len, "__rc_dec_%s", t->as.enm.name);
         return buf;
     }
+    if (t && t->kind == TYPE_VEC) {
+        const char* elem_tname = type_name(t->as.vec.elem);
+        size_t      len        = strlen("__rc_dec_Vec_") + strlen(elem_tname) + 1;
+        char*       buf        = xmalloc(len);
+        snprintf(buf, len, "__rc_dec_Vec_%s", elem_tname);
+        return buf;
+    }
     return xstrdup("__rc_dec");
 }
 
@@ -179,9 +186,12 @@ static int is_struct_type(CodeGen* gen, Node* type_node) {
     if (!type_node)
         return 0;
     type_node = resolve_alias(gen, type_node);
-    // Generic types (Box<i64>) are always struct types, except Span<T> and generic enums
+    // Generic types (Box<i64>) are always struct types, except Span<T>, Vec<T>, and generic enums
     if (type_node->type == NODE_GENERIC_TYPE) {
         if (strcmp(type_node->as.generic_type.base_name, "Span") == 0) {
+            return 0;
+        }
+        if (strcmp(type_node->as.generic_type.base_name, "Vec") == 0) {
             return 0;
         }
         // Check if the mangled name is a registered enum
@@ -206,6 +216,8 @@ int type_node_has_rc(CodeGen* gen, Node* type_node) {
     if (type_node->type == NODE_GENERIC_TYPE) {
         if (strcmp(type_node->as.generic_type.base_name, "Span") == 0)
             return 0;
+        if (strcmp(type_node->as.generic_type.base_name, "Vec") == 0)
+            return 1; // Vec is always RC-managed
         // Check if this is a generic enum
         char* mangled = build_mangled_name_from_generic_node(gen, type_node);
         if (is_enum_type_name(gen, mangled)) {
@@ -472,6 +484,31 @@ void emit_type(CodeGen* gen, Node* type_node) {
 
         // Special case: Span<T> is a value type, not a pointer
         int is_span = (strcmp(base, "Span") == 0);
+        int is_vec  = (strcmp(base, "Vec") == 0);
+
+        if (is_vec) {
+            emit(gen, "__Vec_");
+            Node* arg = type_node->as.generic_type.type_args.nodes[0];
+            if (arg->type == NODE_IDENT) {
+                const char* arg_name    = arg->as.ident.name;
+                int         substituted = 0;
+                if (gen->subst_ctx) {
+                    for (int s = 0; s < gen->subst_ctx->count; s++) {
+                        if (strcmp(gen->subst_ctx->type_params[s], arg_name) == 0) {
+                            Type* subst_type = gen->subst_ctx->type_args[s];
+                            emit(gen, "%s", type_name(subst_type));
+                            substituted = 1;
+                            break;
+                        }
+                    }
+                }
+                if (!substituted) {
+                    emit(gen, "%s", arg_name);
+                }
+            }
+            emit(gen, "*"); // Vec is RC-managed pointer
+            break;
+        }
 
         if (is_span) {
             emit(gen, "__Span_");
@@ -632,6 +669,9 @@ void emit_resolved_type(CodeGen* gen, Type* type) {
         break;
     case TYPE_SPAN:
         emit(gen, "__Span_%s", type_name(type->as.span.elem));
+        break;
+    case TYPE_VEC:
+        emit(gen, "__Vec_%s*", type_name(type->as.vec.elem));
         break;
     case TYPE_ENUM:
         emit(gen, "%s", type->as.enm.name);
@@ -952,7 +992,18 @@ static void emit_expr(CodeGen* gen, Node* node) {
     }
 
     case NODE_INDEX:
-        if (node->as.index.is_span_index) {
+        if (node->as.index.is_vec_index) {
+            // Bounds-checked vec access
+            emit(gen, "(__w0_vec_check(");
+            emit_expr(gen, node->as.index.object);
+            emit(gen, "->count, ");
+            emit_expr(gen, node->as.index.index);
+            emit(gen, ", %d, %d), ", node->line, node->column);
+            emit_expr(gen, node->as.index.object);
+            emit(gen, "->data[");
+            emit_expr(gen, node->as.index.index);
+            emit(gen, "])");
+        } else if (node->as.index.is_span_index) {
             // Bounds-checked span access
             emit(gen, "(__w0_span_check(");
             emit_expr(gen, node->as.index.object);
@@ -984,7 +1035,16 @@ static void emit_expr(CodeGen* gen, Node* node) {
         // Emit compound literal
         emit(gen, "((__Span_%s){ .data = ", type_name(elem_type));
 
-        if (node->as.slice.is_array) {
+        if (node->as.slice.is_vec) {
+            // Vec slicing: .data = vec->data + start
+            emit_expr(gen, node->as.slice.object);
+            emit(gen, "->data + ");
+            if (node->as.slice.start) {
+                emit_expr(gen, node->as.slice.start);
+            } else {
+                emit(gen, "0");
+            }
+        } else if (node->as.slice.is_array) {
             // Array slicing: .data = &arr[start]
             emit(gen, "&(");
             emit_expr(gen, node->as.slice.object);
@@ -1009,14 +1069,17 @@ static void emit_expr(CodeGen* gen, Node* node) {
         emit(gen, ", .count = ");
 
         // Calculate count: end - start
-        // For omitted end, use array length or span.count
+        // For omitted end, use array length or span/vec.count
         if (node->as.slice.end) {
             emit(gen, "(");
             emit_expr(gen, node->as.slice.end);
             emit(gen, ")");
         } else {
             // Use full length
-            if (node->as.slice.is_array) {
+            if (node->as.slice.is_vec) {
+                emit_expr(gen, node->as.slice.object);
+                emit(gen, "->count");
+            } else if (node->as.slice.is_array) {
                 emit(gen, "(sizeof(");
                 emit_expr(gen, node->as.slice.object);
                 emit(gen, ")/sizeof((");
@@ -1099,29 +1162,50 @@ static void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_NEW_EXPR: {
-        // new Type { fields } as inline expression using GCC statement expression
-        Type*       stype = node->as.new_expr.resolved_type;
-        const char* tname = stype->as.struc.name;
-        int         tmp   = gen->temp_count++;
-        emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s)); *__rc_tmp%d = (%s)", tname, tmp,
-             tname, tname, tmp, tname);
-        emit_struct_init(gen, node->as.new_expr.init);
-        emit(gen, ";");
-        // Increment refcount for any RC-tracked idents stored in struct fields
-        Node* rc_init = node->as.new_expr.init;
-        for (int i = 0; i < rc_init->as.struct_init.fields.count; i++) {
-            Node* field = rc_init->as.struct_init.fields.nodes[i];
-            if (field && field->type == NODE_FIELD_INIT &&
-                field->as.field_init.value->type == NODE_IDENT &&
-                rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
-                const char* vname  = field->as.field_init.value->as.ident.name;
-                Type*       vtype  = rc_get_var_type(gen, vname);
-                const char* inc_fn = get_inc_func_for_type(vtype);
-                emit(gen, " %s(%s);", inc_fn, vname);
-                free((char*)inc_fn);
+        Type* rtype = node->as.new_expr.resolved_type;
+        if (rtype->kind == TYPE_VEC) {
+            // new Vec<T>{elems} as inline expression using GCC statement expression
+            const char* elem_tname = type_name(rtype->as.vec.elem);
+            int         tmp        = gen->temp_count++;
+            emit(gen,
+                 "({ __Vec_%s* __rc_tmp%d = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s)); "
+                 "__rc_tmp%d->data = NULL; __rc_tmp%d->count = 0; __rc_tmp%d->capacity = 0;",
+                 elem_tname, tmp, elem_tname, elem_tname, tmp, tmp, tmp);
+            // Push initial elements
+            Node* init = node->as.new_expr.init;
+            for (int i = 0; i < init->as.struct_init.fields.count; i++) {
+                Node* field = init->as.struct_init.fields.nodes[i];
+                if (field && field->type == NODE_FIELD_INIT) {
+                    emit(gen, " __Vec_%s_push(__rc_tmp%d, ", elem_tname, tmp);
+                    emit_expr(gen, field->as.field_init.value);
+                    emit(gen, ");");
+                }
             }
+            emit(gen, " __rc_tmp%d; })", tmp);
+        } else {
+            // new Type { fields } as inline expression using GCC statement expression
+            const char* tname = rtype->as.struc.name;
+            int         tmp   = gen->temp_count++;
+            emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s)); *__rc_tmp%d = (%s)", tname,
+                 tmp, tname, tname, tmp, tname);
+            emit_struct_init(gen, node->as.new_expr.init);
+            emit(gen, ";");
+            // Increment refcount for any RC-tracked idents stored in struct fields
+            Node* rc_init = node->as.new_expr.init;
+            for (int i = 0; i < rc_init->as.struct_init.fields.count; i++) {
+                Node* field = rc_init->as.struct_init.fields.nodes[i];
+                if (field && field->type == NODE_FIELD_INIT &&
+                    field->as.field_init.value->type == NODE_IDENT &&
+                    rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
+                    const char* vname  = field->as.field_init.value->as.ident.name;
+                    Type*       vtype  = rc_get_var_type(gen, vname);
+                    const char* inc_fn = get_inc_func_for_type(vtype);
+                    emit(gen, " %s(%s);", inc_fn, vname);
+                    free((char*)inc_fn);
+                }
+            }
+            emit(gen, " __rc_tmp%d; })", tmp);
         }
-        emit(gen, " __rc_tmp%d; })", tmp);
         break;
     }
 
@@ -1330,6 +1414,25 @@ void emit_stmt(CodeGen* gen, Node* node) {
                 }
             }
         }
+        // Handle Vec index assignment: v[i] = x → bounds check + direct data write
+        if (expr->type == NODE_ASSIGN && expr->as.assign.target->type == NODE_INDEX &&
+            expr->as.assign.target->as.index.is_vec_index) {
+            Node* idx_node = expr->as.assign.target;
+            emit_indent(gen);
+            emit(gen, "__w0_vec_check(");
+            emit_expr(gen, idx_node->as.index.object);
+            emit(gen, "->count, ");
+            emit_expr(gen, idx_node->as.index.index);
+            emit(gen, ", %d, %d);\n", idx_node->line, idx_node->column);
+            emit_indent(gen);
+            emit_expr(gen, idx_node->as.index.object);
+            emit(gen, "->data[");
+            emit_expr(gen, idx_node->as.index.index);
+            emit(gen, "] %s ", assign_op_str(expr->as.assign.op));
+            emit_expr(gen, expr->as.assign.value);
+            emit(gen, ";\n");
+            break;
+        }
         emit_indent(gen);
         emit_expr(gen, expr);
         emit(gen, ";\n");
@@ -1360,11 +1463,36 @@ void emit_stmt(CodeGen* gen, Node* node) {
         // Handle RC-managed variable declarations
         if (node->as.var_decl.is_rc && node->as.var_decl.init) {
             if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
+                Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
+                if (rtype && rtype->kind == TYPE_VEC) {
+                    // var v = new Vec<T>{} or new Vec<T>{1, 2, 3}
+                    const char* elem_tname = type_name(rtype->as.vec.elem);
+                    emit_indent(gen);
+                    emit(gen, "__Vec_%s* %s = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s));\n",
+                         elem_tname, node->as.var_decl.name, elem_tname, elem_tname);
+                    emit_indent(gen);
+                    emit(gen, "%s->data = NULL; %s->count = 0; %s->capacity = 0;\n",
+                         node->as.var_decl.name, node->as.var_decl.name, node->as.var_decl.name);
+                    // Push initial elements
+                    Node* init = node->as.var_decl.init->as.new_expr.init;
+                    for (int i = 0; i < init->as.struct_init.fields.count; i++) {
+                        Node* field = init->as.struct_init.fields.nodes[i];
+                        if (field && field->type == NODE_FIELD_INIT) {
+                            emit_indent(gen);
+                            emit(gen, "__Vec_%s_push(%s, ", elem_tname, node->as.var_decl.name);
+                            emit_expr(gen, field->as.field_init.value);
+                            emit(gen, ");\n");
+                        }
+                    }
+                    char dec_buf[256];
+                    snprintf(dec_buf, sizeof(dec_buf), "__rc_dec_Vec_%s", elem_tname);
+                    rc_push_var(gen, node->as.var_decl.name, dec_buf, rtype);
+                    break;
+                }
                 // var p = new Point { x: 1, y: 2 }
                 // => Point* p = (Point*)__rc_alloc(sizeof(Point));
                 //    *p = (Point){ .x = 1, .y = 2 };
-                Type*       stype = node->as.var_decl.init->as.new_expr.resolved_type;
-                const char* tname = stype->as.struc.name;
+                const char* tname = rtype->as.struc.name;
                 emit_indent(gen);
                 emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s));\n", tname, node->as.var_decl.name,
                      tname, tname);
@@ -1387,8 +1515,8 @@ void emit_stmt(CodeGen* gen, Node* node) {
                         free((char*)inc_fn);
                     }
                 }
-                const char* dec_fn = get_dec_func_for_type(stype);
-                rc_push_var(gen, node->as.var_decl.name, dec_fn, stype);
+                const char* dec_fn = get_dec_func_for_type(rtype);
+                rc_push_var(gen, node->as.var_decl.name, dec_fn, rtype);
                 free((char*)dec_fn);
                 break;
             } else {

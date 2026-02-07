@@ -201,6 +201,7 @@ struct Node {
             Node* index;
             int   is_tuple_index; // Set by checker if indexing a tuple
             int   is_span_index;  // Set by checker if indexing a span
+            int   is_vec_index;   // Set by checker if indexing a vec
         } index;
 
         // Slice expression: arr[start:end]
@@ -210,6 +211,7 @@ struct Node {
             Node* end;           // End index (NULL if omitted)
             Type* resolved_type; // Set by checker
             int   is_array;      // Set by checker: 1 if slicing array, 0 if slicing span
+            int   is_vec;        // Set by checker: 1 if slicing a vec
         } slice;
 
         // Member access: obj.member

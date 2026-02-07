@@ -144,6 +144,12 @@ Type* type_span(Type* elem) {
     return type;
 }
 
+Type* type_vec(Type* elem) {
+    Type* type        = type_new(TYPE_VEC);
+    type->as.vec.elem = elem;
+    return type;
+}
+
 void type_free(Type* type) {
     if (!type)
         return;
@@ -223,6 +229,8 @@ int type_equals(Type* a, Type* b) {
                type_equals(a->as.array.elem, b->as.array.elem);
     case TYPE_SPAN:
         return type_equals(a->as.span.elem, b->as.span.elem);
+    case TYPE_VEC:
+        return type_equals(a->as.vec.elem, b->as.vec.elem);
     case TYPE_STRUCT:
         return strcmp(a->as.struc.name, b->as.struc.name) == 0;
     case TYPE_ENUM:
@@ -304,6 +312,11 @@ int type_assignable(Type* target, Type* value) {
         return 1;
     }
 
+    // null can be assigned to vec references
+    if (target->kind == TYPE_VEC && value->kind == TYPE_NULL) {
+        return 1;
+    }
+
     // null can be assigned to voidptr
     if (target->kind == TYPE_VOIDPTR && value->kind == TYPE_NULL) {
         return 1;
@@ -375,6 +388,11 @@ const char* type_name(Type* type) {
     case TYPE_SPAN: {
         char* buf = next_type_name_buf();
         snprintf(buf, 256, "Span<%s>", type_name(type->as.span.elem));
+        return buf;
+    }
+    case TYPE_VEC: {
+        char* buf = next_type_name_buf();
+        snprintf(buf, 256, "Vec<%s>", type_name(type->as.vec.elem));
         return buf;
     }
     case TYPE_STRUCT:
@@ -496,6 +514,10 @@ static const char* type_mangle_name(Type* type) {
     case TYPE_SPAN:
         snprintf(type_mangle_buf, sizeof(type_mangle_buf), "Span_%s",
                  type_mangle_name(type->as.span.elem));
+        return type_mangle_buf;
+    case TYPE_VEC:
+        snprintf(type_mangle_buf, sizeof(type_mangle_buf), "Vec_%s",
+                 type_mangle_name(type->as.vec.elem));
         return type_mangle_buf;
     case TYPE_STRUCT:
         return type->as.struc.name;
