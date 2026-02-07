@@ -94,18 +94,23 @@ Generic structs are monomorphized at compile time, generating specialized C code
 ### Trait Declaration
 
 ```bnf
-<trait-decl> ::= 'trait' <identifier> '{' { <func-decl> ';' } '}'
+<trait-decl>   ::= 'trait' <identifier> '{' { <trait-method> } '}'
+
+<trait-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <type> ] ';'
 ```
 
-Traits define a set of required method signatures that types can implement. Trait methods are declared without a receiver or body — just the function signature followed by a semicolon.
+Traits define a set of required method signatures that types can implement. Trait methods are declared without a receiver or body — just the function signature followed by a semicolon. Use `const func` to declare methods that require an immutable receiver. Impl blocks must match the const-ness exactly.
 
 ### Impl Declaration
 
 ```bnf
-<impl-decl> ::= 'impl' <identifier> 'for' <identifier> '{' { <func-defn> } '}'
+<impl-decl>   ::= 'impl' <identifier> 'for' <identifier> [ '<' <type-arg-list> '>' ]
+                   '{' { <impl-method> } '}'
+
+<impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <type> ] '{' <block> '}'
 ```
 
-An `impl` block provides concrete method implementations for a trait on a specific type. Each method must have a receiver matching the target type and a signature matching the trait's requirements. All trait methods must be implemented.
+An `impl` block provides concrete method implementations for a trait on a specific type. Methods inside `impl` blocks do not specify a receiver — it is inferred from the `for Type` clause. Use `const func` for immutable-receiver methods. For generic target types, specify the type parameters on the impl header (e.g., `impl Drop for Box<T>`). All trait methods must be implemented.
 
 ### Variable Declaration
 

@@ -2202,14 +2202,16 @@ static void check_decl(Checker* checker, Node* node) {
         Type* trait_type   = type_trait(name);
         int   method_count = node->as.trait_decl.methods.count;
 
-        trait_type->as.trait.method_count = method_count;
-        trait_type->as.trait.method_names = xmalloc(method_count * sizeof(char*));
-        trait_type->as.trait.method_types = xmalloc(method_count * sizeof(Type*));
+        trait_type->as.trait.method_count    = method_count;
+        trait_type->as.trait.method_names    = xmalloc(method_count * sizeof(char*));
+        trait_type->as.trait.method_types    = xmalloc(method_count * sizeof(Type*));
+        trait_type->as.trait.method_is_const = xmalloc(method_count * sizeof(int));
 
         for (int i = 0; i < method_count; i++) {
-            Node* method                         = node->as.trait_decl.methods.nodes[i];
-            trait_type->as.trait.method_names[i] = xstrdup(method->as.func_decl.name);
-            trait_type->as.trait.method_types[i] = get_function_type(checker, method);
+            Node* method                            = node->as.trait_decl.methods.nodes[i];
+            trait_type->as.trait.method_names[i]    = xstrdup(method->as.func_decl.name);
+            trait_type->as.trait.method_types[i]    = get_function_type(checker, method);
+            trait_type->as.trait.method_is_const[i] = method->as.func_decl.receiver_is_const;
         }
 
         checker_define(checker, name, SYM_TYPE, trait_type, 0, node->as.trait_decl.is_public,
@@ -2263,6 +2265,18 @@ static void check_decl(Checker* checker, Node* node) {
             if (!found_in_trait) {
                 check_error(checker, method->line, method->column,
                             "Method '%s' is not declared in trait '%s'", method_name, trait_name);
+                continue;
+            }
+
+            // Check receiver const-ness matches trait declaration
+            int trait_is_const = trait_type->as.trait.method_is_const[trait_method_idx];
+            int impl_is_const  = method->as.func_decl.receiver_is_const;
+            if (impl_is_const != trait_is_const) {
+                check_error(checker, method->line, method->column,
+                            "Method '%s' receiver mutability mismatch: trait '%s' declares '%s', "
+                            "impl provides '%s'",
+                            method_name, trait_name, trait_is_const ? "const func" : "func",
+                            impl_is_const ? "const func" : "func");
                 continue;
             }
 

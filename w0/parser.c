@@ -1542,12 +1542,20 @@ static Node* parse_trait_decl(Parser* parser, int is_public) {
     consume_token(parser, TOK_LBRACE, "Expected '{' after trait name");
 
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
+        // Accept 'const func' or 'func' in trait declarations
+        int method_is_const = 0;
+        if (check_token(parser, TOK_CONST)) {
+            advance_token(parser); // consume 'const'
+            method_is_const = 1;
+        }
+
         if (!match_token(parser, TOK_FUNC)) {
             parse_error(parser, "Expected 'func' in trait declaration");
             return NULL;
         }
         Node* method = parse_func_decl(parser, 0);
         if (method) {
+            method->as.func_decl.receiver_is_const = method_is_const;
             nodelist_push(&node->as.trait_decl.methods, method);
         }
     }
@@ -1582,17 +1590,54 @@ static Node* parse_impl_decl(Parser* parser) {
         return NULL;
     }
     node->as.impl_decl.type_name_length = type_name.length;
+    nodelist_init(&node->as.impl_decl.type_args);
     nodelist_init(&node->as.impl_decl.methods);
+
+    // Parse optional type args: impl Drop for Box<T> { ... }
+    if (match_token(parser, TOK_LT)) {
+        do {
+            Node* type_arg = parse_type(parser);
+            if (!type_arg) {
+                node_free(node);
+                return NULL;
+            }
+            nodelist_push(&node->as.impl_decl.type_args, type_arg);
+        } while (match_token(parser, TOK_COMMA));
+        consume_token(parser, TOK_GT, "Expected '>' after type arguments");
+    }
 
     consume_token(parser, TOK_LBRACE, "Expected '{' after type name in impl block");
 
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
+        // Check for 'const func' (immutable receiver) or 'func' (mutable receiver)
+        int method_is_const = 0;
+        if (check_token(parser, TOK_CONST) && parser->current.type == TOK_CONST) {
+            // Peek ahead: if next is 'func', this is 'const func' (const receiver method)
+            // If next is something else, it's an error
+            advance_token(parser); // consume 'const'
+            method_is_const = 1;
+        }
+
         if (!match_token(parser, TOK_FUNC)) {
             parse_error(parser, "Expected 'func' in impl block");
             return NULL;
         }
+
+        // Parse the function without a receiver (no `(Type)` prefix)
         Node* method = parse_func_decl(parser, 0);
         if (method) {
+            // Fill in receiver from the impl block context
+            func_decl_node* fdn    = &method->as.func_decl;
+            fdn->receiver_type     = xstrdup(node->as.impl_decl.type_name);
+            fdn->receiver_type_len = node->as.impl_decl.type_name_length;
+            fdn->receiver_is_const = method_is_const;
+
+            // Copy type args from impl decl to receiver
+            nodelist_init(&fdn->receiver_type_args);
+            for (int i = 0; i < node->as.impl_decl.type_args.count; i++) {
+                nodelist_push(&fdn->receiver_type_args, node->as.impl_decl.type_args.nodes[i]);
+            }
+
             nodelist_push(&node->as.impl_decl.methods, method);
         }
     }

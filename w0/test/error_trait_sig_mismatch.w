@@ -9,7 +9,7 @@ struct Bag {
 }
 
 impl Countable for Bag {
-    func (Bag) count(): string {
+    func count(): string {
         return "oops";
     }
 }

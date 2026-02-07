@@ -2,6 +2,7 @@ import std;
 
 trait Greetable {
     func greet(): string;
+    const func name_length(): i64;
 }
 
 struct Dog {
@@ -9,8 +10,11 @@ struct Dog {
 }
 
 impl Greetable for Dog {
-    func (Dog) greet(): string {
+    func greet(): string {
         return self.name;
+    }
+    const func name_length(): i64 {
+        return 3;
     }
 }
 

@@ -7,7 +7,7 @@ struct Wrapper {
 }
 
 impl HasValue for Wrapper {
-    func (Wrapper) value(): i64 {
+    func value(): i64 {
         return self.v;
     }
 }

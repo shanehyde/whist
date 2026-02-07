@@ -11,10 +11,11 @@ Phase 1 covers trait declarations, `impl` blocks, and trait bounds on generic st
 ```whist
 trait Greetable {
     func greet(): string;
+    const func id(): i64;
 }
 ```
 
-Traits define required method signatures. Methods are declared without a receiver or body — just the function signature followed by a semicolon.
+Traits define required method signatures. Methods are declared without a receiver or body — just the function signature followed by a semicolon. Use `const func` for methods that require an immutable receiver. Impl blocks must match the const-ness exactly.
 
 ### Impl Blocks
 
@@ -24,13 +25,13 @@ struct Dog {
 }
 
 impl Greetable for Dog {
-    func (Dog) greet(): string {
+    func greet(): string {
         return self.name;
     }
 }
 ```
 
-An `impl` block provides concrete method implementations for a trait on a specific struct type. Each method must have a receiver matching the target type and a signature (parameter types and return type) matching the trait's declaration. All trait methods must be implemented — missing methods are a compile error.
+An `impl` block provides concrete method implementations for a trait on a specific struct type. Methods inside `impl` blocks do not specify a receiver — it is inferred from the `for Type` clause. Use `const func` for immutable-receiver methods. For generic types, specify the type parameters on the impl header: `impl Drop for Box<T>`. Signatures (parameter types and return type) must match the trait's declaration. All trait methods must be implemented — missing methods are a compile error.
 
 ### Trait Bounds on Generic Structs
 
@@ -67,9 +68,12 @@ The checker validates:
 ### Grammar
 
 ```bnf
-<trait-decl> ::= 'trait' <identifier> '{' { <func-decl> ';' } '}'
-<impl-decl>  ::= 'impl' <identifier> 'for' <identifier> '{' { <func-defn> } '}'
-<type-param> ::= <identifier> [ ':' <identifier> ]
+<trait-decl>   ::= 'trait' <identifier> '{' { <trait-method> } '}'
+<trait-method>  ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <type> ] ';'
+<impl-decl>   ::= 'impl' <identifier> 'for' <identifier> [ '<' <type-arg-list> '>' ]
+                   '{' { <impl-method> } '}'
+<impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <type> ] '{' <block> '}'
+<type-param>  ::= <identifier> [ ':' <identifier> ]
 ```
 
 ## Phase 2 (Future)

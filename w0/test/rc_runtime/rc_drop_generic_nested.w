@@ -10,7 +10,7 @@ struct Inner {
 }
 
 impl Drop for Inner {
-    func (Inner) drop(): void {
+    func drop(): void {
         // Inner cleanup
     }
 }

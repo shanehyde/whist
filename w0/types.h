@@ -83,7 +83,8 @@ struct Type {
         struct {
             char*  name;
             char** method_names;
-            Type** method_types; // Function types (signatures without receiver)
+            Type** method_types;    // Function types (signatures without receiver)
+            int*   method_is_const; // Whether each method requires const receiver
             int    method_count;
         } trait;
 

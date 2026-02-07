@@ -103,11 +103,12 @@ Type* type_enum(const char* name) {
 }
 
 Type* type_trait(const char* name) {
-    Type* type                  = type_new(TYPE_TRAIT);
-    type->as.trait.name         = xstrdup(name);
-    type->as.trait.method_names = NULL;
-    type->as.trait.method_types = NULL;
-    type->as.trait.method_count = 0;
+    Type* type                     = type_new(TYPE_TRAIT);
+    type->as.trait.name            = xstrdup(name);
+    type->as.trait.method_names    = NULL;
+    type->as.trait.method_types    = NULL;
+    type->as.trait.method_is_const = NULL;
+    type->as.trait.method_count    = 0;
     return type;
 }
 
@@ -180,6 +181,7 @@ void type_free(Type* type) {
         }
         free(type->as.trait.method_names);
         free(type->as.trait.method_types);
+        free(type->as.trait.method_is_const);
         break;
     case TYPE_FUNC:
         free(type->as.func.param_types);

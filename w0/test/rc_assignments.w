@@ -16,13 +16,13 @@ trait Drop {
 }
 
 impl Drop for Line {
-    func (Line) drop() {
+    func drop() {
         std.print("Deleting line\n");
     }
 }
 
 impl Drop for Point {
-    func (Point) drop() {
+    func drop() {
         std.print("Deleting point\n");
     }
 }

@@ -237,6 +237,17 @@ void node_free(Node* node) {
         free(node->as.module.name);
         nodelist_free(&node->as.module.decls);
         break;
+    case NODE_TRAIT_DECL:
+        free(node->as.trait_decl.name);
+        nodelist_free(&node->as.trait_decl.methods);
+        break;
+    case NODE_IMPL_DECL:
+        free(node->as.impl_decl.trait_name);
+        free(node->as.impl_decl.type_name);
+        // type_args nodes are shared with method receiver_type_args — just free the array
+        free(node->as.impl_decl.type_args.nodes);
+        nodelist_free(&node->as.impl_decl.methods);
+        break;
     case NODE_EXTERN_MODULE:
         nodelist_free(&node->as.extern_module.decls);
         free(node->as.extern_module.module_name);

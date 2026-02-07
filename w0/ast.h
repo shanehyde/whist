@@ -392,7 +392,8 @@ struct Node {
             int      trait_name_length;
             char*    type_name;
             int      type_name_length;
-            NodeList methods; // List of func_decl nodes (with bodies and receivers)
+            NodeList type_args; // Type args for generic target (e.g., <T> from Box<T>)
+            NodeList methods;   // List of func_decl nodes (with bodies and receivers)
             char*    source_module;
         } impl_decl;
 
