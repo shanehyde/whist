@@ -193,6 +193,7 @@ void checker_init(Checker* checker) {
     checker->trait_impls         = NULL;
     checker->trait_impl_count    = 0;
     checker->trait_impl_capacity = 0;
+    checker->enum_target_hint    = NULL;
     types_init();
 }
 
@@ -584,6 +585,73 @@ static int unify_method_pattern(Checker* checker, NodeList* pattern_args, Type**
     return 1;
 }
 
+// Instantiate a generic enum with resolved type arguments.
+// def: the generic definition (must be NODE_ENUM_DECL)
+// mangled: the mangled name (takes ownership)
+// resolved_args: array of resolved type arguments (takes ownership)
+// arg_count: number of type arguments
+// Returns the instantiated enum type or type_error.
+static Type* instantiate_generic_enum(Checker* checker, GenericDef* def, char* mangled,
+                                      Type** resolved_args, int arg_count) {
+    Type* enum_type = type_enum(mangled);
+
+    // Register early to handle recursive types
+    register_generic_instance(checker, mangled, def->name, enum_type, resolved_args, arg_count);
+
+    // Set up substitution context
+    char** old_params = checker->current_type_params;
+    Type** old_args   = checker->current_type_args;
+    int    old_count  = checker->current_type_param_count;
+
+    checker->current_type_params      = def->type_params;
+    checker->current_type_args        = resolved_args;
+    checker->current_type_param_count = def->type_param_count;
+
+    // Process enum variants
+    Node* decl        = def->decl;
+    int   value_count = decl->as.enum_decl.values.count;
+
+    enum_type->as.enm.value_count         = value_count;
+    enum_type->as.enm.value_names         = xmalloc(value_count * sizeof(char*));
+    enum_type->as.enm.variant_types       = xmalloc(value_count * sizeof(Type**));
+    enum_type->as.enm.variant_type_counts = xmalloc(value_count * sizeof(int));
+
+    for (int i = 0; i < value_count; i++) {
+        Node* val                        = decl->as.enum_decl.values.nodes[i];
+        enum_type->as.enm.value_names[i] = xstrdup(val->as.enum_variant.name);
+
+        int type_count                           = val->as.enum_variant.types.count;
+        enum_type->as.enm.variant_type_counts[i] = type_count;
+
+        if (type_count > 0) {
+            enum_type->as.enm.has_data         = 1;
+            enum_type->as.enm.variant_types[i] = xmalloc(type_count * sizeof(Type*));
+            for (int j = 0; j < type_count; j++) {
+                Type* resolved = resolve_type(checker, val->as.enum_variant.types.nodes[j]);
+                enum_type->as.enm.variant_types[i][j] = resolved;
+                if (resolved && (resolved->kind == TYPE_STRUCT ||
+                                 (resolved->kind == TYPE_ENUM && resolved->as.enm.has_rc_fields))) {
+                    enum_type->as.enm.has_rc_fields = 1;
+                }
+            }
+        } else {
+            enum_type->as.enm.variant_types[i] = NULL;
+        }
+    }
+
+    // Restore substitution context
+    checker->current_type_params      = old_params;
+    checker->current_type_args        = old_args;
+    checker->current_type_param_count = old_count;
+
+    // Register in symbol table
+    checker_define(checker, mangled, SYM_TYPE, enum_type, 0, 1, checker->current_module);
+
+    free(mangled);
+    free(resolved_args);
+    return enum_type;
+}
+
 static Type* resolve_type(Checker* checker, Node* type_node) {
     if (!type_node)
         return type_void;
@@ -715,6 +783,11 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
             free(mangled);
             free(resolved_args);
             return existing->type;
+        }
+
+        // Branch on enum vs struct
+        if (def->decl->type == NODE_ENUM_DECL) {
+            return instantiate_generic_enum(checker, def, mangled, resolved_args, arg_count);
         }
 
         // Instantiate: create a new TYPE_STRUCT with substituted field types
@@ -1311,19 +1384,151 @@ static Type* check_expression(Checker* checker, Node* node) {
 
     case NODE_ENUM_VALUE: {
         // Look up the enum type
-        Symbol* sym = checker_lookup(checker, node->as.enum_value.enum_name);
-        if (!sym || sym->kind != SYM_TYPE) {
-            check_error(checker, node->line, node->column, "Unknown enum '%s'",
-                        node->as.enum_value.enum_name);
-            return type_error;
+        const char* enum_name = node->as.enum_value.enum_name;
+        Symbol*     sym       = checker_lookup(checker, enum_name);
+        Type*       enum_type = NULL;
+
+        if (sym && sym->kind == SYM_TYPE && sym->type->kind == TYPE_ENUM) {
+            // Non-generic enum or already-instantiated generic enum
+            enum_type = sym->type;
+        } else {
+            // Try as a generic enum definition
+            GenericDef* def = lookup_generic_def(checker, enum_name);
+            if (!def || def->decl->type != NODE_ENUM_DECL) {
+                check_error(checker, node->line, node->column, "Unknown enum '%s'", enum_name);
+                return type_error;
+            }
+
+            // Find the variant by name in the template
+            Node* template_decl = def->decl;
+            int   variant_idx   = -1;
+            for (int i = 0; i < template_decl->as.enum_decl.values.count; i++) {
+                Node* v = template_decl->as.enum_decl.values.nodes[i];
+                if (strcmp(v->as.enum_variant.name, node->as.enum_value.value_name) == 0) {
+                    variant_idx = i;
+                    break;
+                }
+            }
+            if (variant_idx < 0) {
+                check_error(checker, node->line, node->column, "'%s' is not a value of enum '%s'",
+                            node->as.enum_value.value_name, enum_name);
+                return type_error;
+            }
+
+            Node* variant    = template_decl->as.enum_decl.values.nodes[variant_idx];
+            int   type_count = variant->as.enum_variant.types.count;
+            int   arg_count  = node->as.enum_value.args.count;
+
+            if (arg_count != type_count) {
+                check_error(checker, node->line, node->column,
+                            "Enum variant '%s::%s' expects %d argument(s), got %d", enum_name,
+                            node->as.enum_value.value_name, type_count, arg_count);
+                return type_error;
+            }
+
+            // Type-check args and infer type params
+            Type** inferred     = xcalloc(def->type_param_count, sizeof(Type*));
+            int    all_inferred = 1;
+
+            // First, type-check all args
+            Type** arg_types = NULL;
+            if (arg_count > 0) {
+                arg_types = xmalloc(arg_count * sizeof(Type*));
+                for (int i = 0; i < arg_count; i++) {
+                    arg_types[i] = check_expression(checker, node->as.enum_value.args.nodes[i]);
+                }
+            }
+
+            // Infer type params from args
+            for (int i = 0; i < arg_count; i++) {
+                Node* vtype_node = variant->as.enum_variant.types.nodes[i];
+                if (vtype_node->type == NODE_IDENT) {
+                    // Check if this ident is a type param
+                    for (int p = 0; p < def->type_param_count; p++) {
+                        if (strcmp(vtype_node->as.ident.name, def->type_params[p]) == 0) {
+                            if (!inferred[p]) {
+                                inferred[p] = arg_types[i];
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Check if all type params were inferred
+            for (int p = 0; p < def->type_param_count; p++) {
+                if (!inferred[p]) {
+                    all_inferred = 0;
+                    break;
+                }
+            }
+
+            // If not all inferred, try the target hint
+            if (!all_inferred && checker->enum_target_hint &&
+                checker->enum_target_hint->kind == TYPE_ENUM) {
+                // The target hint is an already-instantiated generic enum
+                // Find the instance to get the type args
+                for (int gi = 0; gi < checker->generic_instance_count; gi++) {
+                    GenericInstance* inst = &checker->generic_instances[gi];
+                    if (inst->type == checker->enum_target_hint &&
+                        strcmp(inst->base_name, enum_name) == 0) {
+                        // Use instance type args for any missing inferred params
+                        for (int p = 0; p < def->type_param_count && p < inst->type_arg_count;
+                             p++) {
+                            if (!inferred[p]) {
+                                inferred[p] = inst->type_args[p];
+                            }
+                        }
+                        break;
+                    }
+                }
+                // Recheck
+                all_inferred = 1;
+                for (int p = 0; p < def->type_param_count; p++) {
+                    if (!inferred[p]) {
+                        all_inferred = 0;
+                        break;
+                    }
+                }
+            }
+
+            if (!all_inferred) {
+                check_error(checker, node->line, node->column,
+                            "Cannot infer type parameters for generic enum '%s'; add explicit type "
+                            "annotation",
+                            enum_name);
+                free(inferred);
+                free(arg_types);
+                return type_error;
+            }
+
+            // Generate mangled name and instantiate
+            char* mangled = type_mangle_generic(enum_name, inferred, def->type_param_count);
+
+            GenericInstance* existing = lookup_generic_instance(checker, mangled);
+            if (existing) {
+                enum_type = existing->type;
+                free(mangled);
+            } else {
+                // Make a copy of inferred for instantiate (it takes ownership)
+                Type** args_copy = xmalloc(def->type_param_count * sizeof(Type*));
+                for (int p = 0; p < def->type_param_count; p++) {
+                    args_copy[p] = inferred[p];
+                }
+                enum_type = instantiate_generic_enum(checker, def, mangled, args_copy,
+                                                     def->type_param_count);
+            }
+
+            free(inferred);
+            free(arg_types);
+
+            // Update AST node to use mangled name (critical for codegen)
+            free(node->as.enum_value.enum_name);
+            node->as.enum_value.enum_name        = xstrdup(enum_type->as.enm.name);
+            node->as.enum_value.enum_name_length = (int)strlen(enum_type->as.enm.name);
         }
-        Type* enum_type = sym->type;
-        if (enum_type->kind != TYPE_ENUM) {
-            check_error(checker, node->line, node->column, "'%s' is not an enum",
-                        node->as.enum_value.enum_name);
-            return type_error;
-        }
-        // Check that the value exists in the enum
+
+        // Check that the value exists in the (possibly instantiated) enum
         int variant_idx = -1;
         for (int i = 0; i < enum_type->as.enm.value_count; i++) {
             if (strcmp(enum_type->as.enm.value_names[i], node->as.enum_value.value_name) == 0) {
@@ -1776,7 +1981,14 @@ static void check_statement(Checker* checker, Node* node) {
         }
 
         if (node->as.var_decl.init) {
-            init_type = check_expression(checker, node->as.var_decl.init);
+            // Set enum_target_hint for generic enum inference (e.g., var x: Option<i64> =
+            // Option::None)
+            Type* old_hint = checker->enum_target_hint;
+            if (decl_type && decl_type->kind == TYPE_ENUM) {
+                checker->enum_target_hint = decl_type;
+            }
+            init_type                 = check_expression(checker, node->as.var_decl.init);
+            checker->enum_target_hint = old_hint;
         }
 
         Type* var_type;
@@ -2225,6 +2437,14 @@ static void check_decl(Checker* checker, Node* node) {
 
         if (checker_lookup(checker, name)) {
             check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+            return;
+        }
+
+        // Check if this is a generic enum definition
+        if (node->as.enum_decl.type_param_count > 0) {
+            register_generic_def(checker, name, node->as.enum_decl.type_params,
+                                 node->as.enum_decl.type_param_bounds,
+                                 node->as.enum_decl.type_param_count, node);
             return;
         }
 

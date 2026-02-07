@@ -221,6 +221,11 @@ void node_free(Node* node) {
     case NODE_ENUM_DECL:
         free(node->as.enum_decl.name);
         nodelist_free(&node->as.enum_decl.values);
+        // Free type parameters if present
+        for (int i = 0; i < node->as.enum_decl.type_param_count; i++) {
+            free(node->as.enum_decl.type_params[i]);
+        }
+        free(node->as.enum_decl.type_params);
         break;
     case NODE_TUPLE_TYPE:
         nodelist_free(&node->as.tuple_type.elem_types);
