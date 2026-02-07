@@ -1,7 +1,7 @@
 # Whist Compiler Future Plans
 
 This document outlines potential directions for the Whist compiler and language.
-See the [plans/](plans/) directory for detailed design documents.
+See the [features/](features/) directory for detailed design documents.
 
 ## Current State
 
@@ -19,7 +19,7 @@ The w0 bootstrap compiler is feature-complete with:
 ## Proposed Language Features
 
 ### Closures / Lambdas
-[Detailed design →](plans/closures.md)
+[Detailed design →](features/closures.md)
 
 Anonymous functions with variable capture:
 ```whist
@@ -28,7 +28,7 @@ var items = filter(list, |x| x > 0);
 ```
 
 ### Traits / Interfaces
-[Detailed design →](plans/traits.md)
+[Detailed design →](features/traits.md)
 
 Polymorphism beyond generics:
 ```whist
@@ -44,7 +44,7 @@ impl Printable for Point {
 ```
 
 ### Pattern Matching
-[Detailed design →](plans/pattern-matching.md)
+[Detailed design →](features/pattern-matching.md)
 
 `match` expressions with exhaustiveness checking:
 ```whist
@@ -57,7 +57,7 @@ match value {
 ```
 
 ### Result / Option Types
-[Detailed design →](plans/result-option.md)
+[Detailed design →](features/result-option.md)
 
 Structured error handling:
 ```whist
@@ -72,7 +72,7 @@ var result = divide(10, 2)?;  // propagate errors
 ```
 
 ### String Interpolation
-[Detailed design →](plans/string-interpolation.md)
+[Detailed design →](features/string-interpolation.md)
 
 Embedded expressions in strings:
 ```whist
@@ -84,7 +84,7 @@ print("2 + 2 = {2 + 2}");
 ## Type System
 
 ### Union Types
-[Detailed design →](plans/union-types.md)
+[Detailed design →](features/union-types.md)
 
 Values that can be one of several types:
 ```whist
@@ -92,7 +92,7 @@ type JsonValue = null | bool | i64 | f64 | string | JsonArray | JsonObject;
 ```
 
 ### Type Aliases
-[Detailed design →](plans/type-aliases.md)
+[Detailed design →](features/type-aliases.md)
 
 Named aliases for complex types:
 ```whist
@@ -102,7 +102,7 @@ type StringMap<V> = Map<string, V>;
 ```
 
 ### Nullable Types
-[Detailed design →](plans/nullable-types.md)
+[Detailed design →](features/nullable-types.md)
 
 Explicit null safety:
 ```whist
@@ -114,12 +114,12 @@ var len = name?.length() ?? 0;  // optional chaining
 ```
 
 ### Memory Management
-[Detailed design →](plans/memory-management.md)
+[Detailed design →](features/memory-management.md)
 
 Reference counting with owner/borrower semantics for automatic memory management.
 
 ### Reflection & Source Generation
-[Detailed design →](plans/reflection.md)
+[Detailed design →](features/reflection.md)
 
 Compile-time reflection via a phased approach:
 1. **Built-in derives** — `@[derive(Debug, Eq, Clone, ...)]` generates implementations from struct/enum definitions
@@ -138,7 +138,7 @@ var info = @type_info(Config);  // static type metadata
 ## Compiler Infrastructure
 
 ### Self-Hosting (wc)
-[Detailed design →](plans/self-hosting.md)
+[Detailed design →](features/self-hosting.md)
 
 Rewrite the compiler in Whist itself:
 - Validates language expressiveness
@@ -147,7 +147,7 @@ Rewrite the compiler in Whist itself:
 - Milestone for language maturity
 
 ### Comptime (wc only)
-[Detailed design →](plans/comptime.md)
+[Detailed design →](features/comptime.md)
 
 Compile-time execution via an AST interpreter in the self-hosted compiler:
 - Comptime functions introspect types via `@type_info`, `@fields` builtins
@@ -164,7 +164,7 @@ comptime func gen_eq(comptime T: type): string {
 ```
 
 ### LLVM Backend
-[Detailed design →](plans/llvm-backend.md)
+[Detailed design →](features/llvm-backend.md)
 
 Native code generation via LLVM:
 - Direct machine code output
@@ -173,7 +173,7 @@ Native code generation via LLVM:
 - Multiple target architectures
 
 ### WebAssembly Target
-[Detailed design →](plans/webassembly.md)
+[Detailed design →](features/webassembly.md)
 
 Compile to WASM for:
 - Browser execution
@@ -181,7 +181,7 @@ Compile to WASM for:
 - Portable binaries
 
 ### LSP Server
-[Detailed design →](plans/lsp-server.md)
+[Detailed design →](features/lsp-server.md)
 
 Language Server Protocol implementation:
 - IDE integration (VS Code, etc.)
@@ -192,7 +192,7 @@ Language Server Protocol implementation:
 - Auto-completion
 
 ### Incremental Compilation
-[Detailed design →](plans/incremental-compilation.md)
+[Detailed design →](features/incremental-compilation.md)
 
 Only recompile changed files:
 - Dependency tracking
@@ -202,7 +202,7 @@ Only recompile changed files:
 ## Tooling & Ecosystem
 
 ### Package Manager
-[Detailed design →](plans/package-manager.md)
+[Detailed design →](features/package-manager.md)
 
 Dependency management:
 - Package registry
@@ -211,7 +211,7 @@ Dependency management:
 - Build integration
 
 ### REPL
-[Detailed design →](plans/repl.md)
+[Detailed design →](features/repl.md)
 
 Interactive evaluation:
 - Expression evaluation
@@ -219,7 +219,7 @@ Interactive evaluation:
 - Quick prototyping
 
 ### Debugger Support
-[Detailed design →](plans/debugger.md)
+[Detailed design →](features/debugger.md)
 
 Debug info and tooling:
 - Source maps
@@ -228,7 +228,7 @@ Debug info and tooling:
 - Stack traces
 
 ### Better Error Messages
-[Detailed design →](plans/error-messages.md)
+[Detailed design →](features/error-messages.md)
 
 Improved diagnostics:
 - Suggested fixes
@@ -239,7 +239,7 @@ Improved diagnostics:
 ## Standard Library
 
 ### Collections
-[Detailed design →](plans/stdlib-collections.md)
+[Detailed design →](features/stdlib-collections.md)
 
 - `HashMap<K, V>` - hash-based key-value store
 - `HashSet<T>` - unique element collection
@@ -248,7 +248,7 @@ Improved diagnostics:
 - `Queue<T>` / `Stack<T>` - FIFO/LIFO collections
 
 ### File I/O
-[Detailed design →](plans/stdlib-io.md)
+[Detailed design →](features/stdlib-io.md)
 
 - File reading/writing
 - Directory operations
@@ -256,14 +256,14 @@ Improved diagnostics:
 - Streaming I/O
 
 ### Networking
-[Detailed design →](plans/stdlib-networking.md)
+[Detailed design →](features/stdlib-networking.md)
 
 - TCP/UDP sockets
 - HTTP client
 - URL parsing
 
 ### String Manipulation
-[Detailed design →](plans/stdlib-strings.md)
+[Detailed design →](features/stdlib-strings.md)
 
 - Split, join, trim
 - Search and replace
@@ -271,7 +271,7 @@ Improved diagnostics:
 - Formatting
 
 ### Math
-[Detailed design →](plans/stdlib-math.md)
+[Detailed design →](features/stdlib-math.md)
 
 - Trigonometry
 - Random numbers

@@ -509,5 +509,5 @@ void Vec_i64_push(Vec_i64* self, int64_t value) {
 ## Related Features
 
 - [Traits](traits.md) - Iterator, Hash, Eq, Ord traits
-- [Generics](../PLANS.md) - Generic type parameters
+- [Generics](../FEATURES.md) - Generic type parameters
 - [Memory Management](memory-management.md) - Collection ownership

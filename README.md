@@ -68,36 +68,36 @@ See [w0/README.md](w0/README.md) for full compiler usage.
 ## Planned Features
 
 ### Language
-- [ ] **Closures / lambdas** — anonymous functions with variable capture ([design](plans/closures.md))
-- [ ] **Pattern matching** — `match` expressions with exhaustiveness checking ([design](plans/pattern-matching.md))
-- [ ] **Result / Option types** — structured error handling with `?` propagation ([design](plans/result-option.md))
-- [ ] **Traits / interfaces** — shared behavior across types, static and dynamic dispatch ([design](plans/traits.md))
-- [ ] **String interpolation** — `"Hello {name}!"` ([design](plans/string-interpolation.md))
-- [ ] **Union types** — `type JsonValue = null | bool | i64 | string` ([design](plans/union-types.md))
-- [ ] **Type aliases** — `type UserId = i64;` ([design](plans/type-aliases.md))
-- [ ] **Nullable types** — `?string` with optional chaining ([design](plans/nullable-types.md))
-- [ ] **Memory management** — reference counting with owner/borrower semantics ([design](plans/memory-management.md))
-- [ ] **Reflection & comptime** — derive macros, type metadata, compile-time execution ([design](plans/reflection.md))
+- [ ] **Closures / lambdas** — anonymous functions with variable capture ([design](features/closures.md))
+- [ ] **Pattern matching** — `match` expressions with exhaustiveness checking ([design](features/pattern-matching.md))
+- [ ] **Result / Option types** — structured error handling with `?` propagation ([design](features/result-option.md))
+- [ ] **Traits / interfaces** — shared behavior across types, static and dynamic dispatch ([design](features/traits.md))
+- [ ] **String interpolation** — `"Hello {name}!"` ([design](features/string-interpolation.md))
+- [ ] **Union types** — `type JsonValue = null | bool | i64 | string` ([design](features/union-types.md))
+- [ ] **Type aliases** — `type UserId = i64;` ([design](features/type-aliases.md))
+- [ ] **Nullable types** — `?string` with optional chaining ([design](features/nullable-types.md))
+- [ ] **Memory management** — reference counting with owner/borrower semantics ([design](features/memory-management.md))
+- [ ] **Reflection & comptime** — derive macros, type metadata, compile-time execution ([design](features/reflection.md))
 
 ### Compiler
-- [ ] **Self-hosted compiler (wc)** — rewrite the compiler in Whist ([design](plans/self-hosting.md))
-- [ ] **LLVM backend** — native code generation and optimizations ([design](plans/llvm-backend.md))
-- [ ] **WebAssembly target** — browser and sandboxed execution ([design](plans/webassembly.md))
-- [ ] **Incremental compilation** — dependency tracking and caching ([design](plans/incremental-compilation.md))
-- [ ] **Better error messages** — suggested fixes, colored output ([design](plans/error-messages.md))
+- [ ] **Self-hosted compiler (wc)** — rewrite the compiler in Whist ([design](features/self-hosting.md))
+- [ ] **LLVM backend** — native code generation and optimizations ([design](features/llvm-backend.md))
+- [ ] **WebAssembly target** — browser and sandboxed execution ([design](features/webassembly.md))
+- [ ] **Incremental compilation** — dependency tracking and caching ([design](features/incremental-compilation.md))
+- [ ] **Better error messages** — suggested fixes, colored output ([design](features/error-messages.md))
 
 ### Tooling
-- [ ] **LSP server** — IDE integration with go-to-definition, completions, diagnostics ([design](plans/lsp-server.md))
-- [ ] **Package manager** — dependency management and registry ([design](plans/package-manager.md))
-- [ ] **REPL** — interactive evaluation and prototyping ([design](plans/repl.md))
-- [ ] **Debugger support** — source maps, breakpoints, stack traces ([design](plans/debugger.md))
+- [ ] **LSP server** — IDE integration with go-to-definition, completions, diagnostics ([design](features/lsp-server.md))
+- [ ] **Package manager** — dependency management and registry ([design](features/package-manager.md))
+- [ ] **REPL** — interactive evaluation and prototyping ([design](features/repl.md))
+- [ ] **Debugger support** — source maps, breakpoints, stack traces ([design](features/debugger.md))
 
 ### Standard Library
-- [ ] **Collections** — `Vec<T>`, `HashMap<K, V>`, `HashSet<T>`, `Queue<T>`, `Stack<T>` ([design](plans/stdlib-collections.md))
-- [ ] **Strings** — split, join, trim, search, Unicode support ([design](plans/stdlib-strings.md))
-- [ ] **Networking** — TCP/UDP sockets, HTTP client ([design](plans/stdlib-networking.md))
-- [ ] **Math** — trigonometry, random numbers, big integers ([design](plans/stdlib-math.md))
-- [ ] **Extended I/O** — directory operations, path manipulation, streaming ([design](plans/stdlib-io.md))
+- [ ] **Collections** — `Vec<T>`, `HashMap<K, V>`, `HashSet<T>`, `Queue<T>`, `Stack<T>` ([design](features/stdlib-collections.md))
+- [ ] **Strings** — split, join, trim, search, Unicode support ([design](features/stdlib-strings.md))
+- [ ] **Networking** — TCP/UDP sockets, HTTP client ([design](features/stdlib-networking.md))
+- [ ] **Math** — trigonometry, random numbers, big integers ([design](features/stdlib-math.md))
+- [ ] **Extended I/O** — directory operations, path manipulation, streaming ([design](features/stdlib-io.md))
 
 ## Progress
 
@@ -110,7 +110,7 @@ whist/
 ├── w0/          Bootstrap compiler (C)
 ├── wc/          Self-hosted compiler (planned)
 ├── lib/         Standard library
-├── plans/       Design documents for future features
+├── features/       Design documents for future features
 └── grammar.md   BNF grammar specification
 ```
 
