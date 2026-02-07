@@ -312,7 +312,17 @@ int type_assignable(Type* target, Type* value) {
     return 0;
 }
 
-static char type_name_buf[256];
+// Ring buffer for type_name() results. Multiple concurrent calls (e.g. in the same
+// printf argument list) each get their own buffer slot, avoiding aliasing bugs.
+#define TYPE_NAME_BUFS 4
+static char type_name_bufs[TYPE_NAME_BUFS][256];
+static int  type_name_idx = 0;
+
+static char* next_type_name_buf(void) {
+    char* buf     = type_name_bufs[type_name_idx];
+    type_name_idx = (type_name_idx + 1) % TYPE_NAME_BUFS;
+    return buf;
+}
 
 const char* type_name(Type* type) {
     if (!type)
@@ -353,30 +363,35 @@ const char* type_name(Type* type) {
         return "<error>";
     case TYPE_NULL:
         return "null";
-    case TYPE_ARRAY:
+    case TYPE_ARRAY: {
+        char* buf = next_type_name_buf();
         if (type->as.array.size >= 0) {
-            snprintf(type_name_buf, sizeof(type_name_buf), "[%d]%s", type->as.array.size,
-                     type_name(type->as.array.elem));
+            snprintf(buf, 256, "[%d]%s", type->as.array.size, type_name(type->as.array.elem));
         } else {
-            snprintf(type_name_buf, sizeof(type_name_buf), "[]%s", type_name(type->as.array.elem));
+            snprintf(buf, 256, "[]%s", type_name(type->as.array.elem));
         }
-        return type_name_buf;
-    case TYPE_SPAN:
-        snprintf(type_name_buf, sizeof(type_name_buf), "Span<%s>", type_name(type->as.span.elem));
-        return type_name_buf;
+        return buf;
+    }
+    case TYPE_SPAN: {
+        char* buf = next_type_name_buf();
+        snprintf(buf, 256, "Span<%s>", type_name(type->as.span.elem));
+        return buf;
+    }
     case TYPE_STRUCT:
         return type->as.struc.name;
     case TYPE_ENUM:
         return type->as.enm.name;
     case TYPE_TRAIT:
         return type->as.trait.name;
-    case TYPE_FUNC:
-        snprintf(type_name_buf, sizeof(type_name_buf), "func(...): %s",
-                 type_name(type->as.func.return_type));
-        return type_name_buf;
+    case TYPE_FUNC: {
+        char* buf = next_type_name_buf();
+        snprintf(buf, 256, "func(...): %s", type_name(type->as.func.return_type));
+        return buf;
+    }
     case TYPE_TUPLE: {
-        char* p   = type_name_buf;
-        char* end = type_name_buf + sizeof(type_name_buf) - 1;
+        char* buf = next_type_name_buf();
+        char* p   = buf;
+        char* end = buf + 256 - 1;
         *p++      = '(';
         for (int i = 0; i < type->as.tuple.elem_count && p < end; i++) {
             if (i > 0) {
@@ -393,7 +408,7 @@ const char* type_name(Type* type) {
         if (p < end)
             *p++ = ')';
         *p = '\0';
-        return type_name_buf;
+        return buf;
     }
     case TYPE_GENERIC_PARAM:
         return type->as.generic_param.name;

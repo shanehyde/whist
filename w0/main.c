@@ -11,9 +11,6 @@
 #include "parser.h"
 #include "print_ast.h"
 
-static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path,
-                           int rc_debug);
-
 static char* read_file(const char* path) {
     FILE* file = fopen(path, "rb");
     if (!file) {
@@ -32,14 +29,10 @@ static char* read_file(const char* path) {
     return buffer;
 }
 
-static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path,
-                           int rc_debug) {
-    // Read source file
-    char* source = read_file(source_path);
-    if (!source)
-        return 1;
-
-    // Parse
+// Compile source to C code, writing to the given output file.
+// Returns 0 on success, 1 on error.
+static int compile_to_c(const char* source, const char* source_path, const char* lib_path,
+                        int rc_debug, FILE* out) {
     Parser parser;
     parser_init_with_path(&parser, source, source_path, lib_path);
     Node* ast = parser_parse(&parser);
@@ -48,11 +41,9 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
         fprintf(stderr, "Parse failed\n");
         node_free(ast);
         parser_free(&parser);
-        free(source);
         return 1;
     }
 
-    // Type check
     Checker checker;
     checker_init(&checker);
     checker_set_direct_imports(&checker, parser.direct_imports, parser.direct_imports_count);
@@ -63,9 +54,26 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
         fprintf(stderr, "Type check failed\n");
         node_free(ast);
         parser_free(&parser);
-        free(source);
         return 1;
     }
+
+    CodeGen gen;
+    codegen_init(&gen, out, checker.generic_instances, checker.generic_instance_count,
+                 checker.span_instances, checker.span_instance_count, checker.trait_impls,
+                 checker.trait_impl_count, rc_debug);
+    codegen_emit(&gen, ast);
+
+    checker_free(&checker);
+    node_free(ast);
+    parser_free(&parser);
+    return 0;
+}
+
+static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path,
+                           int rc_debug) {
+    char* source = read_file(source_path);
+    if (!source)
+        return 1;
 
     // Create temp files
     char c_base[]   = "/tmp/w0_XXXXXX";
@@ -74,19 +82,16 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
     int c_fd = mkstemp(c_base);
     if (c_fd < 0) {
         fprintf(stderr, "Could not create temp file\n");
-        node_free(ast);
         free(source);
         return 1;
     }
 
-    // Rename to .c extension for cc
     char c_path[256];
     snprintf(c_path, sizeof(c_path), "%s.c", c_base);
     close(c_fd);
     if (rename(c_base, c_path) != 0) {
         fprintf(stderr, "Could not rename temp file\n");
         unlink(c_base);
-        node_free(ast);
         free(source);
         return 1;
     }
@@ -95,34 +100,29 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
     if (exe_fd < 0) {
         fprintf(stderr, "Could not create temp file\n");
         unlink(c_path);
-        node_free(ast);
         free(source);
         return 1;
     }
     close(exe_fd);
 
-    // Generate C code
     FILE* c_file = fopen(c_path, "w");
     if (!c_file) {
         fprintf(stderr, "Could not open temp file for writing\n");
         unlink(c_path);
         unlink(exe_path);
-        node_free(ast);
         free(source);
         return 1;
     }
 
-    CodeGen gen;
-    codegen_init(&gen, c_file, checker.generic_instances, checker.generic_instance_count,
-                 checker.span_instances, checker.span_instance_count, checker.trait_impls,
-                 checker.trait_impl_count, rc_debug);
-    codegen_emit(&gen, ast);
+    int result = compile_to_c(source, source_path, lib_path, rc_debug, c_file);
     fclose(c_file);
-
-    checker_free(&checker);
-    node_free(ast);
-    parser_free(&parser);
     free(source);
+
+    if (result != 0) {
+        unlink(c_path);
+        unlink(exe_path);
+        return 1;
+    }
 
     // Compile with cc
     char cmd[1024];
@@ -292,7 +292,31 @@ int main(int argc, char** argv) {
             }
             printf("\n");
         } while (token.type != TOK_EOF);
+    } else if (!parse_only && !check_only && !print_ast_flag) {
+        // Normal compilation
+        FILE* out = stdout;
+        if (output_file) {
+            out = fopen(output_file, "w");
+            if (!out) {
+                fprintf(stderr, "Could not open output file: %s\n", output_file);
+                if (free_source)
+                    free(source);
+                return 1;
+            }
+        }
+
+        int result = compile_to_c(source, source_file, lib_path, rc_debug, out);
+
+        if (output_file) {
+            fclose(out);
+            if (result == 0)
+                fprintf(stderr, "Generated: %s\n", output_file);
+        }
+        if (free_source)
+            free(source);
+        return result;
     } else {
+        // Debug modes: --parse, --check, --ast
         Parser parser;
         parser_init_with_path(&parser, source, source_file, lib_path);
         Node* ast = parser_parse(&parser);
@@ -331,7 +355,7 @@ int main(int argc, char** argv) {
             }
 
             if (!check_only) {
-                // Code generation
+                // --ast with full codegen
                 FILE* out = stdout;
                 if (output_file) {
                     out = fopen(output_file, "w");
@@ -351,7 +375,7 @@ int main(int argc, char** argv) {
                              checker.span_instances, checker.span_instance_count,
                              checker.trait_impls, checker.trait_impl_count, rc_debug);
                 codegen_emit(&gen, ast);
-                checker_free(&checker); // Free types after codegen
+                checker_free(&checker);
 
                 if (output_file) {
                     fclose(out);
