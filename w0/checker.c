@@ -756,6 +756,15 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
             }
         }
 
+        // Check if the base generic has a Drop trait impl and propagate to instantiation
+        for (int ti = 0; ti < checker->trait_impl_count; ti++) {
+            if (strcmp(checker->trait_impls[ti].trait_name, "Drop") == 0 &&
+                strcmp(checker->trait_impls[ti].type_name, base_name) == 0) {
+                struct_type->as.struc.has_drop = 1;
+                break;
+            }
+        }
+
         // Instantiate methods on the generic struct
         for (int m = 0; m < def->method_count; m++) {
             Node*           method_decl = def->methods[m];
@@ -2231,15 +2240,21 @@ static void check_decl(Checker* checker, Node* node) {
         Type* trait_type = trait_sym->type;
 
         // Look up the target type
-        Symbol* type_sym = checker_lookup(checker, type_name_str);
+        Symbol*     type_sym    = checker_lookup(checker, type_name_str);
+        GenericDef* generic_def = NULL;
+        int         is_generic  = 0;
         if (!type_sym || type_sym->kind != SYM_TYPE || type_sym->type->kind != TYPE_STRUCT) {
-            check_error(checker, node->line, node->column,
-                        "Cannot implement trait for unknown struct type '%s'", type_name_str);
-            return;
+            // Fallback: check if it's a generic struct template
+            generic_def = lookup_generic_def(checker, type_name_str);
+            if (!generic_def) {
+                check_error(checker, node->line, node->column,
+                            "Cannot implement trait for unknown struct type '%s'", type_name_str);
+                return;
+            }
+            is_generic = 1;
         }
 
-        // Process each method in the impl block as a regular NODE_FUNC_DECL
-        // This registers the method on the struct type and checks the body
+        // Process each method in the impl block
         for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
             Node* method = node->as.impl_decl.methods.nodes[i];
 
@@ -2261,44 +2276,53 @@ static void check_decl(Checker* checker, Node* node) {
                 continue;
             }
 
-            // Verify the method signature matches the trait signature
-            Type* impl_func_type  = get_function_type(checker, method);
-            Type* trait_func_type = trait_type->as.trait.method_types[trait_method_idx];
+            if (is_generic) {
+                // For generic structs, the method has a generic receiver (e.g., func (Box<T>)
+                // drop()) Process it via check_decl which routes to the generic method registration
+                // path
+                check_decl(checker, method);
+            } else {
+                // Verify the method signature matches the trait signature
+                Type* impl_func_type  = get_function_type(checker, method);
+                Type* trait_func_type = trait_type->as.trait.method_types[trait_method_idx];
 
-            // Check return type
-            if (!type_equals(impl_func_type->as.func.return_type,
-                             trait_func_type->as.func.return_type)) {
-                check_error(checker, method->line, method->column,
-                            "Method '%s' return type mismatch: trait '%s' expects '%s', got '%s'",
-                            method_name, trait_name,
-                            type_name(trait_func_type->as.func.return_type),
-                            type_name(impl_func_type->as.func.return_type));
-                continue;
-            }
-
-            // Check parameter types
-            if (impl_func_type->as.func.param_count != trait_func_type->as.func.param_count) {
-                check_error(checker, method->line, method->column,
-                            "Method '%s' parameter count mismatch: trait '%s' expects %d, got %d",
-                            method_name, trait_name, trait_func_type->as.func.param_count,
-                            impl_func_type->as.func.param_count);
-                continue;
-            }
-
-            for (int p = 0; p < trait_func_type->as.func.param_count; p++) {
-                if (!type_equals(impl_func_type->as.func.param_types[p],
-                                 trait_func_type->as.func.param_types[p])) {
+                // Check return type
+                if (!type_equals(impl_func_type->as.func.return_type,
+                                 trait_func_type->as.func.return_type)) {
                     check_error(
                         checker, method->line, method->column,
-                        "Method '%s' parameter %d type mismatch: trait '%s' expects '%s', got '%s'",
-                        method_name, p + 1, trait_name,
-                        type_name(trait_func_type->as.func.param_types[p]),
-                        type_name(impl_func_type->as.func.param_types[p]));
+                        "Method '%s' return type mismatch: trait '%s' expects '%s', got '%s'",
+                        method_name, trait_name, type_name(trait_func_type->as.func.return_type),
+                        type_name(impl_func_type->as.func.return_type));
+                    continue;
                 }
-            }
 
-            // Process the method as a regular func_decl (registers on struct, checks body)
-            check_decl(checker, method);
+                // Check parameter types
+                if (impl_func_type->as.func.param_count != trait_func_type->as.func.param_count) {
+                    check_error(
+                        checker, method->line, method->column,
+                        "Method '%s' parameter count mismatch: trait '%s' expects %d, got %d",
+                        method_name, trait_name, trait_func_type->as.func.param_count,
+                        impl_func_type->as.func.param_count);
+                    continue;
+                }
+
+                for (int p = 0; p < trait_func_type->as.func.param_count; p++) {
+                    if (!type_equals(impl_func_type->as.func.param_types[p],
+                                     trait_func_type->as.func.param_types[p])) {
+                        check_error(
+                            checker, method->line, method->column,
+                            "Method '%s' parameter %d type mismatch: trait '%s' expects '%s', got "
+                            "'%s'",
+                            method_name, p + 1, trait_name,
+                            type_name(trait_func_type->as.func.param_types[p]),
+                            type_name(impl_func_type->as.func.param_types[p]));
+                    }
+                }
+
+                // Process the method as a regular func_decl (registers on struct, checks body)
+                check_decl(checker, method);
+            }
         }
 
         // Verify all required trait methods are implemented
@@ -2324,7 +2348,7 @@ static void check_decl(Checker* checker, Node* node) {
         impl->type_name  = xstrdup(type_name_str);
 
         // If implementing Drop, set the flag on the struct type
-        if (strcmp(trait_name, "Drop") == 0) {
+        if (strcmp(trait_name, "Drop") == 0 && !is_generic) {
             type_sym->type->as.struc.has_drop = 1;
         }
         break;

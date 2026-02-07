@@ -1985,11 +1985,25 @@ static void collect_generic_methods(Node* ast, const char* struct_name, Node*** 
             continue;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
+            // Direct generic methods: func (Box<T>) get(): T
             if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type != NULL &&
                 decl->as.func_decl.receiver_type_args.count > 0 &&
                 strcmp(decl->as.func_decl.receiver_type, struct_name) == 0) {
                 VEC_GROW(methods, count, capacity);
                 methods[count++] = decl;
+            }
+            // Methods inside impl blocks: impl Drop for Box { func (Box<T>) drop(): void }
+            if (decl->type == NODE_IMPL_DECL) {
+                for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
+                    Node* method = decl->as.impl_decl.methods.nodes[j];
+                    if (method->type == NODE_FUNC_DECL &&
+                        method->as.func_decl.receiver_type != NULL &&
+                        method->as.func_decl.receiver_type_args.count > 0 &&
+                        strcmp(method->as.func_decl.receiver_type, struct_name) == 0) {
+                        VEC_GROW(methods, count, capacity);
+                        methods[count++] = method;
+                    }
+                }
             }
         }
     }
@@ -2430,6 +2444,62 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     }
     emit(gen, "\n");
 
+    // Forward declare all __rc_dec_TypeName functions to handle cross-references
+    // (e.g., non-generic Container referencing __rc_dec_Box_Inner from generic instance)
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type != NODE_STRUCT_DECL)
+                continue;
+            if (decl->as.struct_decl.type_param_count > 0)
+                continue;
+            const char* sname = decl->as.struct_decl.name;
+            // Check if this struct needs a custom dec function
+            int needs_dec = 0;
+            for (int t = 0; t < gen->trait_impl_count; t++) {
+                if (strcmp(gen->trait_impls[t].trait_name, "Drop") == 0 &&
+                    strcmp(gen->trait_impls[t].type_name, sname) == 0) {
+                    needs_dec = 1;
+                    break;
+                }
+            }
+            if (!needs_dec) {
+                for (int f = 0; f < decl->as.struct_decl.fields.count; f++) {
+                    Node* field = decl->as.struct_decl.fields.nodes[f];
+                    if (field->as.field.type && is_struct_type(field->as.field.type)) {
+                        needs_dec = 1;
+                        break;
+                    }
+                }
+            }
+            if (needs_dec) {
+                emit(gen, "static inline void __rc_dec_%s(%s* ptr);\n", sname, sname);
+            }
+        }
+    }
+    for (int i = 0; i < gen->generic_instance_count; i++) {
+        GenericInstance* info = &gen->generic_instances[i];
+        Type*            t    = info->type;
+        if (!t || t->kind != TYPE_STRUCT)
+            continue;
+        int has_drop = 0;
+        for (int ti = 0; ti < gen->trait_impl_count; ti++) {
+            if (strcmp(gen->trait_impls[ti].trait_name, "Drop") == 0 &&
+                strcmp(gen->trait_impls[ti].type_name, info->base_name) == 0) {
+                has_drop = 1;
+                break;
+            }
+        }
+        if (has_drop || t->as.struc.has_rc_fields) {
+            emit(gen, "static inline void __rc_dec_%s(%s* ptr);\n", info->mangled_name,
+                 info->mangled_name);
+        }
+    }
+    emit(gen, "\n");
+
     // Emit type-specific __rc_dec_TypeName functions for structs with Drop or RC fields
     // Non-generic structs: scan modules for struct decls with resolved types
     for (int m = 0; m < ast->as.program.modules.count; m++) {
@@ -2480,14 +2550,22 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                     rc_field_names = xrealloc(rc_field_names, rc_field_count * sizeof(char*));
                     rc_field_type_names =
                         xrealloc(rc_field_type_names, rc_field_count * sizeof(char*));
-                    rc_field_names[rc_field_count - 1] = field->as.field.name;
+                    rc_field_names[rc_field_count - 1] = xstrdup(field->as.field.name);
                     // Get the type name for the field
                     if (field->as.field.type->type == NODE_IDENT) {
                         rc_field_type_names[rc_field_count - 1] =
-                            field->as.field.type->as.ident.name;
+                            xstrdup(field->as.field.type->as.ident.name);
                     } else if (field->as.field.type->type == NODE_GENERIC_TYPE) {
-                        // For generic types, we'd need the mangled name
-                        rc_field_type_names[rc_field_count - 1] = NULL;
+                        // Build mangled name for generic type field (e.g., Box<Inner> -> Box_Inner)
+                        Node*  gtype     = field->as.field.type;
+                        int    arg_count = gtype->as.generic_type.type_args.count;
+                        Type** args      = xmalloc(arg_count * sizeof(Type*));
+                        for (int a = 0; a < arg_count; a++) {
+                            args[a] = type_from_node(gtype->as.generic_type.type_args.nodes[a]);
+                        }
+                        rc_field_type_names[rc_field_count - 1] =
+                            type_mangle_generic(gtype->as.generic_type.base_name, args, arg_count);
+                        free(args);
                     } else {
                         rc_field_type_names[rc_field_count - 1] = NULL;
                     }
@@ -2510,7 +2588,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                 const char* field_tname            = rc_field_type_names[f];
                 int         field_needs_custom_dec = 0;
                 if (field_tname) {
-                    // Check if field type implements Drop
+                    // Check if field type implements Drop (exact name match for non-generic)
                     for (int t = 0; t < gen->trait_impl_count; t++) {
                         if (strcmp(gen->trait_impls[t].trait_name, "Drop") == 0 &&
                             strcmp(gen->trait_impls[t].type_name, field_tname) == 0) {
@@ -2518,7 +2596,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                             break;
                         }
                     }
-                    // Check if field type has RC fields (scan other structs)
+                    // Check if field type has RC fields (scan non-generic structs)
                     if (!field_needs_custom_dec) {
                         for (int si = 0;
                              si < ast->as.program.modules.count && !field_needs_custom_dec; si++) {
@@ -2544,6 +2622,19 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                             }
                         }
                     }
+                    // Also check generic instances (e.g., field type "Box_Inner")
+                    if (!field_needs_custom_dec) {
+                        for (int gi = 0; gi < gen->generic_instance_count; gi++) {
+                            if (strcmp(gen->generic_instances[gi].mangled_name, field_tname) == 0) {
+                                Type* git = gen->generic_instances[gi].type;
+                                if (git && git->kind == TYPE_STRUCT &&
+                                    (git->as.struc.has_drop || git->as.struc.has_rc_fields)) {
+                                    field_needs_custom_dec = 1;
+                                }
+                                break;
+                            }
+                        }
+                    }
                 }
                 if (field_needs_custom_dec) {
                     emit(gen, "        __rc_dec_%s(ptr->%s);\n", field_tname, rc_field_names[f]);
@@ -2563,6 +2654,10 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             emit(gen, "    }\n");
             emit(gen, "}\n\n");
 
+            for (int f = 0; f < rc_field_count; f++) {
+                free(rc_field_names[f]);
+                free(rc_field_type_names[f]);
+            }
             free(rc_field_names);
             free(rc_field_type_names);
         }
