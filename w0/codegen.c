@@ -1022,7 +1022,11 @@ static void emit_expr(CodeGen* gen, Node* node) {
             if (field && field->type == NODE_FIELD_INIT &&
                 field->as.field_init.value->type == NODE_IDENT &&
                 rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
-                emit(gen, " __rc_inc(%s);", field->as.field_init.value->as.ident.name);
+                const char* vname  = field->as.field_init.value->as.ident.name;
+                Type*       vtype  = rc_get_var_type(gen, vname);
+                const char* inc_fn = get_inc_func_for_type(vtype);
+                emit(gen, " %s(%s);", inc_fn, vname);
+                free((char*)inc_fn);
             }
         }
         emit(gen, " __rc_tmp%d; })", tmp);
@@ -1283,8 +1287,12 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                     if (field && field->type == NODE_FIELD_INIT &&
                         field->as.field_init.value->type == NODE_IDENT &&
                         rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
+                        const char* vname  = field->as.field_init.value->as.ident.name;
+                        Type*       vtype  = rc_get_var_type(gen, vname);
+                        const char* inc_fn = get_inc_func_for_type(vtype);
                         emit_indent(gen);
-                        emit(gen, "__rc_inc(%s);\n", field->as.field_init.value->as.ident.name);
+                        emit(gen, "%s(%s);\n", inc_fn, vname);
+                        free((char*)inc_fn);
                     }
                 }
                 const char* dec_fn = get_dec_func_for_type(stype);
@@ -2381,7 +2389,32 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         }
     }
 
-    // Emit enum typedefs (before struct forward declarations)
+    // Forward declarations for structs (skip generic templates)
+    // Must come before enum typedefs since data enums may reference struct types
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type == NODE_STRUCT_DECL) {
+                // Skip generic struct templates
+                if (decl->as.struct_decl.type_param_count > 0) {
+                    continue;
+                }
+                emit(gen, "typedef struct %s %s;\n", decl->as.struct_decl.name,
+                     decl->as.struct_decl.name);
+            }
+        }
+    }
+    // Forward declarations for instantiated generic structs
+    for (int i = 0; i < gen->generic_instance_count; i++) {
+        emit(gen, "typedef struct %s %s;\n", gen->generic_instances[i].mangled_name,
+             gen->generic_instances[i].mangled_name);
+    }
+    emit(gen, "\n");
+
+    // Emit enum typedefs (after struct forward declarations)
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
@@ -2552,30 +2585,6 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             emit(gen, "}\n\n");
         }
     }
-
-    // Forward declarations for structs (skip generic templates)
-    for (int m = 0; m < ast->as.program.modules.count; m++) {
-        Node* mod = ast->as.program.modules.nodes[m];
-        if (!mod || mod->type != NODE_MODULE)
-            continue;
-        for (int i = 0; i < mod->as.module.decls.count; i++) {
-            Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type == NODE_STRUCT_DECL) {
-                // Skip generic struct templates
-                if (decl->as.struct_decl.type_param_count > 0) {
-                    continue;
-                }
-                emit(gen, "typedef struct %s %s;\n", decl->as.struct_decl.name,
-                     decl->as.struct_decl.name);
-            }
-        }
-    }
-    // Forward declarations for instantiated generic structs
-    for (int i = 0; i < gen->generic_instance_count; i++) {
-        emit(gen, "typedef struct %s %s;\n", gen->generic_instances[i].mangled_name,
-             gen->generic_instances[i].mangled_name);
-    }
-    emit(gen, "\n");
 
     // Emit body typedefs for non-generic structs (must come before __rc_dec_TypeName)
     for (int m = 0; m < ast->as.program.modules.count; m++) {
