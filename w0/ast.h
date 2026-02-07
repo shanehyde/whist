@@ -72,6 +72,7 @@ typedef enum {
     NODE_FUNC_DECL,
     NODE_STRUCT_DECL,
     NODE_ENUM_DECL,
+    NODE_ENUM_VARIANT,
     NODE_TRAIT_DECL,
     NODE_IMPL_DECL,
 
@@ -238,12 +239,14 @@ struct Node {
             Node* value;
         } field_init;
 
-        // Enum value access: EnumName::ValueName
+        // Enum value access: EnumName::ValueName or EnumName::ValueName(args)
         struct {
-            char* enum_name;
-            int   enum_name_length;
-            char* value_name;
-            int   value_name_length;
+            char*    enum_name;
+            int      enum_name_length;
+            char*    value_name;
+            int      value_name_length;
+            NodeList args;         // constructor arg expressions (count==0 for bare tag)
+            int      is_data_enum; // set by checker: 1 if parent enum has data variants
         } enum_value;
 
         // New expression: new Type { fields }
@@ -373,9 +376,16 @@ struct Node {
             int      is_public;
             char*    name;
             int      name_length;
-            NodeList values;        // list of ident nodes
+            NodeList values;        // list of NODE_ENUM_VARIANT nodes
             char*    source_module; // NULL = same module, else external module name
         } enum_decl;
+
+        // Enum variant (inside enum declaration)
+        struct {
+            char*    name;
+            int      name_length;
+            NodeList types; // payload type nodes (empty for simple variants)
+        } enum_variant;
 
         // Trait declaration
         struct {

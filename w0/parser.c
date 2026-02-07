@@ -463,6 +463,22 @@ static Node* parse_primary_expression(Parser* parser) {
                 return NULL;
             }
             node->as.enum_value.value_name_length = value_name.length;
+            nodelist_init(&node->as.enum_value.args);
+
+            // Check for constructor args: EnumName::ValueName(expr, ...)
+            if (match_token(parser, TOK_LPAREN)) {
+                while (!check_token(parser, TOK_RPAREN) && !check_token(parser, TOK_EOF)) {
+                    Node* arg = parse_expression(parser);
+                    if (!arg)
+                        return NULL;
+                    nodelist_push(&node->as.enum_value.args, arg);
+                    if (!check_token(parser, TOK_RPAREN)) {
+                        consume_token(parser, TOK_COMMA,
+                                      "Expected ',' or ')' after enum constructor arg");
+                    }
+                }
+                consume_token(parser, TOK_RPAREN, "Expected ')' after enum constructor args");
+            }
             return node;
         }
 
@@ -1670,17 +1686,32 @@ static Node* parse_enum_decl(Parser* parser, int is_public) {
         Token value_name = parser->current;
         consume_token(parser, TOK_IDENT, "Expected enum value name");
 
-        Node* value = node_new(NODE_IDENT, value_name.line, value_name.column);
+        Node* value = node_new(NODE_ENUM_VARIANT, value_name.line, value_name.column);
         if (!value) {
             parse_error(parser, "Out of memory");
             return NULL;
         }
-        value->as.ident.name = copy_token_string(&value_name);
-        if (!value->as.ident.name) {
+        value->as.enum_variant.name = copy_token_string(&value_name);
+        if (!value->as.enum_variant.name) {
             parse_error(parser, "Out of memory");
             return NULL;
         }
-        value->as.ident.length = value_name.length;
+        value->as.enum_variant.name_length = value_name.length;
+        nodelist_init(&value->as.enum_variant.types);
+
+        // Check for payload types: VariantName(Type1, Type2, ...)
+        if (match_token(parser, TOK_LPAREN)) {
+            while (!check_token(parser, TOK_RPAREN) && !check_token(parser, TOK_EOF)) {
+                Node* type_node = parse_type(parser);
+                if (!type_node)
+                    return NULL;
+                nodelist_push(&value->as.enum_variant.types, type_node);
+                if (!check_token(parser, TOK_RPAREN)) {
+                    consume_token(parser, TOK_COMMA, "Expected ',' or ')' after variant type");
+                }
+            }
+            consume_token(parser, TOK_RPAREN, "Expected ')' after variant types");
+        }
 
         nodelist_push(&node->as.enum_decl.values, value);
 

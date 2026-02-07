@@ -74,9 +74,13 @@ struct Type {
 
         // Enum
         struct {
-            char*  name;
-            char** value_names;
-            int    value_count;
+            char*   name;
+            char**  value_names;
+            int     value_count;
+            int     has_data;            // 1 if any variant carries payload
+            int     has_rc_fields;       // 1 if any payload carries RC-managed pointers
+            Type*** variant_types;       // [variant_idx] -> Type*[] (NULL = no payload)
+            int*    variant_type_counts; // [variant_idx] -> field count
         } enm;
 
         // Trait

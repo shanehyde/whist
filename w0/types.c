@@ -95,10 +95,14 @@ Type* type_struct(const char* name) {
 }
 
 Type* type_enum(const char* name) {
-    Type* type               = type_new(TYPE_ENUM);
-    type->as.enm.name        = xstrdup(name);
-    type->as.enm.value_names = NULL;
-    type->as.enm.value_count = 0;
+    Type* type                       = type_new(TYPE_ENUM);
+    type->as.enm.name                = xstrdup(name);
+    type->as.enm.value_names         = NULL;
+    type->as.enm.value_count         = 0;
+    type->as.enm.has_data            = 0;
+    type->as.enm.has_rc_fields       = 0;
+    type->as.enm.variant_types       = NULL;
+    type->as.enm.variant_type_counts = NULL;
     return type;
 }
 
@@ -173,6 +177,13 @@ void type_free(Type* type) {
             free(type->as.enm.value_names[i]);
         }
         free(type->as.enm.value_names);
+        if (type->as.enm.variant_types) {
+            for (int i = 0; i < type->as.enm.value_count; i++) {
+                free(type->as.enm.variant_types[i]);
+            }
+            free(type->as.enm.variant_types);
+        }
+        free(type->as.enm.variant_type_counts);
         break;
     case TYPE_TRAIT:
         free(type->as.trait.name);
