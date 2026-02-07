@@ -94,10 +94,12 @@ Generic structs are monomorphized at compile time, generating specialized C code
 ### Trait Declaration
 
 ```bnf
-<trait-decl> ::= 'trait' <identifier> '{' { <func-decl> ';' } '}'
+<trait-decl>   ::= 'trait' <identifier> '{' { <trait-method> } '}'
+
+<trait-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <type> ] ';'
 ```
 
-Traits define a set of required method signatures that types can implement. Trait methods are declared without a receiver or body — just the function signature followed by a semicolon.
+Traits define a set of required method signatures that types can implement. Trait methods are declared without a receiver or body — just the function signature followed by a semicolon. Use `const func` to declare methods that require an immutable receiver. Impl blocks must match the const-ness exactly.
 
 ### Impl Declaration
 

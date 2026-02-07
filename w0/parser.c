@@ -1542,12 +1542,20 @@ static Node* parse_trait_decl(Parser* parser, int is_public) {
     consume_token(parser, TOK_LBRACE, "Expected '{' after trait name");
 
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
+        // Accept 'const func' or 'func' in trait declarations
+        int method_is_const = 0;
+        if (check_token(parser, TOK_CONST)) {
+            advance_token(parser); // consume 'const'
+            method_is_const = 1;
+        }
+
         if (!match_token(parser, TOK_FUNC)) {
             parse_error(parser, "Expected 'func' in trait declaration");
             return NULL;
         }
         Node* method = parse_func_decl(parser, 0);
         if (method) {
+            method->as.func_decl.receiver_is_const = method_is_const;
             nodelist_push(&node->as.trait_decl.methods, method);
         }
     }

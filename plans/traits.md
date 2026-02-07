@@ -11,10 +11,11 @@ Phase 1 covers trait declarations, `impl` blocks, and trait bounds on generic st
 ```whist
 trait Greetable {
     func greet(): string;
+    const func id(): i64;
 }
 ```
 
-Traits define required method signatures. Methods are declared without a receiver or body — just the function signature followed by a semicolon.
+Traits define required method signatures. Methods are declared without a receiver or body — just the function signature followed by a semicolon. Use `const func` for methods that require an immutable receiver. Impl blocks must match the const-ness exactly.
 
 ### Impl Blocks
 
@@ -67,7 +68,8 @@ The checker validates:
 ### Grammar
 
 ```bnf
-<trait-decl>  ::= 'trait' <identifier> '{' { <func-decl> ';' } '}'
+<trait-decl>   ::= 'trait' <identifier> '{' { <trait-method> } '}'
+<trait-method>  ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <type> ] ';'
 <impl-decl>   ::= 'impl' <identifier> 'for' <identifier> [ '<' <type-arg-list> '>' ]
                    '{' { <impl-method> } '}'
 <impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <type> ] '{' <block> '}'
