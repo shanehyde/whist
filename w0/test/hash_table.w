@@ -26,7 +26,8 @@ struct HashTable<V>  {
 }
 
 func (HashTable<V>) init(): void {
-    self.buckets = new Vec<HashEntry<V>>{};
+    // self.buckets = new Vec<HashEntry<V>>{};
+    self.buckets.clear();
     self.size = 0;
     foreach (const i in 0..16) {
         self.buckets.push(new HashEntry<V> {next: null, value: 0});

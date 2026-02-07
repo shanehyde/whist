@@ -839,7 +839,8 @@ static char* resolve_generic_method_target(CodeGen* gen, Node* member) {
             if (gen->subst_ctx) {
                 for (int s = 0; s < gen->subst_ctx->count; s++) {
                     if (strcmp(gen->subst_ctx->type_params[s], elem_name) == 0) {
-                        snprintf(buf, sizeof(buf), "__Vec_%s", type_name(gen->subst_ctx->type_args[s]));
+                        snprintf(buf, sizeof(buf), "__Vec_%s",
+                                 type_name(gen->subst_ctx->type_args[s]));
                         return xstrdup(buf);
                     }
                 }
@@ -1104,8 +1105,8 @@ static void emit_expr(CodeGen* gen, Node* node) {
             }
             if (is_module_call) {
                 // Module-qualified call: emit module_func(args...)
-                emit(gen, "%s_%.*s(", func->as.member.object->as.ident.name,
-                     func->as.member.length, func->as.member.name);
+                emit(gen, "%s_%.*s(", func->as.member.object->as.ident.name, func->as.member.length,
+                     func->as.member.name);
                 for (int i = 0; i < node->as.call.args.count; i++) {
                     if (i > 0)
                         emit(gen, ", ");
@@ -1619,9 +1620,8 @@ void emit_stmt(CodeGen* gen, Node* node) {
                 char* dec_fn      = NULL;
                 if (value_is_rc && gen->current_generic_template) {
                     // Generic method: look up field type from template
-                    Node* ftype =
-                        lookup_generic_template_field_type(gen, member->as.member.name);
-                    dec_fn = resolve_generic_field_dec_func(gen, ftype);
+                    Node* ftype = lookup_generic_template_field_type(gen, member->as.member.name);
+                    dec_fn      = resolve_generic_field_dec_func(gen, ftype);
                 }
                 if (dec_fn) {
                     // Dec the old field value, then assign the new one

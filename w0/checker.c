@@ -996,6 +996,39 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
             Type* return_type =
                 mfdn->return_type ? resolve_type(checker, mfdn->return_type) : type_void;
 
+            // Type-check the method body with the combined substitution context
+            if (mfdn->body) {
+                checker_push_scope(checker);
+                Type* old_return             = checker->current_func_return;
+                checker->current_func_return = return_type;
+
+                char** old_accessible_modules       = checker->current_accessible_modules;
+                int    old_accessible_modules_count = checker->current_accessible_modules_count;
+                checker->current_accessible_modules = mfdn->accessible_modules;
+                checker->current_accessible_modules_count = mfdn->accessible_modules_count;
+
+                // Inject 'self' into scope
+                checker_define(checker, "self", SYM_VAR, struct_type, mfdn->receiver_is_const, 0,
+                               NULL);
+
+                // Define parameters
+                for (int p = 0; p < param_count; p++) {
+                    Node* param = mfdn->params.nodes[p];
+                    checker_define(checker, param->as.param.name, SYM_VAR, param_types[p],
+                                   param->as.param.is_const, 0, NULL);
+                }
+
+                // Check body statements
+                for (int s = 0; s < mfdn->body->as.block.stmts.count; s++) {
+                    check_statement(checker, mfdn->body->as.block.stmts.nodes[s]);
+                }
+
+                checker->current_accessible_modules       = old_accessible_modules;
+                checker->current_accessible_modules_count = old_accessible_modules_count;
+                checker->current_func_return              = old_return;
+                checker_pop_scope(checker);
+            }
+
             // Restore struct-only context
             checker->current_type_params      = def->type_params;
             checker->current_type_args        = resolved_args;
