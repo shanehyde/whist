@@ -2,10 +2,22 @@
 //     Some(V),
 //     None,
 // }
+import std;
+
+trait Drop {
+    func drop(): void;
+}
 
 struct HashEntry<V> {
     next: HashEntry<V>,
     value: V,
+}
+
+impl Drop for HashEntry<V> {
+    func drop(): void {
+        std.print("Dropping HashEntry\n");
+        // self.next = null;
+    }
 }
 
 struct HashTable<V>  {
@@ -22,9 +34,18 @@ func (HashTable<V>) init(): void {
     // Implementation of insert method
 }
 
+impl Drop for HashTable<V> {
+    func drop(): void {
+        std.print("Dropping HashTable\n");
+        self.buckets.clear();
+    }
+}
+
 // type HashMap = HashTable<string, i32>;
 
 func main(): i32 {
+
+    std.print("Testing HashTable\n");
 
     var h: HashTable<i32> = new HashTable<i32>{
         size: 0,

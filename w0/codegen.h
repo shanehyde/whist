@@ -39,6 +39,9 @@ typedef struct {
     TypeSubstContext* subst_ctx;
     // Current generic struct template (set during generic method body emission)
     Node* current_generic_template;
+    // Accessible modules for current generic method (not owned)
+    char** accessible_modules;
+    int    accessible_modules_count;
     // Tuple typedef tracking
     Type** tuple_types; // Array of unique tuple types
     int    tuple_type_count;

@@ -1780,8 +1780,10 @@ void codegen_emit(CodeGen* gen, Node* ast) {
 
             // Clear defer stack for this function
             defer_clear(gen);
-            gen->current_return_type    = fdn->return_type;
+            gen->current_return_type      = fdn->return_type;
             gen->current_generic_template = template;
+            gen->accessible_modules       = fdn->accessible_modules;
+            gen->accessible_modules_count = fdn->accessible_modules_count;
 
             // First pass: count defers to know if we need __ret
             int has_defers = 0;
@@ -1827,6 +1829,8 @@ void codegen_emit(CodeGen* gen, Node* ast) {
 
             gen->subst_ctx                = NULL;
             gen->current_generic_template = NULL;
+            gen->accessible_modules       = NULL;
+            gen->accessible_modules_count = 0;
             free(combined_params);
             free(combined_args);
             for (int k = 0; k < method_bind_count; k++) {

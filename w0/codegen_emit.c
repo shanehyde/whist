@@ -1090,28 +1090,52 @@ static void emit_expr(CodeGen* gen, Node* node) {
             emit(gen, ")");
         } else if (func->type == NODE_MEMBER && func->as.member.struct_name == NULL &&
                    gen->subst_ctx) {
-            // Method call in a generic method body — checker didn't annotate struct_name.
-            // Try to resolve the target type from the struct template field types.
-            char* resolved_name = resolve_generic_method_target(gen, func);
-            if (resolved_name) {
-                emit(gen, "%s_%.*s(", resolved_name, func->as.member.length, func->as.member.name);
-                emit_expr(gen, func->as.member.object);
-                for (int i = 0; i < node->as.call.args.count; i++) {
-                    emit(gen, ", ");
-                    emit_expr(gen, node->as.call.args.nodes[i]);
+            // In a generic method body — checker didn't annotate struct_name or module_name.
+            // First check if this is a module-qualified call (e.g., std.print)
+            int is_module_call = 0;
+            if (func->as.member.object->type == NODE_IDENT) {
+                const char* obj_name = func->as.member.object->as.ident.name;
+                for (int i = 0; i < gen->accessible_modules_count; i++) {
+                    if (strcmp(gen->accessible_modules[i], obj_name) == 0) {
+                        is_module_call = 1;
+                        break;
+                    }
                 }
-                emit(gen, ")");
-                free(resolved_name);
-            } else {
-                // Fallback: regular function call
-                emit_expr(gen, func);
-                emit(gen, "(");
+            }
+            if (is_module_call) {
+                // Module-qualified call: emit module_func(args...)
+                emit(gen, "%s_%.*s(", func->as.member.object->as.ident.name,
+                     func->as.member.length, func->as.member.name);
                 for (int i = 0; i < node->as.call.args.count; i++) {
                     if (i > 0)
                         emit(gen, ", ");
                     emit_expr(gen, node->as.call.args.nodes[i]);
                 }
                 emit(gen, ")");
+            } else {
+                // Try to resolve the target type from the struct template field types.
+                char* resolved_name = resolve_generic_method_target(gen, func);
+                if (resolved_name) {
+                    emit(gen, "%s_%.*s(", resolved_name, func->as.member.length,
+                         func->as.member.name);
+                    emit_expr(gen, func->as.member.object);
+                    for (int i = 0; i < node->as.call.args.count; i++) {
+                        emit(gen, ", ");
+                        emit_expr(gen, node->as.call.args.nodes[i]);
+                    }
+                    emit(gen, ")");
+                    free(resolved_name);
+                } else {
+                    // Fallback: regular function call
+                    emit_expr(gen, func);
+                    emit(gen, "(");
+                    for (int i = 0; i < node->as.call.args.count; i++) {
+                        if (i > 0)
+                            emit(gen, ", ");
+                        emit_expr(gen, node->as.call.args.nodes[i]);
+                    }
+                    emit(gen, ")");
+                }
             }
         } else {
             // Regular function call
