@@ -457,5 +457,5 @@ func run(): Result<void, AppError> {
 
 - [Pattern Matching](pattern-matching.md) - Primary way to deconstruct unions
 - [Result/Option](result-option.md) - Built on union types
-- [Generics](../PLANS.md) - Parameterized union types
+- [Generics](../FEATURES.md) - Parameterized union types
 - [Traits](traits.md) - Implementing behavior for unions

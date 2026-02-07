@@ -531,6 +531,6 @@ func is_prime(n: i64): bool {
 
 ## Related Features
 
-- [Generics](../PLANS.md) - Generic math functions
+- [Generics](../FEATURES.md) - Generic math functions
 - [Traits](traits.md) - Numeric traits (Add, Mul, etc.)
 - [Union Types](union-types.md) - Optional results
