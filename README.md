@@ -99,6 +99,10 @@ See [w0/README.md](w0/README.md) for full compiler usage.
 - [ ] **Math** — trigonometry, random numbers, big integers ([design](plans/stdlib-math.md))
 - [ ] **Extended I/O** — directory operations, path manipulation, streaming ([design](plans/stdlib-io.md))
 
+## Progress
+
+Whist is under active development — the compiler went from initial bootstrap to a language with generics, traits, reference-counted memory management, and a standard library in under two weeks. See the [weekly changelog](PROGRESS.md) for a detailed history of every change.
+
 ## Project Structure
 
 ```
