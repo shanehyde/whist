@@ -44,7 +44,8 @@ typedef struct {
     char** type_params;       // ["T"] or ["K", "V"]
     char** type_param_bounds; // Trait bounds (NULL entries = unbounded)
     int    type_param_count;
-    Node*  decl; // Original AST node for field type resolution
+    Node*  decl;          // Original AST node for field type resolution
+    int    is_type_alias; // 1 if this is a generic type alias, 0 for struct/enum
     // Methods on the generic struct
     Node** methods; // Array of NODE_FUNC_DECL
     int    method_count;
@@ -109,6 +110,9 @@ struct Checker {
     TraitImpl* trait_impls;
     int        trait_impl_count;
     int        trait_impl_capacity;
+
+    // Type alias cycle detection
+    int alias_depth;
 
     // Hint for generic enum type inference (set by var_decl when declared type is known)
     Type* enum_target_hint;

@@ -55,6 +55,7 @@ static void register_generic_def(Checker* checker, const char* name, char** type
     }
     def->type_param_count = type_param_count;
     def->decl             = decl;
+    def->is_type_alias    = 0;
     def->methods          = NULL;
     def->method_count     = 0;
     def->method_capacity  = 0;
@@ -193,6 +194,7 @@ void checker_init(Checker* checker) {
     checker->trait_impls         = NULL;
     checker->trait_impl_count    = 0;
     checker->trait_impl_capacity = 0;
+    checker->alias_depth         = 0;
     checker->enum_target_hint    = NULL;
     types_init();
 }
@@ -772,6 +774,38 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
                     return type_error;
                 }
             }
+        }
+
+        // Handle generic type alias: substitute type params and resolve target
+        if (def->is_type_alias) {
+            checker->alias_depth++;
+            if (checker->alias_depth > 16) {
+                check_error(checker, type_node->line, type_node->column,
+                            "Recursive type alias '%s'", base_name);
+                checker->alias_depth--;
+                free(resolved_args);
+                return type_error;
+            }
+
+            // Set up substitution context
+            char** old_params = checker->current_type_params;
+            Type** old_args   = checker->current_type_args;
+            int    old_count  = checker->current_type_param_count;
+
+            checker->current_type_params      = def->type_params;
+            checker->current_type_args        = resolved_args;
+            checker->current_type_param_count = def->type_param_count;
+
+            Type* result = resolve_type(checker, def->decl->as.type_alias.target_type);
+
+            // Restore context
+            checker->current_type_params      = old_params;
+            checker->current_type_args        = old_args;
+            checker->current_type_param_count = old_count;
+
+            checker->alias_depth--;
+            free(resolved_args);
+            return result;
         }
 
         // Generate mangled name
@@ -2516,6 +2550,45 @@ static void check_decl(Checker* checker, Node* node) {
         break;
     }
 
+    case NODE_TYPE_ALIAS: {
+        const char* name = node->as.type_alias.name;
+
+        // Check for redefinition
+        if (checker_lookup(checker, name)) {
+            check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+            return;
+        }
+
+        // Generic type alias: register as a generic def template
+        if (node->as.type_alias.type_param_count > 0) {
+            register_generic_def(checker, name, node->as.type_alias.type_params,
+                                 node->as.type_alias.type_param_bounds,
+                                 node->as.type_alias.type_param_count, node);
+            // Mark as type alias so resolve_type can handle it differently
+            GenericDef* def    = lookup_generic_def(checker, name);
+            def->is_type_alias = 1;
+            return;
+        }
+
+        // Non-generic type alias: resolve the target type and define the symbol
+        checker->alias_depth++;
+        if (checker->alias_depth > 16) {
+            check_error(checker, node->line, node->column, "Recursive type alias '%s'", name);
+            checker->alias_depth--;
+            return;
+        }
+        Type* resolved = resolve_type(checker, node->as.type_alias.target_type);
+        checker->alias_depth--;
+
+        if (resolved == type_error) {
+            return;
+        }
+
+        checker_define(checker, name, SYM_TYPE, resolved, 0, node->as.type_alias.is_public,
+                       checker->current_module);
+        break;
+    }
+
     case NODE_IMPL_DECL: {
         const char* trait_name    = node->as.impl_decl.trait_name;
         const char* type_name_str = node->as.impl_decl.type_name;
@@ -2688,7 +2761,7 @@ int checker_check(Checker* checker, Node* ast) {
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
             if (decl->type == NODE_STRUCT_DECL || decl->type == NODE_ENUM_DECL ||
-                decl->type == NODE_TRAIT_DECL) {
+                decl->type == NODE_TRAIT_DECL || decl->type == NODE_TYPE_ALIAS) {
                 check_decl(checker, decl);
             }
         }
@@ -2708,7 +2781,7 @@ int checker_check(Checker* checker, Node* ast) {
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
             if (decl->type != NODE_STRUCT_DECL && decl->type != NODE_ENUM_DECL &&
-                decl->type != NODE_TRAIT_DECL) {
+                decl->type != NODE_TRAIT_DECL && decl->type != NODE_TYPE_ALIAS) {
                 check_decl(checker, decl);
             }
         }
@@ -2725,7 +2798,7 @@ int checker_check(Checker* checker, Node* ast) {
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
             if (decl->type != NODE_STRUCT_DECL && decl->type != NODE_ENUM_DECL &&
-                decl->type != NODE_TRAIT_DECL) {
+                decl->type != NODE_TRAIT_DECL && decl->type != NODE_TYPE_ALIAS) {
                 check_decl(checker, decl);
             }
         }

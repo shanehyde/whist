@@ -482,19 +482,34 @@ void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, i
     gen->enum_name_count        = 0;
     gen->enum_name_capacity     = 0;
     gen->enum_has_rc_fields     = NULL;
+    gen->alias_names            = NULL;
+    gen->alias_targets          = NULL;
+    gen->alias_count            = 0;
+    gen->alias_capacity         = 0;
 }
 
 void codegen_emit(CodeGen* gen, Node* ast) {
     if (!ast || ast->type != NODE_PROGRAM)
         return;
 
-    // First pass: collect all tuple types
+    // First pass: collect all tuple types and type aliases
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
             continue;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
-            collect_tuple_types_from_decl(gen, mod->as.module.decls.nodes[i]);
+            Node* decl = mod->as.module.decls.nodes[i];
+            collect_tuple_types_from_decl(gen, decl);
+            // Collect non-generic type aliases for codegen resolution
+            if (decl->type == NODE_TYPE_ALIAS && decl->as.type_alias.type_param_count == 0) {
+                VEC_GROW(gen->alias_names, gen->alias_count, gen->alias_capacity);
+                // Grow alias_targets in parallel (realloc to match capacity)
+                gen->alias_targets =
+                    xrealloc(gen->alias_targets, gen->alias_capacity * sizeof(Node*));
+                gen->alias_names[gen->alias_count]   = decl->as.type_alias.name;
+                gen->alias_targets[gen->alias_count] = decl->as.type_alias.target_type;
+                gen->alias_count++;
+            }
         }
     }
 

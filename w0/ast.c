@@ -258,6 +258,16 @@ void node_free(Node* node) {
         free(node->as.impl_decl.type_args.nodes);
         nodelist_free(&node->as.impl_decl.methods);
         break;
+    case NODE_TYPE_ALIAS:
+        free(node->as.type_alias.name);
+        node_free(node->as.type_alias.target_type);
+        for (int i = 0; i < node->as.type_alias.type_param_count; i++) {
+            free(node->as.type_alias.type_params[i]);
+            free(node->as.type_alias.type_param_bounds[i]);
+        }
+        free(node->as.type_alias.type_params);
+        free(node->as.type_alias.type_param_bounds);
+        break;
     case NODE_EXTERN_MODULE:
         nodelist_free(&node->as.extern_module.decls);
         free(node->as.extern_module.module_name);

@@ -161,10 +161,24 @@ int enum_has_rc_fields(CodeGen* gen, const char* name) {
     return gen->enum_has_rc_fields[idx];
 }
 
+// Resolve a type node through aliases. If the node is a NODE_IDENT
+// that names a type alias, return the alias target node instead.
+static Node* resolve_alias(CodeGen* gen, Node* type_node) {
+    if (!type_node || type_node->type != NODE_IDENT)
+        return type_node;
+    for (int i = 0; i < gen->alias_count; i++) {
+        if (strcmp(gen->alias_names[i], type_node->as.ident.name) == 0) {
+            return gen->alias_targets[i];
+        }
+    }
+    return type_node;
+}
+
 // Check if a type node represents a struct (user-defined) type
 static int is_struct_type(CodeGen* gen, Node* type_node) {
     if (!type_node)
         return 0;
+    type_node = resolve_alias(gen, type_node);
     // Generic types (Box<i64>) are always struct types, except Span<T> and generic enums
     if (type_node->type == NODE_GENERIC_TYPE) {
         if (strcmp(type_node->as.generic_type.base_name, "Span") == 0) {
@@ -188,6 +202,7 @@ static int is_struct_type(CodeGen* gen, Node* type_node) {
 int type_node_has_rc(CodeGen* gen, Node* type_node) {
     if (!type_node)
         return 0;
+    type_node = resolve_alias(gen, type_node);
     if (type_node->type == NODE_GENERIC_TYPE) {
         if (strcmp(type_node->as.generic_type.base_name, "Span") == 0)
             return 0;
@@ -233,6 +248,7 @@ int type_node_has_rc(CodeGen* gen, Node* type_node) {
 const char* resolve_enum_name(CodeGen* gen, Node* type_node) {
     if (!type_node)
         return NULL;
+    type_node = resolve_alias(gen, type_node);
     if (type_node->type == NODE_GENERIC_TYPE) {
         char* mangled = build_mangled_name_from_generic_node(gen, type_node);
         if (is_enum_type_name(gen, mangled)) {
@@ -395,8 +411,19 @@ void emit_type(CodeGen* gen, Node* type_node) {
             // Enum type - value type, no pointer
             emit(gen, "%s", name);
         } else {
-            // User-defined struct type - emit as pointer (struct references)
-            emit(gen, "%s*", name);
+            // Check if this is a type alias — resolve to target type
+            int alias_found = 0;
+            for (int i = 0; i < gen->alias_count; i++) {
+                if (strcmp(gen->alias_names[i], name) == 0) {
+                    emit_type(gen, gen->alias_targets[i]);
+                    alias_found = 1;
+                    break;
+                }
+            }
+            if (!alias_found) {
+                // User-defined struct type - emit as pointer (struct references)
+                emit(gen, "%s*", name);
+            }
         }
         break;
     }
@@ -1764,6 +1791,10 @@ void emit_decl(CodeGen* gen, Node* node) {
 
     case NODE_TRAIT_DECL:
         // Traits produce no C code - they are purely a type-checking concept
+        break;
+
+    case NODE_TYPE_ALIAS:
+        // Type aliases produce no C code - they are resolved during type checking
         break;
 
     case NODE_IMPL_DECL:

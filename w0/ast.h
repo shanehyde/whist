@@ -76,6 +76,7 @@ typedef enum {
     NODE_ENUM_VARIANT,
     NODE_TRAIT_DECL,
     NODE_IMPL_DECL,
+    NODE_TYPE_ALIAS,
 
     NODE_EXTERN_MODULE,
     NODE_MODULE,
@@ -411,6 +412,18 @@ struct Node {
             NodeList methods;   // List of func_decl nodes (with bodies and receivers)
             char*    source_module;
         } impl_decl;
+
+        // Type alias: type Name = TargetType; or type Name<T> = GenericType<T>;
+        struct {
+            int    is_public;
+            char*  name;
+            int    name_length;
+            Node*  target_type; // The RHS type expression
+            char*  source_module;
+            char** type_params;       // Generic params: ["T", "V"]
+            char** type_param_bounds; // Trait bounds (parallel array)
+            int    type_param_count;
+        } type_alias;
 
         struct {
             char*    module_name;

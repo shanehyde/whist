@@ -22,6 +22,7 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
                | [ 'public' | 'private' ] <struct-decl>
                | [ 'public' | 'private' ] <enum-decl>
                | [ 'public' | 'private' ] <trait-decl>
+               | [ 'public' | 'private' ] <type-alias>
                | [ 'public' | 'private' ] <var-decl>
                | <impl-decl>
                | <extern-module>
@@ -111,6 +112,21 @@ Traits define a set of required method signatures that types can implement. Trai
 ```
 
 An `impl` block provides concrete method implementations for a trait on a specific type. Methods inside `impl` blocks do not specify a receiver — it is inferred from the `for Type` clause. Use `const func` for immutable-receiver methods. For generic target types, specify the type parameters on the impl header (e.g., `impl Drop for Box<T>`). All trait methods must be implemented.
+
+### Type Alias
+
+```bnf
+<type-alias> ::= 'type' <identifier> [ '<' <type-param-list> '>' ] '=' <type> ';'
+```
+
+Type aliases create alternative names for existing types. They are purely compile-time — aliases resolve to the underlying type during type checking and produce no C code.
+
+- **Simple alias:** `type UserId = i64;` — semantic naming for primitive types
+- **Struct alias:** `type Pos = Point;` — alternative name for a struct type
+- **Generic instantiation alias:** `type IntBox = Box<i64>;` — alias for a concrete generic instantiation
+- **Generic partial application:** `type StringPair<V> = Pair<string, V>;` — alias with its own type parameters that fills in some arguments of a generic type
+
+Aliases are fully interchangeable with the underlying type: `var id: UserId = 42;` is equivalent to `var id: i64 = 42;`.
 
 ### Variable Declaration
 
@@ -310,7 +326,7 @@ break    const    continue    defer     else      enum
 extern   false    for         foreach   func      if
 impl     import   in          new       null      public
 private  return   self        struct    trait     true
-var      while
+type     var      while
 ```
 
 ### Identifiers

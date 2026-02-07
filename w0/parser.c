@@ -114,6 +114,7 @@ void synchronize(Parser* parser) {
         case TOK_STRUCT:
         case TOK_ENUM:
         case TOK_TRAIT:
+        case TOK_TYPE:
         case TOK_IMPL:
         case TOK_VAR:
         case TOK_CONST:
@@ -203,7 +204,7 @@ static Node* parse_type(Parser* parser) {
         consume_token(parser, TOK_RBRACKET, "Expected ']' in array type");
         Node* elem = parse_type(parser);
 
-        Node* node = node_new(NODE_ARRAY_TYPE, token.line, token.column);
+        Node* node                    = node_new(NODE_ARRAY_TYPE, token.line, token.column);
         node->as.array_type.elem_type = elem;
         node->as.array_type.size      = size;
         return node;
@@ -215,7 +216,7 @@ static Node* parse_type(Parser* parser) {
         if (check_token(parser, TOK_LT)) {
             advance_token(parser); // consume '<'
 
-            Node* node = node_new(NODE_GENERIC_TYPE, token.line, token.column);
+            Node* node                      = node_new(NODE_GENERIC_TYPE, token.line, token.column);
             node->as.generic_type.base_name = copy_token_string(&token);
             node->as.generic_type.base_name_length = token.length;
             nodelist_init(&node->as.generic_type.type_args);
@@ -247,8 +248,8 @@ static Node* parse_type(Parser* parser) {
         }
 
         // Regular named type (not generic)
-        Node* node = node_new(NODE_IDENT, token.line, token.column);
-        node->as.ident.name = copy_token_string(&token);
+        Node* node            = node_new(NODE_IDENT, token.line, token.column);
+        node->as.ident.name   = copy_token_string(&token);
         node->as.ident.length = token.length;
         return node;
     }
@@ -272,7 +273,7 @@ static Node* parse_struct_init(Parser* parser) {
             consume_token(parser, TOK_IDENT, "Expected field name in struct initializer");
 
             Node* field = node_new(NODE_FIELD_INIT, field_name.line, field_name.column);
-            field->as.field_init.name = copy_token_string(&field_name);
+            field->as.field_init.name        = copy_token_string(&field_name);
             field->as.field_init.name_length = field_name.length;
 
             consume_token(parser, TOK_COLON, "Expected ':' after field name");
@@ -329,7 +330,7 @@ static Node* parse_primary_expression(Parser* parser) {
     }
 
     if (match_token(parser, TOK_FLOAT)) {
-        Node* node = node_new(NODE_FLOAT_LIT, token.line, token.column);
+        Node* node               = node_new(NODE_FLOAT_LIT, token.line, token.column);
         node->as.float_lit.value = strtod(token.start, NULL);
         return node;
     }
@@ -368,7 +369,7 @@ static Node* parse_primary_expression(Parser* parser) {
     }
 
     if (match_token(parser, TOK_TRUE) || match_token(parser, TOK_FALSE)) {
-        Node* node = node_new(NODE_BOOL_LIT, token.line, token.column);
+        Node* node              = node_new(NODE_BOOL_LIT, token.line, token.column);
         node->as.bool_lit.value = (token.type == TOK_TRUE);
         return node;
     }
@@ -387,9 +388,9 @@ static Node* parse_primary_expression(Parser* parser) {
             consume_token(parser, TOK_IDENT, "Expected enum value name after '::'");
 
             Node* node = node_new(NODE_ENUM_VALUE, enum_name.line, enum_name.column);
-            node->as.enum_value.enum_name = copy_token_string(&enum_name);
-            node->as.enum_value.enum_name_length = enum_name.length;
-            node->as.enum_value.value_name       = copy_token_string(&value_name);
+            node->as.enum_value.enum_name         = copy_token_string(&enum_name);
+            node->as.enum_value.enum_name_length  = enum_name.length;
+            node->as.enum_value.value_name        = copy_token_string(&value_name);
             node->as.enum_value.value_name_length = value_name.length;
             nodelist_init(&node->as.enum_value.args);
 
@@ -410,15 +411,15 @@ static Node* parse_primary_expression(Parser* parser) {
             return node;
         }
 
-        Node* node = node_new(NODE_IDENT, token.line, token.column);
-        node->as.ident.name = copy_token_string(&token);
+        Node* node            = node_new(NODE_IDENT, token.line, token.column);
+        node->as.ident.name   = copy_token_string(&token);
         node->as.ident.length = token.length;
         return node;
     }
 
     // Handle 'self' keyword as an identifier
     if (match_token(parser, TOK_SELF)) {
-        Node* node = node_new(NODE_IDENT, token.line, token.column);
+        Node* node            = node_new(NODE_IDENT, token.line, token.column);
         node->as.ident.name   = xstrdup("self");
         node->as.ident.length = 4;
         return node;
@@ -477,7 +478,7 @@ static Node* parse_primary_expression(Parser* parser) {
             node_free(type_node);
             return NULL;
         }
-        Node* node = node_new(NODE_NEW_EXPR, new_token.line, new_token.column);
+        Node* node                      = node_new(NODE_NEW_EXPR, new_token.line, new_token.column);
         node->as.new_expr.type_node     = type_node;
         node->as.new_expr.init          = init;
         node->as.new_expr.resolved_type = NULL;
@@ -535,7 +536,7 @@ static Node* parse_postfix(Parser* parser) {
     for (;;) {
         if (match_token(parser, TOK_LPAREN)) {
             // Function call
-            Node* call = node_new(NODE_CALL, expr->line, expr->column);
+            Node* call         = node_new(NODE_CALL, expr->line, expr->column);
             call->as.call.func = expr;
             nodelist_init(&call->as.call.args);
 
@@ -559,7 +560,7 @@ static Node* parse_postfix(Parser* parser) {
                 if (!check_token(parser, TOK_RBRACKET)) {
                     end = parse_expression(parser);
                 }
-                Node* slice = node_new(NODE_SLICE, expr->line, expr->column);
+                Node* slice            = node_new(NODE_SLICE, expr->line, expr->column);
                 slice->as.slice.object = expr;
                 slice->as.slice.start  = NULL;
                 slice->as.slice.end    = end;
@@ -574,7 +575,7 @@ static Node* parse_postfix(Parser* parser) {
                     if (!check_token(parser, TOK_RBRACKET)) {
                         end = parse_expression(parser);
                     }
-                    Node* slice = node_new(NODE_SLICE, expr->line, expr->column);
+                    Node* slice            = node_new(NODE_SLICE, expr->line, expr->column);
                     slice->as.slice.object = expr;
                     slice->as.slice.start  = first;
                     slice->as.slice.end    = end;
@@ -582,7 +583,7 @@ static Node* parse_postfix(Parser* parser) {
                     expr = slice;
                 } else {
                     // Regular index [expr]
-                    Node* index = node_new(NODE_INDEX, expr->line, expr->column);
+                    Node* index            = node_new(NODE_INDEX, expr->line, expr->column);
                     index->as.index.object = expr;
                     index->as.index.index  = first;
                     consume_token(parser, TOK_RBRACKET, "Expected ']'");
@@ -593,7 +594,7 @@ static Node* parse_postfix(Parser* parser) {
             // Member access
             Token name = parser->current;
             consume_token(parser, TOK_IDENT, "Expected member name after '.'");
-            Node* member = node_new(NODE_MEMBER, expr->line, expr->column);
+            Node* member             = node_new(NODE_MEMBER, expr->line, expr->column);
             member->as.member.object = expr;
             member->as.member.name   = copy_token_string(&name);
             member->as.member.length = name.length;
@@ -610,9 +611,9 @@ static Node* parse_postfix(Parser* parser) {
 static Node* parse_unary(Parser* parser) {
     if (match_token(parser, TOK_BANG) || match_token(parser, TOK_MINUS) ||
         match_token(parser, TOK_TILDE)) {
-        Token op      = parser->previous;
-        Node* operand = parse_unary(parser);
-        Node* node    = node_new(NODE_UNARY, op.line, op.column);
+        Token op               = parser->previous;
+        Node* operand          = parse_unary(parser);
+        Node* node             = node_new(NODE_UNARY, op.line, op.column);
         node->as.unary.op      = op.type;
         node->as.unary.operand = operand;
         return node;
@@ -678,7 +679,7 @@ static Node* parse_binary(Parser* parser, Precedence min_prec) {
         Precedence prec  = get_precedence(op.type);
         Node*      right = parse_binary(parser, prec + 1);
 
-        Node* binary = node_new(NODE_BINARY, op.line, op.column);
+        Node* binary            = node_new(NODE_BINARY, op.line, op.column);
         binary->as.binary.op    = op.type;
         binary->as.binary.left  = left;
         binary->as.binary.right = right;
@@ -718,7 +719,7 @@ static Node* parse_expression(Parser* parser) {
         advance_token(parser);
         Node* value = parse_expression(parser); // Right associative
 
-        Node* assign = node_new(NODE_ASSIGN, op.line, op.column);
+        Node* assign             = node_new(NODE_ASSIGN, op.line, op.column);
         assign->as.assign.op     = op.type;
         assign->as.assign.target = expr;
         assign->as.assign.value  = value;
@@ -771,7 +772,7 @@ static Node* parse_if_stmt(Parser* parser) {
         }
     }
 
-    Node* node = node_new(NODE_IF, token.line, token.column);
+    Node* node                  = node_new(NODE_IF, token.line, token.column);
     node->as.if_stmt.cond       = cond;
     node->as.if_stmt.then_block = then_block;
     node->as.if_stmt.else_block = else_block;
@@ -787,7 +788,7 @@ static Node* parse_while_stmt(Parser* parser) {
     consume_token(parser, TOK_LBRACE, "Expected '{' after while condition");
     Node* body = parse_block(parser);
 
-    Node* node = node_new(NODE_WHILE, token.line, token.column);
+    Node* node               = node_new(NODE_WHILE, token.line, token.column);
     node->as.while_stmt.cond = cond;
     node->as.while_stmt.body = body;
     return node;
@@ -823,7 +824,7 @@ static Node* parse_for_stmt(Parser* parser) {
     consume_token(parser, TOK_LBRACE, "Expected '{' after for clauses");
     Node* body = parse_block(parser);
 
-    Node* node = node_new(NODE_FOR, token.line, token.column);
+    Node* node             = node_new(NODE_FOR, token.line, token.column);
     node->as.for_stmt.init = init;
     node->as.for_stmt.cond = cond;
     node->as.for_stmt.post = post;
@@ -859,7 +860,7 @@ static Node* parse_foreach_stmt(Parser* parser) {
         step = parse_expression(parser);
     } else {
         // Default step is 1
-        step = node_new(NODE_INT_LIT, token.line, token.column);
+        step                   = node_new(NODE_INT_LIT, token.line, token.column);
         step->as.int_lit.value = 1;
     }
 
@@ -867,7 +868,7 @@ static Node* parse_foreach_stmt(Parser* parser) {
     consume_token(parser, TOK_LBRACE, "Expected '{' after foreach clauses");
     Node* body = parse_block(parser);
 
-    Node* node = node_new(NODE_FOREACH, token.line, token.column);
+    Node* node                            = node_new(NODE_FOREACH, token.line, token.column);
     node->as.foreach_stmt.var_name        = var_name;
     node->as.foreach_stmt.var_name_length = var_token.length;
     node->as.foreach_stmt.start           = start;
@@ -886,7 +887,7 @@ static Node* parse_return_stmt(Parser* parser) {
     }
     consume_token(parser, TOK_SEMICOLON, "Expected ';' after return value");
 
-    Node* node = node_new(NODE_RETURN, token.line, token.column);
+    Node* node                 = node_new(NODE_RETURN, token.line, token.column);
     node->as.return_stmt.value = value;
     return node;
 }
@@ -897,7 +898,7 @@ static Node* parse_defer_stmt(Parser* parser) {
     // Parse the deferred statement (typically an expression statement like a function call)
     Node* stmt = parse_statement(parser);
 
-    Node* node = node_new(NODE_DEFER, token.line, token.column);
+    Node* node               = node_new(NODE_DEFER, token.line, token.column);
     node->as.defer_stmt.stmt = stmt;
     return node;
 }
@@ -1035,8 +1036,8 @@ static Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
             return NULL;
         }
 
-        Node* node = node_new(NODE_VAR_DECL, start.line, start.column);
-        var_decl_node* vdn = &node->as.var_decl;
+        Node*          node = node_new(NODE_VAR_DECL, start.line, start.column);
+        var_decl_node* vdn  = &node->as.var_decl;
 
         vdn->name             = NULL; // NULL indicates destructuring
         vdn->name_length      = 0;
@@ -1067,10 +1068,10 @@ static Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
     Token name = parser->current;
     consume_token(parser, TOK_IDENT, "Expected variable name");
 
-    Node* node = node_new(NODE_VAR_DECL, name.line, name.column);
-    var_decl_node* vdn = &node->as.var_decl;
+    Node*          node = node_new(NODE_VAR_DECL, name.line, name.column);
+    var_decl_node* vdn  = &node->as.var_decl;
 
-    vdn->name = copy_token_string(&name);
+    vdn->name             = copy_token_string(&name);
     vdn->is_public        = is_public;
     vdn->name_length      = name.length;
     vdn->is_const         = is_const;
@@ -1112,7 +1113,7 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
         // Expect struct type name
         Token recv_type = parser->current;
         consume_token(parser, TOK_IDENT, "Expected receiver type name");
-        receiver_type = copy_token_string(&recv_type);
+        receiver_type     = copy_token_string(&recv_type);
         receiver_type_len = recv_type.length;
 
         // Check for generic type args: Box<T> or Pair<K, V> or Pair<i32, Box<T>>
@@ -1136,8 +1137,8 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     Token name = parser->current;
     consume_token(parser, TOK_IDENT, "Expected function name");
 
-    Node* node = node_new(NODE_FUNC_DECL, name.line, name.column);
-    func_decl_node* fdn = &node->as.func_decl;
+    Node*           node = node_new(NODE_FUNC_DECL, name.line, name.column);
+    func_decl_node* fdn  = &node->as.func_decl;
 
     fdn->is_public          = is_public;
     fdn->is_extern          = 0;
@@ -1146,8 +1147,8 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     fdn->receiver_is_const  = receiver_is_const;
     fdn->receiver_type_args = receiver_type_args;
     fdn->name               = copy_token_string(&name);
-    fdn->name_length = name.length;
-    fdn->is_varargs  = 0;
+    fdn->name_length        = name.length;
+    fdn->is_varargs         = 0;
     nodelist_init(&fdn->params);
 
     consume_token(parser, TOK_LPAREN, "Expected '(' after function name");
@@ -1176,7 +1177,7 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
                 Token param_name = parser->current;
                 consume_token(parser, TOK_IDENT, "Expected parameter name");
 
-                Node* param = node_new(NODE_PARAM, param_name.line, param_name.column);
+                Node* param          = node_new(NODE_PARAM, param_name.line, param_name.column);
                 param->as.param.name = copy_token_string(&param_name);
                 param->as.param.name_length = param_name.length;
                 param->as.param.type        = NULL;
@@ -1229,9 +1230,9 @@ static Node* parse_struct_decl(Parser* parser, int is_public) {
     Token name = parser->current;
     consume_token(parser, TOK_IDENT, "Expected struct name");
 
-    Node* node = node_new(NODE_STRUCT_DECL, name.line, name.column);
-    node->as.struct_decl.is_public = is_public;
-    node->as.struct_decl.name      = copy_token_string(&name);
+    Node* node                       = node_new(NODE_STRUCT_DECL, name.line, name.column);
+    node->as.struct_decl.is_public   = is_public;
+    node->as.struct_decl.name        = copy_token_string(&name);
     node->as.struct_decl.name_length = name.length;
     nodelist_init(&node->as.struct_decl.fields);
 
@@ -1285,8 +1286,8 @@ static Node* parse_struct_decl(Parser* parser, int is_public) {
         Token field_name = parser->current;
         consume_token(parser, TOK_IDENT, "Expected field name");
 
-        Node* field = node_new(NODE_FIELD, field_name.line, field_name.column);
-        field->as.field.name = copy_token_string(&field_name);
+        Node* field                 = node_new(NODE_FIELD, field_name.line, field_name.column);
+        field->as.field.name        = copy_token_string(&field_name);
         field->as.field.name_length = field_name.length;
 
         consume_token(parser, TOK_COLON, "Expected ':' after field name");
@@ -1309,9 +1310,9 @@ static Node* parse_trait_decl(Parser* parser, int is_public) {
     Token name = parser->current;
     consume_token(parser, TOK_IDENT, "Expected trait name");
 
-    Node* node = node_new(NODE_TRAIT_DECL, name.line, name.column);
-    node->as.trait_decl.is_public = is_public;
-    node->as.trait_decl.name      = copy_token_string(&name);
+    Node* node                      = node_new(NODE_TRAIT_DECL, name.line, name.column);
+    node->as.trait_decl.is_public   = is_public;
+    node->as.trait_decl.name        = copy_token_string(&name);
     node->as.trait_decl.name_length = name.length;
     nodelist_init(&node->as.trait_decl.methods);
 
@@ -1349,11 +1350,11 @@ static Node* parse_impl_decl(Parser* parser) {
     Token type_name = parser->current;
     consume_token(parser, TOK_IDENT, "Expected type name after 'for'");
 
-    Node* node = node_new(NODE_IMPL_DECL, trait_name.line, trait_name.column);
+    Node* node                    = node_new(NODE_IMPL_DECL, trait_name.line, trait_name.column);
     node->as.impl_decl.trait_name = copy_token_string(&trait_name);
     node->as.impl_decl.trait_name_length = trait_name.length;
     node->as.impl_decl.type_name         = copy_token_string(&type_name);
-    node->as.impl_decl.type_name_length = type_name.length;
+    node->as.impl_decl.type_name_length  = type_name.length;
     nodelist_init(&node->as.impl_decl.type_args);
     nodelist_init(&node->as.impl_decl.methods);
 
@@ -1414,9 +1415,9 @@ static Node* parse_enum_decl(Parser* parser, int is_public) {
     Token name = parser->current;
     consume_token(parser, TOK_IDENT, "Expected enum name");
 
-    Node* node = node_new(NODE_ENUM_DECL, name.line, name.column);
-    node->as.enum_decl.is_public = is_public;
-    node->as.enum_decl.name      = copy_token_string(&name);
+    Node* node                     = node_new(NODE_ENUM_DECL, name.line, name.column);
+    node->as.enum_decl.is_public   = is_public;
+    node->as.enum_decl.name        = copy_token_string(&name);
     node->as.enum_decl.name_length = name.length;
     nodelist_init(&node->as.enum_decl.values);
 
@@ -1467,7 +1468,7 @@ static Node* parse_enum_decl(Parser* parser, int is_public) {
         consume_token(parser, TOK_IDENT, "Expected enum value name");
 
         Node* value = node_new(NODE_ENUM_VARIANT, value_name.line, value_name.column);
-        value->as.enum_variant.name = copy_token_string(&value_name);
+        value->as.enum_variant.name        = copy_token_string(&value_name);
         value->as.enum_variant.name_length = value_name.length;
         nodelist_init(&value->as.enum_variant.types);
 
@@ -1498,12 +1499,68 @@ static Node* parse_enum_decl(Parser* parser, int is_public) {
     return node;
 }
 
+static Node* parse_type_alias(Parser* parser, int is_public) {
+    Token name = parser->current;
+    consume_token(parser, TOK_IDENT, "Expected type alias name");
+
+    Node* node                      = node_new(NODE_TYPE_ALIAS, name.line, name.column);
+    node->as.type_alias.is_public   = is_public;
+    node->as.type_alias.name        = copy_token_string(&name);
+    node->as.type_alias.name_length = name.length;
+
+    // Parse optional type parameters: type StringMap<V> = ...
+    node->as.type_alias.type_params       = NULL;
+    node->as.type_alias.type_param_bounds = NULL;
+    node->as.type_alias.type_param_count  = 0;
+
+    if (match_token(parser, TOK_LT)) {
+        int capacity                          = 4;
+        node->as.type_alias.type_params       = xmalloc(capacity * sizeof(char*));
+        node->as.type_alias.type_param_bounds = xmalloc(capacity * sizeof(char*));
+
+        do {
+            Token param_name = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected type parameter name");
+
+            if (node->as.type_alias.type_param_count >= capacity) {
+                capacity *= 2;
+                node->as.type_alias.type_params =
+                    xrealloc(node->as.type_alias.type_params, capacity * sizeof(char*));
+                node->as.type_alias.type_param_bounds =
+                    xrealloc(node->as.type_alias.type_param_bounds, capacity * sizeof(char*));
+            }
+
+            node->as.type_alias.type_params[node->as.type_alias.type_param_count] =
+                copy_token_string(&param_name);
+
+            // Check for trait bound: V: TraitName
+            if (match_token(parser, TOK_COLON)) {
+                Token bound_name = parser->current;
+                consume_token(parser, TOK_IDENT, "Expected trait name after ':'");
+                node->as.type_alias.type_param_bounds[node->as.type_alias.type_param_count] =
+                    copy_token_string(&bound_name);
+            } else {
+                node->as.type_alias.type_param_bounds[node->as.type_alias.type_param_count] = NULL;
+            }
+
+            node->as.type_alias.type_param_count++;
+        } while (match_token(parser, TOK_COMMA));
+
+        consume_token(parser, TOK_GT, "Expected '>' after type parameters");
+    }
+
+    consume_token(parser, TOK_EQ, "Expected '=' after type alias name");
+    node->as.type_alias.target_type = parse_type(parser);
+    consume_token(parser, TOK_SEMICOLON, "Expected ';' after type alias");
+    return node;
+}
+
 static Node* parse_extern_decls(Parser* parser, int is_public) {
     Token module_name = parser->current;
     consume_token(parser, TOK_IDENT, "Expected module name string after 'extern'");
 
     Node* node = node_new(NODE_EXTERN_MODULE, module_name.line, module_name.column);
-    node->as.extern_module.module_name = copy_token_string(&module_name);
+    node->as.extern_module.module_name        = copy_token_string(&module_name);
     node->as.extern_module.module_name_length = module_name.length;
     nodelist_init(&node->as.extern_module.decls);
     consume_token(parser, TOK_LBRACE, "Expected '{' after extern module name");
@@ -1852,6 +1909,9 @@ static Node* parse_declaration(Parser* parser) {
     if (match_token(parser, TOK_TRAIT)) {
         return parse_trait_decl(parser, is_public);
     }
+    if (match_token(parser, TOK_TYPE)) {
+        return parse_type_alias(parser, is_public);
+    }
     if (match_token(parser, TOK_IMPL)) {
         return parse_impl_decl(parser);
     }
@@ -1928,7 +1988,7 @@ Node* parser_parse(Parser* parser) {
     nodelist_init(&program->as.program.modules);
 
     // Create main module for the entry file
-    Node* main_module = node_new(NODE_MODULE, 1, 1);
+    Node* main_module                  = node_new(NODE_MODULE, 1, 1);
     main_module->as.module.name        = xstrdup("main");
     main_module->as.module.name_length = 4;
     nodelist_init(&main_module->as.module.decls);
