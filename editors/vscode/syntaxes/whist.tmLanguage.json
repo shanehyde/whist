@@ -1,0 +1,276 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Whist",
+  "scopeName": "source.whist",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#characters" },
+    { "include": "#numbers" },
+    { "include": "#type-declaration" },
+    { "include": "#struct-declaration" },
+    { "include": "#enum-declaration" },
+    { "include": "#trait-declaration" },
+    { "include": "#impl-declaration" },
+    { "include": "#function-declaration" },
+    { "include": "#method-declaration" },
+    { "include": "#extern-block" },
+    { "include": "#import-statement" },
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#builtin-types" },
+    { "include": "#enum-variant-access" },
+    { "include": "#function-call" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.whist",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.whist",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.whist",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.whist",
+              "match": "\\\\(x[0-9a-fA-F]{2}|[0-7]{1,3}|[nrt\\\\'\"/0])"
+            }
+          ]
+        }
+      ]
+    },
+    "characters": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.whist",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.whist",
+              "match": "\\\\(x[0-9a-fA-F]{2}|[0-7]{1,3}|[nrt\\\\'\"/0])"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.whist",
+          "match": "\\b0[xX][0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.whist",
+          "match": "\\b0[bB][01]+\\b"
+        },
+        {
+          "name": "constant.numeric.octal.whist",
+          "match": "\\b0[oO][0-7]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.whist",
+          "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.float.scientific.whist",
+          "match": "\\b[0-9]+[eE][+-]?[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.whist",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.whist",
+          "match": "\\b(if|else|for|foreach|while|return|break|continue|in|by)\\b"
+        },
+        {
+          "name": "keyword.other.whist",
+          "match": "\\b(func|new|self|defer)\\b"
+        },
+        {
+          "name": "storage.type.whist",
+          "match": "\\b(struct|enum|trait|impl|type)\\b"
+        },
+        {
+          "name": "storage.modifier.whist",
+          "match": "\\b(var|const|public|private|extern)\\b"
+        },
+        {
+          "name": "keyword.control.import.whist",
+          "match": "\\b(import)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.whist",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.whist",
+          "match": "\\b(null)\\b"
+        }
+      ]
+    },
+    "builtin-types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.whist",
+          "match": "\\b(void|bool|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|char|string|voidptr)\\b"
+        }
+      ]
+    },
+    "function-declaration": {
+      "comment": "Top-level function: func name(",
+      "match": "\\b(func)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\(|<)",
+      "captures": {
+        "1": { "name": "keyword.other.func.whist" },
+        "2": { "name": "entity.name.function.whist" }
+      }
+    },
+    "method-declaration": {
+      "comment": "Method: func (Type) name( or func (const Type) name(",
+      "match": "\\b(func)\\s*\\(\\s*(const\\s+)?([a-zA-Z_][a-zA-Z0-9_]*)(?:<[^>]*>)?\\s*\\)\\s*([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.other.func.whist" },
+        "2": { "name": "storage.modifier.const.whist" },
+        "3": { "name": "entity.name.type.whist" },
+        "4": { "name": "entity.name.function.whist" }
+      }
+    },
+    "struct-declaration": {
+      "match": "\\b(struct)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.type.struct.whist" },
+        "2": { "name": "entity.name.type.whist" }
+      }
+    },
+    "enum-declaration": {
+      "match": "\\b(enum)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.type.enum.whist" },
+        "2": { "name": "entity.name.type.whist" }
+      }
+    },
+    "trait-declaration": {
+      "match": "\\b(trait)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.type.trait.whist" },
+        "2": { "name": "entity.name.type.whist" }
+      }
+    },
+    "impl-declaration": {
+      "match": "\\b(impl)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s+(for)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.type.impl.whist" },
+        "2": { "name": "entity.name.type.whist" },
+        "3": { "name": "keyword.other.for.whist" },
+        "4": { "name": "entity.name.type.whist" }
+      }
+    },
+    "type-declaration": {
+      "match": "\\b(type)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:<[^>]*>)?\\s*(=)",
+      "captures": {
+        "1": { "name": "storage.type.typealias.whist" },
+        "2": { "name": "entity.name.type.whist" },
+        "3": { "name": "keyword.operator.assignment.whist" }
+      }
+    },
+    "extern-block": {
+      "match": "\\b(extern)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.modifier.extern.whist" },
+        "2": { "name": "entity.name.namespace.whist" }
+      }
+    },
+    "import-statement": {
+      "patterns": [
+        {
+          "comment": "import \"./path\";",
+          "match": "\\b(import)\\s+(\"[^\"]*\")",
+          "captures": {
+            "1": { "name": "keyword.control.import.whist" },
+            "2": { "name": "string.quoted.double.whist" }
+          }
+        },
+        {
+          "comment": "import module;",
+          "match": "\\b(import)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.import.whist" },
+            "2": { "name": "entity.name.namespace.whist" }
+          }
+        }
+      ]
+    },
+    "enum-variant-access": {
+      "match": "\\b([A-Z][a-zA-Z0-9_]*)\\s*(::)\\s*([A-Z][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "entity.name.type.whist" },
+        "2": { "name": "punctuation.separator.scope.whist" },
+        "3": { "name": "variable.other.enummember.whist" }
+      }
+    },
+    "function-call": {
+      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "entity.name.function.call.whist" }
+      }
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.whist",
+          "match": "(==|!=|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.logical.whist",
+          "match": "(&&|\\|\\||!)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.whist",
+          "match": "(\\+|-|\\*|/|%)"
+        },
+        {
+          "name": "keyword.operator.bitwise.whist",
+          "match": "(<<|>>|&|\\||\\^|~)"
+        },
+        {
+          "name": "keyword.operator.assignment.whist",
+          "match": "(\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>=|=)"
+        },
+        {
+          "name": "keyword.operator.range.whist",
+          "match": "\\.\\."
+        },
+        {
+          "name": "keyword.operator.arrow.whist",
+          "match": "->"
+        },
+        {
+          "name": "punctuation.separator.scope.whist",
+          "match": "::"
+        }
+      ]
+    }
+  }
+}
