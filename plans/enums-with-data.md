@@ -4,7 +4,7 @@ Support for enums with associated data, enabling types like `Option<T>` and `Res
 
 ## Current State
 
-Phase 1 (non-generic enums with data) is complete. Simple enums and data enums both work end-to-end:
+Phase 1 (non-generic enums with data) and Phase 2 (generic enums) are complete. Simple enums, data enums, and generic enums all work end-to-end:
 
 ```whist
 enum Color { Red, Green, Blue }
@@ -17,11 +17,28 @@ enum Shape {
 }
 var s = Shape::Circle(3.14);
 var tag: i32 = s.tag;
+
+enum Option<T> { None, Some(T) }
+var x: Option<i64> = Option::Some(42);
+var y = Option::Some(3.14);           // inferred as Option<f32>
+var n: Option<i64> = Option::None;    // explicit type needed (can't infer from None)
+
+enum Result<T, E> { Ok(T), Err(E) }
+var ok: Result<i64, string> = Result::Ok(42);
 ```
 
 Generated C for simple enums: `typedef enum Color { Color_Red, Color_Green, Color_Blue } Color;`
 
 Generated C for data enums: tag enum + tagged union struct (see Phase 1 below).
+
+Generated C for generic enums (monomorphized):
+```c
+typedef enum Option_i64_Tag { Option_i64_None, Option_i64_Some } Option_i64_Tag;
+typedef struct Option_i64 {
+    Option_i64_Tag tag;
+    union { struct { int64_t f0; } Some; };
+} Option_i64;
+```
 
 ## Target
 
@@ -107,45 +124,59 @@ Shape n = (Shape){ .tag = Shape_None };
 **Tests:** `enum_data.w`, `enum_data_tag.w`, `error_enum_data_args.w`, `error_enum_data_type.w`
 
 **Known limitations:**
-- No generic enums (Phase 2)
 - No `match` for destructuring (Phase 3)
 - No methods on enum types
-- Enum types as variant fields would emit `EnumName*` instead of `EnumName` in `emit_type`'s AST-node-based path (not yet tested)
 
-### Phase 2: Generic Enums
+### Phase 2: Generic Enums ✅
 
-Extend Phase 1 with generic type parameters, reusing the existing generic instantiation machinery from structs.
+**Status: Complete**
+
+Extended Phase 1 with generic type parameters, reusing the existing generic instantiation machinery from structs. Supports type inference from constructor args and explicit annotation for uninferrable cases.
 
 ```whist
-enum Option<T> {
-    None,
-    Some(T),
-}
+enum Option<T> { None, Some(T) }
+enum Result<T, E> { Ok(T), Err(E) }
 
-enum Result<T, E> {
-    Ok(T),
-    Err(E),
-}
+var x: Option<i64> = Option::Some(42);   // explicit type
+var y = Option::Some(3.14);              // inferred as Option<f32>
+var n: Option<i64> = Option::None;       // explicit type needed
+
+var ok: Result<i64, string> = Result::Ok(42);
+var err: Result<i64, string> = Result::Err("bad");
 ```
 
-**C codegen target (after monomorphization):**
+**C codegen output (monomorphized):**
 
 ```c
 typedef enum Option_i64_Tag { Option_i64_None, Option_i64_Some } Option_i64_Tag;
-
 typedef struct Option_i64 {
     Option_i64_Tag tag;
-    union {
-        struct { int64_t f0; } Some;
-    };
+    union { struct { int64_t f0; } Some; };
 } Option_i64;
+
+// Construction:
+Option_i64 x = (Option_i64){.tag = Option_i64_Some, .Some = {.f0 = 42LL}};
+Option_i64 n = (Option_i64){.tag = Option_i64_None};
 ```
 
-**Changes required:**
+**Changes made:**
 
-- Add `type_params` / `type_param_count` to `enum_decl` AST node (same as `struct_decl`)
-- Generic enum instantiation in checker (parallel to struct instantiation)
-- Mangled names for monomorphized enum types
+| File | Change |
+|------|--------|
+| `ast.h` | Added `type_params`, `type_param_bounds`, `type_param_count` to `enum_decl` |
+| `ast.c` | Free type_params in `node_free` for `NODE_ENUM_DECL` |
+| `parser.c` | Parse `<T, E>` type params after enum name (same pattern as struct) |
+| `checker.h` | Added `enum_target_hint` field to Checker for type inference fallback |
+| `checker.c` | Register generic enum defs; `instantiate_generic_enum()` helper; type param inference from constructor args; `enum_target_hint` for uninferrable cases (e.g. `Option::None`); modified `NODE_GENERIC_TYPE` in `resolve_type` to branch on enum vs struct |
+| `codegen.c` | `build_mangled_name_from_generic_node()` helper; `resolve_enum_name()` for RC dispatch; `find_generic_enum_decl()` helper; fixed `is_struct_type`/`type_node_has_rc`/`emit_type` for generic enums; emit monomorphized tag enum + tagged union typedefs with `subst_ctx`; emit RC inc/dec helpers for generic enum instances with struct-pointer payloads |
+| `grammar.md` | `<enum-decl> ::= 'enum' <identifier> [ '<' <type-param-list> '>' ] '{' { <enum-variant> } '}'` |
+
+**Tests:** `generic_enum_basic.w`, `generic_enum_multi.w`, `generic_enum_infer.w`, `generic_enum_tag.w`, `error_generic_enum_infer.w`, `error_generic_enum_arity.w`
+
+**Known limitations:**
+- No `match` for destructuring (Phase 3)
+- No methods on generic enum types
+- `Option::None` requires explicit type annotation (cannot infer T from no arguments)
 
 ### Phase 3: Match Expressions
 
