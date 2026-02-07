@@ -56,10 +56,11 @@ static const char* get_dec_func_for_type(Type* t) {
     return xstrdup("__rc_dec");
 }
 
-static void rc_push_var(CodeGen* gen, const char* name, const char* dec_func) {
+static void rc_push_var(CodeGen* gen, const char* name, const char* dec_func, Type* type) {
     VEC_GROW(gen->rc_vars, gen->rc_var_count, gen->rc_var_capacity);
     gen->rc_vars[gen->rc_var_count].name        = xstrdup(name);
     gen->rc_vars[gen->rc_var_count].dec_func    = xstrdup(dec_func);
+    gen->rc_vars[gen->rc_var_count].type        = type;
     gen->rc_vars[gen->rc_var_count].scope_depth = gen->rc_scope_depth;
     gen->rc_var_count++;
 }
@@ -110,6 +111,15 @@ static const char* rc_get_dec_func(CodeGen* gen, const char* name) {
     return "__rc_dec";
 }
 
+// Look up the stored Type* for a tracked RC variable
+static Type* rc_get_var_type(CodeGen* gen, const char* name) {
+    for (int i = 0; i < gen->rc_var_count; i++) {
+        if (strcmp(gen->rc_vars[i].name, name) == 0)
+            return gen->rc_vars[i].type;
+    }
+    return NULL;
+}
+
 // Check if a variable name is in the RC tracking list
 static int rc_is_tracked(CodeGen* gen, const char* name) {
     for (int i = 0; i < gen->rc_var_count; i++) {
@@ -124,8 +134,13 @@ static int is_struct_type(Node* type_node) {
     if (!type_node)
         return 0;
     // Generic types (Box<i64>) are always struct types
-    if (type_node->type == NODE_GENERIC_TYPE)
+    if (type_node->type == NODE_GENERIC_TYPE) {
+        // Span<T> is a value type, not an RC-managed struct pointer
+        if (strcmp(type_node->as.generic_type.base_name, "Span") == 0) {
+            return 0;
+        }
         return 1;
+    }
     if (type_node->type != NODE_IDENT)
         return 0;
     return !type_is_builtin_name(type_node->as.ident.name);
@@ -1023,12 +1038,26 @@ static void emit_stmt(CodeGen* gen, Node* node) {
             int obj_is_rc = member->as.member.object->type == NODE_IDENT &&
                             rc_is_tracked(gen, member->as.member.object->as.ident.name);
             if (value_is_rc && obj_is_rc) {
-                // Determine the dec function for the field's type from the value being assigned
-                const char* member_dec = "__rc_dec";
-                if (expr->as.assign.value->type == NODE_IDENT) {
-                    member_dec = rc_get_dec_func(gen, expr->as.assign.value->as.ident.name);
+                const char* obj_name = member->as.member.object->as.ident.name;
+                Type*       obj_type = rc_get_var_type(gen, obj_name);
+                Type*       field_ty = NULL;
+                if (obj_type && obj_type->kind == TYPE_STRUCT) {
+                    for (int f = 0; f < obj_type->as.struc.field_count; f++) {
+                        if (strcmp(obj_type->as.struc.field_names[f], member->as.member.name) ==
+                            0) {
+                            field_ty = obj_type->as.struc.field_types[f];
+                            break;
+                        }
+                    }
                 }
-                int tmp = gen->temp_count++;
+                if (!field_ty || field_ty->kind != TYPE_STRUCT) {
+                    break;
+                }
+
+                // Determine the dec function for the field's type
+                char*       member_dec_owned = (char*)get_dec_func_for_type(field_ty);
+                const char* member_dec       = member_dec_owned;
+                int         tmp              = gen->temp_count++;
                 emit_indent(gen);
                 emit(gen, "void* __rc_tmp%d = (void*)", tmp);
                 emit_expr(gen, expr->as.assign.value);
@@ -1042,6 +1071,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 emit_indent(gen);
                 emit_expr(gen, member);
                 emit(gen, " = __rc_tmp%d;\n", tmp);
+                free(member_dec_owned);
                 break;
             }
         }
@@ -1099,7 +1129,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                     }
                 }
                 const char* dec_fn = get_dec_func_for_type(stype);
-                rc_push_var(gen, node->as.var_decl.name, dec_fn);
+                rc_push_var(gen, node->as.var_decl.name, dec_fn, stype);
                 free((char*)dec_fn);
                 break;
             } else {
@@ -1125,7 +1155,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 // Function calls transfer ownership (rc already 1), no inc needed
                 Type*       rc_type = (Type*)node->as.var_decl.resolved_type;
                 const char* dec_fn2 = get_dec_func_for_type(rc_type);
-                rc_push_var(gen, node->as.var_decl.name, dec_fn2);
+                rc_push_var(gen, node->as.var_decl.name, dec_fn2, rc_type);
                 free((char*)dec_fn2);
                 break;
             }
