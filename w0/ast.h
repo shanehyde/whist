@@ -3,8 +3,9 @@
 
 #include "lexer.h"
 
-// Forward declaration for destructuring patterns
+// Forward declarations
 typedef struct DestructPattern DestructPattern;
+typedef struct Type            Type;
 
 // Destructuring pattern kinds
 typedef enum {
@@ -25,7 +26,7 @@ struct DestructPattern {
             int               count;
         } tuple;
     } as;
-    void* resolved_type; // Type* set by checker (cast to void* to avoid dep)
+    Type* resolved_type; // Set by checker
 };
 
 // Pattern memory management
@@ -141,7 +142,7 @@ typedef struct {
     // Destructuring support: var (a, b) = tuple; or var (a, (b, c)) = nested;
     DestructPattern* destruct_pattern; // NULL if not destructuring
     int              is_rc; // Set by checker: 1 if init is a new expression or copy of RC var
-    void*            resolved_type; // Type* set by checker for RC vars (the struct type)
+    Type*            resolved_type; // Set by checker for RC vars (the struct type)
 } var_decl_node;
 
 struct Node {
@@ -206,7 +207,7 @@ struct Node {
             Node* object;        // Array or span being sliced
             Node* start;         // Start index (NULL if omitted)
             Node* end;           // End index (NULL if omitted)
-            void* resolved_type; // Type* set by checker (cast to void* to avoid dep)
+            Type* resolved_type; // Set by checker
             int   is_array;      // Set by checker: 1 if slicing array, 0 if slicing span
         } slice;
 
@@ -253,7 +254,7 @@ struct Node {
         struct {
             Node* type_node;     // NODE_IDENT or NODE_GENERIC_TYPE
             Node* init;          // NODE_STRUCT_INIT
-            void* resolved_type; // Type* set by checker
+            Type* resolved_type; // Set by checker
         } new_expr;
 
         // Tuple type: (T1, T2, ...)
@@ -269,7 +270,7 @@ struct Node {
         // Array literal: [e1, e2, ...]
         struct {
             NodeList elements;
-            void*    resolved_type; // Type* set by checker (element type)
+            Type*    resolved_type; // Set by checker (element type)
         } array_lit;
 
         // Array type: [n]T or []T

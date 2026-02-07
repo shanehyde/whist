@@ -961,7 +961,7 @@ static void emit_expr(CodeGen* gen, Node* node) {
 
     case NODE_SLICE: {
         // Slice produces a span: (__Span_T){ .data = ..., .count = ... }
-        Type* span_type = (Type*)node->as.slice.resolved_type;
+        Type* span_type = node->as.slice.resolved_type;
         Type* elem_type = span_type->as.span.elem;
 
         // Emit compound literal
@@ -1083,7 +1083,7 @@ static void emit_expr(CodeGen* gen, Node* node) {
 
     case NODE_NEW_EXPR: {
         // new Type { fields } as inline expression using GCC statement expression
-        Type*       stype = (Type*)node->as.new_expr.resolved_type;
+        Type*       stype = node->as.new_expr.resolved_type;
         const char* tname = stype->as.struc.name;
         int         tmp   = gen->temp_count++;
         emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s)); *__rc_tmp%d = (%s)", tname, tmp,
@@ -1137,7 +1137,7 @@ static void emit_destruct_pattern(CodeGen* gen, DestructPattern* pattern, const 
     if (!pattern)
         return;
 
-    Type* type = (Type*)pattern->resolved_type;
+    Type* type = pattern->resolved_type;
 
     switch (pattern->kind) {
     case PATTERN_IDENT:
@@ -1162,7 +1162,7 @@ static void emit_destruct_pattern(CodeGen* gen, DestructPattern* pattern, const 
 
             if (elem->kind == PATTERN_TUPLE) {
                 // For nested tuple patterns, first create a temp variable for this level
-                Type* elem_type = (Type*)elem->resolved_type;
+                Type* elem_type = elem->resolved_type;
                 emit_indent(gen);
                 emit_resolved_type(gen, elem_type);
                 int temp_id = gen->temp_count++;
@@ -1323,7 +1323,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
         // Handle destructuring: var (a, b) = tuple; or var (a, (b, c)) = nested;
         DestructPattern* pattern = node->as.var_decl.destruct_pattern;
         if (pattern) {
-            Type* tuple_type = (Type*)pattern->resolved_type;
+            Type* tuple_type = pattern->resolved_type;
 
             // Emit a temporary variable to hold the tuple value
             emit_indent(gen);
@@ -1346,7 +1346,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 // var p = new Point { x: 1, y: 2 }
                 // => Point* p = (Point*)__rc_alloc(sizeof(Point));
                 //    *p = (Point){ .x = 1, .y = 2 };
-                Type*       stype = (Type*)node->as.var_decl.init->as.new_expr.resolved_type;
+                Type*       stype = node->as.var_decl.init->as.new_expr.resolved_type;
                 const char* tname = stype->as.struc.name;
                 emit_indent(gen);
                 emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s));\n", tname, node->as.var_decl.name,
@@ -1381,7 +1381,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                     emit_type_with_name(gen, node->as.var_decl.type, node->as.var_decl.name);
                 } else if (node->as.var_decl.resolved_type) {
                     // Use resolved struct type from checker
-                    Type* rtype = (Type*)node->as.var_decl.resolved_type;
+                    Type* rtype = node->as.var_decl.resolved_type;
                     if (rtype->kind == TYPE_STRUCT) {
                         emit(gen, "%s* %s", rtype->as.struc.name, node->as.var_decl.name);
                     } else {
@@ -1395,7 +1395,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 emit_expr(gen, node->as.var_decl.init);
                 emit(gen, ";\n");
                 // Function calls transfer ownership (rc already 1), no inc needed
-                Type* rc_type  = (Type*)node->as.var_decl.resolved_type;
+                Type* rc_type  = node->as.var_decl.resolved_type;
                 int   skip_inc = node->as.var_decl.init->type == NODE_CALL ||
                                (rc_type && rc_type->kind == TYPE_ENUM &&
                                 node->as.var_decl.init->type == NODE_ENUM_VALUE);
@@ -1500,7 +1500,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 case NODE_ARRAY_LIT: {
                     // Use the resolved element type from checker
                     Node* init      = node->as.var_decl.init;
-                    Type* elem_type = (Type*)init->as.array_lit.resolved_type;
+                    Type* elem_type = init->as.array_lit.resolved_type;
                     int   count     = init->as.array_lit.elements.count;
                     emit_resolved_type(gen, elem_type);
                     emit(gen, " %s[%d]", node->as.var_decl.name, count);
@@ -2019,7 +2019,7 @@ static void collect_tuple_types_from_pattern(CodeGen* gen, DestructPattern* patt
         return;
 
     // Collect the resolved type if it's a tuple
-    Type* type = (Type*)pattern->resolved_type;
+    Type* type = pattern->resolved_type;
     if (type && type->kind == TYPE_TUPLE) {
         register_tuple_type(gen, type);
     }
