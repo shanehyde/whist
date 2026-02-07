@@ -1163,6 +1163,45 @@ static void emit_expr(CodeGen* gen, Node* node) {
 
     case NODE_NEW_EXPR: {
         Type* rtype = node->as.new_expr.resolved_type;
+        // In generic method bodies, the checker doesn't visit the body, so resolved_type
+        // may be NULL. Resolve from the type_node using the current substitution context.
+        if (!rtype) {
+            Node* tn = node->as.new_expr.type_node;
+            if (tn->type == NODE_GENERIC_TYPE) {
+                if (strcmp(tn->as.generic_type.base_name, "Vec") == 0) {
+                    // Look up the Vec instance by mangled name
+                    char* mangled = build_mangled_name_from_generic_node(gen, tn);
+                    for (int vi = 0; vi < gen->vec_instance_count; vi++) {
+                        if (strcmp(gen->vec_instances[vi].mangled_name, mangled) == 0) {
+                            rtype = gen->vec_instances[vi].type;
+                            break;
+                        }
+                    }
+                    free(mangled);
+                } else {
+                    // Look up the generic struct instance by mangled name
+                    char* mangled = build_mangled_name_from_generic_node(gen, tn);
+                    for (int gi = 0; gi < gen->generic_instance_count; gi++) {
+                        if (strcmp(gen->generic_instances[gi].mangled_name, mangled) == 0) {
+                            rtype = gen->generic_instances[gi].type;
+                            break;
+                        }
+                    }
+                    free(mangled);
+                }
+            } else if (tn->type == NODE_IDENT) {
+                // Simple type name — check substitution context first
+                const char* name = tn->as.ident.name;
+                if (gen->subst_ctx) {
+                    for (int si = 0; si < gen->subst_ctx->count; si++) {
+                        if (strcmp(gen->subst_ctx->type_params[si], name) == 0) {
+                            rtype = gen->subst_ctx->type_args[si];
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         if (rtype->kind == TYPE_VEC) {
             // new Vec<T>{elems} as inline expression using GCC statement expression
             const char* elem_tname = type_name(rtype->as.vec.elem);
