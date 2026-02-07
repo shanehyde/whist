@@ -1,6 +1,8 @@
 # Type Aliases
 
-Named aliases for complex or semantic types.
+**Status: Implemented** (PR #55, `feature/type_aliases` branch)
+
+Named aliases for complex or semantic types. Aliases are purely compile-time — they resolve to the underlying type during type checking and produce no C code.
 
 ## Proposed Syntax
 
@@ -263,32 +265,17 @@ newtype_decl = "newtype" IDENTIFIER type_params? "=" type ";"
 
 ## Open Questions
 
-1. **Keyword choice?**
-   - `type` (Rust, TypeScript, Haskell)
-   - `alias` (Swift proposal)
-   - `typedef` (C, C++)
+1. **Keyword choice?** — Resolved: `type` (matches Rust, TypeScript, Haskell)
 
-2. **Support newtypes?**
-   - Separate `newtype` keyword?
-   - Use single-field structs?
-   - `distinct` modifier?
+2. **Support newtypes?** — Deferred: out of scope for initial implementation
 
-3. **Where can aliases appear?**
-   - Top-level only?
-   - Inside functions (local type aliases)?
-   - Inside structs?
+3. **Where can aliases appear?** — Resolved: top-level only (in module declarations)
 
-4. **Generic alias bounds?**
-   - `type Sortable<T: Ord> = Vec<T>`
-   - Propagate bounds or require at use site?
+4. **Generic alias bounds?** — Resolved: supported, bounds are checked at the alias definition site via `<T: Trait>` syntax
 
-5. **Associated type aliases?**
-   - Inside traits: `type Item;`
-   - Inside impls: `type Item = i64;`
+5. **Associated type aliases?** — Deferred: not yet implemented
 
-6. **Visibility of underlying type?**
-   - Can users see that `UserId = i64`?
-   - Or is it opaque outside the module?
+6. **Visibility of underlying type?** — Resolved: aliases are fully transparent; `public type` exports the alias
 
 ## Examples
 
@@ -333,6 +320,24 @@ type Box<T> = struct { value: T };
 type Lazy<T> = func(): T;
 type Cache<K, V> = HashMap<K, Lazy<V>>;
 ```
+
+## Implemented Scope
+
+- **Use case 1**: Semantic naming (`type UserId = i64;`)
+- **Use case 2**: Simplifying complex types (`type Pos = Point;`)
+- **Use case 3**: Generic partial application (`type IntBox = Box<i64>;`, `type StringPair<V> = Pair<string, V>;`)
+- Cycle detection via depth counter (max 16)
+- `public`/`private` visibility
+- Codegen resolves aliases to underlying types (no alias names in generated C)
+
+### Not Yet Implemented
+
+- Use case 4: Platform abstraction (requires conditional compilation)
+- Newtypes
+- Local type aliases (inside functions)
+- Associated type aliases (inside traits/impls)
+- Function type aliases (`type Handler = func(Request): Response;` — requires function types)
+- Recursive type aliases through indirection
 
 ## Related Features
 

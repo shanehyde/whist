@@ -128,8 +128,8 @@ static const Keyword keywords[] = {
     {"public", 6, TOK_PUBLIC},   {"private", 7, TOK_PRIVATE},
     {"return", 6, TOK_RETURN},   {"self", 4, TOK_SELF},
     {"struct", 6, TOK_STRUCT},   {"trait", 5, TOK_TRAIT},
-    {"true", 4, TOK_TRUE},       {"var", 3, TOK_VAR},
-    {"while", 5, TOK_WHILE},
+    {"true", 4, TOK_TRUE},       {"type", 4, TOK_TYPE},
+    {"var", 3, TOK_VAR},         {"while", 5, TOK_WHILE},
 };
 
 static const size_t keyword_count = sizeof(keywords) / sizeof(keywords[0]);
@@ -389,6 +389,7 @@ static const char* token_names[] = {
     [TOK_STRUCT]      = "STRUCT",
     [TOK_ENUM]        = "ENUM",
     [TOK_TRAIT]       = "TRAIT",
+    [TOK_TYPE]        = "TYPE",
     [TOK_IMPL]        = "IMPL",
     [TOK_FUNC]        = "FUNC",
     [TOK_VAR]         = "VAR",

@@ -55,6 +55,11 @@ typedef struct {
     int    enum_name_count;
     int    enum_name_capacity;
     int*   enum_has_rc_fields; // Parallel to enum_names
+    // Type alias tracking (alias name -> target type node)
+    char** alias_names;
+    Node** alias_targets;
+    int    alias_count;
+    int    alias_capacity;
 } CodeGen;
 
 void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,

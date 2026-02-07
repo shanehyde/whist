@@ -412,6 +412,24 @@ void print_ast(Node* node, int depth) {
         }
         break;
 
+    case NODE_TYPE_ALIAS:
+        printf("TypeAlias: %.*s", node->as.type_alias.name_length, node->as.type_alias.name);
+        if (node->as.type_alias.type_param_count > 0) {
+            printf("<");
+            for (int i = 0; i < node->as.type_alias.type_param_count; i++) {
+                if (i > 0)
+                    printf(", ");
+                printf("%s", node->as.type_alias.type_params[i]);
+            }
+            printf(">");
+        }
+        printf("\n");
+        print_visibility(depth + 1, node->as.type_alias.is_public);
+        print_indent(depth + 1);
+        printf("Target:\n");
+        print_ast(node->as.type_alias.target_type, depth + 2);
+        break;
+
     case NODE_IMPL_DECL:
         printf("ImplDecl: %.*s for %.*s", node->as.impl_decl.trait_name_length,
                node->as.impl_decl.trait_name, node->as.impl_decl.type_name_length,
