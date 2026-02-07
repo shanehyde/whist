@@ -749,8 +749,9 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
 
         // Check if any field is a struct type (RC pointer)
         for (int i = 0; i < field_count; i++) {
-            if (struct_type->as.struc.field_types[i] &&
-                struct_type->as.struc.field_types[i]->kind == TYPE_STRUCT) {
+            Type* ftype = struct_type->as.struc.field_types[i];
+            if (ftype && (ftype->kind == TYPE_STRUCT ||
+                          (ftype->kind == TYPE_ENUM && ftype->as.enm.has_rc_fields))) {
                 struct_type->as.struc.has_rc_fields = 1;
                 break;
             }
@@ -1239,6 +1240,16 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
                             obj->as.ident.name);
                 return type_error;
             }
+        }
+    }
+
+    // Disallow assignments to data enum tags
+    if (t->type == NODE_MEMBER && strcmp(t->as.member.name, "tag") == 0) {
+        Type* obj_type = check_expression(checker, t->as.member.object);
+        if (obj_type && obj_type->kind == TYPE_ENUM && obj_type->as.enm.has_data) {
+            check_error(checker, node->line, node->column,
+                        "Enum tag is read-only; cannot assign to '%s.tag'", obj_type->as.enm.name);
+            return type_error;
         }
     }
 
@@ -1790,6 +1801,11 @@ static void check_statement(Checker* checker, Node* node) {
 
         // Propagate RC tracking
         if (sym && node->as.var_decl.init) {
+            if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
+                node->as.var_decl.is_rc         = 1;
+                node->as.var_decl.resolved_type = var_type;
+                sym->is_rc                      = 1;
+            }
             if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
                 node->as.var_decl.is_rc         = 1;
                 node->as.var_decl.resolved_type = node->as.var_decl.init->as.new_expr.resolved_type;
@@ -2191,8 +2207,9 @@ static void check_decl(Checker* checker, Node* node) {
 
         // Check if any field is a struct type (RC pointer)
         for (int i = 0; i < field_count; i++) {
-            if (struct_type->as.struc.field_types[i] &&
-                struct_type->as.struc.field_types[i]->kind == TYPE_STRUCT) {
+            Type* ftype = struct_type->as.struc.field_types[i];
+            if (ftype && (ftype->kind == TYPE_STRUCT ||
+                          (ftype->kind == TYPE_ENUM && ftype->as.enm.has_rc_fields))) {
                 struct_type->as.struc.has_rc_fields = 1;
                 break;
             }
@@ -2236,6 +2253,11 @@ static void check_decl(Checker* checker, Node* node) {
                 for (int j = 0; j < type_count; j++) {
                     Type* resolved = resolve_type(checker, val->as.enum_variant.types.nodes[j]);
                     enum_type->as.enm.variant_types[i][j] = resolved;
+                    if (resolved &&
+                        (resolved->kind == TYPE_STRUCT ||
+                         (resolved->kind == TYPE_ENUM && resolved->as.enm.has_rc_fields))) {
+                        enum_type->as.enm.has_rc_fields = 1;
+                    }
                 }
             } else {
                 enum_type->as.enm.variant_types[i] = NULL;

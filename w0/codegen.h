@@ -54,6 +54,7 @@ typedef struct {
     char** enum_names;
     int    enum_name_count;
     int    enum_name_capacity;
+    int*   enum_has_rc_fields; // Parallel to enum_names
 } CodeGen;
 
 void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,

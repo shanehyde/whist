@@ -100,6 +100,7 @@ Type* type_enum(const char* name) {
     type->as.enm.value_names         = NULL;
     type->as.enm.value_count         = 0;
     type->as.enm.has_data            = 0;
+    type->as.enm.has_rc_fields       = 0;
     type->as.enm.variant_types       = NULL;
     type->as.enm.variant_type_counts = NULL;
     return type;
