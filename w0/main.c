@@ -125,7 +125,11 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
 
     // Compile with cc
     char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "cc -o %s %s", exe_path, c_path);
+    if (lib_path) {
+        snprintf(cmd, sizeof(cmd), "cc -o %s %s -I%s/include", exe_path, c_path, lib_path);
+    } else {
+        snprintf(cmd, sizeof(cmd), "cc -o %s %s", exe_path, c_path);
+    }
 
     int cc_result = system(cmd);
     unlink(c_path);
@@ -183,9 +187,39 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Check for 'run' subcommand
-    if (argc >= 3 && strcmp(argv[1], "run") == 0) {
-        return compile_and_run(argv[2], argc - 2, argv + 2, lib_path, rc_debug);
+    // Check for 'run' subcommand (may appear after flags like --lib-path)
+    int run_idx = -1;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "run") == 0) {
+            run_idx = i;
+            break;
+        }
+        // Skip the value argument of --lib-path and -o
+        if ((strcmp(argv[i], "--lib-path") == 0 || strcmp(argv[i], "-o") == 0) && i + 1 < argc) {
+            i++;
+        }
+    }
+    if (run_idx >= 0) {
+        // Find the source file: first non-flag argument after 'run'
+        const char* run_source     = NULL;
+        int         run_args_start = 0;
+        for (int i = run_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--lib-path") == 0 && i + 1 < argc) {
+                i++; // skip value
+            } else if (strcmp(argv[i], "--rc-debug") == 0) {
+                // skip flag
+            } else {
+                run_source     = argv[i];
+                run_args_start = i;
+                break;
+            }
+        }
+        if (!run_source) {
+            fprintf(stderr, "Usage: %s run [options] <source-file> [args...]\n", argv[0]);
+            return 1;
+        }
+        return compile_and_run(run_source, argc - run_args_start, argv + run_args_start, lib_path,
+                               rc_debug);
     }
 
     // Parse args
