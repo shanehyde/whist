@@ -1133,36 +1133,22 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         emit(gen, "typedef struct %s {\n", info->mangled_name);
         gen->indent++;
 
-        // Build type substitution map
-        int param_count = template->as.struct_decl.type_param_count;
-        // Note: info->type_arg_count should equal param_count
+        // Set up substitution context so emit_type handles all type params
+        TypeSubstContext subst_ctx;
+        subst_ctx.type_params = template->as.struct_decl.type_params;
+        subst_ctx.type_args   = info->type_args;
+        subst_ctx.count       = template->as.struct_decl.type_param_count;
+        gen->subst_ctx        = &subst_ctx;
 
         // Emit fields with substituted types
         for (int f = 0; f < template->as.struct_decl.fields.count; f++) {
             Node* field = template->as.struct_decl.fields.nodes[f];
             emit_indent(gen);
-
-            // Check if field type is a type parameter
-            if (field->as.field.type && field->as.field.type->type == NODE_IDENT) {
-                const char* type_name = field->as.field.type->as.ident.name;
-                int         found     = 0;
-                for (int p = 0; p < param_count; p++) {
-                    if (strcmp(template->as.struct_decl.type_params[p], type_name) == 0) {
-                        // Substitute with actual type
-                        emit_resolved_type(gen, info->type_args[p]);
-                        found = 1;
-                        break;
-                    }
-                }
-                if (!found) {
-                    emit_type(gen, field->as.field.type);
-                }
-            } else {
-                emit_type(gen, field->as.field.type);
-            }
-
+            emit_type(gen, field->as.field.type);
             emit(gen, " %s;\n", field->as.field.name);
         }
+
+        gen->subst_ctx = NULL;
 
         gen->indent--;
         emit(gen, "} %s;\n\n", info->mangled_name);
@@ -1794,7 +1780,8 @@ void codegen_emit(CodeGen* gen, Node* ast) {
 
             // Clear defer stack for this function
             defer_clear(gen);
-            gen->current_return_type = fdn->return_type;
+            gen->current_return_type    = fdn->return_type;
+            gen->current_generic_template = template;
 
             // First pass: count defers to know if we need __ret
             int has_defers = 0;
@@ -1838,7 +1825,8 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             // Clear RC tracking for generic method
             rc_clear_all(gen);
 
-            gen->subst_ctx = NULL;
+            gen->subst_ctx                = NULL;
+            gen->current_generic_template = NULL;
             free(combined_params);
             free(combined_args);
             for (int k = 0; k < method_bind_count; k++) {

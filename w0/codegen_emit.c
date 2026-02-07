@@ -486,8 +486,8 @@ void emit_type(CodeGen* gen, Node* type_node) {
         int is_span = (strcmp(base, "Span") == 0);
         int is_vec  = (strcmp(base, "Vec") == 0);
 
-        if (is_vec) {
-            emit(gen, "__Vec_");
+        if (is_vec || is_span) {
+            emit(gen, "%s", is_vec ? "__Vec_" : "__Span_");
             Node* arg = type_node->as.generic_type.type_args.nodes[0];
             if (arg->type == NODE_IDENT) {
                 const char* arg_name    = arg->as.ident.name;
@@ -505,33 +505,14 @@ void emit_type(CodeGen* gen, Node* type_node) {
                 if (!substituted) {
                     emit(gen, "%s", arg_name);
                 }
+            } else if (arg->type == NODE_GENERIC_TYPE) {
+                // Nested generic like Vec<HashEntry<V>> — build substituted mangled name
+                char* mangled = build_mangled_name_from_generic_node(gen, arg);
+                emit(gen, "%s", mangled);
+                free(mangled);
             }
-            emit(gen, "*"); // Vec is RC-managed pointer
-            break;
-        }
-
-        if (is_span) {
-            emit(gen, "__Span_");
-            // Emit the element type name
-            Node* arg = type_node->as.generic_type.type_args.nodes[0];
-            if (arg->type == NODE_IDENT) {
-                const char* arg_name    = arg->as.ident.name;
-                int         substituted = 0;
-                if (gen->subst_ctx) {
-                    for (int s = 0; s < gen->subst_ctx->count; s++) {
-                        if (strcmp(gen->subst_ctx->type_params[s], arg_name) == 0) {
-                            Type* subst_type = gen->subst_ctx->type_args[s];
-                            emit(gen, "%s", type_name(subst_type));
-                            substituted = 1;
-                            break;
-                        }
-                    }
-                }
-                if (!substituted) {
-                    emit(gen, "%s", arg_name);
-                }
-            }
-            // No * for spans - they are value types
+            if (is_vec)
+                emit(gen, "*"); // Vec is RC-managed pointer
             break;
         }
 
@@ -812,6 +793,72 @@ static const char* assign_op_str(TokenType op) {
     }
 }
 
+// In a generic method body, look up the field type node from the struct template.
+// For `self.fieldname`, returns the AST type node of the field, or NULL.
+static Node* lookup_generic_template_field_type(CodeGen* gen, const char* field_name) {
+    if (!gen->current_generic_template)
+        return NULL;
+    Node* tmpl = gen->current_generic_template;
+    for (int i = 0; i < tmpl->as.struct_decl.fields.count; i++) {
+        Node* field = tmpl->as.struct_decl.fields.nodes[i];
+        if (strcmp(field->as.field.name, field_name) == 0) {
+            return field->as.field.type;
+        }
+    }
+    return NULL;
+}
+
+// Resolve the struct name for a method call in a generic method body.
+// For `self.field.method(...)`, determines if `field` is a Vec/struct and returns
+// the mangled name (e.g., "__Vec_HashEntry_i32" or "HashEntry_i32").
+// Returns a malloc'd string, or NULL if unresolvable. Caller must free.
+static char* resolve_generic_method_target(CodeGen* gen, Node* member) {
+    if (!gen->subst_ctx || !gen->current_generic_template)
+        return NULL;
+    // Only handle `self.field.method()` pattern
+    Node* obj = member->as.member.object;
+    if (!obj || obj->type != NODE_MEMBER)
+        return NULL;
+    // obj should be `self.field`
+    if (!obj->as.member.object || obj->as.member.object->type != NODE_IDENT)
+        return NULL;
+    if (strcmp(obj->as.member.object->as.ident.name, "self") != 0)
+        return NULL;
+    // Look up the field type in the template
+    Node* field_type = lookup_generic_template_field_type(gen, obj->as.member.name);
+    if (!field_type || field_type->type != NODE_GENERIC_TYPE)
+        return NULL;
+    const char* base = field_type->as.generic_type.base_name;
+    if (strcmp(base, "Vec") == 0) {
+        // Build "__Vec_" + mangled element type
+        Node* elem = field_type->as.generic_type.type_args.nodes[0];
+        char  buf[256];
+        if (elem->type == NODE_IDENT) {
+            const char* elem_name = elem->as.ident.name;
+            // Check substitution
+            if (gen->subst_ctx) {
+                for (int s = 0; s < gen->subst_ctx->count; s++) {
+                    if (strcmp(gen->subst_ctx->type_params[s], elem_name) == 0) {
+                        snprintf(buf, sizeof(buf), "__Vec_%s", type_name(gen->subst_ctx->type_args[s]));
+                        return xstrdup(buf);
+                    }
+                }
+            }
+            snprintf(buf, sizeof(buf), "__Vec_%s", elem_name);
+            return xstrdup(buf);
+        } else if (elem->type == NODE_GENERIC_TYPE) {
+            char* mangled = build_mangled_name_from_generic_node(gen, elem);
+            snprintf(buf, sizeof(buf), "__Vec_%s", mangled);
+            free(mangled);
+            return xstrdup(buf);
+        }
+        return NULL;
+    }
+    // Generic struct type — build mangled name
+    char* mangled = build_mangled_name_from_generic_node(gen, field_type);
+    return mangled;
+}
+
 static void emit_expr(CodeGen* gen, Node* node) {
     if (!node)
         return;
@@ -977,6 +1024,31 @@ static void emit_expr(CodeGen* gen, Node* node) {
                 emit_expr(gen, node->as.call.args.nodes[i]);
             }
             emit(gen, ")");
+        } else if (func->type == NODE_MEMBER && func->as.member.struct_name == NULL &&
+                   gen->subst_ctx) {
+            // Method call in a generic method body — checker didn't annotate struct_name.
+            // Try to resolve the target type from the struct template field types.
+            char* resolved_name = resolve_generic_method_target(gen, func);
+            if (resolved_name) {
+                emit(gen, "%s_%.*s(", resolved_name, func->as.member.length, func->as.member.name);
+                emit_expr(gen, func->as.member.object);
+                for (int i = 0; i < node->as.call.args.count; i++) {
+                    emit(gen, ", ");
+                    emit_expr(gen, node->as.call.args.nodes[i]);
+                }
+                emit(gen, ")");
+                free(resolved_name);
+            } else {
+                // Fallback: regular function call
+                emit_expr(gen, func);
+                emit(gen, "(");
+                for (int i = 0; i < node->as.call.args.count; i++) {
+                    if (i > 0)
+                        emit(gen, ", ");
+                    emit_expr(gen, node->as.call.args.nodes[i]);
+                }
+                emit(gen, ")");
+            }
         } else {
             // Regular function call
             emit_expr(gen, func);

@@ -17,7 +17,7 @@ func (HashTable<V>) init(): void {
     self.buckets = new Vec<HashEntry<V>>{};
     self.size = 0;
     foreach (const i in 0..16) {
-        self.buckets.push(new HashEntry<V> {next: null, value: null});
+        self.buckets.push(new HashEntry<V> {next: null, value: 0});
     }
     // Implementation of insert method
 }
