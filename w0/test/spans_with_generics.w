@@ -19,7 +19,7 @@ func main(): i32 {
     if (s[1] != 200) { return 2; }
 
     // Create a box with span value as element
-    var box: Box<i64> = {value: s[0]};
+    var box = new Box<i64> {value: s[0]};
     if (box.get() != 100) { return 3; }
 
     // Slice from span

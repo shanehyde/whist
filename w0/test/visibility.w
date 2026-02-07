@@ -46,10 +46,10 @@ public func (Point) magnitude_squared(): i64 {
 }
 
 func main(): i32 {
-    var p: Point = { x: 3, y: 4 };
+    var p = new Point { x: 3, y: 4 };
     var mag = p.magnitude_squared();
 
-    var data: InternalData = { value: 42 };
+    var data = new InternalData { value: 42 };
 
     var c: Color = Color::Red;
     var s: Status = Status::Done;

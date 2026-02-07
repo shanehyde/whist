@@ -1724,17 +1724,7 @@ static void check_statement(Checker* checker, Node* node) {
         }
 
         if (node->as.var_decl.init) {
-            if (node->as.var_decl.init->type == NODE_STRUCT_INIT) {
-                if (!decl_type) {
-                    check_error(checker, node->line, node->column,
-                                "Struct initializer requires an explicit type");
-                    init_type = type_error;
-                } else {
-                    init_type = check_struct_init(checker, node->as.var_decl.init, decl_type);
-                }
-            } else {
-                init_type = check_expression(checker, node->as.var_decl.init);
-            }
+            init_type = check_expression(checker, node->as.var_decl.init);
         }
 
         Type* var_type;

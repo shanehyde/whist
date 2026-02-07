@@ -17,7 +17,7 @@ struct Box<T: HasValue> {
 }
 
 func main(): i32 {
-    var w: Wrapper = {v: 42};
-    var b: Box<Wrapper> = {item: w};
+    var w = new Wrapper {v: 42};
+    var b = new Box<Wrapper> {item: w};
     return w.value();
 }

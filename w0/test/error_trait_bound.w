@@ -13,7 +13,7 @@ struct Plain {
 }
 
 func main(): i32 {
-    var p: Plain = {x: 1};
-    var b: Box<Plain> = {item: p};
+    var p = new Plain {x: 1};
+    var b = new Box<Plain> {item: p};
     return 0;
 }

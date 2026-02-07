@@ -20,7 +20,7 @@ func move_ref(p: Point): void {
 }
 
 func main(): i32 {
-    var p: Point = {x: 10, y: 20};
+    var p = new Point {x: 10, y: 20};
     p.move(5, 5);
     move_ref(p);     // Calls p.move(1, 1)
     return p.sum();  // Should return 42
