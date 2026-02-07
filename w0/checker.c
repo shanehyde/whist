@@ -747,6 +747,15 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
             struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
         }
 
+        // Check if any field is a struct type (RC pointer)
+        for (int i = 0; i < field_count; i++) {
+            if (struct_type->as.struc.field_types[i] &&
+                struct_type->as.struc.field_types[i]->kind == TYPE_STRUCT) {
+                struct_type->as.struc.has_rc_fields = 1;
+                break;
+            }
+        }
+
         // Instantiate methods on the generic struct
         for (int m = 0; m < def->method_count; m++) {
             Node*           method_decl = def->methods[m];
@@ -2140,6 +2149,15 @@ static void check_decl(Checker* checker, Node* node) {
             struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
         }
 
+        // Check if any field is a struct type (RC pointer)
+        for (int i = 0; i < field_count; i++) {
+            if (struct_type->as.struc.field_types[i] &&
+                struct_type->as.struc.field_types[i]->kind == TYPE_STRUCT) {
+                struct_type->as.struc.has_rc_fields = 1;
+                break;
+            }
+        }
+
         checker_define(checker, name, SYM_TYPE, struct_type, 0, node->as.struct_decl.is_public,
                        checker->current_module);
         break;
@@ -2304,6 +2322,11 @@ static void check_decl(Checker* checker, Node* node) {
         TraitImpl* impl  = &checker->trait_impls[checker->trait_impl_count++];
         impl->trait_name = xstrdup(trait_name);
         impl->type_name  = xstrdup(type_name_str);
+
+        // If implementing Drop, set the flag on the struct type
+        if (strcmp(trait_name, "Drop") == 0) {
+            type_sym->type->as.struc.has_drop = 1;
+        }
         break;
     }
 
