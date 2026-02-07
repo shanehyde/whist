@@ -1023,6 +1023,11 @@ static void emit_stmt(CodeGen* gen, Node* node) {
             int obj_is_rc = member->as.member.object->type == NODE_IDENT &&
                             rc_is_tracked(gen, member->as.member.object->as.ident.name);
             if (value_is_rc && obj_is_rc) {
+                // Determine the dec function for the field's type from the value being assigned
+                const char* member_dec = "__rc_dec";
+                if (expr->as.assign.value->type == NODE_IDENT) {
+                    member_dec = rc_get_dec_func(gen, expr->as.assign.value->as.ident.name);
+                }
                 int tmp = gen->temp_count++;
                 emit_indent(gen);
                 emit(gen, "void* __rc_tmp%d = (void*)", tmp);
@@ -1031,7 +1036,7 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                 emit_indent(gen);
                 emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
                 emit_indent(gen);
-                emit(gen, "__rc_dec(");
+                emit(gen, "%s(", member_dec);
                 emit_expr(gen, member);
                 emit(gen, ");\n");
                 emit_indent(gen);
@@ -2434,15 +2439,28 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             // Check if any field is a struct type (non-builtin, non-enum)
             int has_rc_fields = 0;
             // Collect RC field info for emission
-            int    rc_field_count = 0;
-            char** rc_field_names = NULL;
+            int    rc_field_count      = 0;
+            char** rc_field_names      = NULL;
+            char** rc_field_type_names = NULL;
             for (int f = 0; f < decl->as.struct_decl.fields.count; f++) {
                 Node* field = decl->as.struct_decl.fields.nodes[f];
                 if (field->as.field.type && is_struct_type(field->as.field.type)) {
                     has_rc_fields = 1;
                     rc_field_count++;
                     rc_field_names = xrealloc(rc_field_names, rc_field_count * sizeof(char*));
+                    rc_field_type_names =
+                        xrealloc(rc_field_type_names, rc_field_count * sizeof(char*));
                     rc_field_names[rc_field_count - 1] = field->as.field.name;
+                    // Get the type name for the field
+                    if (field->as.field.type->type == NODE_IDENT) {
+                        rc_field_type_names[rc_field_count - 1] =
+                            field->as.field.type->as.ident.name;
+                    } else if (field->as.field.type->type == NODE_GENERIC_TYPE) {
+                        // For generic types, we'd need the mangled name
+                        rc_field_type_names[rc_field_count - 1] = NULL;
+                    } else {
+                        rc_field_type_names[rc_field_count - 1] = NULL;
+                    }
                 }
             }
 
@@ -2458,7 +2476,50 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                 emit(gen, "        %s_drop(ptr);\n", sname);
             }
             for (int f = 0; f < rc_field_count; f++) {
-                emit(gen, "        __rc_dec(ptr->%s);\n", rc_field_names[f]);
+                // Check if the field's type itself has a type-specific dec function
+                const char* field_tname            = rc_field_type_names[f];
+                int         field_needs_custom_dec = 0;
+                if (field_tname) {
+                    // Check if field type implements Drop
+                    for (int t = 0; t < gen->trait_impl_count; t++) {
+                        if (strcmp(gen->trait_impls[t].trait_name, "Drop") == 0 &&
+                            strcmp(gen->trait_impls[t].type_name, field_tname) == 0) {
+                            field_needs_custom_dec = 1;
+                            break;
+                        }
+                    }
+                    // Check if field type has RC fields (scan other structs)
+                    if (!field_needs_custom_dec) {
+                        for (int si = 0;
+                             si < ast->as.program.modules.count && !field_needs_custom_dec; si++) {
+                            Node* smod = ast->as.program.modules.nodes[si];
+                            if (!smod || smod->type != NODE_MODULE)
+                                continue;
+                            for (int sj = 0; sj < smod->as.module.decls.count; sj++) {
+                                Node* sdecl = smod->as.module.decls.nodes[sj];
+                                if (sdecl->type == NODE_STRUCT_DECL &&
+                                    sdecl->as.struct_decl.type_param_count == 0 &&
+                                    strcmp(sdecl->as.struct_decl.name, field_tname) == 0) {
+                                    for (int sf = 0; sf < sdecl->as.struct_decl.fields.count;
+                                         sf++) {
+                                        Node* sfield = sdecl->as.struct_decl.fields.nodes[sf];
+                                        if (sfield->as.field.type &&
+                                            is_struct_type(sfield->as.field.type)) {
+                                            field_needs_custom_dec = 1;
+                                            break;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (field_needs_custom_dec) {
+                    emit(gen, "        __rc_dec_%s(ptr->%s);\n", field_tname, rc_field_names[f]);
+                } else {
+                    emit(gen, "        __rc_dec(ptr->%s);\n", rc_field_names[f]);
+                }
             }
             if (gen->rc_debug) {
                 emit(gen, "        fprintf(stderr, \"RC_FREE: %%p\\n\", (void*)ptr);\n");
@@ -2473,6 +2534,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             emit(gen, "}\n\n");
 
             free(rc_field_names);
+            free(rc_field_type_names);
         }
     }
 
@@ -2507,8 +2569,14 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             emit(gen, "        %s_drop(ptr);\n", mname);
         }
         for (int f = 0; f < t->as.struc.field_count; f++) {
-            if (t->as.struc.field_types[f] && t->as.struc.field_types[f]->kind == TYPE_STRUCT) {
-                emit(gen, "        __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
+            Type* ft = t->as.struc.field_types[f];
+            if (ft && ft->kind == TYPE_STRUCT) {
+                if (ft->as.struc.has_drop || ft->as.struc.has_rc_fields) {
+                    emit(gen, "        __rc_dec_%s(ptr->%s);\n", ft->as.struc.name,
+                         t->as.struc.field_names[f]);
+                } else {
+                    emit(gen, "        __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
+                }
             }
         }
         if (gen->rc_debug) {

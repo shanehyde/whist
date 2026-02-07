@@ -11,6 +11,21 @@ struct Line {
     end: Point,
 }
 
+trait Drop {
+    func drop(): void;
+}
+
+impl Drop for Line {
+    func (Line) drop() {
+        std.print("Deleting line\n");
+    }
+}
+
+impl Drop for Point {
+    func (Point) drop() {
+        std.print("Deleting point\n");
+    }
+}
 
 func main(): i32 {
     var p = new Point { x: 10, y: 20 };
