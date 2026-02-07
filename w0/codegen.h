@@ -50,6 +50,10 @@ typedef struct {
     // Trait implementations from checker (not owned, do not free)
     TraitImpl* trait_impls;
     int        trait_impl_count;
+    // Enum name tracking (for distinguishing enums from structs in type emission)
+    char** enum_names;
+    int    enum_name_count;
+    int    enum_name_capacity;
 } CodeGen;
 
 void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,

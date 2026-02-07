@@ -129,6 +129,15 @@ static int rc_is_tracked(CodeGen* gen, const char* name) {
     return 0;
 }
 
+// Check if a name is a registered enum type
+static int is_enum_type_name(CodeGen* gen, const char* name) {
+    for (int i = 0; i < gen->enum_name_count; i++) {
+        if (strcmp(gen->enum_names[i], name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 // Check if a type node represents a struct (user-defined) type
 static int is_struct_type(Node* type_node) {
     if (!type_node)
@@ -272,6 +281,9 @@ static void emit_type(CodeGen* gen, Node* type_node) {
         const char* c_type = type_c_name(name);
         if (c_type) {
             emit(gen, "%s", c_type);
+        } else if (is_enum_type_name(gen, name)) {
+            // Enum type - value type, no pointer
+            emit(gen, "%s", name);
         } else {
             // User-defined struct type - emit as pointer (struct references)
             emit(gen, "%s*", name);
@@ -687,8 +699,32 @@ static void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_ENUM_VALUE:
-        // Emit just the value name - C enums use unqualified names
-        emit(gen, "%.*s", node->as.enum_value.value_name_length, node->as.enum_value.value_name);
+        if (!node->as.enum_value.is_data_enum) {
+            // Simple enum: emit qualified value name (EnumName_ValueName)
+            emit(gen, "%.*s_%.*s", node->as.enum_value.enum_name_length,
+                 node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
+                 node->as.enum_value.value_name);
+        } else if (node->as.enum_value.args.count == 0) {
+            // Data enum, bare tag: (EnumName){.tag = EnumName_ValueName}
+            emit(gen, "(%.*s){.tag = %.*s_%.*s}", node->as.enum_value.enum_name_length,
+                 node->as.enum_value.enum_name, node->as.enum_value.enum_name_length,
+                 node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
+                 node->as.enum_value.value_name);
+        } else {
+            // Data enum with args: (EnumName){.tag = EnumName_ValueName, .ValueName = {.f0 = ..}}
+            emit(gen, "(%.*s){.tag = %.*s_%.*s, .%.*s = {", node->as.enum_value.enum_name_length,
+                 node->as.enum_value.enum_name, node->as.enum_value.enum_name_length,
+                 node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
+                 node->as.enum_value.value_name, node->as.enum_value.value_name_length,
+                 node->as.enum_value.value_name);
+            for (int i = 0; i < node->as.enum_value.args.count; i++) {
+                if (i > 0)
+                    emit(gen, ", ");
+                emit(gen, ".f%d = ", i);
+                emit_expr(gen, node->as.enum_value.args.nodes[i]);
+            }
+            emit(gen, "}}");
+        }
         break;
 
     case NODE_BINARY:
@@ -1254,6 +1290,11 @@ static void emit_stmt(CodeGen* gen, Node* node) {
                     emit(gen, " %s[%d]", node->as.var_decl.name, count);
                     break;
                 }
+                case NODE_ENUM_VALUE:
+                    // Emit enum type name from the initializer
+                    emit(gen, "%.*s %s", node->as.var_decl.init->as.enum_value.enum_name_length,
+                         node->as.var_decl.init->as.enum_value.enum_name, node->as.var_decl.name);
+                    break;
                 default:
                     // Default to auto if we can't determine
                     emit(gen, "int64_t %s", node->as.var_decl.name);
@@ -1512,19 +1553,7 @@ static void emit_decl(CodeGen* gen, Node* node) {
         break;
 
     case NODE_ENUM_DECL:
-        emit(gen, "typedef enum %s {\n", node->as.enum_decl.name);
-        gen->indent++;
-        for (int i = 0; i < node->as.enum_decl.values.count; i++) {
-            Node* val = node->as.enum_decl.values.nodes[i];
-            emit_indent(gen);
-            emit(gen, "%.*s", val->as.ident.length, val->as.ident.name);
-            if (i < node->as.enum_decl.values.count - 1) {
-                emit(gen, ",");
-            }
-            emit(gen, "\n");
-        }
-        gen->indent--;
-        emit(gen, "} %s;\n\n", node->as.enum_decl.name);
+        // Enum typedefs are emitted in the early pass in codegen_emit
         break;
 
     case NODE_TRAIT_DECL:
@@ -2060,6 +2089,9 @@ void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, i
     gen->span_instance_count    = span_count;
     gen->trait_impls            = trait_impls;
     gen->trait_impl_count       = trait_impl_count;
+    gen->enum_names             = NULL;
+    gen->enum_name_count        = 0;
+    gen->enum_name_capacity     = 0;
 }
 
 void codegen_emit(CodeGen* gen, Node* ast) {
@@ -2166,6 +2198,97 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     }
     if (gen->tuple_type_count > 0)
         emit(gen, "\n");
+
+    // Emit enum typedefs (before struct forward declarations)
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type != NODE_ENUM_DECL)
+                continue;
+
+            const char* ename       = decl->as.enum_decl.name;
+            int         value_count = decl->as.enum_decl.values.count;
+
+            // Register enum name for type emission
+            VEC_GROW(gen->enum_names, gen->enum_name_count, gen->enum_name_capacity);
+            gen->enum_names[gen->enum_name_count++] = xstrdup(ename);
+
+            // Determine if this is a data enum (any variant has types)
+            int has_data = 0;
+            for (int v = 0; v < value_count; v++) {
+                Node* var = decl->as.enum_decl.values.nodes[v];
+                if (var->as.enum_variant.types.count > 0) {
+                    has_data = 1;
+                    break;
+                }
+            }
+
+            if (!has_data) {
+                // Simple enum: typedef enum Name { ... } Name;
+                emit(gen, "typedef enum %s {\n", ename);
+                gen->indent++;
+                for (int v = 0; v < value_count; v++) {
+                    Node* var = decl->as.enum_decl.values.nodes[v];
+                    emit_indent(gen);
+                    emit(gen, "%s_%.*s", ename, var->as.enum_variant.name_length,
+                         var->as.enum_variant.name);
+                    if (v < value_count - 1)
+                        emit(gen, ",");
+                    emit(gen, "\n");
+                }
+                gen->indent--;
+                emit(gen, "} %s;\n\n", ename);
+            } else {
+                // Data enum: tag enum + tagged union struct
+                // 1. Tag enum
+                emit(gen, "typedef enum %s_Tag {\n", ename);
+                gen->indent++;
+                for (int v = 0; v < value_count; v++) {
+                    Node* var = decl->as.enum_decl.values.nodes[v];
+                    emit_indent(gen);
+                    emit(gen, "%s_%.*s", ename, var->as.enum_variant.name_length,
+                         var->as.enum_variant.name);
+                    if (v < value_count - 1)
+                        emit(gen, ",");
+                    emit(gen, "\n");
+                }
+                gen->indent--;
+                emit(gen, "} %s_Tag;\n\n", ename);
+
+                // 2. Tagged union struct
+                emit(gen, "typedef struct %s {\n", ename);
+                gen->indent++;
+                emit_indent(gen);
+                emit(gen, "%s_Tag tag;\n", ename);
+                emit_indent(gen);
+                emit(gen, "union {\n");
+                gen->indent++;
+                for (int v = 0; v < value_count; v++) {
+                    Node* var        = decl->as.enum_decl.values.nodes[v];
+                    int   type_count = var->as.enum_variant.types.count;
+                    if (type_count == 0)
+                        continue;
+                    emit_indent(gen);
+                    emit(gen, "struct {");
+                    for (int t = 0; t < type_count; t++) {
+                        emit(gen, " ");
+                        emit_type(gen, var->as.enum_variant.types.nodes[t]);
+                        emit(gen, " f%d;", t);
+                    }
+                    emit(gen, " } %.*s;\n", var->as.enum_variant.name_length,
+                         var->as.enum_variant.name);
+                }
+                gen->indent--;
+                emit_indent(gen);
+                emit(gen, "};\n");
+                gen->indent--;
+                emit(gen, "} %s;\n\n", ename);
+            }
+        }
+    }
 
     // Forward declarations for structs (skip generic templates)
     for (int m = 0; m < ast->as.program.modules.count; m++) {

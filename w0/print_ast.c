@@ -145,6 +145,23 @@ void print_ast(Node* node, int depth) {
         }
         break;
 
+    case NODE_ENUM_VARIANT:
+        printf("EnumVariant: %.*s", node->as.enum_variant.name_length, node->as.enum_variant.name);
+        if (node->as.enum_variant.types.count > 0) {
+            printf("(");
+            for (int i = 0; i < node->as.enum_variant.types.count; i++) {
+                if (i > 0)
+                    printf(", ");
+                printf("...");
+            }
+            printf(")");
+        }
+        printf("\n");
+        for (int i = 0; i < node->as.enum_variant.types.count; i++) {
+            print_ast(node->as.enum_variant.types.nodes[i], depth + 1);
+        }
+        break;
+
     case NODE_VAR_DECL:
         if (node->as.var_decl.destruct_pattern) {
             printf("VarDecl: ");
@@ -333,6 +350,13 @@ void print_ast(Node* node, int depth) {
         printf("EnumValue: %.*s::%.*s\n", node->as.enum_value.enum_name_length,
                node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
                node->as.enum_value.value_name);
+        if (node->as.enum_value.args.count > 0) {
+            print_indent(depth + 1);
+            printf("Args:\n");
+            for (int i = 0; i < node->as.enum_value.args.count; i++) {
+                print_ast(node->as.enum_value.args.nodes[i], depth + 2);
+            }
+        }
         break;
 
     case NODE_NEW_EXPR:

@@ -100,6 +100,11 @@ void node_free(Node* node) {
     case NODE_ENUM_VALUE:
         free(node->as.enum_value.enum_name);
         free(node->as.enum_value.value_name);
+        nodelist_free(&node->as.enum_value.args);
+        break;
+    case NODE_ENUM_VARIANT:
+        free(node->as.enum_variant.name);
+        nodelist_free(&node->as.enum_variant.types);
         break;
     case NODE_NEW_EXPR:
         node_free(node->as.new_expr.type_node);

@@ -1146,6 +1146,18 @@ static Type* check_member_expr(Checker* checker, Node* node) {
         return type_error;
     }
 
+    // Handle data enum member access (.tag)
+    if (object->kind == TYPE_ENUM && object->as.enm.has_data) {
+        const char* member_name = node->as.member.name;
+        node->as.member.is_ref  = 0; // Data enums are value types, use . not ->
+        if (strcmp(member_name, "tag") == 0) {
+            return type_int32;
+        }
+        check_error(checker, node->line, node->column, "Enum '%s' has no member '%s'",
+                    object->as.enm.name, member_name);
+        return type_error;
+    }
+
     if (object->kind != TYPE_STRUCT) {
         check_error(checker, node->line, node->column,
                     "Member access requires struct type, got '%s'", type_name(object));
@@ -1301,18 +1313,47 @@ static Type* check_expression(Checker* checker, Node* node) {
             return type_error;
         }
         // Check that the value exists in the enum
-        int found = 0;
+        int variant_idx = -1;
         for (int i = 0; i < enum_type->as.enm.value_count; i++) {
             if (strcmp(enum_type->as.enm.value_names[i], node->as.enum_value.value_name) == 0) {
-                found = 1;
+                variant_idx = i;
                 break;
             }
         }
-        if (!found) {
+        if (variant_idx < 0) {
             check_error(checker, node->line, node->column, "'%s' is not a value of enum '%s'",
                         node->as.enum_value.value_name, node->as.enum_value.enum_name);
             return type_error;
         }
+
+        // Set is_data_enum flag for codegen
+        node->as.enum_value.is_data_enum = enum_type->as.enm.has_data;
+
+        // Validate constructor args for data enums
+        int expected_args = enum_type->as.enm.variant_type_counts[variant_idx];
+        int actual_args   = node->as.enum_value.args.count;
+
+        if (actual_args != expected_args) {
+            check_error(checker, node->line, node->column,
+                        "Enum variant '%s::%s' expects %d argument(s), got %d",
+                        node->as.enum_value.enum_name, node->as.enum_value.value_name,
+                        expected_args, actual_args);
+            return type_error;
+        }
+
+        // Type-check each constructor arg
+        for (int i = 0; i < actual_args; i++) {
+            Type* arg_type = check_expression(checker, node->as.enum_value.args.nodes[i]);
+            Type* expected = enum_type->as.enm.variant_types[variant_idx][i];
+            if (arg_type->kind != TYPE_ERROR && !type_assignable(expected, arg_type)) {
+                check_error(checker, node->as.enum_value.args.nodes[i]->line,
+                            node->as.enum_value.args.nodes[i]->column,
+                            "Enum variant '%s::%s' argument %d: expected '%s', got '%s'",
+                            node->as.enum_value.enum_name, node->as.enum_value.value_name, i + 1,
+                            type_name(expected), type_name(arg_type));
+            }
+        }
+
         return enum_type;
     }
 
@@ -2173,18 +2214,32 @@ static void check_decl(Checker* checker, Node* node) {
         Type* enum_type   = type_enum(name);
         int   value_count = node->as.enum_decl.values.count;
 
-        enum_type->as.enm.value_count = value_count;
-        enum_type->as.enm.value_names = xmalloc(value_count * sizeof(char*));
+        enum_type->as.enm.value_count         = value_count;
+        enum_type->as.enm.value_names         = xmalloc(value_count * sizeof(char*));
+        enum_type->as.enm.variant_types       = xmalloc(value_count * sizeof(Type**));
+        enum_type->as.enm.variant_type_counts = xmalloc(value_count * sizeof(int));
 
         checker_define(checker, name, SYM_TYPE, enum_type, 0, node->as.enum_decl.is_public,
                        checker->current_module);
 
-        // Define enum values as constants
+        // Process enum variants
         for (int i = 0; i < value_count; i++) {
             Node* val                        = node->as.enum_decl.values.nodes[i];
-            enum_type->as.enm.value_names[i] = xstrdup(val->as.ident.name);
-            // Note: enum values are NOT registered in scope - they must be accessed via
-            // EnumName::ValueName
+            enum_type->as.enm.value_names[i] = xstrdup(val->as.enum_variant.name);
+
+            int type_count                           = val->as.enum_variant.types.count;
+            enum_type->as.enm.variant_type_counts[i] = type_count;
+
+            if (type_count > 0) {
+                enum_type->as.enm.has_data         = 1;
+                enum_type->as.enm.variant_types[i] = xmalloc(type_count * sizeof(Type*));
+                for (int j = 0; j < type_count; j++) {
+                    Type* resolved = resolve_type(checker, val->as.enum_variant.types.nodes[j]);
+                    enum_type->as.enm.variant_types[i][j] = resolved;
+                }
+            } else {
+                enum_type->as.enm.variant_types[i] = NULL;
+            }
         }
         break;
     }
