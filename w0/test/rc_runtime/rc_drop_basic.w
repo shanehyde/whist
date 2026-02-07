@@ -11,7 +11,7 @@ struct Resource {
 }
 
 impl Drop for Resource {
-    func (Resource) drop(): void {
+    func drop(): void {
         // Drop method called - resource cleaned up
     }
 }

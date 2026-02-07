@@ -8,8 +8,8 @@ struct Box<T> {
     item: T,
 }
 
-impl Drop for Box {
-    func (Box<T>) drop(): void {
+impl Drop for Box<T> {
+    func drop(): void {
         // Generic drop called
     }
 }

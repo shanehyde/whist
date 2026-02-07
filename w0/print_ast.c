@@ -381,6 +381,38 @@ void print_ast(Node* node, int depth) {
         }
         break;
 
+    case NODE_TRAIT_DECL:
+        printf("TraitDecl: %.*s\n", node->as.trait_decl.name_length, node->as.trait_decl.name);
+        for (int i = 0; i < node->as.trait_decl.methods.count; i++) {
+            print_ast(node->as.trait_decl.methods.nodes[i], depth + 1);
+        }
+        break;
+
+    case NODE_IMPL_DECL:
+        printf("ImplDecl: %.*s for %.*s", node->as.impl_decl.trait_name_length,
+               node->as.impl_decl.trait_name, node->as.impl_decl.type_name_length,
+               node->as.impl_decl.type_name);
+        if (node->as.impl_decl.type_args.count > 0) {
+            printf("<");
+            for (int i = 0; i < node->as.impl_decl.type_args.count; i++) {
+                if (i > 0)
+                    printf(", ");
+                // Print type arg inline (simplified)
+                Node* ta = node->as.impl_decl.type_args.nodes[i];
+                if (ta->type == NODE_IDENT) {
+                    printf("%.*s", ta->as.ident.length, ta->as.ident.name);
+                } else {
+                    printf("?");
+                }
+            }
+            printf(">");
+        }
+        printf("\n");
+        for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
+            print_ast(node->as.impl_decl.methods.nodes[i], depth + 1);
+        }
+        break;
+
     default:
         printf("Unknown node type: %d\n", node->type);
         break;

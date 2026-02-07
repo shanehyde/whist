@@ -9,7 +9,7 @@ struct Alpha {
 }
 
 impl Drop for Alpha {
-    func (Alpha) drop(): void {
+    func drop(): void {
         // Alpha cleanup
     }
 }
@@ -19,7 +19,7 @@ struct Beta {
 }
 
 impl Drop for Beta {
-    func (Beta) drop(): void {
+    func drop(): void {
         // Beta cleanup
     }
 }

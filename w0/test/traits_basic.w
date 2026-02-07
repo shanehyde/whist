@@ -9,7 +9,7 @@ struct Dog {
 }
 
 impl Greetable for Dog {
-    func (Dog) greet(): string {
+    func greet(): string {
         return self.name;
     }
 }

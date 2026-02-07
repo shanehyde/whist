@@ -102,10 +102,13 @@ Traits define a set of required method signatures that types can implement. Trai
 ### Impl Declaration
 
 ```bnf
-<impl-decl> ::= 'impl' <identifier> 'for' <identifier> '{' { <func-defn> } '}'
+<impl-decl>   ::= 'impl' <identifier> 'for' <identifier> [ '<' <type-arg-list> '>' ]
+                   '{' { <impl-method> } '}'
+
+<impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <type> ] '{' <block> '}'
 ```
 
-An `impl` block provides concrete method implementations for a trait on a specific type. Each method must have a receiver matching the target type and a signature matching the trait's requirements. All trait methods must be implemented.
+An `impl` block provides concrete method implementations for a trait on a specific type. Methods inside `impl` blocks do not specify a receiver — it is inferred from the `for Type` clause. Use `const func` for immutable-receiver methods. For generic target types, specify the type parameters on the impl header (e.g., `impl Drop for Box<T>`). All trait methods must be implemented.
 
 ### Variable Declaration
 

@@ -8,6 +8,7 @@ A weekly changelog of the Whist compiler, tracking development from initial comm
 
 A big week for memory management and type system maturity. The compiler gained reference-counted heap allocation, a Drop trait for deterministic cleanup, and generic struct support — bringing Whist closer to a language with real resource management.
 
+- **refactor: remove explicit receiver from impl methods** ([#50](https://github.com/shanehyde/whist/pull/50)) — methods inside `impl` blocks no longer specify a redundant receiver; it's inferred from `impl Trait for Type`. Generic type args move to the impl header (`impl Drop for Box<T>`)
 - **refactor: remove stack-based struct initialization** ([#48](https://github.com/shanehyde/whist/pull/48)) — all structs are now consistently heap-allocated via `new`
 - **fix: support Drop trait for generic structs and nested RC field cleanup** ([#47](https://github.com/shanehyde/whist/pull/47)) — generic types now properly propagate Drop and clean up nested RC fields
 - **feat: add Drop trait and nested RC field cleanup** ([#46](https://github.com/shanehyde/whist/pull/46)) — structs can implement a `drop()` method called automatically when refcount hits zero; nested RC fields are cleaned up transitively

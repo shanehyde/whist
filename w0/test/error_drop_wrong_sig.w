@@ -8,7 +8,7 @@ struct Foo {
 }
 
 impl Drop for Foo {
-    func (Foo) drop(): i64 {
+    func drop(): i64 {
         return 0;
     }
 }

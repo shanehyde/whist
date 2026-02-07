@@ -15,7 +15,7 @@ struct Parent {
 }
 
 impl Drop for Child {
-    func (Child) drop(): void {
+    func drop(): void {
         drop_count = drop_count + 1;
     }
 }
