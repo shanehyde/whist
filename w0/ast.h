@@ -378,6 +378,10 @@ struct Node {
             int      name_length;
             NodeList values;        // list of NODE_ENUM_VARIANT nodes
             char*    source_module; // NULL = same module, else external module name
+            // Generic type parameters (NULL if not generic)
+            char** type_params;       // ["T"] or ["T", "E"]
+            char** type_param_bounds; // Trait bounds parallel to type_params (NULL = unbounded)
+            int    type_param_count;
         } enum_decl;
 
         // Enum variant (inside enum declaration)

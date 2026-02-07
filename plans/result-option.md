@@ -2,17 +2,46 @@
 
 Structured error handling with explicit success and failure paths.
 
+## Current State
+
+The underlying generic enum types are implemented and working. `Option<T>` and `Result<T, E>` can be declared and constructed:
+
+```whist
+enum Option<T> { None, Some(T) }
+enum Result<T, E> { Ok(T), Err(E) }
+
+var x: Option<i64> = Option::Some(42);
+var y = Option::Some(3.14);              // type inferred as Option<f32>
+var n: Option<i64> = Option::None;       // explicit type needed for None
+
+var ok: Result<i64, string> = Result::Ok(42);
+var err: Result<i64, string> = Result::Err("bad");
+```
+
+**What works now:**
+- Generic enum declaration with type parameters
+- Monomorphized C output (e.g. `Option_i64`, `Result_i64_string`)
+- Type inference from constructor args
+- `.tag` member access for manual tag checking
+- RC helpers for payloads containing struct pointers
+
+**What's still needed:**
+- Pattern matching (`match`) for destructuring variants (see [pattern-matching.md](pattern-matching.md))
+- Methods on enum types (`is_some()`, `unwrap()`, `map()`, etc.)
+- `?` error propagation operator
+- Standard library definitions (move to `lib/`)
+
 ## Proposed Syntax
 
 ```whist
 func divide(a: i64, b: i64): Result<i64, string> {
     if b == 0 {
-        return Err("division by zero");
+        return Result::Err("division by zero");
     }
-    return Ok(a / b);
+    return Result::Ok(a / b);
 }
 
-var result = divide(10, 2)?;  // propagate errors
+var result = divide(10, 2)?;  // propagate errors (not yet implemented)
 ```
 
 ## Option Type
@@ -21,17 +50,18 @@ Represents a value that may or may not exist:
 
 ```whist
 enum Option<T> {
-    Some(T),
     None,
+    Some(T),
 }
 
 func find(items: Span<i64>, target: i64): Option<i64> {
     foreach i in 0..items.count {
         if items[i] == target {
-            return Some(i);
+            return Option::Some(i);
         }
     }
-    return None;
+    var none: Option<i64> = Option::None;
+    return none;
 }
 ```
 
@@ -156,25 +186,25 @@ var result = try {
 
 ## Implementation Considerations
 
-### Data Layout
+### Data Layout (Implemented)
 
-Option and Result are just enums with data:
+Option and Result are generic enums monomorphized to C tagged unions:
 
 ```c
-// Option<i64>
-typedef struct {
-    enum { Option_None, Option_Some } tag;
-    union {
-        i64 some_value;
-    };
+// Option<i64> — actual generated output
+typedef enum Option_i64_Tag { Option_i64_None, Option_i64_Some } Option_i64_Tag;
+typedef struct Option_i64 {
+    Option_i64_Tag tag;
+    union { struct { int64_t f0; } Some; };
 } Option_i64;
 
-// Result<i64, string>
-typedef struct {
-    enum { Result_Ok, Result_Err } tag;
+// Result<i64, string> — actual generated output
+typedef enum Result_i64_string_Tag { Result_i64_string_Ok, Result_i64_string_Err } Result_i64_string_Tag;
+typedef struct Result_i64_string {
+    Result_i64_string_Tag tag;
     union {
-        i64 ok_value;
-        string err_value;
+        struct { int64_t f0; } Ok;
+        struct { char* f0; } Err;
     };
 } Result_i64_string;
 ```
@@ -320,4 +350,4 @@ var config = load_from_env()
 
 - [Pattern matching](pattern-matching.md) - Required for ergonomic Result/Option handling
 - [Traits](traits.md) - `From` trait for error conversion
-- Enums with data - Result/Option are generic enums
+- [Enums with data](enums-with-data.md) - Result/Option are generic enums (Phase 2 complete)

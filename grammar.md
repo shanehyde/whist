@@ -86,7 +86,7 @@ Generic structs are monomorphized at compile time, generating specialized C code
 ### Enum Declaration
 
 ```bnf
-<enum-decl>    ::= 'enum' <identifier> '{' { <enum-variant> } '}'
+<enum-decl>    ::= 'enum' <identifier> [ '<' <type-param-list> '>' ] '{' { <enum-variant> } '}'
 
 <enum-variant> ::= <identifier> [ '(' <type> { ',' <type> } ')' ] [ ',' ]
 ```

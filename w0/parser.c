@@ -1680,6 +1680,46 @@ static Node* parse_enum_decl(Parser* parser, int is_public) {
     node->as.enum_decl.name_length = name.length;
     nodelist_init(&node->as.enum_decl.values);
 
+    // Parse type parameters if present: enum Option<T> or enum Result<T, E>
+    node->as.enum_decl.type_params       = NULL;
+    node->as.enum_decl.type_param_bounds = NULL;
+    node->as.enum_decl.type_param_count  = 0;
+
+    if (match_token(parser, TOK_LT)) {
+        int capacity                         = 4;
+        node->as.enum_decl.type_params       = xmalloc(capacity * sizeof(char*));
+        node->as.enum_decl.type_param_bounds = xmalloc(capacity * sizeof(char*));
+
+        do {
+            Token param_name = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected type parameter name");
+
+            if (node->as.enum_decl.type_param_count >= capacity) {
+                capacity *= 2;
+                node->as.enum_decl.type_params =
+                    xrealloc(node->as.enum_decl.type_params, capacity * sizeof(char*));
+                node->as.enum_decl.type_param_bounds =
+                    xrealloc(node->as.enum_decl.type_param_bounds, capacity * sizeof(char*));
+            }
+
+            node->as.enum_decl.type_params[node->as.enum_decl.type_param_count] =
+                copy_token_string(&param_name);
+
+            if (match_token(parser, TOK_COLON)) {
+                Token bound_name = parser->current;
+                consume_token(parser, TOK_IDENT, "Expected trait name after ':'");
+                node->as.enum_decl.type_param_bounds[node->as.enum_decl.type_param_count] =
+                    copy_token_string(&bound_name);
+            } else {
+                node->as.enum_decl.type_param_bounds[node->as.enum_decl.type_param_count] = NULL;
+            }
+
+            node->as.enum_decl.type_param_count++;
+        } while (match_token(parser, TOK_COMMA));
+
+        consume_token(parser, TOK_GT, "Expected '>' after type parameters");
+    }
+
     consume_token(parser, TOK_LBRACE, "Expected '{' after enum name");
 
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {

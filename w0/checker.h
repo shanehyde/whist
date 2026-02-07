@@ -109,6 +109,9 @@ struct Checker {
     TraitImpl* trait_impls;
     int        trait_impl_count;
     int        trait_impl_capacity;
+
+    // Hint for generic enum type inference (set by var_decl when declared type is known)
+    Type* enum_target_hint;
 };
 
 void checker_init(Checker* checker);

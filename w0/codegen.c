@@ -34,6 +34,7 @@ static void  emit_struct_init(CodeGen* gen, Node* node);
 static int   tuple_types_equal(Type* a, Type* b);
 static Type* type_from_node(Node* type_node);
 static void  emit_block_contents(CodeGen* gen, Node* block);
+static char* build_mangled_name_from_generic_node(CodeGen* gen, Node* type_node);
 
 static void defer_push(CodeGen* gen, Node* node) {
     VEC_GROW(gen->defer_stack, gen->defer_count, gen->defer_capacity);
@@ -173,12 +174,17 @@ static int enum_has_rc_fields(CodeGen* gen, const char* name) {
 static int is_struct_type(CodeGen* gen, Node* type_node) {
     if (!type_node)
         return 0;
-    // Generic types (Box<i64>) are always struct types
+    // Generic types (Box<i64>) are always struct types, except Span<T> and generic enums
     if (type_node->type == NODE_GENERIC_TYPE) {
-        // Span<T> is a value type, not an RC-managed struct pointer
         if (strcmp(type_node->as.generic_type.base_name, "Span") == 0) {
             return 0;
         }
+        // Check if the mangled name is a registered enum
+        char* mangled = build_mangled_name_from_generic_node(gen, type_node);
+        int   is_enum = is_enum_type_name(gen, mangled);
+        free(mangled);
+        if (is_enum)
+            return 0;
         return 1;
     }
     if (type_node->type != NODE_IDENT)
@@ -194,17 +200,79 @@ static int type_node_has_rc(CodeGen* gen, Node* type_node) {
     if (type_node->type == NODE_GENERIC_TYPE) {
         if (strcmp(type_node->as.generic_type.base_name, "Span") == 0)
             return 0;
-        return 1;
+        // Check if this is a generic enum
+        char* mangled = build_mangled_name_from_generic_node(gen, type_node);
+        if (is_enum_type_name(gen, mangled)) {
+            int has_rc = enum_has_rc_fields(gen, mangled);
+            free(mangled);
+            return has_rc;
+        }
+        free(mangled);
+        return 1; // Generic struct — always RC
     }
     if (type_node->type != NODE_IDENT)
         return 0;
 
     const char* name = type_node->as.ident.name;
+
+    // Handle type parameter substitution
+    if (gen->subst_ctx) {
+        for (int i = 0; i < gen->subst_ctx->count; i++) {
+            if (strcmp(gen->subst_ctx->type_params[i], name) == 0) {
+                Type* resolved = gen->subst_ctx->type_args[i];
+                if (resolved->kind == TYPE_ENUM)
+                    return resolved->as.enm.has_rc_fields;
+                if (resolved->kind == TYPE_STRUCT)
+                    return 1; // Structs are always RC (heap-allocated pointers)
+                return 0;     // Primitives, etc.
+            }
+        }
+    }
+
     if (type_is_builtin_name(name))
         return 0;
     if (is_enum_type_name(gen, name))
         return enum_has_rc_fields(gen, name);
     return 1;
+}
+
+// Resolve a type node to its enum name under substitution, or NULL if not an enum.
+// For NODE_GENERIC_TYPE: builds mangled name and checks. For NODE_IDENT with subst_ctx: resolves.
+// Returns a static/interned name (caller must NOT free).
+static const char* resolve_enum_name(CodeGen* gen, Node* type_node) {
+    if (!type_node)
+        return NULL;
+    if (type_node->type == NODE_GENERIC_TYPE) {
+        char* mangled = build_mangled_name_from_generic_node(gen, type_node);
+        if (is_enum_type_name(gen, mangled)) {
+            // Return the registered name from enum_names (don't free mangled yet)
+            for (int i = 0; i < gen->enum_name_count; i++) {
+                if (strcmp(gen->enum_names[i], mangled) == 0) {
+                    free(mangled);
+                    return gen->enum_names[i];
+                }
+            }
+        }
+        free(mangled);
+        return NULL;
+    }
+    if (type_node->type == NODE_IDENT) {
+        const char* name = type_node->as.ident.name;
+        // Check substitution context
+        if (gen->subst_ctx) {
+            for (int i = 0; i < gen->subst_ctx->count; i++) {
+                if (strcmp(gen->subst_ctx->type_params[i], name) == 0) {
+                    Type* resolved = gen->subst_ctx->type_args[i];
+                    if (resolved->kind == TYPE_ENUM)
+                        return resolved->as.enm.name;
+                    return NULL;
+                }
+            }
+        }
+        if (is_enum_type_name(gen, name))
+            return name;
+    }
+    return NULL;
 }
 
 // Helper to check if a name is a type variable (not a builtin type)
@@ -465,7 +533,14 @@ static void emit_type(CodeGen* gen, Node* type_node) {
                 }
             }
         }
-        emit(gen, "*"); // Struct reference
+        // Only emit * for struct types, not for generic enums
+        {
+            char* mangled = build_mangled_name_from_generic_node(gen, type_node);
+            if (!is_enum_type_name(gen, mangled)) {
+                emit(gen, "*"); // Struct reference
+            }
+            free(mangled);
+        }
         break;
     }
     default:
@@ -2107,6 +2182,79 @@ static Node* find_generic_struct_decl(Node* ast, const char* name) {
     return NULL;
 }
 
+// Find a generic enum declaration by name in the AST
+static Node* find_generic_enum_decl(Node* ast, const char* name) {
+    if (!ast || ast->type != NODE_PROGRAM)
+        return NULL;
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type == NODE_ENUM_DECL && decl->as.enum_decl.type_param_count > 0 &&
+                strcmp(decl->as.enum_decl.name, name) == 0) {
+                return decl;
+            }
+        }
+    }
+    return NULL;
+}
+
+// Build a mangled name from a NODE_GENERIC_TYPE node (with subst_ctx support) into a buffer.
+// Returns a dynamically allocated string that the caller must free.
+static char* build_mangled_name_from_generic_node(CodeGen* gen, Node* type_node) {
+    char buf[256];
+    int  pos = 0;
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", type_node->as.generic_type.base_name);
+    for (int i = 0; i < type_node->as.generic_type.type_args.count; i++) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "_");
+        Node* arg = type_node->as.generic_type.type_args.nodes[i];
+        if (arg->type == NODE_IDENT) {
+            const char* arg_name    = arg->as.ident.name;
+            int         substituted = 0;
+            if (gen->subst_ctx) {
+                for (int s = 0; s < gen->subst_ctx->count; s++) {
+                    if (strcmp(gen->subst_ctx->type_params[s], arg_name) == 0) {
+                        Type* subst_type = gen->subst_ctx->type_args[s];
+                        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", type_name(subst_type));
+                        substituted = 1;
+                        break;
+                    }
+                }
+            }
+            if (!substituted) {
+                pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", arg_name);
+            }
+        } else if (arg->type == NODE_GENERIC_TYPE) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", arg->as.generic_type.base_name);
+            for (int j = 0; j < arg->as.generic_type.type_args.count; j++) {
+                pos += snprintf(buf + pos, sizeof(buf) - pos, "_");
+                Node* nested = arg->as.generic_type.type_args.nodes[j];
+                if (nested->type == NODE_IDENT) {
+                    const char* nested_name = nested->as.ident.name;
+                    int         subst       = 0;
+                    if (gen->subst_ctx) {
+                        for (int s = 0; s < gen->subst_ctx->count; s++) {
+                            if (strcmp(gen->subst_ctx->type_params[s], nested_name) == 0) {
+                                Type* subst_type = gen->subst_ctx->type_args[s];
+                                pos += snprintf(buf + pos, sizeof(buf) - pos, "%s",
+                                                type_name(subst_type));
+                                subst = 1;
+                                break;
+                            }
+                        }
+                    }
+                    if (!subst) {
+                        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", nested_name);
+                    }
+                }
+            }
+        }
+    }
+    return xstrdup(buf);
+}
+
 // Helper to get the type parameter name for mangling (currently unused)
 // static const char* type_arg_mangle_name(Type* type) {
 //     ... preserved for potential future use
@@ -2341,7 +2489,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     if (gen->tuple_type_count > 0)
         emit(gen, "\n");
 
-    // Register enum names for type emission
+    // Register enum names for type emission (skip generic templates)
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
@@ -2350,9 +2498,20 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             Node* decl = mod->as.module.decls.nodes[i];
             if (decl->type != NODE_ENUM_DECL)
                 continue;
+            if (decl->as.enum_decl.type_param_count > 0)
+                continue; // Skip generic enum templates
             VEC_GROW(gen->enum_names, gen->enum_name_count, gen->enum_name_capacity);
             gen->enum_names[gen->enum_name_count++] = xstrdup(decl->as.enum_decl.name);
         }
+    }
+
+    // Register generic enum instance names
+    for (int i = 0; i < gen->generic_instance_count; i++) {
+        GenericInstance* inst = &gen->generic_instances[i];
+        if (inst->type->kind != TYPE_ENUM)
+            continue;
+        VEC_GROW(gen->enum_names, gen->enum_name_count, gen->enum_name_capacity);
+        gen->enum_names[gen->enum_name_count++] = xstrdup(inst->mangled_name);
     }
 
     // Compute enum RC payload flags (fixed-point to support enum-to-enum payloads)
@@ -2369,6 +2528,8 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                     Node* decl = mod->as.module.decls.nodes[i];
                     if (decl->type != NODE_ENUM_DECL)
                         continue;
+                    if (decl->as.enum_decl.type_param_count > 0)
+                        continue; // Skip generic templates
                     int idx = enum_index(gen, decl->as.enum_decl.name);
                     if (idx < 0 || gen->enum_has_rc_fields[idx])
                         continue;
@@ -2385,6 +2546,16 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                             break;
                     }
                 }
+            }
+        }
+        // Set RC flags for generic enum instances from checker Type data
+        for (int i = 0; i < gen->generic_instance_count; i++) {
+            GenericInstance* inst = &gen->generic_instances[i];
+            if (inst->type->kind != TYPE_ENUM)
+                continue;
+            int idx = enum_index(gen, inst->mangled_name);
+            if (idx >= 0 && inst->type->as.enm.has_rc_fields) {
+                gen->enum_has_rc_fields[idx] = 1;
             }
         }
     }
@@ -2407,8 +2578,10 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             }
         }
     }
-    // Forward declarations for instantiated generic structs
+    // Forward declarations for instantiated generic structs (skip enum instances)
     for (int i = 0; i < gen->generic_instance_count; i++) {
+        if (gen->generic_instances[i].type->kind == TYPE_ENUM)
+            continue;
         emit(gen, "typedef struct %s %s;\n", gen->generic_instances[i].mangled_name,
              gen->generic_instances[i].mangled_name);
     }
@@ -2423,6 +2596,8 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             Node* decl = mod->as.module.decls.nodes[i];
             if (decl->type != NODE_ENUM_DECL)
                 continue;
+            if (decl->as.enum_decl.type_param_count > 0)
+                continue; // Skip generic enum templates
 
             const char* ename       = decl->as.enum_decl.name;
             int         value_count = decl->as.enum_decl.values.count;
@@ -2501,6 +2676,101 @@ void codegen_emit(CodeGen* gen, Node* ast) {
         }
     }
 
+    // Emit generic enum instance typedefs
+    for (int gi = 0; gi < gen->generic_instance_count; gi++) {
+        GenericInstance* info = &gen->generic_instances[gi];
+        if (info->type->kind != TYPE_ENUM)
+            continue;
+        Node* template = find_generic_enum_decl(ast, info->base_name);
+        if (!template)
+            continue;
+
+        const char* ename       = info->mangled_name;
+        int         value_count = template->as.enum_decl.values.count;
+
+        // Build substitution context
+        int              param_count = template->as.enum_decl.type_param_count;
+        TypeSubstContext subst;
+        subst.type_params = template->as.enum_decl.type_params;
+        subst.type_args   = info->type_args;
+        subst.count       = param_count;
+
+        TypeSubstContext* old_subst = gen->subst_ctx;
+        gen->subst_ctx              = &subst;
+
+        // Determine if this is a data enum
+        int has_data = 0;
+        for (int v = 0; v < value_count; v++) {
+            Node* var = template->as.enum_decl.values.nodes[v];
+            if (var->as.enum_variant.types.count > 0) {
+                has_data = 1;
+                break;
+            }
+        }
+
+        if (!has_data) {
+            // Simple enum
+            emit(gen, "typedef enum %s {\n", ename);
+            gen->indent++;
+            for (int v = 0; v < value_count; v++) {
+                Node* var = template->as.enum_decl.values.nodes[v];
+                emit_indent(gen);
+                emit(gen, "%s_%.*s", ename, var->as.enum_variant.name_length,
+                     var->as.enum_variant.name);
+                if (v < value_count - 1)
+                    emit(gen, ",");
+                emit(gen, "\n");
+            }
+            gen->indent--;
+            emit(gen, "} %s;\n\n", ename);
+        } else {
+            // Data enum: tag enum + tagged union struct
+            emit(gen, "typedef enum %s_Tag {\n", ename);
+            gen->indent++;
+            for (int v = 0; v < value_count; v++) {
+                Node* var = template->as.enum_decl.values.nodes[v];
+                emit_indent(gen);
+                emit(gen, "%s_%.*s", ename, var->as.enum_variant.name_length,
+                     var->as.enum_variant.name);
+                if (v < value_count - 1)
+                    emit(gen, ",");
+                emit(gen, "\n");
+            }
+            gen->indent--;
+            emit(gen, "} %s_Tag;\n\n", ename);
+
+            emit(gen, "typedef struct %s {\n", ename);
+            gen->indent++;
+            emit_indent(gen);
+            emit(gen, "%s_Tag tag;\n", ename);
+            emit_indent(gen);
+            emit(gen, "union {\n");
+            gen->indent++;
+            for (int v = 0; v < value_count; v++) {
+                Node* var        = template->as.enum_decl.values.nodes[v];
+                int   type_count = var->as.enum_variant.types.count;
+                if (type_count == 0)
+                    continue;
+                emit_indent(gen);
+                emit(gen, "struct {");
+                for (int t = 0; t < type_count; t++) {
+                    emit(gen, " ");
+                    emit_type(gen, var->as.enum_variant.types.nodes[t]);
+                    emit(gen, " f%d;", t);
+                }
+                emit(gen, " } %.*s;\n", var->as.enum_variant.name_length,
+                     var->as.enum_variant.name);
+            }
+            gen->indent--;
+            emit_indent(gen);
+            emit(gen, "};\n");
+            gen->indent--;
+            emit(gen, "} %s;\n\n", ename);
+        }
+
+        gen->subst_ctx = old_subst;
+    }
+
     // Emit enum RC helper declarations and definitions
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
@@ -2510,12 +2780,26 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             Node* decl = mod->as.module.decls.nodes[i];
             if (decl->type != NODE_ENUM_DECL)
                 continue;
+            if (decl->as.enum_decl.type_param_count > 0)
+                continue; // Skip generic templates
             const char* ename = decl->as.enum_decl.name;
             if (!enum_has_rc_fields(gen, ename))
                 continue;
             emit(gen, "static inline void __rc_inc_%s(%s v);\n", ename, ename);
             emit(gen, "static inline void __rc_dec_%s(%s v);\n", ename, ename);
         }
+    }
+    // Forward declarations for generic enum RC helpers
+    for (int gi = 0; gi < gen->generic_instance_count; gi++) {
+        GenericInstance* info = &gen->generic_instances[gi];
+        if (info->type->kind != TYPE_ENUM)
+            continue;
+        if (!enum_has_rc_fields(gen, info->mangled_name))
+            continue;
+        emit(gen, "static inline void __rc_inc_%s(%s v);\n", info->mangled_name,
+             info->mangled_name);
+        emit(gen, "static inline void __rc_dec_%s(%s v);\n", info->mangled_name,
+             info->mangled_name);
     }
     if (gen->enum_name_count > 0)
         emit(gen, "\n");
@@ -2528,6 +2812,8 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             Node* decl = mod->as.module.decls.nodes[i];
             if (decl->type != NODE_ENUM_DECL)
                 continue;
+            if (decl->as.enum_decl.type_param_count > 0)
+                continue; // Skip generic templates
             const char* ename = decl->as.enum_decl.name;
             if (!enum_has_rc_fields(gen, ename))
                 continue;
@@ -2584,6 +2870,88 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             emit(gen, "    }\n");
             emit(gen, "}\n\n");
         }
+    }
+
+    // Emit RC helpers for generic enum instances
+    for (int gi = 0; gi < gen->generic_instance_count; gi++) {
+        GenericInstance* info = &gen->generic_instances[gi];
+        if (info->type->kind != TYPE_ENUM)
+            continue;
+        if (!enum_has_rc_fields(gen, info->mangled_name))
+            continue;
+        Node* tmpl = find_generic_enum_decl(ast, info->base_name);
+        if (!tmpl)
+            continue;
+
+        const char* ename = info->mangled_name;
+
+        // Set up substitution context
+        int              param_count = tmpl->as.enum_decl.type_param_count;
+        TypeSubstContext subst;
+        subst.type_params = tmpl->as.enum_decl.type_params;
+        subst.type_args   = info->type_args;
+        subst.count       = param_count;
+
+        TypeSubstContext* old_subst = gen->subst_ctx;
+        gen->subst_ctx              = &subst;
+
+        // __rc_inc
+        emit(gen, "static inline void __rc_inc_%s(%s v) {\n", ename, ename);
+        emit(gen, "    switch (v.tag) {\n");
+        for (int v = 0; v < tmpl->as.enum_decl.values.count; v++) {
+            Node* var = tmpl->as.enum_decl.values.nodes[v];
+            if (var->as.enum_variant.types.count == 0)
+                continue;
+            emit(gen, "    case %s_%.*s:\n", ename, var->as.enum_variant.name_length,
+                 var->as.enum_variant.name);
+            for (int t = 0; t < var->as.enum_variant.types.count; t++) {
+                Node* tnode = var->as.enum_variant.types.nodes[t];
+                if (!type_node_has_rc(gen, tnode))
+                    continue;
+                const char* enum_nm = resolve_enum_name(gen, tnode);
+                if (enum_nm) {
+                    emit(gen, "        __rc_inc_%s(v.%.*s.f%d);\n", enum_nm,
+                         var->as.enum_variant.name_length, var->as.enum_variant.name, t);
+                } else {
+                    emit(gen, "        __rc_inc(v.%.*s.f%d);\n", var->as.enum_variant.name_length,
+                         var->as.enum_variant.name, t);
+                }
+            }
+            emit(gen, "        break;\n");
+        }
+        emit(gen, "    default: break;\n");
+        emit(gen, "    }\n");
+        emit(gen, "}\n\n");
+
+        // __rc_dec
+        emit(gen, "static inline void __rc_dec_%s(%s v) {\n", ename, ename);
+        emit(gen, "    switch (v.tag) {\n");
+        for (int v = 0; v < tmpl->as.enum_decl.values.count; v++) {
+            Node* var = tmpl->as.enum_decl.values.nodes[v];
+            if (var->as.enum_variant.types.count == 0)
+                continue;
+            emit(gen, "    case %s_%.*s:\n", ename, var->as.enum_variant.name_length,
+                 var->as.enum_variant.name);
+            for (int t = 0; t < var->as.enum_variant.types.count; t++) {
+                Node* tnode = var->as.enum_variant.types.nodes[t];
+                if (!type_node_has_rc(gen, tnode))
+                    continue;
+                const char* enum_nm = resolve_enum_name(gen, tnode);
+                if (enum_nm) {
+                    emit(gen, "        __rc_dec_%s(v.%.*s.f%d);\n", enum_nm,
+                         var->as.enum_variant.name_length, var->as.enum_variant.name, t);
+                } else {
+                    emit(gen, "        __rc_dec(v.%.*s.f%d);\n", var->as.enum_variant.name_length,
+                         var->as.enum_variant.name, t);
+                }
+            }
+            emit(gen, "        break;\n");
+        }
+        emit(gen, "    default: break;\n");
+        emit(gen, "    }\n");
+        emit(gen, "}\n\n");
+
+        gen->subst_ctx = old_subst;
     }
 
     // Emit body typedefs for non-generic structs (must come before __rc_dec_TypeName)
