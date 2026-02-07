@@ -27,6 +27,7 @@ typedef struct {
     // RC variable tracking
     struct {
         char* name;
+        char* dec_func; // "__rc_dec" or "__rc_dec_TypeName"
         int   scope_depth;
     }*  rc_vars;
     int rc_var_count;
@@ -45,10 +46,14 @@ typedef struct {
     // Span instances from checker (not owned, do not free)
     SpanInstance* span_instances;
     int           span_instance_count;
+    // Trait implementations from checker (not owned, do not free)
+    TraitImpl* trait_impls;
+    int        trait_impl_count;
 } CodeGen;
 
 void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,
-                  SpanInstance* span_instances, int span_count, int rc_debug);
+                  SpanInstance* span_instances, int span_count, TraitImpl* trait_impls,
+                  int trait_impl_count, int rc_debug);
 void codegen_emit(CodeGen* gen, Node* ast);
 
 #endif

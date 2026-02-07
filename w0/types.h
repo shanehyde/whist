@@ -68,6 +68,8 @@ struct Type {
             Type** method_types;    // Function types for methods
             int*   method_is_const; // Whether each method is const
             int    method_count;
+            int    has_drop;      // 1 if type implements Drop trait
+            int    has_rc_fields; // 1 if any field is TYPE_STRUCT (RC pointer)
         } struc;
 
         // Enum

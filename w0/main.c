@@ -114,7 +114,8 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
 
     CodeGen gen;
     codegen_init(&gen, c_file, checker.generic_instances, checker.generic_instance_count,
-                 checker.span_instances, checker.span_instance_count, rc_debug);
+                 checker.span_instances, checker.span_instance_count, checker.trait_impls,
+                 checker.trait_impl_count, rc_debug);
     codegen_emit(&gen, ast);
     fclose(c_file);
 
@@ -347,7 +348,8 @@ int main(int argc, char** argv) {
 
                 CodeGen gen;
                 codegen_init(&gen, out, checker.generic_instances, checker.generic_instance_count,
-                             checker.span_instances, checker.span_instance_count, rc_debug);
+                             checker.span_instances, checker.span_instance_count,
+                             checker.trait_impls, checker.trait_impl_count, rc_debug);
                 codegen_emit(&gen, ast);
                 checker_free(&checker); // Free types after codegen
 
