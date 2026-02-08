@@ -1455,7 +1455,15 @@ void codegen_emit(CodeGen* gen, Node* ast) {
             emit(gen, "        }\n");
         }
         emit(gen, "        free(ptr->data);\n");
+        if (gen->rc_debug) {
+            emit(gen, "        fprintf(stderr, \"RC_FREE: %%p\\n\", (void*)ptr);\n");
+        }
         emit(gen, "        free(h);\n");
+        if (gen->rc_debug) {
+            emit(gen, "    } else {\n");
+            emit(gen, "        fprintf(stderr, \"RC_DEC: %%p (rc=%%zu)\\n\", (void*)ptr, "
+                      "h->refcount);\n");
+        }
         emit(gen, "    }\n");
         emit(gen, "}\n\n");
     }
@@ -1675,6 +1683,9 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                 } else {
                     emit(gen, "        __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
                 }
+            } else if (ft && ft->kind == TYPE_VEC) {
+                emit(gen, "        __rc_dec_Vec_%s(ptr->%s);\n",
+                     type_name(ft->as.vec.elem), t->as.struc.field_names[f]);
             }
         }
         if (gen->rc_debug) {

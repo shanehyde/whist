@@ -924,10 +924,10 @@ static Type* resolve_type(Checker* checker, Node* type_node) {
             struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
         }
 
-        // Check if any field is a struct type (RC pointer)
+        // Check if any field is an RC-managed type (struct, Vec, or enum with RC fields)
         for (int i = 0; i < field_count; i++) {
             Type* ftype = struct_type->as.struc.field_types[i];
-            if (ftype && (ftype->kind == TYPE_STRUCT ||
+            if (ftype && (ftype->kind == TYPE_STRUCT || ftype->kind == TYPE_VEC ||
                           (ftype->kind == TYPE_ENUM && ftype->as.enm.has_rc_fields))) {
                 struct_type->as.struc.has_rc_fields = 1;
                 break;
@@ -2624,10 +2624,10 @@ static void check_decl(Checker* checker, Node* node) {
             struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
         }
 
-        // Check if any field is a struct type (RC pointer)
+        // Check if any field is an RC-managed type (struct, Vec, or enum with RC fields)
         for (int i = 0; i < field_count; i++) {
             Type* ftype = struct_type->as.struc.field_types[i];
-            if (ftype && (ftype->kind == TYPE_STRUCT ||
+            if (ftype && (ftype->kind == TYPE_STRUCT || ftype->kind == TYPE_VEC ||
                           (ftype->kind == TYPE_ENUM && ftype->as.enm.has_rc_fields))) {
                 struct_type->as.struc.has_rc_fields = 1;
                 break;

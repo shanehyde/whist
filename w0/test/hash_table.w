@@ -8,6 +8,10 @@ trait Drop {
     func drop(): void;
 }
 
+trait Hashable {
+    const func hash(): u32;
+}
+
 struct HashEntry<K,V> {
     next: HashEntry<K,V>,
     value: V,
@@ -16,14 +20,9 @@ struct HashEntry<K,V> {
 impl Drop for HashEntry<K,V> {
     func drop(): void {
         std.print("Dropping HashEntry\n");
-        // self.next = null;
+        self.next = null;
     }
 }
-
-// struct HashTable<V>  {
-//     buckets: Vec<HashEntry<V>> ,
-//     size: u32,
-// }
 
 struct HashTable<K, V>  {
     buckets: Vec<HashEntry<K, V>> ,
@@ -33,8 +32,8 @@ struct HashTable<K, V>  {
 func (HashTable<K,V>) init(): void {
     // self.buckets = new Vec<HashEntry<V>>{};
     self.buckets.clear();
-    self.size = 0;
-    foreach (const i in 0..16) {
+    self.size = 16;
+    foreach (const i in 0..1) {
         self.buckets.push(new HashEntry<K, V>{next: null, value: 0});
     }
     // Implementation of insert method
