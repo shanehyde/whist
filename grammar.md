@@ -212,6 +212,8 @@ Create vecs: `var v = new Vec<i64>{};` or `var v = new Vec<i64>{1, 2, 3};`
 
 <foreach-stmt> ::= 'foreach' '(' 'const' <identifier> 'in' <expression> '..' <expression> [ 'by' <expression> ] ')' '{' <block> '}'
 
+The range `start..end` is **end-exclusive**: iterates from `start` up to but not including `end`. For example, `0..5` iterates `0, 1, 2, 3, 4`.
+
 <return-stmt> ::= 'return' [ <expression> ] ';'
 
 <break-stmt> ::= 'break' ';'
