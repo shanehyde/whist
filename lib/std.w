@@ -29,6 +29,20 @@ func min_i64(a: i64, b: i64): i64 {
     return b;
 }
 
+// String/integer conversion
+private extern std_str {
+    func std__parse_i64(s: string): i64;
+    func std__to_string(n: i64): string;
+}
+
+func parse_i64(s: string): i64 {
+    return std__parse_i64(s);
+}
+
+func to_string(n: i64): string {
+    return std__to_string(n);
+}
+
 // Private internal function - should not be visible outside std
 private func _internal_std(): i64 {
     return 42;

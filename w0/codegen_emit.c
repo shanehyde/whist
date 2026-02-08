@@ -1059,6 +1059,19 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
     Node* func = node->as.call.func;
     // Check if this is a module-qualified call (e.g., std.print())
     if (func->type == NODE_MEMBER && func->as.member.module_name != NULL) {
+        // Built-in: std.format -> __std_format
+        if (strcmp(func->as.member.module_name, "std") == 0 &&
+            strncmp(func->as.member.name, "format", func->as.member.length) == 0 &&
+            func->as.member.length == 6) {
+            emit(gen, "__std_format(");
+            for (int i = 0; i < node->as.call.args.count; i++) {
+                if (i > 0)
+                    emit(gen, ", ");
+                emit_expr(gen, node->as.call.args.nodes[i]);
+            }
+            emit(gen, ")");
+            return;
+        }
         // Module-qualified call: emit module_func(args...)
         emit(gen, "%s_%.*s(", func->as.member.module_name, func->as.member.length,
              func->as.member.name);
@@ -1180,6 +1193,28 @@ static void emit_index_expr(CodeGen* gen, Node* node) {
 
 // Emit a slice expression as a Span compound literal with data pointer and count
 static void emit_slice_expr(CodeGen* gen, Node* node) {
+    // String slicing: produces a new string via __String_substr
+    if (node->as.slice.is_string) {
+        emit(gen, "__String_substr(");
+        emit_expr(gen, node->as.slice.object);
+        emit(gen, ", ");
+        if (node->as.slice.start) {
+            emit_expr(gen, node->as.slice.start);
+        } else {
+            emit(gen, "0");
+        }
+        emit(gen, ", ");
+        if (node->as.slice.end) {
+            emit_expr(gen, node->as.slice.end);
+        } else {
+            emit(gen, "(int64_t)strlen(");
+            emit_expr(gen, node->as.slice.object);
+            emit(gen, ")");
+        }
+        emit(gen, ")");
+        return;
+    }
+
     // Slice produces a span: (__Span_T){ .data = ..., .count = ... }
     Type* span_type = node->as.slice.resolved_type;
     Type* elem_type = span_type->as.span.elem;
@@ -1404,11 +1439,34 @@ static void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_BINARY:
-        emit(gen, "(");
-        emit_expr(gen, node->as.binary.left);
-        emit(gen, " %s ", binary_op_str(node->as.binary.op));
-        emit_expr(gen, node->as.binary.right);
-        emit(gen, ")");
+        if (node->as.binary.is_string_op) {
+            TokenType op = node->as.binary.op;
+            if (op == TOK_EQ_EQ) {
+                emit(gen, "(strcmp(");
+                emit_expr(gen, node->as.binary.left);
+                emit(gen, ", ");
+                emit_expr(gen, node->as.binary.right);
+                emit(gen, ") == 0)");
+            } else if (op == TOK_BANG_EQ) {
+                emit(gen, "(strcmp(");
+                emit_expr(gen, node->as.binary.left);
+                emit(gen, ", ");
+                emit_expr(gen, node->as.binary.right);
+                emit(gen, ") != 0)");
+            } else if (op == TOK_PLUS) {
+                emit(gen, "__String_concat(");
+                emit_expr(gen, node->as.binary.left);
+                emit(gen, ", ");
+                emit_expr(gen, node->as.binary.right);
+                emit(gen, ")");
+            }
+        } else {
+            emit(gen, "(");
+            emit_expr(gen, node->as.binary.left);
+            emit(gen, " %s ", binary_op_str(node->as.binary.op));
+            emit_expr(gen, node->as.binary.right);
+            emit(gen, ")");
+        }
         break;
 
     case NODE_UNARY:
@@ -1726,14 +1784,14 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
 
 // Emit an RC-managed Vec declaration: var v = new Vec<T>{...}
 static void emit_var_decl_rc_new_vec(CodeGen* gen, Node* node) {
-    Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
+    Type*       rtype      = node->as.var_decl.init->as.new_expr.resolved_type;
     const char* elem_tname = type_name(rtype->as.vec.elem);
     emit_indent(gen);
     emit(gen, "__Vec_%s* %s = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s));\n", elem_tname,
          node->as.var_decl.name, elem_tname, elem_tname);
     emit_indent(gen);
-    emit(gen, "%s->data = NULL; %s->count = 0; %s->capacity = 0;\n",
-         node->as.var_decl.name, node->as.var_decl.name, node->as.var_decl.name);
+    emit(gen, "%s->data = NULL; %s->count = 0; %s->capacity = 0;\n", node->as.var_decl.name,
+         node->as.var_decl.name, node->as.var_decl.name);
     Node* init = node->as.var_decl.init->as.new_expr.init;
     for (int i = 0; i < init->as.struct_init.fields.count; i++) {
         Node* field = init->as.struct_init.fields.nodes[i];
@@ -1751,11 +1809,11 @@ static void emit_var_decl_rc_new_vec(CodeGen* gen, Node* node) {
 
 // Emit an RC-managed struct declaration: var p = new Point { x: 1, y: 2 }
 static void emit_var_decl_rc_new_struct(CodeGen* gen, Node* node) {
-    Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
+    Type*       rtype = node->as.var_decl.init->as.new_expr.resolved_type;
     const char* tname = rtype->as.struc.name;
     emit_indent(gen);
-    emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s));\n", tname, node->as.var_decl.name,
-         tname, tname);
+    emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s));\n", tname, node->as.var_decl.name, tname,
+         tname);
     emit_indent(gen);
     emit(gen, "*%s = (%s)", node->as.var_decl.name, tname);
     emit_struct_init(gen, node->as.var_decl.init->as.new_expr.init);
@@ -1800,10 +1858,10 @@ static void emit_var_decl_rc_copy(CodeGen* gen, Node* node) {
     emit_expr(gen, node->as.var_decl.init);
     emit(gen, ";\n");
     // Function calls transfer ownership (rc already 1), no inc needed
-    Type* rc_type  = node->as.var_decl.resolved_type;
-    int   skip_inc = node->as.var_decl.init->type == NODE_CALL ||
-                   (rc_type && rc_type->kind == TYPE_ENUM &&
-                    node->as.var_decl.init->type == NODE_ENUM_VALUE);
+    Type* rc_type = node->as.var_decl.resolved_type;
+    int   skip_inc =
+        node->as.var_decl.init->type == NODE_CALL ||
+        (rc_type && rc_type->kind == TYPE_ENUM && node->as.var_decl.init->type == NODE_ENUM_VALUE);
     if (!skip_inc && rc_type) {
         const char* inc_fn = get_inc_func_for_type(rc_type);
         emit_indent(gen);
@@ -1867,7 +1925,7 @@ static void emit_var_decl_inferred_type(CodeGen* gen, Node* node) {
             }
         }
         Type* tuple = type_tuple(elems, count);
-        int idx = -1;
+        int   idx   = -1;
         for (int i = 0; i < gen->tuple_type_count; i++) {
             if (tuple_types_equal(gen->tuple_types[i], tuple)) {
                 idx = i;

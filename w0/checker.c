@@ -574,6 +574,12 @@ static void check_var_decl_stmt(Checker* checker, Node* node) {
     Symbol* sym = checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const,
                                  node->as.var_decl.is_public, checker->current_module);
 
+    // Store resolved type for codegen when type is inferred from non-literal expressions
+    if (!node->as.var_decl.type && init_type && init_type->kind == TYPE_STRING &&
+        node->as.var_decl.init->type != NODE_STRING_LIT) {
+        node->as.var_decl.resolved_type = init_type;
+    }
+
     // Propagate RC tracking
     if (sym && node->as.var_decl.init) {
         if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
