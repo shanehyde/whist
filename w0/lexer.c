@@ -124,12 +124,13 @@ static const Keyword keywords[] = {
     {"foreach", 7, TOK_FOREACH}, {"func", 4, TOK_FUNC},
     {"if", 2, TOK_IF},           {"impl", 4, TOK_IMPL},
     {"import", 6, TOK_IMPORT},   {"in", 2, TOK_IN},
-    {"new", 3, TOK_NEW},         {"null", 4, TOK_NULL},
-    {"public", 6, TOK_PUBLIC},   {"private", 7, TOK_PRIVATE},
-    {"return", 6, TOK_RETURN},   {"self", 4, TOK_SELF},
-    {"struct", 6, TOK_STRUCT},   {"trait", 5, TOK_TRAIT},
-    {"true", 4, TOK_TRUE},       {"type", 4, TOK_TYPE},
-    {"var", 3, TOK_VAR},         {"while", 5, TOK_WHILE},
+    {"match", 5, TOK_MATCH},     {"new", 3, TOK_NEW},
+    {"null", 4, TOK_NULL},       {"public", 6, TOK_PUBLIC},
+    {"private", 7, TOK_PRIVATE}, {"return", 6, TOK_RETURN},
+    {"self", 4, TOK_SELF},       {"struct", 6, TOK_STRUCT},
+    {"trait", 5, TOK_TRAIT},     {"true", 4, TOK_TRUE},
+    {"type", 4, TOK_TYPE},       {"var", 3, TOK_VAR},
+    {"while", 5, TOK_WHILE},
 };
 
 static const size_t keyword_count = sizeof(keywords) / sizeof(keywords[0]);
@@ -348,6 +349,8 @@ Token lexer_next(Lexer* lexer) {
     case '!':
         return make_token(lexer, match(lexer, '=') ? TOK_BANG_EQ : TOK_BANG);
     case '=':
+        if (match(lexer, '>'))
+            return make_token(lexer, TOK_FAT_ARROW);
         return make_token(lexer, match(lexer, '=') ? TOK_EQ_EQ : TOK_EQ);
     case '<':
         if (match(lexer, '<'))
@@ -402,6 +405,7 @@ static const char* token_names[] = {
     [TOK_NEW]         = "NEW",
     [TOK_SELF]        = "SELF",
     [TOK_DEFER]       = "DEFER",
+    [TOK_MATCH]       = "MATCH",
     [TOK_PUBLIC]      = "PUBLIC",
     [TOK_PRIVATE]     = "PRIVATE",
     [TOK_EXTERN]      = "EXTERN",
@@ -438,6 +442,7 @@ static const char* token_names[] = {
     [TOK_LT_LT_EQ]    = "LT_LT_EQ",
     [TOK_GT_GT_EQ]    = "GT_GT_EQ",
     [TOK_ARROW]       = "ARROW",
+    [TOK_FAT_ARROW]   = "FAT_ARROW",
     [TOK_LPAREN]      = "LPAREN",
     [TOK_RPAREN]      = "RPAREN",
     [TOK_LBRACE]      = "LBRACE",

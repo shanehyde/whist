@@ -29,6 +29,9 @@ static int check_destruct_pattern_against_type(Checker* checker, DestructPattern
 static void define_destruct_pattern_vars(Checker* checker, DestructPattern* pattern, Type* type,
                                          int is_const, int is_public);
 
+// Forward declaration for match checking
+static void check_match_stmt(Checker* checker, Node* node);
+
 // Forward declarations for check_decl helpers
 static void check_extern_module_decl(Checker* checker, Node* node);
 static void check_func_decl(Checker* checker, Node* node);
@@ -709,6 +712,81 @@ static void check_return_stmt(Checker* checker, Node* node) {
 }
 
 // =============================================================================
+// Match statement checking
+// =============================================================================
+
+static void check_match_stmt(Checker* checker, Node* node) {
+    Type* expr_type = check_expression(checker, node->as.match_stmt.expr);
+
+    if (expr_type->kind != TYPE_ENUM && expr_type->kind != TYPE_ERROR) {
+        check_error(checker, node->line, node->column,
+                    "Match expression must be an enum type, got '%s'", type_name(expr_type));
+        return;
+    }
+
+    if (expr_type->kind == TYPE_ERROR)
+        return;
+
+    node->as.match_stmt.resolved_type = expr_type;
+
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        Node* arm = node->as.match_stmt.arms.nodes[a];
+
+        if (arm->as.match_arm.is_wildcard) {
+            // Wildcard: just check body
+            check_statement(checker, arm->as.match_arm.body);
+            continue;
+        }
+
+        // Look up variant in enum type
+        const char* variant_name = arm->as.match_arm.variant_name;
+        int         variant_idx  = -1;
+
+        for (int i = 0; i < expr_type->as.enm.value_count; i++) {
+            if (strcmp(expr_type->as.enm.value_names[i], variant_name) == 0) {
+                variant_idx = i;
+                break;
+            }
+        }
+
+        if (variant_idx < 0) {
+            check_error(checker, arm->line, arm->column, "'%s' is not a variant of enum '%s'",
+                        variant_name, expr_type->as.enm.name);
+            continue;
+        }
+
+        // If qualified name given, verify it matches the enum type
+        if (arm->as.match_arm.enum_name) {
+            if (strcmp(arm->as.match_arm.enum_name, expr_type->as.enm.name) != 0) {
+                check_error(checker, arm->line, arm->column,
+                            "Enum name '%s' does not match match expression type '%s'",
+                            arm->as.match_arm.enum_name, expr_type->as.enm.name);
+                continue;
+            }
+        }
+
+        // Check binding count
+        int expected_bindings = expr_type->as.enm.variant_type_counts[variant_idx];
+        if (arm->as.match_arm.binding_count != expected_bindings) {
+            check_error(checker, arm->line, arm->column,
+                        "Variant '%s' expects %d binding(s), got %d", variant_name,
+                        expected_bindings, arm->as.match_arm.binding_count);
+            continue;
+        }
+
+        // Push scope, define bindings, check body, pop scope
+        checker_push_scope(checker);
+        for (int j = 0; j < arm->as.match_arm.binding_count; j++) {
+            Type* binding_type = expr_type->as.enm.variant_types[variant_idx][j];
+            checker_define(checker, arm->as.match_arm.bindings[j], SYM_VAR, binding_type, 0, 0,
+                           NULL);
+        }
+        check_statement(checker, arm->as.match_arm.body);
+        checker_pop_scope(checker);
+    }
+}
+
+// =============================================================================
 // Statement checking
 // =============================================================================
 
@@ -790,6 +868,10 @@ void check_statement(Checker* checker, Node* node) {
             return;
         }
         check_statement(checker, node->as.defer_stmt.stmt);
+        break;
+
+    case NODE_MATCH:
+        check_match_stmt(checker, node);
         break;
 
     default:
