@@ -2316,28 +2316,59 @@ void emit_stmt(CodeGen* gen, Node* node) {
         break;
 
     case NODE_FOREACH:
-        emit_indent(gen);
-        // Generate: for (<type> var = start; var < end; var += step) {
-        emit(gen, "for (");
-        emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
-                                    ? node->as.foreach_stmt.resolved_type
-                                    : type_int64);
-        emit(gen, " %s = ", node->as.foreach_stmt.var_name);
-        emit_expr(gen, node->as.foreach_stmt.start);
-        emit(gen, "; %s < ", node->as.foreach_stmt.var_name);
-        emit_expr(gen, node->as.foreach_stmt.end);
-        emit(gen, "; %s += ", node->as.foreach_stmt.var_name);
-        emit_expr(gen, node->as.foreach_stmt.step);
-        emit(gen, ") {\n");
-        gen->indent++;
-        if (node->as.foreach_stmt.body->type == NODE_BLOCK) {
-            emit_block_contents(gen, node->as.foreach_stmt.body);
+        if (node->as.foreach_stmt.collection) {
+            // Collection foreach: foreach (const item in vec)
+            // Generate:
+            //   for (int64_t __foreach_N = 0; __foreach_N < vec->count; __foreach_N++) {
+            //       <type> item = vec->data[__foreach_N];
+            //       // body
+            //   }
+            int idx_id = gen->temp_count++;
+            emit_indent(gen);
+            emit(gen, "for (int64_t __foreach_%d = 0; __foreach_%d < ", idx_id, idx_id);
+            emit_expr(gen, node->as.foreach_stmt.collection);
+            emit(gen, "->count; __foreach_%d++) {\n", idx_id);
+            gen->indent++;
+            // Declare the loop variable from vec->data[idx]
+            emit_indent(gen);
+            emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
+                                        ? node->as.foreach_stmt.resolved_type
+                                        : type_int64);
+            emit(gen, " %s = ", node->as.foreach_stmt.var_name);
+            emit_expr(gen, node->as.foreach_stmt.collection);
+            emit(gen, "->data[__foreach_%d];\n", idx_id);
+            if (node->as.foreach_stmt.body->type == NODE_BLOCK) {
+                emit_block_contents(gen, node->as.foreach_stmt.body);
+            } else {
+                emit_stmt(gen, node->as.foreach_stmt.body);
+            }
+            gen->indent--;
+            emit_indent(gen);
+            emit(gen, "}\n");
         } else {
-            emit_stmt(gen, node->as.foreach_stmt.body);
+            // Range foreach: for (<type> var = start; var < end; var += step)
+            emit_indent(gen);
+            emit(gen, "for (");
+            emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
+                                        ? node->as.foreach_stmt.resolved_type
+                                        : type_int64);
+            emit(gen, " %s = ", node->as.foreach_stmt.var_name);
+            emit_expr(gen, node->as.foreach_stmt.start);
+            emit(gen, "; %s < ", node->as.foreach_stmt.var_name);
+            emit_expr(gen, node->as.foreach_stmt.end);
+            emit(gen, "; %s += ", node->as.foreach_stmt.var_name);
+            emit_expr(gen, node->as.foreach_stmt.step);
+            emit(gen, ") {\n");
+            gen->indent++;
+            if (node->as.foreach_stmt.body->type == NODE_BLOCK) {
+                emit_block_contents(gen, node->as.foreach_stmt.body);
+            } else {
+                emit_stmt(gen, node->as.foreach_stmt.body);
+            }
+            gen->indent--;
+            emit_indent(gen);
+            emit(gen, "}\n");
         }
-        gen->indent--;
-        emit_indent(gen);
-        emit(gen, "}\n");
         break;
     case NODE_RETURN:
         emit_return_stmt(gen, node);
