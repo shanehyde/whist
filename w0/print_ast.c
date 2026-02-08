@@ -39,6 +39,232 @@ static void print_visibility(int depth, int is_public) {
     }
 }
 
+static void print_func_decl(Node* node, int depth) {
+    if (node->as.func_decl.receiver_type) {
+        printf("MethodDecl: (%s%.*s) %.*s\n", node->as.func_decl.receiver_is_const ? "const " : "",
+               node->as.func_decl.receiver_type_len, node->as.func_decl.receiver_type,
+               node->as.func_decl.name_length, node->as.func_decl.name);
+    } else {
+        printf("FuncDecl: %.*s\n", node->as.func_decl.name_length, node->as.func_decl.name);
+    }
+    print_visibility(depth + 1, node->as.func_decl.is_public);
+    if (node->as.func_decl.receiver_type_args.count > 0) {
+        print_indent(depth + 1);
+        printf("ReceiverTypeArgs:\n");
+        for (int i = 0; i < node->as.func_decl.receiver_type_args.count; i++) {
+            print_ast(node->as.func_decl.receiver_type_args.nodes[i], depth + 2);
+        }
+    }
+    if (node->as.func_decl.params.count > 0) {
+        print_indent(depth + 1);
+        printf("Params:\n");
+        for (int i = 0; i < node->as.func_decl.params.count; i++) {
+            print_ast(node->as.func_decl.params.nodes[i], depth + 2);
+        }
+    }
+    if (node->as.func_decl.return_type) {
+        print_indent(depth + 1);
+        printf("ReturnType:\n");
+        print_ast(node->as.func_decl.return_type, depth + 2);
+    }
+    print_indent(depth + 1);
+    printf("Body:\n");
+    print_ast(node->as.func_decl.body, depth + 2);
+}
+
+static void print_struct_decl(Node* node, int depth) {
+    printf("StructDecl: %.*s\n", node->as.struct_decl.name_length, node->as.struct_decl.name);
+    print_visibility(depth + 1, node->as.struct_decl.is_public);
+    if (node->as.struct_decl.type_param_count > 0) {
+        print_indent(depth + 1);
+        printf("TypeParams: <");
+        for (int i = 0; i < node->as.struct_decl.type_param_count; i++) {
+            if (i > 0)
+                printf(", ");
+            printf("%s", node->as.struct_decl.type_params[i]);
+        }
+        printf(">\n");
+    }
+    for (int i = 0; i < node->as.struct_decl.fields.count; i++) {
+        print_ast(node->as.struct_decl.fields.nodes[i], depth + 1);
+    }
+}
+
+static void print_enum_variant(Node* node, int depth) {
+    printf("EnumVariant: %.*s", node->as.enum_variant.name_length, node->as.enum_variant.name);
+    if (node->as.enum_variant.types.count > 0) {
+        printf("(");
+        for (int i = 0; i < node->as.enum_variant.types.count; i++) {
+            if (i > 0)
+                printf(", ");
+            printf("...");
+        }
+        printf(")");
+    }
+    printf("\n");
+    for (int i = 0; i < node->as.enum_variant.types.count; i++) {
+        print_ast(node->as.enum_variant.types.nodes[i], depth + 1);
+    }
+}
+
+static void print_var_decl(Node* node, int depth) {
+    if (node->as.var_decl.destruct_pattern) {
+        printf("VarDecl: ");
+        print_destruct_pattern(node->as.var_decl.destruct_pattern);
+        printf("%s\n", node->as.var_decl.is_const ? " (const)" : "");
+    } else {
+        printf("VarDecl: %.*s%s\n", node->as.var_decl.name_length, node->as.var_decl.name,
+               node->as.var_decl.is_const ? " (const)" : "");
+    }
+    if (node->as.var_decl.type) {
+        print_indent(depth + 1);
+        printf("Type:\n");
+        print_ast(node->as.var_decl.type, depth + 2);
+    }
+    if (node->as.var_decl.init) {
+        print_indent(depth + 1);
+        printf("Init:\n");
+        print_ast(node->as.var_decl.init, depth + 2);
+    }
+}
+
+static void print_for_stmt(Node* node, int depth) {
+    printf("For\n");
+    if (node->as.for_stmt.init) {
+        print_indent(depth + 1);
+        printf("Init:\n");
+        print_ast(node->as.for_stmt.init, depth + 2);
+    }
+    if (node->as.for_stmt.cond) {
+        print_indent(depth + 1);
+        printf("Cond:\n");
+        print_ast(node->as.for_stmt.cond, depth + 2);
+    }
+    if (node->as.for_stmt.post) {
+        print_indent(depth + 1);
+        printf("Post:\n");
+        print_ast(node->as.for_stmt.post, depth + 2);
+    }
+    print_indent(depth + 1);
+    printf("Body:\n");
+    print_ast(node->as.for_stmt.body, depth + 2);
+}
+
+static void print_match_stmt(Node* node, int depth) {
+    printf("Match\n");
+    print_indent(depth + 1);
+    printf("Expr:\n");
+    print_ast(node->as.match_stmt.expr, depth + 2);
+    print_indent(depth + 1);
+    printf("Arms:\n");
+    for (int i = 0; i < node->as.match_stmt.arms.count; i++) {
+        print_ast(node->as.match_stmt.arms.nodes[i], depth + 2);
+    }
+}
+
+static void print_match_arm(Node* node, int depth) {
+    if (node->as.match_arm.is_wildcard) {
+        printf("MatchArm: _\n");
+    } else {
+        printf("MatchArm: ");
+        if (node->as.match_arm.enum_name) {
+            printf("%.*s::", node->as.match_arm.enum_name_length, node->as.match_arm.enum_name);
+        }
+        printf("%.*s", node->as.match_arm.variant_name_length, node->as.match_arm.variant_name);
+        if (node->as.match_arm.binding_count > 0) {
+            printf("(");
+            for (int i = 0; i < node->as.match_arm.binding_count; i++) {
+                if (i > 0)
+                    printf(", ");
+                printf("%s", node->as.match_arm.bindings[i]);
+            }
+            printf(")");
+        }
+        printf("\n");
+    }
+    print_indent(depth + 1);
+    printf("Body:\n");
+    print_ast(node->as.match_arm.body, depth + 2);
+}
+
+static void print_enum_value(Node* node, int depth) {
+    printf("EnumValue: %.*s::%.*s\n", node->as.enum_value.enum_name_length,
+           node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
+           node->as.enum_value.value_name);
+    if (node->as.enum_value.args.count > 0) {
+        print_indent(depth + 1);
+        printf("Args:\n");
+        for (int i = 0; i < node->as.enum_value.args.count; i++) {
+            print_ast(node->as.enum_value.args.nodes[i], depth + 2);
+        }
+    }
+}
+
+static void print_array_type(Node* node, int depth) {
+    printf("ArrayType\n");
+    print_indent(depth + 1);
+    printf("ElemType:\n");
+    print_ast(node->as.array_type.elem_type, depth + 2);
+    if (node->as.array_type.size) {
+        print_indent(depth + 1);
+        printf("Size:\n");
+        print_ast(node->as.array_type.size, depth + 2);
+    }
+}
+
+static void print_generic_type(Node* node, int depth) {
+    printf("GenericType: %.*s\n", node->as.generic_type.base_name_length,
+           node->as.generic_type.base_name);
+    print_indent(depth + 1);
+    printf("TypeArgs:\n");
+    for (int i = 0; i < node->as.generic_type.type_args.count; i++) {
+        print_ast(node->as.generic_type.type_args.nodes[i], depth + 2);
+    }
+}
+
+static void print_type_alias(Node* node, int depth) {
+    printf("TypeAlias: %.*s", node->as.type_alias.name_length, node->as.type_alias.name);
+    if (node->as.type_alias.type_param_count > 0) {
+        printf("<");
+        for (int i = 0; i < node->as.type_alias.type_param_count; i++) {
+            if (i > 0)
+                printf(", ");
+            printf("%s", node->as.type_alias.type_params[i]);
+        }
+        printf(">");
+    }
+    printf("\n");
+    print_visibility(depth + 1, node->as.type_alias.is_public);
+    print_indent(depth + 1);
+    printf("Target:\n");
+    print_ast(node->as.type_alias.target_type, depth + 2);
+}
+
+static void print_impl_decl(Node* node, int depth) {
+    printf("ImplDecl: %.*s for %.*s", node->as.impl_decl.trait_name_length,
+           node->as.impl_decl.trait_name, node->as.impl_decl.type_name_length,
+           node->as.impl_decl.type_name);
+    if (node->as.impl_decl.type_args.count > 0) {
+        printf("<");
+        for (int i = 0; i < node->as.impl_decl.type_args.count; i++) {
+            if (i > 0)
+                printf(", ");
+            // Print type arg inline (simplified)
+            Node* ta = node->as.impl_decl.type_args.nodes[i];
+            if (ta->type == NODE_IDENT) {
+                printf("%.*s", ta->as.ident.length, ta->as.ident.name);
+            } else {
+                printf("?");
+            }
+        }
+        printf(">");
+    }
+    printf("\n");
+    for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
+        print_ast(node->as.impl_decl.methods.nodes[i], depth + 1);
+    }
+}
+
 void print_ast(Node* node, int depth) {
     if (!node) {
         print_indent(depth);
@@ -69,37 +295,7 @@ void print_ast(Node* node, int depth) {
         }
         break;
     case NODE_FUNC_DECL:
-        if (node->as.func_decl.receiver_type) {
-            printf("MethodDecl: (%s%.*s) %.*s\n",
-                   node->as.func_decl.receiver_is_const ? "const " : "",
-                   node->as.func_decl.receiver_type_len, node->as.func_decl.receiver_type,
-                   node->as.func_decl.name_length, node->as.func_decl.name);
-        } else {
-            printf("FuncDecl: %.*s\n", node->as.func_decl.name_length, node->as.func_decl.name);
-        }
-        print_visibility(depth + 1, node->as.func_decl.is_public);
-        if (node->as.func_decl.receiver_type_args.count > 0) {
-            print_indent(depth + 1);
-            printf("ReceiverTypeArgs:\n");
-            for (int i = 0; i < node->as.func_decl.receiver_type_args.count; i++) {
-                print_ast(node->as.func_decl.receiver_type_args.nodes[i], depth + 2);
-            }
-        }
-        if (node->as.func_decl.params.count > 0) {
-            print_indent(depth + 1);
-            printf("Params:\n");
-            for (int i = 0; i < node->as.func_decl.params.count; i++) {
-                print_ast(node->as.func_decl.params.nodes[i], depth + 2);
-            }
-        }
-        if (node->as.func_decl.return_type) {
-            print_indent(depth + 1);
-            printf("ReturnType:\n");
-            print_ast(node->as.func_decl.return_type, depth + 2);
-        }
-        print_indent(depth + 1);
-        printf("Body:\n");
-        print_ast(node->as.func_decl.body, depth + 2);
+        print_func_decl(node, depth);
         break;
 
     case NODE_PARAM:
@@ -115,21 +311,7 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_STRUCT_DECL:
-        printf("StructDecl: %.*s\n", node->as.struct_decl.name_length, node->as.struct_decl.name);
-        print_visibility(depth + 1, node->as.struct_decl.is_public);
-        if (node->as.struct_decl.type_param_count > 0) {
-            print_indent(depth + 1);
-            printf("TypeParams: <");
-            for (int i = 0; i < node->as.struct_decl.type_param_count; i++) {
-                if (i > 0)
-                    printf(", ");
-                printf("%s", node->as.struct_decl.type_params[i]);
-            }
-            printf(">\n");
-        }
-        for (int i = 0; i < node->as.struct_decl.fields.count; i++) {
-            print_ast(node->as.struct_decl.fields.nodes[i], depth + 1);
-        }
+        print_struct_decl(node, depth);
         break;
 
     case NODE_FIELD:
@@ -146,41 +328,11 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_ENUM_VARIANT:
-        printf("EnumVariant: %.*s", node->as.enum_variant.name_length, node->as.enum_variant.name);
-        if (node->as.enum_variant.types.count > 0) {
-            printf("(");
-            for (int i = 0; i < node->as.enum_variant.types.count; i++) {
-                if (i > 0)
-                    printf(", ");
-                printf("...");
-            }
-            printf(")");
-        }
-        printf("\n");
-        for (int i = 0; i < node->as.enum_variant.types.count; i++) {
-            print_ast(node->as.enum_variant.types.nodes[i], depth + 1);
-        }
+        print_enum_variant(node, depth);
         break;
 
     case NODE_VAR_DECL:
-        if (node->as.var_decl.destruct_pattern) {
-            printf("VarDecl: ");
-            print_destruct_pattern(node->as.var_decl.destruct_pattern);
-            printf("%s\n", node->as.var_decl.is_const ? " (const)" : "");
-        } else {
-            printf("VarDecl: %.*s%s\n", node->as.var_decl.name_length, node->as.var_decl.name,
-                   node->as.var_decl.is_const ? " (const)" : "");
-        }
-        if (node->as.var_decl.type) {
-            print_indent(depth + 1);
-            printf("Type:\n");
-            print_ast(node->as.var_decl.type, depth + 2);
-        }
-        if (node->as.var_decl.init) {
-            print_indent(depth + 1);
-            printf("Init:\n");
-            print_ast(node->as.var_decl.init, depth + 2);
-        }
+        print_var_decl(node, depth);
         break;
 
     case NODE_BLOCK:
@@ -216,25 +368,7 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_FOR:
-        printf("For\n");
-        if (node->as.for_stmt.init) {
-            print_indent(depth + 1);
-            printf("Init:\n");
-            print_ast(node->as.for_stmt.init, depth + 2);
-        }
-        if (node->as.for_stmt.cond) {
-            print_indent(depth + 1);
-            printf("Cond:\n");
-            print_ast(node->as.for_stmt.cond, depth + 2);
-        }
-        if (node->as.for_stmt.post) {
-            print_indent(depth + 1);
-            printf("Post:\n");
-            print_ast(node->as.for_stmt.post, depth + 2);
-        }
-        print_indent(depth + 1);
-        printf("Body:\n");
-        print_ast(node->as.for_stmt.body, depth + 2);
+        print_for_stmt(node, depth);
         break;
 
     case NODE_RETURN:
@@ -258,40 +392,11 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_MATCH:
-        printf("Match\n");
-        print_indent(depth + 1);
-        printf("Expr:\n");
-        print_ast(node->as.match_stmt.expr, depth + 2);
-        print_indent(depth + 1);
-        printf("Arms:\n");
-        for (int i = 0; i < node->as.match_stmt.arms.count; i++) {
-            print_ast(node->as.match_stmt.arms.nodes[i], depth + 2);
-        }
+        print_match_stmt(node, depth);
         break;
 
     case NODE_MATCH_ARM:
-        if (node->as.match_arm.is_wildcard) {
-            printf("MatchArm: _\n");
-        } else {
-            printf("MatchArm: ");
-            if (node->as.match_arm.enum_name) {
-                printf("%.*s::", node->as.match_arm.enum_name_length, node->as.match_arm.enum_name);
-            }
-            printf("%.*s", node->as.match_arm.variant_name_length, node->as.match_arm.variant_name);
-            if (node->as.match_arm.binding_count > 0) {
-                printf("(");
-                for (int i = 0; i < node->as.match_arm.binding_count; i++) {
-                    if (i > 0)
-                        printf(", ");
-                    printf("%s", node->as.match_arm.bindings[i]);
-                }
-                printf(")");
-            }
-            printf("\n");
-        }
-        print_indent(depth + 1);
-        printf("Body:\n");
-        print_ast(node->as.match_arm.body, depth + 2);
+        print_match_arm(node, depth);
         break;
 
     case NODE_EXPR_STMT:
@@ -384,16 +489,7 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_ENUM_VALUE:
-        printf("EnumValue: %.*s::%.*s\n", node->as.enum_value.enum_name_length,
-               node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
-               node->as.enum_value.value_name);
-        if (node->as.enum_value.args.count > 0) {
-            print_indent(depth + 1);
-            printf("Args:\n");
-            for (int i = 0; i < node->as.enum_value.args.count; i++) {
-                print_ast(node->as.enum_value.args.nodes[i], depth + 2);
-            }
-        }
+        print_enum_value(node, depth);
         break;
 
     case NODE_NEW_EXPR:
@@ -421,25 +517,11 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_ARRAY_TYPE:
-        printf("ArrayType\n");
-        print_indent(depth + 1);
-        printf("ElemType:\n");
-        print_ast(node->as.array_type.elem_type, depth + 2);
-        if (node->as.array_type.size) {
-            print_indent(depth + 1);
-            printf("Size:\n");
-            print_ast(node->as.array_type.size, depth + 2);
-        }
+        print_array_type(node, depth);
         break;
 
     case NODE_GENERIC_TYPE:
-        printf("GenericType: %.*s\n", node->as.generic_type.base_name_length,
-               node->as.generic_type.base_name);
-        print_indent(depth + 1);
-        printf("TypeArgs:\n");
-        for (int i = 0; i < node->as.generic_type.type_args.count; i++) {
-            print_ast(node->as.generic_type.type_args.nodes[i], depth + 2);
-        }
+        print_generic_type(node, depth);
         break;
 
     case NODE_TRAIT_DECL:
@@ -450,46 +532,11 @@ void print_ast(Node* node, int depth) {
         break;
 
     case NODE_TYPE_ALIAS:
-        printf("TypeAlias: %.*s", node->as.type_alias.name_length, node->as.type_alias.name);
-        if (node->as.type_alias.type_param_count > 0) {
-            printf("<");
-            for (int i = 0; i < node->as.type_alias.type_param_count; i++) {
-                if (i > 0)
-                    printf(", ");
-                printf("%s", node->as.type_alias.type_params[i]);
-            }
-            printf(">");
-        }
-        printf("\n");
-        print_visibility(depth + 1, node->as.type_alias.is_public);
-        print_indent(depth + 1);
-        printf("Target:\n");
-        print_ast(node->as.type_alias.target_type, depth + 2);
+        print_type_alias(node, depth);
         break;
 
     case NODE_IMPL_DECL:
-        printf("ImplDecl: %.*s for %.*s", node->as.impl_decl.trait_name_length,
-               node->as.impl_decl.trait_name, node->as.impl_decl.type_name_length,
-               node->as.impl_decl.type_name);
-        if (node->as.impl_decl.type_args.count > 0) {
-            printf("<");
-            for (int i = 0; i < node->as.impl_decl.type_args.count; i++) {
-                if (i > 0)
-                    printf(", ");
-                // Print type arg inline (simplified)
-                Node* ta = node->as.impl_decl.type_args.nodes[i];
-                if (ta->type == NODE_IDENT) {
-                    printf("%.*s", ta->as.ident.length, ta->as.ident.name);
-                } else {
-                    printf("?");
-                }
-            }
-            printf(">");
-        }
-        printf("\n");
-        for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
-            print_ast(node->as.impl_decl.methods.nodes[i], depth + 1);
-        }
+        print_impl_decl(node, depth);
         break;
 
     default:

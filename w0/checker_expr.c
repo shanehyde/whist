@@ -12,7 +12,85 @@ static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
 // Expression checking helpers
 // =============================================================================
 
-// Type-check a binary expression: comparison, logical, arithmetic, and bitwise operators
+// Check comparison operators: == != < > <= >=
+static Type* check_comparison_op(Checker* checker, Node* node, Type* left, Type* right) {
+    TokenType op = node->as.binary.op;
+
+    // String comparison: only == and != allowed
+    if (left->kind == TYPE_STRING && right->kind == TYPE_STRING) {
+        if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
+            node->as.binary.is_string_op = 1;
+            return type_bool;
+        }
+        check_error(checker, node->line, node->column, "Strings only support == and != comparison");
+        return type_error;
+    }
+    if (type_equals(left, right))
+        return type_bool;
+    // voidptr/struct == null and null == voidptr/struct (only for == and !=)
+    if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
+        if ((left->kind == TYPE_VOIDPTR && right->kind == TYPE_NULL) ||
+            (left->kind == TYPE_NULL && right->kind == TYPE_VOIDPTR) ||
+            (left->kind == TYPE_STRUCT && right->kind == TYPE_NULL) ||
+            (left->kind == TYPE_NULL && right->kind == TYPE_STRUCT)) {
+            return type_bool;
+        }
+    }
+    if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
+        (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
+        return type_bool;
+    }
+    check_error(checker, node->line, node->column, "Cannot compare '%s' and '%s'", type_name(left),
+                type_name(right));
+    return type_error;
+}
+
+// Check logical operators: && ||
+static Type* check_logical_op(Checker* checker, Node* node, Type* left, Type* right) {
+    if (left->kind != TYPE_BOOL || right->kind != TYPE_BOOL) {
+        check_error(checker, node->line, node->column, "Logical operators require bool operands");
+        return type_error;
+    }
+    return type_bool;
+}
+
+// Check arithmetic operators: + - * / %
+static Type* check_arithmetic_op(Checker* checker, Node* node, Type* left, Type* right) {
+    TokenType op = node->as.binary.op;
+
+    // String concatenation: string + string
+    if (op == TOK_PLUS && left->kind == TYPE_STRING && right->kind == TYPE_STRING) {
+        node->as.binary.is_string_op = 1;
+        return type_string;
+    }
+    if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
+        (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
+        if (left->kind == TYPE_F64 || right->kind == TYPE_F64)
+            return type_f64;
+        if (left->kind == TYPE_F32 || right->kind == TYPE_F32)
+            return type_f32;
+        if (type_equals(left, right))
+            return left;
+        return type_int64;
+    }
+    check_error(checker, node->line, node->column, "Invalid operands to '%s': '%s' and '%s'",
+                token_type_name(op), type_name(left), type_name(right));
+    return type_error;
+}
+
+// Check bitwise operators: & | ^ << >>
+static Type* check_bitwise_op(Checker* checker, Node* node, Type* left, Type* right) {
+    if (!type_is_integer(left) || !type_is_integer(right)) {
+        check_error(checker, node->line, node->column,
+                    "Bitwise operators require integer operands");
+        return type_error;
+    }
+    if (type_equals(left, right))
+        return left;
+    return type_int64;
+}
+
+// Type-check a binary expression: dispatch to operator-specific helpers
 static Type* check_binary_expr(Checker* checker, Node* node) {
     Type* left  = check_expression(checker, node->as.binary.left);
     Type* right = check_expression(checker, node->as.binary.right);
@@ -23,82 +101,19 @@ static Type* check_binary_expr(Checker* checker, Node* node) {
 
     TokenType op = node->as.binary.op;
 
-    // Comparison operators return bool
     if (op == TOK_EQ_EQ || op == TOK_BANG_EQ || op == TOK_LT || op == TOK_GT || op == TOK_LT_EQ ||
         op == TOK_GT_EQ) {
-        // String comparison: only == and != allowed
-        if (left->kind == TYPE_STRING && right->kind == TYPE_STRING) {
-            if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
-                node->as.binary.is_string_op = 1;
-                return type_bool;
-            }
-            check_error(checker, node->line, node->column,
-                        "Strings only support == and != comparison");
-            return type_error;
-        }
-        if (type_equals(left, right))
-            return type_bool;
-        // voidptr/struct == null and null == voidptr/struct (only for == and !=)
-        if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
-            if ((left->kind == TYPE_VOIDPTR && right->kind == TYPE_NULL) ||
-                (left->kind == TYPE_NULL && right->kind == TYPE_VOIDPTR) ||
-                (left->kind == TYPE_STRUCT && right->kind == TYPE_NULL) ||
-                (left->kind == TYPE_NULL && right->kind == TYPE_STRUCT)) {
-                return type_bool;
-            }
-        }
-        if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
-            (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
-            return type_bool;
-        }
-        check_error(checker, node->line, node->column, "Cannot compare '%s' and '%s'",
-                    type_name(left), type_name(right));
-        return type_error;
+        return check_comparison_op(checker, node, left, right);
     }
-
-    // Logical operators
     if (op == TOK_AMP_AMP || op == TOK_PIPE_PIPE) {
-        if (left->kind != TYPE_BOOL || right->kind != TYPE_BOOL) {
-            check_error(checker, node->line, node->column,
-                        "Logical operators require bool operands");
-            return type_error;
-        }
-        return type_bool;
+        return check_logical_op(checker, node, left, right);
     }
-
-    // Arithmetic operators
     if (op == TOK_PLUS || op == TOK_MINUS || op == TOK_STAR || op == TOK_SLASH ||
         op == TOK_PERCENT) {
-        // String concatenation: string + string
-        if (op == TOK_PLUS && left->kind == TYPE_STRING && right->kind == TYPE_STRING) {
-            node->as.binary.is_string_op = 1;
-            return type_string;
-        }
-        if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
-            (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
-            if (left->kind == TYPE_F64 || right->kind == TYPE_F64)
-                return type_f64;
-            if (left->kind == TYPE_F32 || right->kind == TYPE_F32)
-                return type_f32;
-            if (type_equals(left, right))
-                return left;
-            return type_int64;
-        }
-        check_error(checker, node->line, node->column, "Invalid operands to '%s': '%s' and '%s'",
-                    token_type_name(op), type_name(left), type_name(right));
-        return type_error;
+        return check_arithmetic_op(checker, node, left, right);
     }
-
-    // Bitwise operators
     if (op == TOK_AMP || op == TOK_PIPE || op == TOK_CARET || op == TOK_LT_LT || op == TOK_GT_GT) {
-        if (!type_is_integer(left) || !type_is_integer(right)) {
-            check_error(checker, node->line, node->column,
-                        "Bitwise operators require integer operands");
-            return type_error;
-        }
-        if (type_equals(left, right))
-            return left;
-        return type_int64;
+        return check_bitwise_op(checker, node, left, right);
     }
 
     check_error(checker, node->line, node->column, "Unknown binary operator");
