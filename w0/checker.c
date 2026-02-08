@@ -116,8 +116,12 @@ void checker_init(Checker* checker) {
     checker->trait_impls         = NULL;
     checker->trait_impl_count    = 0;
     checker->trait_impl_capacity = 0;
-    checker->alias_depth         = 0;
-    checker->enum_target_hint    = NULL;
+    // Primitive methods
+    checker->primitive_methods         = NULL;
+    checker->primitive_method_count    = 0;
+    checker->primitive_method_capacity = 0;
+    checker->alias_depth               = 0;
+    checker->enum_target_hint          = NULL;
     types_init();
 }
 
@@ -199,6 +203,12 @@ void checker_free(Checker* checker) {
         free(checker->trait_impls[i].type_name);
     }
     free(checker->trait_impls);
+    // Free primitive methods
+    for (int i = 0; i < checker->primitive_method_count; i++) {
+        free(checker->primitive_methods[i].type_name);
+        free(checker->primitive_methods[i].method_name);
+    }
+    free(checker->primitive_methods);
     types_cleanup();
 }
 
@@ -1050,13 +1060,10 @@ static void check_func_decl(Checker* checker, Node* node) {
     checker_define(checker, mangled_name, SYM_FUNC, func_type, 1, fdn->is_public,
                    checker->current_module);
 
-    // For methods, also register the method on the struct type
+    // For methods, also register the method on the struct type (or primitive)
     if (is_method) {
         Symbol* struct_sym = checker_lookup(checker, receiver_type);
-        if (!struct_sym || struct_sym->kind != SYM_TYPE || struct_sym->type->kind != TYPE_STRUCT) {
-            check_error(checker, node->line, node->column, "Unknown receiver type '%s'",
-                        receiver_type);
-        } else {
+        if (struct_sym && struct_sym->kind == SYM_TYPE && struct_sym->type->kind == TYPE_STRUCT) {
             Type* st = struct_sym->type;
             int   n  = st->as.struc.method_count;
 
@@ -1071,6 +1078,18 @@ static void check_func_decl(Checker* checker, Node* node) {
             st->as.struc.method_types[n]    = func_type;
             st->as.struc.method_is_const[n] = fdn->receiver_is_const;
             st->as.struc.method_count       = n + 1;
+        } else if (type_builtin_from_name(receiver_type)) {
+            // Register method on a primitive type
+            VEC_GROW(checker->primitive_methods, checker->primitive_method_count,
+                     checker->primitive_method_capacity);
+            PrimitiveMethod* pm = &checker->primitive_methods[checker->primitive_method_count++];
+            pm->type_name       = xstrdup(receiver_type);
+            pm->method_name     = xstrdup(name);
+            pm->method_type     = func_type;
+            pm->is_const        = fdn->receiver_is_const;
+        } else {
+            check_error(checker, node->line, node->column, "Unknown receiver type '%s'",
+                        receiver_type);
         }
     }
 
@@ -1087,11 +1106,17 @@ static void check_func_decl(Checker* checker, Node* node) {
 
     // For methods, inject 'self' into scope
     // self is a struct reference (the struct type itself, with reference semantics)
+    // For primitive receivers, self is a value type
     if (is_method) {
         Symbol* struct_sym = checker_lookup(checker, receiver_type);
         if (struct_sym && struct_sym->kind == SYM_TYPE) {
             Type* self_type = struct_sym->type;
             checker_define(checker, "self", SYM_VAR, self_type, fdn->receiver_is_const, 0, NULL);
+        } else {
+            Type* builtin = type_builtin_from_name(receiver_type);
+            if (builtin) {
+                checker_define(checker, "self", SYM_VAR, builtin, fdn->receiver_is_const, 0, NULL);
+            }
         }
     }
 
@@ -1309,18 +1334,22 @@ static void check_impl_decl(Checker* checker, Node* node) {
     Type* trait_type = trait_sym->type;
 
     // Look up the target type
-    Symbol*     type_sym    = checker_lookup(checker, type_name_str);
-    GenericDef* generic_def = NULL;
-    int         is_generic  = 0;
+    Symbol*     type_sym     = checker_lookup(checker, type_name_str);
+    GenericDef* generic_def  = NULL;
+    int         is_generic   = 0;
+    int         is_primitive = 0;
     if (!type_sym || type_sym->kind != SYM_TYPE || type_sym->type->kind != TYPE_STRUCT) {
         // Fallback: check if it's a generic struct template
         generic_def = lookup_generic_def(checker, type_name_str);
-        if (!generic_def) {
+        if (generic_def) {
+            is_generic = 1;
+        } else if (type_builtin_from_name(type_name_str)) {
+            is_primitive = 1;
+        } else {
             check_error(checker, node->line, node->column,
-                        "Cannot implement trait for unknown struct type '%s'", type_name_str);
+                        "Cannot implement trait for unknown type '%s'", type_name_str);
             return;
         }
-        is_generic = 1;
     }
 
     // Process each method in the impl block
@@ -1400,7 +1429,8 @@ static void check_impl_decl(Checker* checker, Node* node) {
                 }
             }
 
-            // Process the method as a regular func_decl (registers on struct, checks body)
+            // Process the method as a regular func_decl (registers on struct/primitive, checks
+            // body)
             check_decl(checker, method);
         }
     }
@@ -1428,7 +1458,7 @@ static void check_impl_decl(Checker* checker, Node* node) {
     impl->type_name  = xstrdup(type_name_str);
 
     // If implementing Drop, set the flag on the struct type
-    if (strcmp(trait_name, "Drop") == 0 && !is_generic) {
+    if (strcmp(trait_name, "Drop") == 0 && !is_generic && !is_primitive) {
         type_sym->type->as.struc.has_drop = 1;
     }
 }

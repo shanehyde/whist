@@ -1276,7 +1276,11 @@ static void emit_function_forward_decls(CodeGen* gen, Node* ast) {
                     if (fdn->receiver_is_const) {
                         emit(gen, "const ");
                     }
-                    emit(gen, "%s* self", fdn->receiver_type);
+                    if (type_is_builtin_name(fdn->receiver_type)) {
+                        emit(gen, "%s self", type_c_name(fdn->receiver_type));
+                    } else {
+                        emit(gen, "%s* self", fdn->receiver_type);
+                    }
                     if (fdn->params.count > 0) {
                         emit(gen, ", ");
                     }
