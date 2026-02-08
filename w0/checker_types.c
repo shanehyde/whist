@@ -347,6 +347,7 @@ Type* instantiate_generic_enum(Checker* checker, GenericDef* def, char* mangled,
     return enum_type;
 }
 
+// Resolve Vec<T> type: validate single arg, create vec type, and register span companion
 static Type* resolve_vec_type(Checker* checker, Node* type_node) {
     int arg_count = type_node->as.generic_type.type_args.count;
     if (arg_count != 1) {
@@ -388,6 +389,7 @@ static Type* resolve_vec_type(Checker* checker, Node* type_node) {
     return vec_type;
 }
 
+// Resolve Span<T> type: validate single arg and create span type
 static Type* resolve_span_type(Checker* checker, Node* type_node) {
     int arg_count = type_node->as.generic_type.type_args.count;
     if (arg_count != 1) {
@@ -421,6 +423,7 @@ static Type* resolve_span_type(Checker* checker, Node* type_node) {
     return span_type;
 }
 
+// Resolve a generic type alias by substituting type params into the target type
 static Type* resolve_generic_type_alias(Checker* checker, Node* type_node, GenericDef* def,
                                         Type** resolved_args) {
     const char* base_name = type_node->as.generic_type.base_name;
@@ -455,6 +458,8 @@ static Type* resolve_generic_type_alias(Checker* checker, Node* type_node, Gener
     return result;
 }
 
+// Instantiate a generic struct: substitute type params into fields and methods,
+// type-check method bodies, and register the concrete struct in the symbol table
 static Type* instantiate_generic_struct(Checker* checker, Node* type_node, GenericDef* def,
                                         char* mangled, Type** resolved_args, int arg_count) {
     const char* base_name = type_node->as.generic_type.base_name;
@@ -647,6 +652,8 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
     return struct_type;
 }
 
+// Resolve a type annotation node to a concrete Type*, handling builtins,
+// user-defined types, generics, arrays, tuples, and type parameter substitution
 Type* resolve_type(Checker* checker, Node* type_node) {
     if (!type_node)
         return type_void;

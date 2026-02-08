@@ -8,12 +8,14 @@
 #include "types.h"
 #include "vec.h"
 
+// Emit indentation spaces (4 per level) at the current indent depth
 void emit_indent(CodeGen* gen) {
     for (int i = 0; i < gen->indent; i++) {
         fprintf(gen->out, "    ");
     }
 }
 
+// Emit formatted text to the output stream
 void emit(CodeGen* gen, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -42,16 +44,18 @@ static void emit_slice_expr(CodeGen* gen, Node* node);
 static void emit_member_expr(CodeGen* gen, Node* node);
 static void emit_new_expr(CodeGen* gen, Node* node);
 
+// Push a deferred statement onto the defer stack for later LIFO emission
 static void defer_push(CodeGen* gen, Node* node) {
     VEC_GROW(gen->defer_stack, gen->defer_count, gen->defer_capacity);
     gen->defer_stack[gen->defer_count++] = node;
 }
 
+// Reset the defer stack (called at function boundaries)
 void defer_clear(CodeGen* gen) {
     gen->defer_count = 0;
 }
 
-// RC variable tracking helpers
+// Return the appropriate __rc_dec function name for a type (type-specific or generic)
 static const char* get_dec_func_for_type(Type* t) {
     if (t && t->kind == TYPE_STRUCT && (t->as.struc.has_drop || t->as.struc.has_rc_fields)) {
         // Build "__rc_dec_TypeName"
@@ -76,6 +80,7 @@ static const char* get_dec_func_for_type(Type* t) {
     return xstrdup("__rc_dec");
 }
 
+// Return the appropriate __rc_inc function name for a type (enum-specific or generic)
 static const char* get_inc_func_for_type(Type* t) {
     if (t && t->kind == TYPE_ENUM && t->as.enm.has_rc_fields) {
         size_t len = strlen("__rc_inc_") + strlen(t->as.enm.name) + 1;
@@ -86,6 +91,7 @@ static const char* get_inc_func_for_type(Type* t) {
     return xstrdup("__rc_inc");
 }
 
+// Register an RC-managed variable for scope-based cleanup tracking
 static void rc_push_var(CodeGen* gen, const char* name, const char* dec_func, Type* type) {
     VEC_GROW(gen->rc_vars, gen->rc_var_count, gen->rc_var_capacity);
     gen->rc_vars[gen->rc_var_count].name        = xstrdup(name);
@@ -160,6 +166,7 @@ static int rc_is_tracked(CodeGen* gen, const char* name) {
 }
 
 // Check if a name is a registered enum type
+// Check if a name is a registered enum type in the codegen context
 int is_enum_type_name(CodeGen* gen, const char* name) {
     for (int i = 0; i < gen->enum_name_count; i++) {
         if (strcmp(gen->enum_names[i], name) == 0)
@@ -168,6 +175,7 @@ int is_enum_type_name(CodeGen* gen, const char* name) {
     return 0;
 }
 
+// Return the index of an enum name in the registered enum list, or -1 if not found
 int enum_index(CodeGen* gen, const char* name) {
     for (int i = 0; i < gen->enum_name_count; i++) {
         if (strcmp(gen->enum_names[i], name) == 0)
@@ -176,6 +184,7 @@ int enum_index(CodeGen* gen, const char* name) {
     return -1;
 }
 
+// Check if a named enum type has RC-managed fields
 int enum_has_rc_fields(CodeGen* gen, const char* name) {
     int idx = enum_index(gen, name);
     if (idx < 0 || !gen->enum_has_rc_fields)
@@ -224,6 +233,7 @@ static int is_struct_type(CodeGen* gen, Node* type_node) {
     return !type_is_builtin_name(type_node->as.ident.name);
 }
 
+// Check if a type node represents an RC-managed type (struct, Vec, or enum with RC fields)
 int type_node_has_rc(CodeGen* gen, Node* type_node) {
     if (!type_node)
         return 0;
@@ -719,6 +729,7 @@ void emit_type_with_name(CodeGen* gen, Node* type_node, const char* name) {
     }
 }
 
+// Map a binary operator token to its C operator string
 static const char* binary_op_str(TokenType op) {
     switch (op) {
     case TOK_PLUS:
@@ -762,6 +773,7 @@ static const char* binary_op_str(TokenType op) {
     }
 }
 
+// Map a unary operator token to its C operator string
 static const char* unary_op_str(TokenType op) {
     switch (op) {
     case TOK_MINUS:
@@ -779,6 +791,7 @@ static const char* unary_op_str(TokenType op) {
     }
 }
 
+// Map an assignment operator token to its C operator string
 static const char* assign_op_str(TokenType op) {
     switch (op) {
     case TOK_EQ:
@@ -939,6 +952,7 @@ static char* resolve_generic_field_dec_func(CodeGen* gen, Node* field_type_node)
     return NULL;
 }
 
+// Emit a string literal with C escape sequences
 static void emit_string_lit(CodeGen* gen, Node* node) {
     emit(gen, "\"");
     // Escape special characters
@@ -968,6 +982,7 @@ static void emit_string_lit(CodeGen* gen, Node* node) {
     emit(gen, "\"");
 }
 
+// Emit a character literal with C escape sequences
 static void emit_char_lit(CodeGen* gen, Node* node) {
     if (node->as.char_lit.value == '\n') {
         emit(gen, "'\\n'");
@@ -984,6 +999,7 @@ static void emit_char_lit(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit an enum variant: simple tag, bare data enum, or data enum with constructor args
 static void emit_enum_value(CodeGen* gen, Node* node) {
     if (!node->as.enum_value.is_data_enum) {
         // Simple enum: emit qualified value name (EnumName_ValueName)
@@ -1038,6 +1054,7 @@ static void emit_enum_value(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a function call: module-qualified, method, generic method, or regular call
 static void emit_call_expr(CodeGen* gen, Node* node) {
     Node* func = node->as.call.func;
     // Check if this is a module-qualified call (e.g., std.print())
@@ -1124,6 +1141,7 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit an index expression: bounds-checked vec/span, tuple field, or array access
 static void emit_index_expr(CodeGen* gen, Node* node) {
     if (node->as.index.is_vec_index) {
         // Bounds-checked vec access
@@ -1160,6 +1178,7 @@ static void emit_index_expr(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a slice expression as a Span compound literal with data pointer and count
 static void emit_slice_expr(CodeGen* gen, Node* node) {
     // Slice produces a span: (__Span_T){ .data = ..., .count = ... }
     Type* span_type = node->as.slice.resolved_type;
@@ -1234,6 +1253,7 @@ static void emit_slice_expr(CodeGen* gen, Node* node) {
     emit(gen, " })");
 }
 
+// Emit a member access expression using -> for struct pointers or . for value types
 static void emit_member_expr(CodeGen* gen, Node* node) {
     // Check if this is module-qualified access (already handled struct_name case)
     if (node->as.member.struct_name == NULL && node->as.member.module_name == NULL) {
@@ -1258,6 +1278,7 @@ static void emit_member_expr(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a `new` expression as a GCC statement expression: __rc_alloc + field init
 static void emit_new_expr(CodeGen* gen, Node* node) {
     Type* rtype = node->as.new_expr.resolved_type;
     // In generic method bodies, the checker doesn't visit the body, so resolved_type
@@ -1344,6 +1365,7 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
     }
 }
 
+// Dispatch expression code generation based on node type
 static void emit_expr(CodeGen* gen, Node* node) {
     if (!node)
         return;
@@ -1455,6 +1477,7 @@ static void emit_expr(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a struct initializer as a C designated initializer: {.field = value, ...}
 static void emit_struct_init(CodeGen* gen, Node* node) {
     emit(gen, "{");
     for (int i = 0; i < node->as.struct_init.fields.count; i++) {
@@ -2009,6 +2032,7 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+// Dispatch statement code generation based on node type
 void emit_stmt(CodeGen* gen, Node* node) {
     if (!node)
         return;
@@ -2206,6 +2230,7 @@ void emit_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a top-level declaration: function, struct, enum, extern, impl, or global var
 void emit_decl(CodeGen* gen, Node* node) {
     if (!node)
         return;

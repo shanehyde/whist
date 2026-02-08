@@ -12,6 +12,7 @@ static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
 // Expression checking helpers
 // =============================================================================
 
+// Type-check a binary expression: comparison, logical, arithmetic, and bitwise operators
 static Type* check_binary_expr(Checker* checker, Node* node) {
     Type* left  = check_expression(checker, node->as.binary.left);
     Type* right = check_expression(checker, node->as.binary.right);
@@ -89,6 +90,7 @@ static Type* check_binary_expr(Checker* checker, Node* node) {
     return type_error;
 }
 
+// Type-check a unary expression: negation, logical not, and bitwise complement
 static Type* check_unary_expr(Checker* checker, Node* node) {
     Type*     operand = check_expression(checker, node->as.unary.operand);
     TokenType op      = node->as.unary.op;
@@ -121,6 +123,7 @@ static Type* check_unary_expr(Checker* checker, Node* node) {
     }
 }
 
+// Type-check an index expression: array, span, vec, string, and tuple indexing
 static Type* check_index_expr(Checker* checker, Node* node) {
     Type* object = check_expression(checker, node->as.index.object);
     Type* index  = check_expression(checker, node->as.index.index);
@@ -183,6 +186,7 @@ static Type* check_index_expr(Checker* checker, Node* node) {
     return type_error;
 }
 
+// Type-check a slice expression: validate object is sliceable and bounds are integers
 static Type* check_slice_expr(Checker* checker, Node* node) {
     Type* object = check_expression(checker, node->as.slice.object);
 
@@ -226,6 +230,7 @@ static Type* check_slice_expr(Checker* checker, Node* node) {
     return result_type;
 }
 
+// Type-check a member access: module-qualified, span/enum/vec/struct fields, and methods
 static Type* check_member_expr(Checker* checker, Node* node) {
     // Check for module-qualified access first (e.g., std.print)
     if (node->as.member.object->type == NODE_IDENT) {
@@ -344,6 +349,7 @@ static Type* check_member_expr(Checker* checker, Node* node) {
     return type_error;
 }
 
+// Check if a node is a valid assignment target (identifier, member, or index)
 static int is_lvalue(Node* node) {
     if (!node)
         return 0;
@@ -358,6 +364,7 @@ static int is_lvalue(Node* node) {
     }
 }
 
+// Type-check an assignment: validate lvalue, const, enum tag, and type compatibility
 static Type* check_assign_expr(Checker* checker, Node* node) {
     Type* target = check_expression(checker, node->as.assign.target);
 
@@ -429,6 +436,7 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
 
 // --- Expression case helpers ---
 
+// Type-check an enum variant constructor, including generic enum type inference
 static Type* check_enum_value_expr(Checker* checker, Node* node) {
     // Look up the enum type
     const char* enum_name = node->as.enum_value.enum_name;
@@ -619,6 +627,7 @@ static Type* check_enum_value_expr(Checker* checker, Node* node) {
     return enum_type;
 }
 
+// Type-check a function call: validate callee, argument count, and argument types
 static Type* check_call_expr(Checker* checker, Node* node) {
     Type* func_type = check_expression(checker, node->as.call.func);
 
@@ -667,6 +676,7 @@ static Type* check_call_expr(Checker* checker, Node* node) {
     return func_type->as.func.return_type;
 }
 
+// Type-check a `new` expression: resolve type, validate struct init or Vec elements
 static Type* check_new_expr(Checker* checker, Node* node) {
     Type* resolved = resolve_type(checker, node->as.new_expr.type_node);
     if (resolved == type_error)
@@ -701,6 +711,7 @@ static Type* check_new_expr(Checker* checker, Node* node) {
     return resolved;
 }
 
+// Type-check an array literal: infer element type from first element, validate the rest
 static Type* check_array_lit_expr(Checker* checker, Node* node) {
     int count = node->as.array_lit.elements.count;
     if (count == 0) {
@@ -739,6 +750,7 @@ static Type* check_array_lit_expr(Checker* checker, Node* node) {
 // Expression checking
 // =============================================================================
 
+// Dispatch expression type-checking based on node type, returning the resolved type
 Type* check_expression(Checker* checker, Node* node) {
     if (!node)
         return type_error;
@@ -826,6 +838,7 @@ Type* check_expression(Checker* checker, Node* node) {
 // Struct initializer checking
 // =============================================================================
 
+// Type-check a struct initializer: validate field names, types, and completeness
 static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type) {
     if (!struct_type || struct_type->kind != TYPE_STRUCT) {
         check_error(checker, init->line, init->column, "Struct initializer requires a struct type");

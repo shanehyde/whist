@@ -42,6 +42,7 @@ static void check_impl_decl(Checker* checker, Node* node);
 // Utility functions
 // =============================================================================
 
+// Report a type-checking error at the given source location
 void check_error(Checker* checker, int line, int col, const char* fmt, ...) {
     checker->error_count++;
     va_list args;
@@ -64,6 +65,7 @@ void check_error_cannot(Checker* checker, int line, int col, const char* action,
     check_error(checker, line, col, "Cannot %s type '%s'", action, type_name(type));
 }
 
+// Compute a djb2 hash for symbol table indexing
 static unsigned int hash_string(const char* str) {
     unsigned int hash = 5381;
     int          c;
@@ -77,6 +79,7 @@ static unsigned int hash_string(const char* str) {
 // Checker initialization and cleanup
 // =============================================================================
 
+// Initialize all checker state to zero/NULL defaults
 void checker_init(Checker* checker) {
     checker->scope                            = NULL;
     checker->current_func_return              = NULL;
@@ -115,11 +118,13 @@ void checker_init(Checker* checker) {
     types_init();
 }
 
+// Set the list of directly imported module names for visibility checking
 void checker_set_direct_imports(Checker* checker, char** direct_imports, int count) {
     checker->direct_imports       = direct_imports;
     checker->direct_imports_count = count;
 }
 
+// Push a new scope onto the scope chain for block-level symbol resolution
 void checker_push_scope(Checker* checker) {
     Scope* scope   = xcalloc(1, sizeof(Scope));
     scope->symbols = xcalloc(SCOPE_SIZE, sizeof(Symbol*));
@@ -128,6 +133,7 @@ void checker_push_scope(Checker* checker) {
     checker->scope = scope;
 }
 
+// Pop the current scope and free all its symbols
 void checker_pop_scope(Checker* checker) {
     Scope* scope = checker->scope;
     if (!scope)
@@ -149,6 +155,7 @@ void checker_pop_scope(Checker* checker) {
     free(scope);
 }
 
+// Free all checker resources: scopes, generic defs/instances, spans, vecs, trait impls
 void checker_free(Checker* checker) {
     while (checker->scope) {
         checker_pop_scope(checker);
@@ -196,6 +203,7 @@ void checker_free(Checker* checker) {
 // Symbol table operations
 // =============================================================================
 
+// Define a symbol in the current scope. Returns NULL if already defined.
 Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type* type,
                        int is_const, int is_public, const char* source_module) {
     Scope*       scope = checker->scope;
@@ -289,6 +297,7 @@ Symbol* checker_lookup_in_module(Checker* checker, const char* module_name,
     return NULL;
 }
 
+// Look up a symbol by name, respecting module visibility and qualification rules
 Symbol* checker_lookup(Checker* checker, const char* name) {
     for (Scope* scope = checker->scope; scope; scope = scope->parent) {
         unsigned int index = hash_string(name) % scope->size;
@@ -326,6 +335,7 @@ Symbol* checker_lookup_any(Checker* checker, const char* name) {
     return NULL;
 }
 
+// Look up a symbol in the current scope only (no parent traversal)
 Symbol* checker_lookup_local(Checker* checker, const char* name) {
     Scope* scope = checker->scope;
     if (!scope)
@@ -363,6 +373,7 @@ static int check_destruct_pattern_redefinitions(Checker* checker, DestructPatter
     return had_error;
 }
 
+// Recursive helper: collect pattern identifiers and check for duplicates or scope conflicts
 static int check_destruct_pattern_redefinitions_internal(Checker* checker, DestructPattern* pattern,
                                                          int line, int col, char*** names,
                                                          int* count, int* capacity) {
@@ -489,6 +500,7 @@ static void define_destruct_pattern_vars(Checker* checker, DestructPattern* patt
 
 // --- Statement case helpers ---
 
+// Type-check a variable declaration: handles destructuring, type inference, and RC tracking
 static void check_var_decl_stmt(Checker* checker, Node* node) {
     // Check if this is a destructuring declaration
     DestructPattern* pattern = node->as.var_decl.destruct_pattern;
@@ -592,6 +604,7 @@ static void check_var_decl_stmt(Checker* checker, Node* node) {
     }
 }
 
+// Type-check a for loop: init, condition, post-expression, and body
 static void check_for_stmt(Checker* checker, Node* node) {
     checker_push_scope(checker); // New scope for init var
 
@@ -619,6 +632,7 @@ static void check_for_stmt(Checker* checker, Node* node) {
     checker_pop_scope(checker);
 }
 
+// Type-check a foreach loop: validate range bounds and define loop variable
 static void check_foreach_stmt(Checker* checker, Node* node) {
     checker_push_scope(checker); // New scope for loop variable
 
@@ -664,6 +678,7 @@ static void check_foreach_stmt(Checker* checker, Node* node) {
     checker_pop_scope(checker);
 }
 
+// Type-check a return statement against the current function's return type
 static void check_return_stmt(Checker* checker, Node* node) {
     Type* expected = checker->current_func_return;
     if (!expected) {
@@ -691,6 +706,7 @@ static void check_return_stmt(Checker* checker, Node* node) {
 // Statement checking
 // =============================================================================
 
+// Dispatch statement type-checking based on node type
 void check_statement(Checker* checker, Node* node) {
     if (!node)
         return;
@@ -780,6 +796,7 @@ void check_statement(Checker* checker, Node* node) {
 // Declaration checking
 // =============================================================================
 
+// Build a TYPE_FUNC from a function declaration's parameter and return type annotations
 static Type* get_function_type(Checker* checker, Node* node) {
     func_decl_node* fdn = &(node->as.func_decl);
 
@@ -809,6 +826,7 @@ static Type* get_function_type(Checker* checker, Node* node) {
     return func_type;
 }
 
+// Process an extern module block: register each declared function in the symbol table
 static void check_extern_module_decl(Checker* checker, Node* node) {
     for (int i = 0; i < node->as.extern_module.decls.count; i++) {
         Node* decl = node->as.extern_module.decls.nodes[i];
@@ -822,6 +840,7 @@ static void check_extern_module_decl(Checker* checker, Node* node) {
     }
 }
 
+// Type-check a function declaration: signature, parameters, body, and method registration
 static void check_func_decl(Checker* checker, Node* node) {
     func_decl_node* fdn = &node->as.func_decl;
 
@@ -968,6 +987,7 @@ static void check_func_decl(Checker* checker, Node* node) {
     free(mangled_name);
 }
 
+// Type-check a struct declaration: resolve fields, detect RC fields, or register generic template
 static void check_struct_decl(Checker* checker, Node* node) {
     const char* name = node->as.struct_decl.name;
 
@@ -1014,6 +1034,7 @@ static void check_struct_decl(Checker* checker, Node* node) {
                    checker->current_module);
 }
 
+// Type-check an enum declaration: resolve variant types or register generic template
 static void check_enum_decl(Checker* checker, Node* node) {
     const char* name = node->as.enum_decl.name;
 
@@ -1066,6 +1087,7 @@ static void check_enum_decl(Checker* checker, Node* node) {
     }
 }
 
+// Type-check a trait declaration: build TYPE_TRAIT with method signatures
 static void check_trait_decl(Checker* checker, Node* node) {
     const char* name = node->as.trait_decl.name;
 
@@ -1095,6 +1117,7 @@ static void check_trait_decl(Checker* checker, Node* node) {
                    checker->current_module);
 }
 
+// Type-check a type alias: resolve target type or register generic alias template
 static void check_type_alias_decl(Checker* checker, Node* node) {
     const char* name = node->as.type_alias.name;
 
@@ -1133,6 +1156,7 @@ static void check_type_alias_decl(Checker* checker, Node* node) {
                    checker->current_module);
 }
 
+// Type-check an impl block: verify methods match trait signatures and register trait impl
 static void check_impl_decl(Checker* checker, Node* node) {
     const char* trait_name    = node->as.impl_decl.trait_name;
     const char* type_name_str = node->as.impl_decl.type_name;
@@ -1270,6 +1294,7 @@ static void check_impl_decl(Checker* checker, Node* node) {
     }
 }
 
+// Dispatch declaration type-checking based on node type
 static void check_decl(Checker* checker, Node* node) {
     if (!node)
         return;
@@ -1318,6 +1343,9 @@ static void check_decl(Checker* checker, Node* node) {
 // Main entry point
 // =============================================================================
 
+// Run the checker over an entire program AST in multiple passes:
+// 1. Forward-declare types  2. Register generic methods/impls
+// 3. Check library modules  4. Check main module
 int checker_check(Checker* checker, Node* ast) {
     if (!ast || ast->type != NODE_PROGRAM) {
         return 0;
