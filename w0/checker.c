@@ -2923,44 +2923,76 @@ int checker_check(Checker* checker, Node* ast) {
 
     checker_push_scope(checker); // Global scope
 
-    // First pass: declare all types (structs, enums) for forward references
+    // First pass: declare all types (structs, enums, traits) for forward references
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
             continue;
-        // Set current module context (NULL for "main", module name for library imports)
         checker->current_module =
             strcmp(mod->as.module.name, "main") == 0 ? NULL : mod->as.module.name;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
             if (decl->type == NODE_STRUCT_DECL || decl->type == NODE_ENUM_DECL ||
-                decl->type == NODE_TRAIT_DECL || decl->type == NODE_TYPE_ALIAS) {
+                decl->type == NODE_TRAIT_DECL) {
                 check_decl(checker, decl);
             }
         }
     }
 
-    // Second pass: check everything else
+    // Second pass: register generic methods and trait impls on GenericDefs.
+    // This must happen before type aliases, which may trigger generic instantiation.
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        checker->current_module =
+            strcmp(mod->as.module.name, "main") == 0 ? NULL : mod->as.module.name;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            // Generic method: func (Box<T>) get(): T
+            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type &&
+                decl->as.func_decl.receiver_type_args.count > 0) {
+                check_decl(checker, decl);
+            }
+            // Generic impl block: impl Drop for Box<T>
+            else if (decl->type == NODE_IMPL_DECL &&
+                     decl->as.impl_decl.type_args.count > 0) {
+                check_decl(checker, decl);
+            }
+        }
+    }
+
+    // Third pass: check everything else in library modules (including type aliases)
     // Process library modules (non-main) first, then main module last
     // This ensures library functions are declared before main uses them
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
             continue;
-        // Skip main module in this pass
         if (strcmp(mod->as.module.name, "main") == 0)
             continue;
         checker->current_module = mod->as.module.name;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type != NODE_STRUCT_DECL && decl->type != NODE_ENUM_DECL &&
-                decl->type != NODE_TRAIT_DECL && decl->type != NODE_TYPE_ALIAS) {
-                check_decl(checker, decl);
+            // Skip already-processed declarations
+            if (decl->type == NODE_STRUCT_DECL || decl->type == NODE_ENUM_DECL ||
+                decl->type == NODE_TRAIT_DECL) {
+                continue;
             }
+            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type &&
+                decl->as.func_decl.receiver_type_args.count > 0) {
+                continue;
+            }
+            if (decl->type == NODE_IMPL_DECL &&
+                decl->as.impl_decl.type_args.count > 0) {
+                continue;
+            }
+            check_decl(checker, decl);
         }
     }
 
-    // Third pass: check main module
+    // Fourth pass: check main module (including type aliases)
+    // Type aliases that trigger generic instantiation now have access to all library symbols
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
@@ -2970,10 +3002,20 @@ int checker_check(Checker* checker, Node* ast) {
         checker->current_module = NULL;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type != NODE_STRUCT_DECL && decl->type != NODE_ENUM_DECL &&
-                decl->type != NODE_TRAIT_DECL && decl->type != NODE_TYPE_ALIAS) {
-                check_decl(checker, decl);
+            // Skip already-processed declarations
+            if (decl->type == NODE_STRUCT_DECL || decl->type == NODE_ENUM_DECL ||
+                decl->type == NODE_TRAIT_DECL) {
+                continue;
             }
+            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type &&
+                decl->as.func_decl.receiver_type_args.count > 0) {
+                continue;
+            }
+            if (decl->type == NODE_IMPL_DECL &&
+                decl->as.impl_decl.type_args.count > 0) {
+                continue;
+            }
+            check_decl(checker, decl);
         }
     }
 

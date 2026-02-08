@@ -8,49 +8,55 @@ trait Drop {
     func drop(): void;
 }
 
-struct HashEntry<V> {
-    next: HashEntry<V>,
+struct HashEntry<K,V> {
+    next: HashEntry<K,V>,
     value: V,
 }
 
-impl Drop for HashEntry<V> {
+impl Drop for HashEntry<K,V> {
     func drop(): void {
         std.print("Dropping HashEntry\n");
         // self.next = null;
     }
 }
 
-struct HashTable<V>  {
-    buckets: Vec<HashEntry<V>> ,
+// struct HashTable<V>  {
+//     buckets: Vec<HashEntry<V>> ,
+//     size: u32,
+// }
+
+struct HashTable<K, V>  {
+    buckets: Vec<HashEntry<K, V>> ,
     size: u32,
 }
 
-func (HashTable<V>) init(): void {
+func (HashTable<K,V>) init(): void {
     // self.buckets = new Vec<HashEntry<V>>{};
     self.buckets.clear();
     self.size = 0;
     foreach (const i in 0..16) {
-        self.buckets.push(new HashEntry<V> {next: null, value: 0});
+        self.buckets.push(new HashEntry<K, V>{next: null, value: 0});
     }
     // Implementation of insert method
 }
 
-impl Drop for HashTable<V> {
+impl Drop for HashTable<K, V> {
     func drop(): void {
         std.print("Dropping HashTable\n");
         self.buckets.clear();
     }
 }
 
-// type HashMap = HashTable<string, i32>;
+type HashMap = HashTable<string, i32>;
+type HashMapEntry = HashEntry<string, i32>;
 
 func main(): i32 {
 
     std.print("Testing HashTable\n");
 
-    var h: HashTable<i32> = new HashTable<i32>{
+    var h: HashMap = new HashMap{
         size: 0,
-        buckets: new Vec<HashEntry<i32>>{},
+        buckets: new Vec<HashMapEntry>{},
     };
 
     h.init();
