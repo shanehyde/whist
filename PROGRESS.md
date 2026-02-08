@@ -4,10 +4,23 @@ A weekly changelog of the Whist compiler, tracking development from initial comm
 
 ---
 
-## Week of Feb 3 – Feb 7, 2026
+## Week of Feb 3 – Feb 8, 2026
 
-A big week for memory management and type system maturity. The compiler gained reference-counted heap allocation, a Drop trait for deterministic cleanup, and generic struct support — bringing Whist closer to a language with real resource management.
+A big week for memory management and type system maturity. The compiler gained reference-counted heap allocation, a Drop trait for deterministic cleanup, and generic struct support. The type system expanded with tagged unions, generic enums, type aliases, and a builtin Vec\<T\>. Developer tooling improved with a VS Code syntax highlighting extension and a codegen refactor. Several targeted fixes rounded out generic method resolution, enum type inference, and foreach range semantics.
 
+- **fix: accept all integer types in foreach range expressions** ([#62](https://github.com/shanehyde/whist/pull/62)) — foreach ranges now work with any integer type, not just `i32`
+- **fix: make foreach range end-exclusive** ([#61](https://github.com/shanehyde/whist/pull/61)) — `foreach i in 0..n` is now end-exclusive (`0` to `n-1`), matching Rust/Python semantics
+- **fix: support enum type inference from return type and struct-null comparison** ([#60](https://github.com/shanehyde/whist/pull/60)) — enum variants can be inferred from the function return type; structs can be compared to `null`
+- **fix: resolve generic methods not found when type alias triggers instantiation** ([#59](https://github.com/shanehyde/whist/pull/59)) — methods on generic types accessed via type aliases are now resolved correctly
+- **fix: codegen crashes and incorrect C for generic struct methods** ([#58](https://github.com/shanehyde/whist/pull/58)) — fixed crashes and wrong C output when calling methods on generic structs
+- **feat: add Vec\<T\> as a compiler builtin type** ([#57](https://github.com/shanehyde/whist/pull/57)) — `Vec<T>` is now a builtin with `push`, `pop`, `get`, `set`, and `len` operations
+- **feat: add VS Code syntax highlighting extension** ([#56](https://github.com/shanehyde/whist/pull/56)) — TextMate grammar for `.w` files with keyword, type, and literal highlighting
+- **feat: add type aliases with generic support** ([#55](https://github.com/shanehyde/whist/pull/55)) — `type Name = ExistingType` and `type Name<T> = Generic<T>` for cleaner APIs
+- **refactor: code quality improvements and codegen split** ([#54](https://github.com/shanehyde/whist/pull/54)) — codegen split into multiple files and general code quality cleanup
+
+- **docs: rename plans/ to features/** ([#53](https://github.com/shanehyde/whist/pull/53)) — design documents directory renamed for clarity
+- **feat: add generic enums with type parameters** ([#52](https://github.com/shanehyde/whist/pull/52)) — enums can now take type parameters (`enum Option<T> { Some(T), None }`) with monomorphization
+- **feat: add enums with data (tagged unions)** ([#51](https://github.com/shanehyde/whist/pull/51)) — enum variants can carry payloads (`enum Shape { Circle(f64), Rect(f64, f64) }`), enabling algebraic data types
 - **refactor: remove explicit receiver from impl methods** ([#50](https://github.com/shanehyde/whist/pull/50)) — methods inside `impl` blocks no longer specify a redundant receiver; it's inferred from `impl Trait for Type`. Generic type args move to the impl header (`impl Drop for Box<T>`)
 - **refactor: remove stack-based struct initialization** ([#48](https://github.com/shanehyde/whist/pull/48)) — all structs are now consistently heap-allocated via `new`
 - **fix: support Drop trait for generic structs and nested RC field cleanup** ([#47](https://github.com/shanehyde/whist/pull/47)) — generic types now properly propagate Drop and clean up nested RC fields
