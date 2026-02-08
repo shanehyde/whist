@@ -23,7 +23,17 @@ static Type* check_unary_expr(Checker* checker, Node* node);
 static Type* check_index_expr(Checker* checker, Node* node);
 static Type* check_member_expr(Checker* checker, Node* node);
 static Type* check_assign_expr(Checker* checker, Node* node);
+static Type* check_enum_value_expr(Checker* checker, Node* node);
+static Type* check_call_expr(Checker* checker, Node* node);
+static Type* check_new_expr(Checker* checker, Node* node);
+static Type* check_array_lit_expr(Checker* checker, Node* node);
 static int   is_lvalue(Node* node);
+
+// Forward declarations for statement checking helpers
+static void check_var_decl_stmt(Checker* checker, Node* node);
+static void check_for_stmt(Checker* checker, Node* node);
+static void check_foreach_stmt(Checker* checker, Node* node);
+static void check_return_stmt(Checker* checker, Node* node);
 
 // Forward declarations for destructuring pattern checking
 static int check_destruct_pattern_redefinitions(Checker* checker, DestructPattern* pattern,
@@ -1545,6 +1555,314 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
     return target;
 }
 
+// --- Expression case helpers ---
+
+static Type* check_enum_value_expr(Checker* checker, Node* node) {
+    // Look up the enum type
+    const char* enum_name = node->as.enum_value.enum_name;
+    Symbol*     sym       = checker_lookup(checker, enum_name);
+    Type*       enum_type = NULL;
+
+    if (sym && sym->kind == SYM_TYPE && sym->type->kind == TYPE_ENUM) {
+        // Non-generic enum or already-instantiated generic enum
+        enum_type = sym->type;
+    } else {
+        // Try as a generic enum definition
+        GenericDef* def = lookup_generic_def(checker, enum_name);
+        if (!def || def->decl->type != NODE_ENUM_DECL) {
+            check_error(checker, node->line, node->column, "Unknown enum '%s'", enum_name);
+            return type_error;
+        }
+
+        // Find the variant by name in the template
+        Node* template_decl = def->decl;
+        int   variant_idx   = -1;
+        for (int i = 0; i < template_decl->as.enum_decl.values.count; i++) {
+            Node* v = template_decl->as.enum_decl.values.nodes[i];
+            if (strcmp(v->as.enum_variant.name, node->as.enum_value.value_name) == 0) {
+                variant_idx = i;
+                break;
+            }
+        }
+        if (variant_idx < 0) {
+            check_error(checker, node->line, node->column, "'%s' is not a value of enum '%s'",
+                        node->as.enum_value.value_name, enum_name);
+            return type_error;
+        }
+
+        Node* variant    = template_decl->as.enum_decl.values.nodes[variant_idx];
+        int   type_count = variant->as.enum_variant.types.count;
+        int   arg_count  = node->as.enum_value.args.count;
+
+        if (arg_count != type_count) {
+            check_error(checker, node->line, node->column,
+                        "Enum variant '%s::%s' expects %d argument(s), got %d", enum_name,
+                        node->as.enum_value.value_name, type_count, arg_count);
+            return type_error;
+        }
+
+        // Type-check args and infer type params
+        Type** inferred     = xcalloc(def->type_param_count, sizeof(Type*));
+        int    all_inferred = 1;
+
+        // First, type-check all args
+        Type** arg_types = NULL;
+        if (arg_count > 0) {
+            arg_types = xmalloc(arg_count * sizeof(Type*));
+            for (int i = 0; i < arg_count; i++) {
+                arg_types[i] = check_expression(checker, node->as.enum_value.args.nodes[i]);
+            }
+        }
+
+        // Infer type params from args
+        for (int i = 0; i < arg_count; i++) {
+            Node* vtype_node = variant->as.enum_variant.types.nodes[i];
+            if (vtype_node->type == NODE_IDENT) {
+                // Check if this ident is a type param
+                for (int p = 0; p < def->type_param_count; p++) {
+                    if (strcmp(vtype_node->as.ident.name, def->type_params[p]) == 0) {
+                        if (!inferred[p]) {
+                            inferred[p] = arg_types[i];
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Check if all type params were inferred
+        for (int p = 0; p < def->type_param_count; p++) {
+            if (!inferred[p]) {
+                all_inferred = 0;
+                break;
+            }
+        }
+
+        // If not all inferred, try the target hint
+        if (!all_inferred && checker->enum_target_hint &&
+            checker->enum_target_hint->kind == TYPE_ENUM) {
+            // The target hint is an already-instantiated generic enum
+            // Find the instance to get the type args
+            for (int gi = 0; gi < checker->generic_instance_count; gi++) {
+                GenericInstance* inst = &checker->generic_instances[gi];
+                if (inst->type == checker->enum_target_hint &&
+                    strcmp(inst->base_name, enum_name) == 0) {
+                    // Use instance type args for any missing inferred params
+                    for (int p = 0; p < def->type_param_count && p < inst->type_arg_count; p++) {
+                        if (!inferred[p]) {
+                            inferred[p] = inst->type_args[p];
+                        }
+                    }
+                    break;
+                }
+            }
+            // Recheck
+            all_inferred = 1;
+            for (int p = 0; p < def->type_param_count; p++) {
+                if (!inferred[p]) {
+                    all_inferred = 0;
+                    break;
+                }
+            }
+        }
+
+        if (!all_inferred) {
+            check_error(checker, node->line, node->column,
+                        "Cannot infer type parameters for generic enum '%s'; add explicit type "
+                        "annotation",
+                        enum_name);
+            free(inferred);
+            free(arg_types);
+            return type_error;
+        }
+
+        // Generate mangled name and instantiate
+        char* mangled = type_mangle_generic(enum_name, inferred, def->type_param_count);
+
+        GenericInstance* existing = lookup_generic_instance(checker, mangled);
+        if (existing) {
+            enum_type = existing->type;
+            free(mangled);
+        } else {
+            // Make a copy of inferred for instantiate (it takes ownership)
+            Type** args_copy = xmalloc(def->type_param_count * sizeof(Type*));
+            for (int p = 0; p < def->type_param_count; p++) {
+                args_copy[p] = inferred[p];
+            }
+            enum_type =
+                instantiate_generic_enum(checker, def, mangled, args_copy, def->type_param_count);
+        }
+
+        free(inferred);
+        free(arg_types);
+
+        // Update AST node to use mangled name (critical for codegen)
+        free(node->as.enum_value.enum_name);
+        node->as.enum_value.enum_name        = xstrdup(enum_type->as.enm.name);
+        node->as.enum_value.enum_name_length = (int)strlen(enum_type->as.enm.name);
+    }
+
+    // Check that the value exists in the (possibly instantiated) enum
+    int variant_idx = -1;
+    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
+        if (strcmp(enum_type->as.enm.value_names[i], node->as.enum_value.value_name) == 0) {
+            variant_idx = i;
+            break;
+        }
+    }
+    if (variant_idx < 0) {
+        check_error(checker, node->line, node->column, "'%s' is not a value of enum '%s'",
+                    node->as.enum_value.value_name, node->as.enum_value.enum_name);
+        return type_error;
+    }
+
+    // Set is_data_enum flag for codegen
+    node->as.enum_value.is_data_enum = enum_type->as.enm.has_data;
+
+    // Validate constructor args for data enums
+    int expected_args = enum_type->as.enm.variant_type_counts[variant_idx];
+    int actual_args   = node->as.enum_value.args.count;
+
+    if (actual_args != expected_args) {
+        check_error(checker, node->line, node->column,
+                    "Enum variant '%s::%s' expects %d argument(s), got %d",
+                    node->as.enum_value.enum_name, node->as.enum_value.value_name, expected_args,
+                    actual_args);
+        return type_error;
+    }
+
+    // Type-check each constructor arg
+    for (int i = 0; i < actual_args; i++) {
+        Type* arg_type = check_expression(checker, node->as.enum_value.args.nodes[i]);
+        Type* expected = enum_type->as.enm.variant_types[variant_idx][i];
+        if (arg_type->kind != TYPE_ERROR && !type_assignable(expected, arg_type)) {
+            check_error(checker, node->as.enum_value.args.nodes[i]->line,
+                        node->as.enum_value.args.nodes[i]->column,
+                        "Enum variant '%s::%s' argument %d: expected '%s', got '%s'",
+                        node->as.enum_value.enum_name, node->as.enum_value.value_name, i + 1,
+                        type_name(expected), type_name(arg_type));
+        }
+    }
+
+    return enum_type;
+}
+
+static Type* check_call_expr(Checker* checker, Node* node) {
+    Type* func_type = check_expression(checker, node->as.call.func);
+
+    if (func_type->kind == TYPE_ERROR)
+        return type_error;
+
+    if (func_type->kind != TYPE_FUNC) {
+        check_error_cannot(checker, node->line, node->column, "call", func_type);
+        return type_error;
+    }
+
+    // Check argument count
+    if (func_type->as.func.is_varargs) {
+        // Varargs: require at least param_count arguments
+        if (node->as.call.args.count < func_type->as.func.param_count) {
+            check_error(checker, node->line, node->column, "Expected at least %d arguments, got %d",
+                        func_type->as.func.param_count, node->as.call.args.count);
+            return type_error;
+        }
+    } else {
+        if (node->as.call.args.count != func_type->as.func.param_count) {
+            check_error(checker, node->line, node->column, "Expected %d arguments, got %d",
+                        func_type->as.func.param_count, node->as.call.args.count);
+            return type_error;
+        }
+    }
+
+    // Check argument types (only for named params)
+    for (int i = 0; i < func_type->as.func.param_count; i++) {
+        Type* arg_type   = check_expression(checker, node->as.call.args.nodes[i]);
+        Type* param_type = func_type->as.func.param_types[i];
+
+        if (!type_assignable(param_type, arg_type)) {
+            char ctx[32];
+            snprintf(ctx, sizeof(ctx), "Argument %d", i + 1);
+            check_error_type(checker, node->as.call.args.nodes[i]->line,
+                             node->as.call.args.nodes[i]->column, ctx, param_type, arg_type);
+        }
+    }
+
+    // Type-check extra variadic arguments (but don't check against param types)
+    for (int i = func_type->as.func.param_count; i < node->as.call.args.count; i++) {
+        check_expression(checker, node->as.call.args.nodes[i]);
+    }
+
+    return func_type->as.func.return_type;
+}
+
+static Type* check_new_expr(Checker* checker, Node* node) {
+    Type* resolved = resolve_type(checker, node->as.new_expr.type_node);
+    if (resolved == type_error)
+        return type_error;
+    if (resolved->kind == TYPE_VEC) {
+        // new Vec<T>{} or new Vec<T>{1, 2, 3}
+        Type* elem_type = resolved->as.vec.elem;
+        Node* init      = node->as.new_expr.init;
+        // Check each element expression against the element type
+        for (int i = 0; i < init->as.struct_init.fields.count; i++) {
+            Node* field = init->as.struct_init.fields.nodes[i];
+            if (field->type != NODE_FIELD_INIT)
+                continue;
+            Type* val_type = check_expression(checker, field->as.field_init.value);
+            if (val_type->kind != TYPE_ERROR && !type_assignable(elem_type, val_type)) {
+                check_error_type(checker, field->line, field->column, "Vec element", elem_type,
+                                 val_type);
+            }
+        }
+        node->as.new_expr.resolved_type = resolved;
+        return resolved;
+    }
+    if (resolved->kind != TYPE_STRUCT) {
+        check_error(checker, node->line, node->column, "'new' requires a struct type, got '%s'",
+                    type_name(resolved));
+        return type_error;
+    }
+    Type* init_type = check_struct_init(checker, node->as.new_expr.init, resolved);
+    if (init_type == type_error)
+        return type_error;
+    node->as.new_expr.resolved_type = resolved;
+    return resolved;
+}
+
+static Type* check_array_lit_expr(Checker* checker, Node* node) {
+    int count = node->as.array_lit.elements.count;
+    if (count == 0) {
+        check_error(checker, node->line, node->column,
+                    "Empty array literal requires type annotation");
+        return type_error;
+    }
+
+    // Check first element to get the element type
+    Type* elem_type = check_expression(checker, node->as.array_lit.elements.nodes[0]);
+    if (elem_type->kind == TYPE_ERROR) {
+        return type_error;
+    }
+
+    // Check remaining elements have compatible types
+    for (int i = 1; i < count; i++) {
+        Type* t = check_expression(checker, node->as.array_lit.elements.nodes[i]);
+        if (t->kind == TYPE_ERROR) {
+            return type_error;
+        }
+        if (!type_assignable(elem_type, t)) {
+            check_error(checker, node->as.array_lit.elements.nodes[i]->line,
+                        node->as.array_lit.elements.nodes[i]->column,
+                        "Array element type mismatch: expected '%s', got '%s'",
+                        type_name(elem_type), type_name(t));
+            return type_error;
+        }
+    }
+
+    // Store resolved element type for codegen
+    node->as.array_lit.resolved_type = elem_type;
+    return type_array(elem_type, count);
+}
+
 // =============================================================================
 // Expression checking
 // =============================================================================
@@ -1582,196 +1900,8 @@ static Type* check_expression(Checker* checker, Node* node) {
         return sym->type;
     }
 
-    case NODE_ENUM_VALUE: {
-        // Look up the enum type
-        const char* enum_name = node->as.enum_value.enum_name;
-        Symbol*     sym       = checker_lookup(checker, enum_name);
-        Type*       enum_type = NULL;
-
-        if (sym && sym->kind == SYM_TYPE && sym->type->kind == TYPE_ENUM) {
-            // Non-generic enum or already-instantiated generic enum
-            enum_type = sym->type;
-        } else {
-            // Try as a generic enum definition
-            GenericDef* def = lookup_generic_def(checker, enum_name);
-            if (!def || def->decl->type != NODE_ENUM_DECL) {
-                check_error(checker, node->line, node->column, "Unknown enum '%s'", enum_name);
-                return type_error;
-            }
-
-            // Find the variant by name in the template
-            Node* template_decl = def->decl;
-            int   variant_idx   = -1;
-            for (int i = 0; i < template_decl->as.enum_decl.values.count; i++) {
-                Node* v = template_decl->as.enum_decl.values.nodes[i];
-                if (strcmp(v->as.enum_variant.name, node->as.enum_value.value_name) == 0) {
-                    variant_idx = i;
-                    break;
-                }
-            }
-            if (variant_idx < 0) {
-                check_error(checker, node->line, node->column, "'%s' is not a value of enum '%s'",
-                            node->as.enum_value.value_name, enum_name);
-                return type_error;
-            }
-
-            Node* variant    = template_decl->as.enum_decl.values.nodes[variant_idx];
-            int   type_count = variant->as.enum_variant.types.count;
-            int   arg_count  = node->as.enum_value.args.count;
-
-            if (arg_count != type_count) {
-                check_error(checker, node->line, node->column,
-                            "Enum variant '%s::%s' expects %d argument(s), got %d", enum_name,
-                            node->as.enum_value.value_name, type_count, arg_count);
-                return type_error;
-            }
-
-            // Type-check args and infer type params
-            Type** inferred     = xcalloc(def->type_param_count, sizeof(Type*));
-            int    all_inferred = 1;
-
-            // First, type-check all args
-            Type** arg_types = NULL;
-            if (arg_count > 0) {
-                arg_types = xmalloc(arg_count * sizeof(Type*));
-                for (int i = 0; i < arg_count; i++) {
-                    arg_types[i] = check_expression(checker, node->as.enum_value.args.nodes[i]);
-                }
-            }
-
-            // Infer type params from args
-            for (int i = 0; i < arg_count; i++) {
-                Node* vtype_node = variant->as.enum_variant.types.nodes[i];
-                if (vtype_node->type == NODE_IDENT) {
-                    // Check if this ident is a type param
-                    for (int p = 0; p < def->type_param_count; p++) {
-                        if (strcmp(vtype_node->as.ident.name, def->type_params[p]) == 0) {
-                            if (!inferred[p]) {
-                                inferred[p] = arg_types[i];
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Check if all type params were inferred
-            for (int p = 0; p < def->type_param_count; p++) {
-                if (!inferred[p]) {
-                    all_inferred = 0;
-                    break;
-                }
-            }
-
-            // If not all inferred, try the target hint
-            if (!all_inferred && checker->enum_target_hint &&
-                checker->enum_target_hint->kind == TYPE_ENUM) {
-                // The target hint is an already-instantiated generic enum
-                // Find the instance to get the type args
-                for (int gi = 0; gi < checker->generic_instance_count; gi++) {
-                    GenericInstance* inst = &checker->generic_instances[gi];
-                    if (inst->type == checker->enum_target_hint &&
-                        strcmp(inst->base_name, enum_name) == 0) {
-                        // Use instance type args for any missing inferred params
-                        for (int p = 0; p < def->type_param_count && p < inst->type_arg_count;
-                             p++) {
-                            if (!inferred[p]) {
-                                inferred[p] = inst->type_args[p];
-                            }
-                        }
-                        break;
-                    }
-                }
-                // Recheck
-                all_inferred = 1;
-                for (int p = 0; p < def->type_param_count; p++) {
-                    if (!inferred[p]) {
-                        all_inferred = 0;
-                        break;
-                    }
-                }
-            }
-
-            if (!all_inferred) {
-                check_error(checker, node->line, node->column,
-                            "Cannot infer type parameters for generic enum '%s'; add explicit type "
-                            "annotation",
-                            enum_name);
-                free(inferred);
-                free(arg_types);
-                return type_error;
-            }
-
-            // Generate mangled name and instantiate
-            char* mangled = type_mangle_generic(enum_name, inferred, def->type_param_count);
-
-            GenericInstance* existing = lookup_generic_instance(checker, mangled);
-            if (existing) {
-                enum_type = existing->type;
-                free(mangled);
-            } else {
-                // Make a copy of inferred for instantiate (it takes ownership)
-                Type** args_copy = xmalloc(def->type_param_count * sizeof(Type*));
-                for (int p = 0; p < def->type_param_count; p++) {
-                    args_copy[p] = inferred[p];
-                }
-                enum_type = instantiate_generic_enum(checker, def, mangled, args_copy,
-                                                     def->type_param_count);
-            }
-
-            free(inferred);
-            free(arg_types);
-
-            // Update AST node to use mangled name (critical for codegen)
-            free(node->as.enum_value.enum_name);
-            node->as.enum_value.enum_name        = xstrdup(enum_type->as.enm.name);
-            node->as.enum_value.enum_name_length = (int)strlen(enum_type->as.enm.name);
-        }
-
-        // Check that the value exists in the (possibly instantiated) enum
-        int variant_idx = -1;
-        for (int i = 0; i < enum_type->as.enm.value_count; i++) {
-            if (strcmp(enum_type->as.enm.value_names[i], node->as.enum_value.value_name) == 0) {
-                variant_idx = i;
-                break;
-            }
-        }
-        if (variant_idx < 0) {
-            check_error(checker, node->line, node->column, "'%s' is not a value of enum '%s'",
-                        node->as.enum_value.value_name, node->as.enum_value.enum_name);
-            return type_error;
-        }
-
-        // Set is_data_enum flag for codegen
-        node->as.enum_value.is_data_enum = enum_type->as.enm.has_data;
-
-        // Validate constructor args for data enums
-        int expected_args = enum_type->as.enm.variant_type_counts[variant_idx];
-        int actual_args   = node->as.enum_value.args.count;
-
-        if (actual_args != expected_args) {
-            check_error(checker, node->line, node->column,
-                        "Enum variant '%s::%s' expects %d argument(s), got %d",
-                        node->as.enum_value.enum_name, node->as.enum_value.value_name,
-                        expected_args, actual_args);
-            return type_error;
-        }
-
-        // Type-check each constructor arg
-        for (int i = 0; i < actual_args; i++) {
-            Type* arg_type = check_expression(checker, node->as.enum_value.args.nodes[i]);
-            Type* expected = enum_type->as.enm.variant_types[variant_idx][i];
-            if (arg_type->kind != TYPE_ERROR && !type_assignable(expected, arg_type)) {
-                check_error(checker, node->as.enum_value.args.nodes[i]->line,
-                            node->as.enum_value.args.nodes[i]->column,
-                            "Enum variant '%s::%s' argument %d: expected '%s', got '%s'",
-                            node->as.enum_value.enum_name, node->as.enum_value.value_name, i + 1,
-                            type_name(expected), type_name(arg_type));
-            }
-        }
-
-        return enum_type;
-    }
+    case NODE_ENUM_VALUE:
+        return check_enum_value_expr(checker, node);
 
     case NODE_BINARY:
         return check_binary_expr(checker, node);
@@ -1779,54 +1909,8 @@ static Type* check_expression(Checker* checker, Node* node) {
     case NODE_UNARY:
         return check_unary_expr(checker, node);
 
-    case NODE_CALL: {
-        Type* func_type = check_expression(checker, node->as.call.func);
-
-        if (func_type->kind == TYPE_ERROR)
-            return type_error;
-
-        if (func_type->kind != TYPE_FUNC) {
-            check_error_cannot(checker, node->line, node->column, "call", func_type);
-            return type_error;
-        }
-
-        // Check argument count
-        if (func_type->as.func.is_varargs) {
-            // Varargs: require at least param_count arguments
-            if (node->as.call.args.count < func_type->as.func.param_count) {
-                check_error(checker, node->line, node->column,
-                            "Expected at least %d arguments, got %d",
-                            func_type->as.func.param_count, node->as.call.args.count);
-                return type_error;
-            }
-        } else {
-            if (node->as.call.args.count != func_type->as.func.param_count) {
-                check_error(checker, node->line, node->column, "Expected %d arguments, got %d",
-                            func_type->as.func.param_count, node->as.call.args.count);
-                return type_error;
-            }
-        }
-
-        // Check argument types (only for named params)
-        for (int i = 0; i < func_type->as.func.param_count; i++) {
-            Type* arg_type   = check_expression(checker, node->as.call.args.nodes[i]);
-            Type* param_type = func_type->as.func.param_types[i];
-
-            if (!type_assignable(param_type, arg_type)) {
-                char ctx[32];
-                snprintf(ctx, sizeof(ctx), "Argument %d", i + 1);
-                check_error_type(checker, node->as.call.args.nodes[i]->line,
-                                 node->as.call.args.nodes[i]->column, ctx, param_type, arg_type);
-            }
-        }
-
-        // Type-check extra variadic arguments (but don't check against param types)
-        for (int i = func_type->as.func.param_count; i < node->as.call.args.count; i++) {
-            check_expression(checker, node->as.call.args.nodes[i]);
-        }
-
-        return func_type->as.func.return_type;
-    }
+    case NODE_CALL:
+        return check_call_expr(checker, node);
 
     case NODE_INDEX:
         return check_index_expr(checker, node);
@@ -1840,39 +1924,8 @@ static Type* check_expression(Checker* checker, Node* node) {
     case NODE_ASSIGN:
         return check_assign_expr(checker, node);
 
-    case NODE_NEW_EXPR: {
-        Type* resolved = resolve_type(checker, node->as.new_expr.type_node);
-        if (resolved == type_error)
-            return type_error;
-        if (resolved->kind == TYPE_VEC) {
-            // new Vec<T>{} or new Vec<T>{1, 2, 3}
-            Type* elem_type = resolved->as.vec.elem;
-            Node* init      = node->as.new_expr.init;
-            // Check each element expression against the element type
-            for (int i = 0; i < init->as.struct_init.fields.count; i++) {
-                Node* field = init->as.struct_init.fields.nodes[i];
-                if (field->type != NODE_FIELD_INIT)
-                    continue;
-                Type* val_type = check_expression(checker, field->as.field_init.value);
-                if (val_type->kind != TYPE_ERROR && !type_assignable(elem_type, val_type)) {
-                    check_error_type(checker, field->line, field->column, "Vec element", elem_type,
-                                     val_type);
-                }
-            }
-            node->as.new_expr.resolved_type = resolved;
-            return resolved;
-        }
-        if (resolved->kind != TYPE_STRUCT) {
-            check_error(checker, node->line, node->column, "'new' requires a struct type, got '%s'",
-                        type_name(resolved));
-            return type_error;
-        }
-        Type* init_type = check_struct_init(checker, node->as.new_expr.init, resolved);
-        if (init_type == type_error)
-            return type_error;
-        node->as.new_expr.resolved_type = resolved;
-        return resolved;
-    }
+    case NODE_NEW_EXPR:
+        return check_new_expr(checker, node);
 
     case NODE_STRUCT_INIT:
         check_error(checker, node->line, node->column,
@@ -1888,39 +1941,8 @@ static Type* check_expression(Checker* checker, Node* node) {
         return type_tuple(elems, count);
     }
 
-    case NODE_ARRAY_LIT: {
-        int count = node->as.array_lit.elements.count;
-        if (count == 0) {
-            check_error(checker, node->line, node->column,
-                        "Empty array literal requires type annotation");
-            return type_error;
-        }
-
-        // Check first element to get the element type
-        Type* elem_type = check_expression(checker, node->as.array_lit.elements.nodes[0]);
-        if (elem_type->kind == TYPE_ERROR) {
-            return type_error;
-        }
-
-        // Check remaining elements have compatible types
-        for (int i = 1; i < count; i++) {
-            Type* t = check_expression(checker, node->as.array_lit.elements.nodes[i]);
-            if (t->kind == TYPE_ERROR) {
-                return type_error;
-            }
-            if (!type_assignable(elem_type, t)) {
-                check_error(checker, node->as.array_lit.elements.nodes[i]->line,
-                            node->as.array_lit.elements.nodes[i]->column,
-                            "Array element type mismatch: expected '%s', got '%s'",
-                            type_name(elem_type), type_name(t));
-                return type_error;
-            }
-        }
-
-        // Store resolved element type for codegen
-        node->as.array_lit.resolved_type = elem_type;
-        return type_array(elem_type, count);
-    }
+    case NODE_ARRAY_LIT:
+        return check_array_lit_expr(checker, node);
 
     default:
         check_error(checker, node->line, node->column, "Unknown expression type %d", node->type);
@@ -2143,6 +2165,206 @@ static void define_destruct_pattern_vars(Checker* checker, DestructPattern* patt
     }
 }
 
+// --- Statement case helpers ---
+
+static void check_var_decl_stmt(Checker* checker, Node* node) {
+    // Check if this is a destructuring declaration
+    DestructPattern* pattern = node->as.var_decl.destruct_pattern;
+    if (pattern) {
+        // Destructuring: var (a, b) = tuple; or var (a, (b, c)) = nested;
+
+        // Check for redefinitions
+        if (check_destruct_pattern_redefinitions(checker, pattern, node->line, node->column)) {
+            return;
+        }
+
+        // Initializer is required (parser enforces this)
+        Type* init_type = check_expression(checker, node->as.var_decl.init);
+
+        // Check pattern against initializer type
+        if (check_destruct_pattern_against_type(checker, pattern, init_type, node->line,
+                                                node->column)) {
+            return;
+        }
+
+        // Define all variables in the pattern
+        define_destruct_pattern_vars(checker, pattern, init_type, node->as.var_decl.is_const,
+                                     node->as.var_decl.is_public);
+        return;
+    }
+
+    // Normal variable declaration
+    const char* name = node->as.var_decl.name;
+
+    // Check for redefinition
+    if (checker_lookup_local(checker, name)) {
+        check_error(checker, node->line, node->column, "Redefinition of '%s'", name);
+        return;
+    }
+
+    Type* decl_type = NULL;
+    Type* init_type = NULL;
+
+    if (node->as.var_decl.type) {
+        decl_type = resolve_type(checker, node->as.var_decl.type);
+    }
+
+    if (node->as.var_decl.init) {
+        // Set enum_target_hint for generic enum inference (e.g., var x: Option<i64> =
+        // Option::None)
+        Type* old_hint = checker->enum_target_hint;
+        if (decl_type && decl_type->kind == TYPE_ENUM) {
+            checker->enum_target_hint = decl_type;
+        }
+        init_type                 = check_expression(checker, node->as.var_decl.init);
+        checker->enum_target_hint = old_hint;
+    }
+
+    Type* var_type;
+    if (decl_type && init_type) {
+        // Both specified - check compatibility
+        if (!type_assignable(decl_type, init_type)) {
+            check_error_type(checker, node->line, node->column, name, decl_type, init_type);
+        }
+        var_type = decl_type;
+    } else if (decl_type) {
+        var_type = decl_type;
+    } else if (init_type) {
+        var_type = init_type;
+    } else {
+        check_error(checker, node->line, node->column,
+                    "Variable '%s' needs type annotation or initializer", name);
+        var_type = type_error;
+    }
+
+    Symbol* sym = checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const,
+                                 node->as.var_decl.is_public, checker->current_module);
+
+    // Propagate RC tracking
+    if (sym && node->as.var_decl.init) {
+        if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
+            node->as.var_decl.is_rc         = 1;
+            node->as.var_decl.resolved_type = var_type;
+            sym->is_rc                      = 1;
+        }
+        if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
+            node->as.var_decl.is_rc         = 1;
+            node->as.var_decl.resolved_type = node->as.var_decl.init->as.new_expr.resolved_type;
+            sym->is_rc                      = 1;
+        } else if (node->as.var_decl.init->type == NODE_IDENT) {
+            Symbol* src = checker_lookup(checker, node->as.var_decl.init->as.ident.name);
+            if (src && src->is_rc) {
+                node->as.var_decl.is_rc         = 1;
+                node->as.var_decl.resolved_type = src->type;
+                sym->is_rc                      = 1;
+            }
+        } else if (node->as.var_decl.init->type == NODE_CALL && var_type) {
+            // Store resolved type for codegen type inference
+            node->as.var_decl.resolved_type = var_type;
+            if (var_type->kind == TYPE_STRUCT) {
+                // Function call returning a struct transfers RC ownership
+                node->as.var_decl.is_rc = 1;
+                sym->is_rc              = 1;
+            }
+        }
+    }
+}
+
+static void check_for_stmt(Checker* checker, Node* node) {
+    checker_push_scope(checker); // New scope for init var
+
+    if (node->as.for_stmt.init) {
+        check_statement(checker, node->as.for_stmt.init);
+    }
+
+    if (node->as.for_stmt.cond) {
+        Type* cond = check_expression(checker, node->as.for_stmt.cond);
+        if (cond->kind != TYPE_BOOL && cond->kind != TYPE_ERROR) {
+            check_error(checker, node->as.for_stmt.cond->line, node->as.for_stmt.cond->column,
+                        "For condition must be bool, got '%s'", type_name(cond));
+        }
+    }
+
+    if (node->as.for_stmt.post) {
+        check_expression(checker, node->as.for_stmt.post);
+    }
+
+    int was_in_loop  = checker->in_loop;
+    checker->in_loop = 1;
+    check_statement(checker, node->as.for_stmt.body);
+    checker->in_loop = was_in_loop;
+
+    checker_pop_scope(checker);
+}
+
+static void check_foreach_stmt(Checker* checker, Node* node) {
+    checker_push_scope(checker); // New scope for loop variable
+
+    // Check that start and end are integers
+    Type* start_type = check_expression(checker, node->as.foreach_stmt.start);
+    Type* end_type   = check_expression(checker, node->as.foreach_stmt.end);
+
+    if (!type_is_integer(start_type) && start_type->kind != TYPE_ERROR) {
+        check_error(checker, node->as.foreach_stmt.start->line, node->as.foreach_stmt.start->column,
+                    "Foreach range start must be int, got '%s'", type_name(start_type));
+    }
+
+    if (!type_is_integer(end_type) && end_type->kind != TYPE_ERROR) {
+        check_error(checker, node->as.foreach_stmt.end->line, node->as.foreach_stmt.end->column,
+                    "Foreach range end must be int, got '%s'", type_name(end_type));
+    }
+
+    // Determine loop variable type: prefer end type when start is a default i64 literal
+    Type* loop_type;
+    if (type_is_integer(end_type) &&
+        (start_type->kind == TYPE_INT64 || !type_is_integer(start_type))) {
+        loop_type = end_type;
+    } else if (type_is_integer(start_type)) {
+        loop_type = start_type;
+    } else {
+        loop_type = type_int64;
+    }
+    node->as.foreach_stmt.resolved_type = loop_type;
+
+    // Add the loop variable as a const integer (immutable)
+    Symbol* sym =
+        checker_define(checker, node->as.foreach_stmt.var_name, SYM_VAR, loop_type, 1, 0, NULL);
+    if (!sym) {
+        check_error(checker, node->line, node->column,
+                    "Variable '%s' already declared in this scope", node->as.foreach_stmt.var_name);
+    }
+
+    int was_in_loop  = checker->in_loop;
+    checker->in_loop = 1;
+    check_statement(checker, node->as.foreach_stmt.body);
+    checker->in_loop = was_in_loop;
+
+    checker_pop_scope(checker);
+}
+
+static void check_return_stmt(Checker* checker, Node* node) {
+    Type* expected = checker->current_func_return;
+    if (!expected) {
+        check_error(checker, node->line, node->column, "Return outside of function");
+        return;
+    }
+
+    if (node->as.return_stmt.value) {
+        // Set enum_target_hint so generic enum constructors can infer from return type
+        Type* old_hint = checker->enum_target_hint;
+        if (expected->kind == TYPE_ENUM) {
+            checker->enum_target_hint = expected;
+        }
+        Type* actual              = check_expression(checker, node->as.return_stmt.value);
+        checker->enum_target_hint = old_hint;
+        if (!type_assignable(expected, actual)) {
+            check_error_type(checker, node->line, node->column, "Return", expected, actual);
+        }
+    } else if (expected->kind != TYPE_VOID) {
+        check_error(checker, node->line, node->column, "Return without value in non-void function");
+    }
+}
+
 // =============================================================================
 // Statement checking
 // =============================================================================
@@ -2156,109 +2378,9 @@ static void check_statement(Checker* checker, Node* node) {
         check_expression(checker, node->as.expr_stmt.expr);
         break;
 
-    case NODE_VAR_DECL: {
-        // Check if this is a destructuring declaration
-        DestructPattern* pattern = node->as.var_decl.destruct_pattern;
-        if (pattern) {
-            // Destructuring: var (a, b) = tuple; or var (a, (b, c)) = nested;
-
-            // Check for redefinitions
-            if (check_destruct_pattern_redefinitions(checker, pattern, node->line, node->column)) {
-                return;
-            }
-
-            // Initializer is required (parser enforces this)
-            Type* init_type = check_expression(checker, node->as.var_decl.init);
-
-            // Check pattern against initializer type
-            if (check_destruct_pattern_against_type(checker, pattern, init_type, node->line,
-                                                    node->column)) {
-                return;
-            }
-
-            // Define all variables in the pattern
-            define_destruct_pattern_vars(checker, pattern, init_type, node->as.var_decl.is_const,
-                                         node->as.var_decl.is_public);
-            break;
-        }
-
-        // Normal variable declaration
-        const char* name = node->as.var_decl.name;
-
-        // Check for redefinition
-        if (checker_lookup_local(checker, name)) {
-            check_error(checker, node->line, node->column, "Redefinition of '%s'", name);
-            return;
-        }
-
-        Type* decl_type = NULL;
-        Type* init_type = NULL;
-
-        if (node->as.var_decl.type) {
-            decl_type = resolve_type(checker, node->as.var_decl.type);
-        }
-
-        if (node->as.var_decl.init) {
-            // Set enum_target_hint for generic enum inference (e.g., var x: Option<i64> =
-            // Option::None)
-            Type* old_hint = checker->enum_target_hint;
-            if (decl_type && decl_type->kind == TYPE_ENUM) {
-                checker->enum_target_hint = decl_type;
-            }
-            init_type                 = check_expression(checker, node->as.var_decl.init);
-            checker->enum_target_hint = old_hint;
-        }
-
-        Type* var_type;
-        if (decl_type && init_type) {
-            // Both specified - check compatibility
-            if (!type_assignable(decl_type, init_type)) {
-                check_error_type(checker, node->line, node->column, name, decl_type, init_type);
-            }
-            var_type = decl_type;
-        } else if (decl_type) {
-            var_type = decl_type;
-        } else if (init_type) {
-            var_type = init_type;
-        } else {
-            check_error(checker, node->line, node->column,
-                        "Variable '%s' needs type annotation or initializer", name);
-            var_type = type_error;
-        }
-
-        Symbol* sym = checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const,
-                                     node->as.var_decl.is_public, checker->current_module);
-
-        // Propagate RC tracking
-        if (sym && node->as.var_decl.init) {
-            if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
-                node->as.var_decl.is_rc         = 1;
-                node->as.var_decl.resolved_type = var_type;
-                sym->is_rc                      = 1;
-            }
-            if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
-                node->as.var_decl.is_rc         = 1;
-                node->as.var_decl.resolved_type = node->as.var_decl.init->as.new_expr.resolved_type;
-                sym->is_rc                      = 1;
-            } else if (node->as.var_decl.init->type == NODE_IDENT) {
-                Symbol* src = checker_lookup(checker, node->as.var_decl.init->as.ident.name);
-                if (src && src->is_rc) {
-                    node->as.var_decl.is_rc         = 1;
-                    node->as.var_decl.resolved_type = src->type;
-                    sym->is_rc                      = 1;
-                }
-            } else if (node->as.var_decl.init->type == NODE_CALL && var_type) {
-                // Store resolved type for codegen type inference
-                node->as.var_decl.resolved_type = var_type;
-                if (var_type->kind == TYPE_STRUCT) {
-                    // Function call returning a struct transfers RC ownership
-                    node->as.var_decl.is_rc = 1;
-                    sym->is_rc              = 1;
-                }
-            }
-        }
+    case NODE_VAR_DECL:
+        check_var_decl_stmt(checker, node);
         break;
-    }
 
     case NODE_BLOCK:
         checker_push_scope(checker);
@@ -2294,106 +2416,17 @@ static void check_statement(Checker* checker, Node* node) {
         break;
     }
 
-    case NODE_FOR: {
-        checker_push_scope(checker); // New scope for init var
-
-        if (node->as.for_stmt.init) {
-            check_statement(checker, node->as.for_stmt.init);
-        }
-
-        if (node->as.for_stmt.cond) {
-            Type* cond = check_expression(checker, node->as.for_stmt.cond);
-            if (cond->kind != TYPE_BOOL && cond->kind != TYPE_ERROR) {
-                check_error(checker, node->as.for_stmt.cond->line, node->as.for_stmt.cond->column,
-                            "For condition must be bool, got '%s'", type_name(cond));
-            }
-        }
-
-        if (node->as.for_stmt.post) {
-            check_expression(checker, node->as.for_stmt.post);
-        }
-
-        int was_in_loop  = checker->in_loop;
-        checker->in_loop = 1;
-        check_statement(checker, node->as.for_stmt.body);
-        checker->in_loop = was_in_loop;
-
-        checker_pop_scope(checker);
+    case NODE_FOR:
+        check_for_stmt(checker, node);
         break;
-    }
 
-    case NODE_FOREACH: {
-        checker_push_scope(checker); // New scope for loop variable
-
-        // Check that start and end are integers
-        Type* start_type = check_expression(checker, node->as.foreach_stmt.start);
-        Type* end_type   = check_expression(checker, node->as.foreach_stmt.end);
-
-        if (!type_is_integer(start_type) && start_type->kind != TYPE_ERROR) {
-            check_error(checker, node->as.foreach_stmt.start->line,
-                        node->as.foreach_stmt.start->column,
-                        "Foreach range start must be int, got '%s'", type_name(start_type));
-        }
-
-        if (!type_is_integer(end_type) && end_type->kind != TYPE_ERROR) {
-            check_error(checker, node->as.foreach_stmt.end->line, node->as.foreach_stmt.end->column,
-                        "Foreach range end must be int, got '%s'", type_name(end_type));
-        }
-
-        // Determine loop variable type: prefer end type when start is a default i64 literal
-        Type* loop_type;
-        if (type_is_integer(end_type) &&
-            (start_type->kind == TYPE_INT64 || !type_is_integer(start_type))) {
-            loop_type = end_type;
-        } else if (type_is_integer(start_type)) {
-            loop_type = start_type;
-        } else {
-            loop_type = type_int64;
-        }
-        node->as.foreach_stmt.resolved_type = loop_type;
-
-        // Add the loop variable as a const integer (immutable)
-        Symbol* sym =
-            checker_define(checker, node->as.foreach_stmt.var_name, SYM_VAR, loop_type, 1, 0, NULL);
-        if (!sym) {
-            check_error(checker, node->line, node->column,
-                        "Variable '%s' already declared in this scope",
-                        node->as.foreach_stmt.var_name);
-        }
-
-        int was_in_loop  = checker->in_loop;
-        checker->in_loop = 1;
-        check_statement(checker, node->as.foreach_stmt.body);
-        checker->in_loop = was_in_loop;
-
-        checker_pop_scope(checker);
+    case NODE_FOREACH:
+        check_foreach_stmt(checker, node);
         break;
-    }
 
-    case NODE_RETURN: {
-        Type* expected = checker->current_func_return;
-        if (!expected) {
-            check_error(checker, node->line, node->column, "Return outside of function");
-            return;
-        }
-
-        if (node->as.return_stmt.value) {
-            // Set enum_target_hint so generic enum constructors can infer from return type
-            Type* old_hint = checker->enum_target_hint;
-            if (expected->kind == TYPE_ENUM) {
-                checker->enum_target_hint = expected;
-            }
-            Type* actual              = check_expression(checker, node->as.return_stmt.value);
-            checker->enum_target_hint = old_hint;
-            if (!type_assignable(expected, actual)) {
-                check_error_type(checker, node->line, node->column, "Return", expected, actual);
-            }
-        } else if (expected->kind != TYPE_VOID) {
-            check_error(checker, node->line, node->column,
-                        "Return without value in non-void function");
-        }
+    case NODE_RETURN:
+        check_return_stmt(checker, node);
         break;
-    }
 
     case NODE_BREAK:
         if (!checker->in_loop) {
