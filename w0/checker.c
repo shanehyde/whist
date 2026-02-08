@@ -1136,10 +1136,12 @@ static Type* check_binary_expr(Checker* checker, Node* node) {
         op == TOK_GT_EQ) {
         if (type_equals(left, right))
             return type_bool;
-        // voidptr == null and null == voidptr (only for == and !=)
+        // voidptr/struct == null and null == voidptr/struct (only for == and !=)
         if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
             if ((left->kind == TYPE_VOIDPTR && right->kind == TYPE_NULL) ||
-                (left->kind == TYPE_NULL && right->kind == TYPE_VOIDPTR)) {
+                (left->kind == TYPE_NULL && right->kind == TYPE_VOIDPTR) ||
+                (left->kind == TYPE_STRUCT && right->kind == TYPE_NULL) ||
+                (left->kind == TYPE_NULL && right->kind == TYPE_STRUCT)) {
                 return type_bool;
             }
         }
@@ -2236,12 +2238,14 @@ static void check_statement(Checker* checker, Node* node) {
                     node->as.var_decl.resolved_type = src->type;
                     sym->is_rc                      = 1;
                 }
-            } else if (node->as.var_decl.init->type == NODE_CALL && var_type &&
-                       var_type->kind == TYPE_STRUCT) {
-                // Function call returning a struct transfers RC ownership
-                node->as.var_decl.is_rc         = 1;
+            } else if (node->as.var_decl.init->type == NODE_CALL && var_type) {
+                // Store resolved type for codegen type inference
                 node->as.var_decl.resolved_type = var_type;
-                sym->is_rc                      = 1;
+                if (var_type->kind == TYPE_STRUCT) {
+                    // Function call returning a struct transfers RC ownership
+                    node->as.var_decl.is_rc = 1;
+                    sym->is_rc              = 1;
+                }
             }
         }
         break;
@@ -2353,7 +2357,13 @@ static void check_statement(Checker* checker, Node* node) {
         }
 
         if (node->as.return_stmt.value) {
+            // Set enum_target_hint so generic enum constructors can infer from return type
+            Type* old_hint = checker->enum_target_hint;
+            if (expected->kind == TYPE_ENUM) {
+                checker->enum_target_hint = expected;
+            }
             Type* actual = check_expression(checker, node->as.return_stmt.value);
+            checker->enum_target_hint = old_hint;
             if (!type_assignable(expected, actual)) {
                 check_error_type(checker, node->line, node->column, "Return", expected, actual);
             }
