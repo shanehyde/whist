@@ -337,6 +337,7 @@ struct Node {
             Node* body;
             Node* collection;    // Non-NULL for collection foreach (e.g. Vec<T>)
             Type* resolved_type; // Set by checker (loop variable type)
+            int   is_span;       // Set by checker if collection is Span<T>
         } foreach_stmt;
 
         // Return statement
