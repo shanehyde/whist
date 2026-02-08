@@ -36,6 +36,15 @@ static int check_destruct_pattern_against_type(Checker* checker, DestructPattern
 static void define_destruct_pattern_vars(Checker* checker, DestructPattern* pattern, Type* type,
                                          int is_const, int is_public);
 
+// Forward declarations for check_decl helpers
+static void check_extern_module_decl(Checker* checker, Node* node);
+static void check_func_decl(Checker* checker, Node* node);
+static void check_struct_decl(Checker* checker, Node* node);
+static void check_enum_decl(Checker* checker, Node* node);
+static void check_trait_decl(Checker* checker, Node* node);
+static void check_type_alias_decl(Checker* checker, Node* node);
+static void check_impl_decl(Checker* checker, Node* node);
+
 // =============================================================================
 // Generic struct helpers
 // =============================================================================
@@ -2445,483 +2454,499 @@ static Type* get_function_type(Checker* checker, Node* node) {
     return func_type;
 }
 
+static void check_extern_module_decl(Checker* checker, Node* node) {
+    for (int i = 0; i < node->as.extern_module.decls.count; i++) {
+        Node* decl = node->as.extern_module.decls.nodes[i];
+        if (decl->type == NODE_FUNC_DECL) {
+            func_decl_node* fdn       = &decl->as.func_decl;
+            Type*           func_type = get_function_type(checker, decl);
+
+            checker_define(checker, fdn->name, SYM_FUNC, func_type, 0, fdn->is_public,
+                           checker->current_module);
+        }
+    }
+}
+
+static void check_func_decl(Checker* checker, Node* node) {
+    func_decl_node* fdn = &node->as.func_decl;
+
+    const char* name          = fdn->name;
+    const char* receiver_type = fdn->receiver_type;
+    int         is_method     = (receiver_type != NULL);
+
+    // Check if this is a method on a generic struct: func (Box<T>) get(): T
+    // or func (Pair<i32, Box<T>>) set(): void
+    if (is_method && fdn->receiver_type_args.count > 0) {
+        // Look up the generic definition
+        GenericDef* def = lookup_generic_def(checker, receiver_type);
+        if (!def) {
+            check_error(checker, node->line, node->column, "Unknown generic type '%s'",
+                        receiver_type);
+            return;
+        }
+        // Verify type arg arity matches
+        if (fdn->receiver_type_args.count != def->type_param_count) {
+            check_error(checker, node->line, node->column,
+                        "Generic type '%s' expects %d type parameters, got %d", receiver_type,
+                        def->type_param_count, fdn->receiver_type_args.count);
+            return;
+        }
+        // Store the method on the generic definition - will be instantiated later
+        register_generic_method(def, node);
+        return;
+    }
+
+    // For methods, use mangled name: StructName_methodName
+    char* mangled_name = NULL;
+    if (is_method) {
+        size_t len   = strlen(receiver_type) + 1 + strlen(name) + 1;
+        mangled_name = xmalloc(len);
+        snprintf(mangled_name, len, "%s_%s", receiver_type, name);
+    } else {
+        mangled_name = xstrdup(name);
+    }
+
+    // if main function, ensure correct signature
+    if (!is_method && strcmp(name, "main") == 0) {
+        if (fdn->params.count != 0) {
+            check_error(checker, node->line, node->column,
+                        "main function must not have parameters");
+        }
+        if (fdn->return_type) {
+            Type* ret_type = resolve_type(checker, fdn->return_type);
+            if (ret_type->kind != TYPE_INT32) {
+                check_error(checker, node->line, node->column,
+                            "main function must have return type i32");
+            }
+        } else {
+            check_error(checker, node->line, node->column,
+                        "main function must have return type i32");
+        }
+    }
+
+    // Check for redefinition
+    if (checker_lookup(checker, mangled_name)) {
+        check_error(checker, node->line, node->column, "Redefinition of '%s'", mangled_name);
+        free(mangled_name);
+        return;
+    }
+
+    Type* func_type = get_function_type(checker, node);
+
+    // Pre-declare function for recursion
+    checker_define(checker, mangled_name, SYM_FUNC, func_type, 1, fdn->is_public,
+                   checker->current_module);
+
+    // For methods, also register the method on the struct type
+    if (is_method) {
+        Symbol* struct_sym = checker_lookup(checker, receiver_type);
+        if (!struct_sym || struct_sym->kind != SYM_TYPE || struct_sym->type->kind != TYPE_STRUCT) {
+            check_error(checker, node->line, node->column, "Unknown receiver type '%s'",
+                        receiver_type);
+        } else {
+            Type* st = struct_sym->type;
+            int   n  = st->as.struc.method_count;
+
+            st->as.struc.method_names =
+                xrealloc(st->as.struc.method_names, (n + 1) * sizeof(char*));
+            st->as.struc.method_types =
+                xrealloc(st->as.struc.method_types, (n + 1) * sizeof(Type*));
+            st->as.struc.method_is_const =
+                xrealloc(st->as.struc.method_is_const, (n + 1) * sizeof(int));
+
+            st->as.struc.method_names[n]    = xstrdup(name);
+            st->as.struc.method_types[n]    = func_type;
+            st->as.struc.method_is_const[n] = fdn->receiver_is_const;
+            st->as.struc.method_count       = n + 1;
+        }
+    }
+
+    // Enter function scope
+    checker_push_scope(checker);
+    Type* old_return             = checker->current_func_return;
+    checker->current_func_return = func_type->as.func.return_type;
+
+    // Set this function's accessible modules for visibility checking
+    char** old_accessible_modules             = checker->current_accessible_modules;
+    int    old_accessible_modules_count       = checker->current_accessible_modules_count;
+    checker->current_accessible_modules       = fdn->accessible_modules;
+    checker->current_accessible_modules_count = fdn->accessible_modules_count;
+
+    // For methods, inject 'self' into scope
+    // self is a struct reference (the struct type itself, with reference semantics)
+    if (is_method) {
+        Symbol* struct_sym = checker_lookup(checker, receiver_type);
+        if (struct_sym && struct_sym->kind == SYM_TYPE) {
+            Type* self_type = struct_sym->type;
+            checker_define(checker, "self", SYM_VAR, self_type, fdn->receiver_is_const, 0, NULL);
+        }
+    }
+
+    // Define parameters
+    for (int i = 0; i < func_type->as.func.param_count; i++) {
+        Node* param = fdn->params.nodes[i];
+        Type* ptype = func_type->as.func.param_types[i];
+
+        if (!checker_define(checker, param->as.param.name, SYM_VAR, ptype, param->as.param.is_const,
+                            0, NULL)) {
+            check_error(checker, param->line, param->column, "Duplicate parameter name '%s'",
+                        param->as.param.name);
+        }
+    }
+
+    // Check body
+    if (fdn->body) {
+        // Body is a block, but we already pushed scope for params
+        // So just check the statements directly
+        Node* body = fdn->body;
+        for (int i = 0; i < body->as.block.stmts.count; i++) {
+            check_statement(checker, body->as.block.stmts.nodes[i]);
+        }
+    }
+
+    // Restore previous accessible modules context
+    checker->current_accessible_modules       = old_accessible_modules;
+    checker->current_accessible_modules_count = old_accessible_modules_count;
+
+    checker->current_func_return = old_return;
+    checker_pop_scope(checker);
+    free(mangled_name);
+}
+
+static void check_struct_decl(Checker* checker, Node* node) {
+    const char* name = node->as.struct_decl.name;
+
+    // Check for redefinition
+    if (checker_lookup(checker, name)) {
+        check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+        return;
+    }
+
+    // Check if this is a generic struct definition
+    if (node->as.struct_decl.type_param_count > 0) {
+        // Register as generic template - don't create concrete type yet
+        register_generic_def(checker, name, node->as.struct_decl.type_params,
+                             node->as.struct_decl.type_param_bounds,
+                             node->as.struct_decl.type_param_count, node);
+        return;
+    }
+
+    // Non-generic struct: create concrete type as before
+    Type* struct_type = type_struct(name);
+    int   field_count = node->as.struct_decl.fields.count;
+
+    struct_type->as.struc.field_count = field_count;
+    struct_type->as.struc.field_names = xmalloc(field_count * sizeof(char*));
+    struct_type->as.struc.field_types = xmalloc(field_count * sizeof(Type*));
+
+    for (int i = 0; i < field_count; i++) {
+        Node* field                          = node->as.struct_decl.fields.nodes[i];
+        struct_type->as.struc.field_names[i] = xstrdup(field->as.field.name);
+        struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
+    }
+
+    // Check if any field is an RC-managed type (struct, Vec, or enum with RC fields)
+    for (int i = 0; i < field_count; i++) {
+        Type* ftype = struct_type->as.struc.field_types[i];
+        if (ftype && (ftype->kind == TYPE_STRUCT || ftype->kind == TYPE_VEC ||
+                      (ftype->kind == TYPE_ENUM && ftype->as.enm.has_rc_fields))) {
+            struct_type->as.struc.has_rc_fields = 1;
+            break;
+        }
+    }
+
+    checker_define(checker, name, SYM_TYPE, struct_type, 0, node->as.struct_decl.is_public,
+                   checker->current_module);
+}
+
+static void check_enum_decl(Checker* checker, Node* node) {
+    const char* name = node->as.enum_decl.name;
+
+    if (checker_lookup(checker, name)) {
+        check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+        return;
+    }
+
+    // Check if this is a generic enum definition
+    if (node->as.enum_decl.type_param_count > 0) {
+        register_generic_def(checker, name, node->as.enum_decl.type_params,
+                             node->as.enum_decl.type_param_bounds,
+                             node->as.enum_decl.type_param_count, node);
+        return;
+    }
+
+    Type* enum_type   = type_enum(name);
+    int   value_count = node->as.enum_decl.values.count;
+
+    enum_type->as.enm.value_count         = value_count;
+    enum_type->as.enm.value_names         = xmalloc(value_count * sizeof(char*));
+    enum_type->as.enm.variant_types       = xmalloc(value_count * sizeof(Type**));
+    enum_type->as.enm.variant_type_counts = xmalloc(value_count * sizeof(int));
+
+    checker_define(checker, name, SYM_TYPE, enum_type, 0, node->as.enum_decl.is_public,
+                   checker->current_module);
+
+    // Process enum variants
+    for (int i = 0; i < value_count; i++) {
+        Node* val                        = node->as.enum_decl.values.nodes[i];
+        enum_type->as.enm.value_names[i] = xstrdup(val->as.enum_variant.name);
+
+        int type_count                           = val->as.enum_variant.types.count;
+        enum_type->as.enm.variant_type_counts[i] = type_count;
+
+        if (type_count > 0) {
+            enum_type->as.enm.has_data         = 1;
+            enum_type->as.enm.variant_types[i] = xmalloc(type_count * sizeof(Type*));
+            for (int j = 0; j < type_count; j++) {
+                Type* resolved = resolve_type(checker, val->as.enum_variant.types.nodes[j]);
+                enum_type->as.enm.variant_types[i][j] = resolved;
+                if (resolved && (resolved->kind == TYPE_STRUCT ||
+                                 (resolved->kind == TYPE_ENUM && resolved->as.enm.has_rc_fields))) {
+                    enum_type->as.enm.has_rc_fields = 1;
+                }
+            }
+        } else {
+            enum_type->as.enm.variant_types[i] = NULL;
+        }
+    }
+}
+
+static void check_trait_decl(Checker* checker, Node* node) {
+    const char* name = node->as.trait_decl.name;
+
+    // Check for redefinition
+    if (checker_lookup(checker, name)) {
+        check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+        return;
+    }
+
+    // Create TYPE_TRAIT with method signatures
+    Type* trait_type   = type_trait(name);
+    int   method_count = node->as.trait_decl.methods.count;
+
+    trait_type->as.trait.method_count    = method_count;
+    trait_type->as.trait.method_names    = xmalloc(method_count * sizeof(char*));
+    trait_type->as.trait.method_types    = xmalloc(method_count * sizeof(Type*));
+    trait_type->as.trait.method_is_const = xmalloc(method_count * sizeof(int));
+
+    for (int i = 0; i < method_count; i++) {
+        Node* method                            = node->as.trait_decl.methods.nodes[i];
+        trait_type->as.trait.method_names[i]    = xstrdup(method->as.func_decl.name);
+        trait_type->as.trait.method_types[i]    = get_function_type(checker, method);
+        trait_type->as.trait.method_is_const[i] = method->as.func_decl.receiver_is_const;
+    }
+
+    checker_define(checker, name, SYM_TYPE, trait_type, 0, node->as.trait_decl.is_public,
+                   checker->current_module);
+}
+
+static void check_type_alias_decl(Checker* checker, Node* node) {
+    const char* name = node->as.type_alias.name;
+
+    // Check for redefinition
+    if (checker_lookup(checker, name)) {
+        check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+        return;
+    }
+
+    // Generic type alias: register as a generic def template
+    if (node->as.type_alias.type_param_count > 0) {
+        register_generic_def(checker, name, node->as.type_alias.type_params,
+                             node->as.type_alias.type_param_bounds,
+                             node->as.type_alias.type_param_count, node);
+        // Mark as type alias so resolve_type can handle it differently
+        GenericDef* def    = lookup_generic_def(checker, name);
+        def->is_type_alias = 1;
+        return;
+    }
+
+    // Non-generic type alias: resolve the target type and define the symbol
+    checker->alias_depth++;
+    if (checker->alias_depth > 16) {
+        check_error(checker, node->line, node->column, "Recursive type alias '%s'", name);
+        checker->alias_depth--;
+        return;
+    }
+    Type* resolved = resolve_type(checker, node->as.type_alias.target_type);
+    checker->alias_depth--;
+
+    if (resolved == type_error) {
+        return;
+    }
+
+    checker_define(checker, name, SYM_TYPE, resolved, 0, node->as.type_alias.is_public,
+                   checker->current_module);
+}
+
+static void check_impl_decl(Checker* checker, Node* node) {
+    const char* trait_name    = node->as.impl_decl.trait_name;
+    const char* type_name_str = node->as.impl_decl.type_name;
+
+    // Look up the trait
+    Symbol* trait_sym = checker_lookup(checker, trait_name);
+    if (!trait_sym || trait_sym->kind != SYM_TYPE || trait_sym->type->kind != TYPE_TRAIT) {
+        check_error(checker, node->line, node->column, "Unknown trait '%s'", trait_name);
+        return;
+    }
+    Type* trait_type = trait_sym->type;
+
+    // Look up the target type
+    Symbol*     type_sym    = checker_lookup(checker, type_name_str);
+    GenericDef* generic_def = NULL;
+    int         is_generic  = 0;
+    if (!type_sym || type_sym->kind != SYM_TYPE || type_sym->type->kind != TYPE_STRUCT) {
+        // Fallback: check if it's a generic struct template
+        generic_def = lookup_generic_def(checker, type_name_str);
+        if (!generic_def) {
+            check_error(checker, node->line, node->column,
+                        "Cannot implement trait for unknown struct type '%s'", type_name_str);
+            return;
+        }
+        is_generic = 1;
+    }
+
+    // Process each method in the impl block
+    for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
+        Node* method = node->as.impl_decl.methods.nodes[i];
+
+        // Verify this method exists in the trait
+        const char* method_name      = method->as.func_decl.name;
+        int         found_in_trait   = 0;
+        int         trait_method_idx = -1;
+        for (int j = 0; j < trait_type->as.trait.method_count; j++) {
+            if (strcmp(trait_type->as.trait.method_names[j], method_name) == 0) {
+                found_in_trait   = 1;
+                trait_method_idx = j;
+                break;
+            }
+        }
+
+        if (!found_in_trait) {
+            check_error(checker, method->line, method->column,
+                        "Method '%s' is not declared in trait '%s'", method_name, trait_name);
+            continue;
+        }
+
+        // Check receiver const-ness matches trait declaration
+        int trait_is_const = trait_type->as.trait.method_is_const[trait_method_idx];
+        int impl_is_const  = method->as.func_decl.receiver_is_const;
+        if (impl_is_const != trait_is_const) {
+            check_error(checker, method->line, method->column,
+                        "Method '%s' receiver mutability mismatch: trait '%s' declares '%s', "
+                        "impl provides '%s'",
+                        method_name, trait_name, trait_is_const ? "const func" : "func",
+                        impl_is_const ? "const func" : "func");
+            continue;
+        }
+
+        if (is_generic) {
+            // For generic structs, the method has a generic receiver (e.g., func (Box<T>)
+            // drop()) Process it via check_decl which routes to the generic method registration
+            // path
+            check_decl(checker, method);
+        } else {
+            // Verify the method signature matches the trait signature
+            Type* impl_func_type  = get_function_type(checker, method);
+            Type* trait_func_type = trait_type->as.trait.method_types[trait_method_idx];
+
+            // Check return type
+            if (!type_equals(impl_func_type->as.func.return_type,
+                             trait_func_type->as.func.return_type)) {
+                check_error(checker, method->line, method->column,
+                            "Method '%s' return type mismatch: trait '%s' expects '%s', got '%s'",
+                            method_name, trait_name,
+                            type_name(trait_func_type->as.func.return_type),
+                            type_name(impl_func_type->as.func.return_type));
+                continue;
+            }
+
+            // Check parameter types
+            if (impl_func_type->as.func.param_count != trait_func_type->as.func.param_count) {
+                check_error(checker, method->line, method->column,
+                            "Method '%s' parameter count mismatch: trait '%s' expects %d, got %d",
+                            method_name, trait_name, trait_func_type->as.func.param_count,
+                            impl_func_type->as.func.param_count);
+                continue;
+            }
+
+            for (int p = 0; p < trait_func_type->as.func.param_count; p++) {
+                if (!type_equals(impl_func_type->as.func.param_types[p],
+                                 trait_func_type->as.func.param_types[p])) {
+                    check_error(
+                        checker, method->line, method->column,
+                        "Method '%s' parameter %d type mismatch: trait '%s' expects '%s', got "
+                        "'%s'",
+                        method_name, p + 1, trait_name,
+                        type_name(trait_func_type->as.func.param_types[p]),
+                        type_name(impl_func_type->as.func.param_types[p]));
+                }
+            }
+
+            // Process the method as a regular func_decl (registers on struct, checks body)
+            check_decl(checker, method);
+        }
+    }
+
+    // Verify all required trait methods are implemented
+    for (int j = 0; j < trait_type->as.trait.method_count; j++) {
+        const char* required    = trait_type->as.trait.method_names[j];
+        int         implemented = 0;
+        for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
+            if (strcmp(node->as.impl_decl.methods.nodes[i]->as.func_decl.name, required) == 0) {
+                implemented = 1;
+                break;
+            }
+        }
+        if (!implemented) {
+            check_error(checker, node->line, node->column,
+                        "Missing required method '%s' from trait '%s'", required, trait_name);
+        }
+    }
+
+    // Record the trait implementation
+    VEC_GROW(checker->trait_impls, checker->trait_impl_count, checker->trait_impl_capacity);
+    TraitImpl* impl  = &checker->trait_impls[checker->trait_impl_count++];
+    impl->trait_name = xstrdup(trait_name);
+    impl->type_name  = xstrdup(type_name_str);
+
+    // If implementing Drop, set the flag on the struct type
+    if (strcmp(trait_name, "Drop") == 0 && !is_generic) {
+        type_sym->type->as.struc.has_drop = 1;
+    }
+}
+
 static void check_decl(Checker* checker, Node* node) {
     if (!node)
         return;
 
     switch (node->type) {
-    case NODE_EXTERN_MODULE: {
-        for (int i = 0; i < node->as.extern_module.decls.count; i++) {
-            Node* decl = node->as.extern_module.decls.nodes[i];
-            if (decl->type == NODE_FUNC_DECL) {
-                func_decl_node* fdn       = &decl->as.func_decl;
-                Type*           func_type = get_function_type(checker, decl);
-
-                checker_define(checker, fdn->name, SYM_FUNC, func_type, 0, fdn->is_public,
-                               checker->current_module);
-            }
-        }
-
+    case NODE_EXTERN_MODULE:
+        check_extern_module_decl(checker, node);
         break;
-    }
 
-    case NODE_FUNC_DECL: {
-        func_decl_node* fdn = &node->as.func_decl;
-
-        const char* name          = fdn->name;
-        const char* receiver_type = fdn->receiver_type;
-        int         is_method     = (receiver_type != NULL);
-
-        // Check if this is a method on a generic struct: func (Box<T>) get(): T
-        // or func (Pair<i32, Box<T>>) set(): void
-        if (is_method && fdn->receiver_type_args.count > 0) {
-            // Look up the generic definition
-            GenericDef* def = lookup_generic_def(checker, receiver_type);
-            if (!def) {
-                check_error(checker, node->line, node->column, "Unknown generic type '%s'",
-                            receiver_type);
-                return;
-            }
-            // Verify type arg arity matches
-            if (fdn->receiver_type_args.count != def->type_param_count) {
-                check_error(checker, node->line, node->column,
-                            "Generic type '%s' expects %d type parameters, got %d", receiver_type,
-                            def->type_param_count, fdn->receiver_type_args.count);
-                return;
-            }
-            // Store the method on the generic definition - will be instantiated later
-            register_generic_method(def, node);
-            return;
-        }
-
-        // For methods, use mangled name: StructName_methodName
-        char* mangled_name = NULL;
-        if (is_method) {
-            size_t len   = strlen(receiver_type) + 1 + strlen(name) + 1;
-            mangled_name = xmalloc(len);
-            snprintf(mangled_name, len, "%s_%s", receiver_type, name);
-        } else {
-            mangled_name = xstrdup(name);
-        }
-
-        // if main function, ensure correct signature
-        if (!is_method && strcmp(name, "main") == 0) {
-            if (fdn->params.count != 0) {
-                check_error(checker, node->line, node->column,
-                            "main function must not have parameters");
-            }
-            if (fdn->return_type) {
-                Type* ret_type = resolve_type(checker, fdn->return_type);
-                if (ret_type->kind != TYPE_INT32) {
-                    check_error(checker, node->line, node->column,
-                                "main function must have return type i32");
-                }
-            } else {
-                check_error(checker, node->line, node->column,
-                            "main function must have return type i32");
-            }
-        }
-
-        // Check for redefinition
-        if (checker_lookup(checker, mangled_name)) {
-            check_error(checker, node->line, node->column, "Redefinition of '%s'", mangled_name);
-            free(mangled_name);
-            return;
-        }
-
-        Type* func_type = get_function_type(checker, node);
-
-        // Pre-declare function for recursion
-        checker_define(checker, mangled_name, SYM_FUNC, func_type, 1, fdn->is_public,
-                       checker->current_module);
-
-        // For methods, also register the method on the struct type
-        if (is_method) {
-            Symbol* struct_sym = checker_lookup(checker, receiver_type);
-            if (!struct_sym || struct_sym->kind != SYM_TYPE ||
-                struct_sym->type->kind != TYPE_STRUCT) {
-                check_error(checker, node->line, node->column, "Unknown receiver type '%s'",
-                            receiver_type);
-            } else {
-                Type* st = struct_sym->type;
-                int   n  = st->as.struc.method_count;
-
-                st->as.struc.method_names =
-                    xrealloc(st->as.struc.method_names, (n + 1) * sizeof(char*));
-                st->as.struc.method_types =
-                    xrealloc(st->as.struc.method_types, (n + 1) * sizeof(Type*));
-                st->as.struc.method_is_const =
-                    xrealloc(st->as.struc.method_is_const, (n + 1) * sizeof(int));
-
-                st->as.struc.method_names[n]    = xstrdup(name);
-                st->as.struc.method_types[n]    = func_type;
-                st->as.struc.method_is_const[n] = fdn->receiver_is_const;
-                st->as.struc.method_count       = n + 1;
-            }
-        }
-
-        // Enter function scope
-        checker_push_scope(checker);
-        Type* old_return             = checker->current_func_return;
-        checker->current_func_return = func_type->as.func.return_type;
-
-        // Set this function's accessible modules for visibility checking
-        char** old_accessible_modules             = checker->current_accessible_modules;
-        int    old_accessible_modules_count       = checker->current_accessible_modules_count;
-        checker->current_accessible_modules       = fdn->accessible_modules;
-        checker->current_accessible_modules_count = fdn->accessible_modules_count;
-
-        // For methods, inject 'self' into scope
-        // self is a struct reference (the struct type itself, with reference semantics)
-        if (is_method) {
-            Symbol* struct_sym = checker_lookup(checker, receiver_type);
-            if (struct_sym && struct_sym->kind == SYM_TYPE) {
-                Type* self_type = struct_sym->type;
-                checker_define(checker, "self", SYM_VAR, self_type, fdn->receiver_is_const, 0,
-                               NULL);
-            }
-        }
-
-        // Define parameters
-        for (int i = 0; i < func_type->as.func.param_count; i++) {
-            Node* param = fdn->params.nodes[i];
-            Type* ptype = func_type->as.func.param_types[i];
-
-            if (!checker_define(checker, param->as.param.name, SYM_VAR, ptype,
-                                param->as.param.is_const, 0, NULL)) {
-                check_error(checker, param->line, param->column, "Duplicate parameter name '%s'",
-                            param->as.param.name);
-            }
-        }
-
-        // Check body
-        if (fdn->body) {
-            // Body is a block, but we already pushed scope for params
-            // So just check the statements directly
-            Node* body = fdn->body;
-            for (int i = 0; i < body->as.block.stmts.count; i++) {
-                check_statement(checker, body->as.block.stmts.nodes[i]);
-            }
-        }
-
-        // Restore previous accessible modules context
-        checker->current_accessible_modules       = old_accessible_modules;
-        checker->current_accessible_modules_count = old_accessible_modules_count;
-
-        checker->current_func_return = old_return;
-        checker_pop_scope(checker);
-        free(mangled_name);
+    case NODE_FUNC_DECL:
+        check_func_decl(checker, node);
         break;
-    }
 
-    case NODE_STRUCT_DECL: {
-        const char* name = node->as.struct_decl.name;
-
-        // Check for redefinition
-        if (checker_lookup(checker, name)) {
-            check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
-            return;
-        }
-
-        // Check if this is a generic struct definition
-        if (node->as.struct_decl.type_param_count > 0) {
-            // Register as generic template - don't create concrete type yet
-            register_generic_def(checker, name, node->as.struct_decl.type_params,
-                                 node->as.struct_decl.type_param_bounds,
-                                 node->as.struct_decl.type_param_count, node);
-            return;
-        }
-
-        // Non-generic struct: create concrete type as before
-        Type* struct_type = type_struct(name);
-        int   field_count = node->as.struct_decl.fields.count;
-
-        struct_type->as.struc.field_count = field_count;
-        struct_type->as.struc.field_names = xmalloc(field_count * sizeof(char*));
-        struct_type->as.struc.field_types = xmalloc(field_count * sizeof(Type*));
-
-        for (int i = 0; i < field_count; i++) {
-            Node* field                          = node->as.struct_decl.fields.nodes[i];
-            struct_type->as.struc.field_names[i] = xstrdup(field->as.field.name);
-            struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
-        }
-
-        // Check if any field is an RC-managed type (struct, Vec, or enum with RC fields)
-        for (int i = 0; i < field_count; i++) {
-            Type* ftype = struct_type->as.struc.field_types[i];
-            if (ftype && (ftype->kind == TYPE_STRUCT || ftype->kind == TYPE_VEC ||
-                          (ftype->kind == TYPE_ENUM && ftype->as.enm.has_rc_fields))) {
-                struct_type->as.struc.has_rc_fields = 1;
-                break;
-            }
-        }
-
-        checker_define(checker, name, SYM_TYPE, struct_type, 0, node->as.struct_decl.is_public,
-                       checker->current_module);
+    case NODE_STRUCT_DECL:
+        check_struct_decl(checker, node);
         break;
-    }
 
-    case NODE_ENUM_DECL: {
-        const char* name = node->as.enum_decl.name;
-
-        if (checker_lookup(checker, name)) {
-            check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
-            return;
-        }
-
-        // Check if this is a generic enum definition
-        if (node->as.enum_decl.type_param_count > 0) {
-            register_generic_def(checker, name, node->as.enum_decl.type_params,
-                                 node->as.enum_decl.type_param_bounds,
-                                 node->as.enum_decl.type_param_count, node);
-            return;
-        }
-
-        Type* enum_type   = type_enum(name);
-        int   value_count = node->as.enum_decl.values.count;
-
-        enum_type->as.enm.value_count         = value_count;
-        enum_type->as.enm.value_names         = xmalloc(value_count * sizeof(char*));
-        enum_type->as.enm.variant_types       = xmalloc(value_count * sizeof(Type**));
-        enum_type->as.enm.variant_type_counts = xmalloc(value_count * sizeof(int));
-
-        checker_define(checker, name, SYM_TYPE, enum_type, 0, node->as.enum_decl.is_public,
-                       checker->current_module);
-
-        // Process enum variants
-        for (int i = 0; i < value_count; i++) {
-            Node* val                        = node->as.enum_decl.values.nodes[i];
-            enum_type->as.enm.value_names[i] = xstrdup(val->as.enum_variant.name);
-
-            int type_count                           = val->as.enum_variant.types.count;
-            enum_type->as.enm.variant_type_counts[i] = type_count;
-
-            if (type_count > 0) {
-                enum_type->as.enm.has_data         = 1;
-                enum_type->as.enm.variant_types[i] = xmalloc(type_count * sizeof(Type*));
-                for (int j = 0; j < type_count; j++) {
-                    Type* resolved = resolve_type(checker, val->as.enum_variant.types.nodes[j]);
-                    enum_type->as.enm.variant_types[i][j] = resolved;
-                    if (resolved &&
-                        (resolved->kind == TYPE_STRUCT ||
-                         (resolved->kind == TYPE_ENUM && resolved->as.enm.has_rc_fields))) {
-                        enum_type->as.enm.has_rc_fields = 1;
-                    }
-                }
-            } else {
-                enum_type->as.enm.variant_types[i] = NULL;
-            }
-        }
+    case NODE_ENUM_DECL:
+        check_enum_decl(checker, node);
         break;
-    }
 
-    case NODE_TRAIT_DECL: {
-        const char* name = node->as.trait_decl.name;
-
-        // Check for redefinition
-        if (checker_lookup(checker, name)) {
-            check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
-            return;
-        }
-
-        // Create TYPE_TRAIT with method signatures
-        Type* trait_type   = type_trait(name);
-        int   method_count = node->as.trait_decl.methods.count;
-
-        trait_type->as.trait.method_count    = method_count;
-        trait_type->as.trait.method_names    = xmalloc(method_count * sizeof(char*));
-        trait_type->as.trait.method_types    = xmalloc(method_count * sizeof(Type*));
-        trait_type->as.trait.method_is_const = xmalloc(method_count * sizeof(int));
-
-        for (int i = 0; i < method_count; i++) {
-            Node* method                            = node->as.trait_decl.methods.nodes[i];
-            trait_type->as.trait.method_names[i]    = xstrdup(method->as.func_decl.name);
-            trait_type->as.trait.method_types[i]    = get_function_type(checker, method);
-            trait_type->as.trait.method_is_const[i] = method->as.func_decl.receiver_is_const;
-        }
-
-        checker_define(checker, name, SYM_TYPE, trait_type, 0, node->as.trait_decl.is_public,
-                       checker->current_module);
+    case NODE_TRAIT_DECL:
+        check_trait_decl(checker, node);
         break;
-    }
 
-    case NODE_TYPE_ALIAS: {
-        const char* name = node->as.type_alias.name;
-
-        // Check for redefinition
-        if (checker_lookup(checker, name)) {
-            check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
-            return;
-        }
-
-        // Generic type alias: register as a generic def template
-        if (node->as.type_alias.type_param_count > 0) {
-            register_generic_def(checker, name, node->as.type_alias.type_params,
-                                 node->as.type_alias.type_param_bounds,
-                                 node->as.type_alias.type_param_count, node);
-            // Mark as type alias so resolve_type can handle it differently
-            GenericDef* def    = lookup_generic_def(checker, name);
-            def->is_type_alias = 1;
-            return;
-        }
-
-        // Non-generic type alias: resolve the target type and define the symbol
-        checker->alias_depth++;
-        if (checker->alias_depth > 16) {
-            check_error(checker, node->line, node->column, "Recursive type alias '%s'", name);
-            checker->alias_depth--;
-            return;
-        }
-        Type* resolved = resolve_type(checker, node->as.type_alias.target_type);
-        checker->alias_depth--;
-
-        if (resolved == type_error) {
-            return;
-        }
-
-        checker_define(checker, name, SYM_TYPE, resolved, 0, node->as.type_alias.is_public,
-                       checker->current_module);
+    case NODE_TYPE_ALIAS:
+        check_type_alias_decl(checker, node);
         break;
-    }
 
-    case NODE_IMPL_DECL: {
-        const char* trait_name    = node->as.impl_decl.trait_name;
-        const char* type_name_str = node->as.impl_decl.type_name;
-
-        // Look up the trait
-        Symbol* trait_sym = checker_lookup(checker, trait_name);
-        if (!trait_sym || trait_sym->kind != SYM_TYPE || trait_sym->type->kind != TYPE_TRAIT) {
-            check_error(checker, node->line, node->column, "Unknown trait '%s'", trait_name);
-            return;
-        }
-        Type* trait_type = trait_sym->type;
-
-        // Look up the target type
-        Symbol*     type_sym    = checker_lookup(checker, type_name_str);
-        GenericDef* generic_def = NULL;
-        int         is_generic  = 0;
-        if (!type_sym || type_sym->kind != SYM_TYPE || type_sym->type->kind != TYPE_STRUCT) {
-            // Fallback: check if it's a generic struct template
-            generic_def = lookup_generic_def(checker, type_name_str);
-            if (!generic_def) {
-                check_error(checker, node->line, node->column,
-                            "Cannot implement trait for unknown struct type '%s'", type_name_str);
-                return;
-            }
-            is_generic = 1;
-        }
-
-        // Process each method in the impl block
-        for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
-            Node* method = node->as.impl_decl.methods.nodes[i];
-
-            // Verify this method exists in the trait
-            const char* method_name      = method->as.func_decl.name;
-            int         found_in_trait   = 0;
-            int         trait_method_idx = -1;
-            for (int j = 0; j < trait_type->as.trait.method_count; j++) {
-                if (strcmp(trait_type->as.trait.method_names[j], method_name) == 0) {
-                    found_in_trait   = 1;
-                    trait_method_idx = j;
-                    break;
-                }
-            }
-
-            if (!found_in_trait) {
-                check_error(checker, method->line, method->column,
-                            "Method '%s' is not declared in trait '%s'", method_name, trait_name);
-                continue;
-            }
-
-            // Check receiver const-ness matches trait declaration
-            int trait_is_const = trait_type->as.trait.method_is_const[trait_method_idx];
-            int impl_is_const  = method->as.func_decl.receiver_is_const;
-            if (impl_is_const != trait_is_const) {
-                check_error(checker, method->line, method->column,
-                            "Method '%s' receiver mutability mismatch: trait '%s' declares '%s', "
-                            "impl provides '%s'",
-                            method_name, trait_name, trait_is_const ? "const func" : "func",
-                            impl_is_const ? "const func" : "func");
-                continue;
-            }
-
-            if (is_generic) {
-                // For generic structs, the method has a generic receiver (e.g., func (Box<T>)
-                // drop()) Process it via check_decl which routes to the generic method registration
-                // path
-                check_decl(checker, method);
-            } else {
-                // Verify the method signature matches the trait signature
-                Type* impl_func_type  = get_function_type(checker, method);
-                Type* trait_func_type = trait_type->as.trait.method_types[trait_method_idx];
-
-                // Check return type
-                if (!type_equals(impl_func_type->as.func.return_type,
-                                 trait_func_type->as.func.return_type)) {
-                    check_error(
-                        checker, method->line, method->column,
-                        "Method '%s' return type mismatch: trait '%s' expects '%s', got '%s'",
-                        method_name, trait_name, type_name(trait_func_type->as.func.return_type),
-                        type_name(impl_func_type->as.func.return_type));
-                    continue;
-                }
-
-                // Check parameter types
-                if (impl_func_type->as.func.param_count != trait_func_type->as.func.param_count) {
-                    check_error(
-                        checker, method->line, method->column,
-                        "Method '%s' parameter count mismatch: trait '%s' expects %d, got %d",
-                        method_name, trait_name, trait_func_type->as.func.param_count,
-                        impl_func_type->as.func.param_count);
-                    continue;
-                }
-
-                for (int p = 0; p < trait_func_type->as.func.param_count; p++) {
-                    if (!type_equals(impl_func_type->as.func.param_types[p],
-                                     trait_func_type->as.func.param_types[p])) {
-                        check_error(
-                            checker, method->line, method->column,
-                            "Method '%s' parameter %d type mismatch: trait '%s' expects '%s', got "
-                            "'%s'",
-                            method_name, p + 1, trait_name,
-                            type_name(trait_func_type->as.func.param_types[p]),
-                            type_name(impl_func_type->as.func.param_types[p]));
-                    }
-                }
-
-                // Process the method as a regular func_decl (registers on struct, checks body)
-                check_decl(checker, method);
-            }
-        }
-
-        // Verify all required trait methods are implemented
-        for (int j = 0; j < trait_type->as.trait.method_count; j++) {
-            const char* required    = trait_type->as.trait.method_names[j];
-            int         implemented = 0;
-            for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
-                if (strcmp(node->as.impl_decl.methods.nodes[i]->as.func_decl.name, required) == 0) {
-                    implemented = 1;
-                    break;
-                }
-            }
-            if (!implemented) {
-                check_error(checker, node->line, node->column,
-                            "Missing required method '%s' from trait '%s'", required, trait_name);
-            }
-        }
-
-        // Record the trait implementation
-        VEC_GROW(checker->trait_impls, checker->trait_impl_count, checker->trait_impl_capacity);
-        TraitImpl* impl  = &checker->trait_impls[checker->trait_impl_count++];
-        impl->trait_name = xstrdup(trait_name);
-        impl->type_name  = xstrdup(type_name_str);
-
-        // If implementing Drop, set the flag on the struct type
-        if (strcmp(trait_name, "Drop") == 0 && !is_generic) {
-            type_sym->type->as.struc.has_drop = 1;
-        }
+    case NODE_IMPL_DECL:
+        check_impl_decl(checker, node);
         break;
-    }
 
     case NODE_VAR_DECL:
         // Global variable

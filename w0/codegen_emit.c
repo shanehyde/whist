@@ -27,6 +27,16 @@ static void emit_block_contents(CodeGen* gen, Node* block);
 static void emit_destruct_pattern(CodeGen* gen, DestructPattern* pattern, const char* temp_prefix,
                                   int is_const);
 
+// Forward declarations for emit_expr helpers
+static void emit_string_lit(CodeGen* gen, Node* node);
+static void emit_char_lit(CodeGen* gen, Node* node);
+static void emit_enum_value(CodeGen* gen, Node* node);
+static void emit_call_expr(CodeGen* gen, Node* node);
+static void emit_index_expr(CodeGen* gen, Node* node);
+static void emit_slice_expr(CodeGen* gen, Node* node);
+static void emit_member_expr(CodeGen* gen, Node* node);
+static void emit_new_expr(CodeGen* gen, Node* node);
+
 static void defer_push(CodeGen* gen, Node* node) {
     VEC_GROW(gen->defer_stack, gen->defer_count, gen->defer_capacity);
     gen->defer_stack[gen->defer_count++] = node;
@@ -924,6 +934,411 @@ static char* resolve_generic_field_dec_func(CodeGen* gen, Node* field_type_node)
     return NULL;
 }
 
+static void emit_string_lit(CodeGen* gen, Node* node) {
+    emit(gen, "\"");
+    // Escape special characters
+    for (int i = 0; i < node->as.string_lit.length; i++) {
+        char c = node->as.string_lit.value[i];
+        switch (c) {
+        case '\n':
+            emit(gen, "\\n");
+            break;
+        case '\t':
+            emit(gen, "\\t");
+            break;
+        case '\r':
+            emit(gen, "\\r");
+            break;
+        case '\\':
+            emit(gen, "\\\\");
+            break;
+        case '"':
+            emit(gen, "\\\"");
+            break;
+        default:
+            emit(gen, "%c", c);
+            break;
+        }
+    }
+    emit(gen, "\"");
+}
+
+static void emit_char_lit(CodeGen* gen, Node* node) {
+    if (node->as.char_lit.value == '\n') {
+        emit(gen, "'\\n'");
+    } else if (node->as.char_lit.value == '\t') {
+        emit(gen, "'\\t'");
+    } else if (node->as.char_lit.value == '\r') {
+        emit(gen, "'\\r'");
+    } else if (node->as.char_lit.value == '\\') {
+        emit(gen, "'\\\\'");
+    } else if (node->as.char_lit.value == '\'') {
+        emit(gen, "'\\''");
+    } else {
+        emit(gen, "'%c'", node->as.char_lit.value);
+    }
+}
+
+static void emit_enum_value(CodeGen* gen, Node* node) {
+    if (!node->as.enum_value.is_data_enum) {
+        // Simple enum: emit qualified value name (EnumName_ValueName)
+        emit(gen, "%.*s_%.*s", node->as.enum_value.enum_name_length, node->as.enum_value.enum_name,
+             node->as.enum_value.value_name_length, node->as.enum_value.value_name);
+    } else if (node->as.enum_value.args.count == 0) {
+        // Data enum, bare tag: (EnumName){.tag = EnumName_ValueName}
+        emit(gen, "(%.*s){.tag = %.*s_%.*s}", node->as.enum_value.enum_name_length,
+             node->as.enum_value.enum_name, node->as.enum_value.enum_name_length,
+             node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
+             node->as.enum_value.value_name);
+    } else {
+        // Data enum with args: (EnumName){.tag = EnumName_ValueName, .ValueName = {.f0 = ..}}
+        int needs_rc_inc = 0;
+        for (int i = 0; i < node->as.enum_value.args.count; i++) {
+            Node* arg = node->as.enum_value.args.nodes[i];
+            if (arg->type == NODE_IDENT && rc_is_tracked(gen, arg->as.ident.name)) {
+                needs_rc_inc = 1;
+                break;
+            }
+        }
+
+        if (needs_rc_inc) {
+            emit(gen, "({ ");
+            for (int i = 0; i < node->as.enum_value.args.count; i++) {
+                Node* arg = node->as.enum_value.args.nodes[i];
+                if (arg->type == NODE_IDENT && rc_is_tracked(gen, arg->as.ident.name)) {
+                    Type*       arg_type = rc_get_var_type(gen, arg->as.ident.name);
+                    const char* inc_fn   = get_inc_func_for_type(arg_type);
+                    emit(gen, "%s(%s); ", inc_fn, arg->as.ident.name);
+                    free((char*)inc_fn);
+                }
+            }
+        }
+
+        emit(gen, "(%.*s){.tag = %.*s_%.*s, .%.*s = {", node->as.enum_value.enum_name_length,
+             node->as.enum_value.enum_name, node->as.enum_value.enum_name_length,
+             node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
+             node->as.enum_value.value_name, node->as.enum_value.value_name_length,
+             node->as.enum_value.value_name);
+        for (int i = 0; i < node->as.enum_value.args.count; i++) {
+            if (i > 0)
+                emit(gen, ", ");
+            emit(gen, ".f%d = ", i);
+            emit_expr(gen, node->as.enum_value.args.nodes[i]);
+        }
+        emit(gen, "}}");
+
+        if (needs_rc_inc) {
+            emit(gen, "; })");
+        }
+    }
+}
+
+static void emit_call_expr(CodeGen* gen, Node* node) {
+    Node* func = node->as.call.func;
+    // Check if this is a module-qualified call (e.g., std.print())
+    if (func->type == NODE_MEMBER && func->as.member.module_name != NULL) {
+        // Module-qualified call: emit module_func(args...)
+        emit(gen, "%s_%.*s(", func->as.member.module_name, func->as.member.length,
+             func->as.member.name);
+        for (int i = 0; i < node->as.call.args.count; i++) {
+            if (i > 0)
+                emit(gen, ", ");
+            emit_expr(gen, node->as.call.args.nodes[i]);
+        }
+        emit(gen, ")");
+    } else if (func->type == NODE_MEMBER && func->as.member.struct_name != NULL) {
+        // Method call: emit StructName_method(obj, args...)
+        // With struct references, objects are already pointers
+        emit(gen, "%s_%.*s(", func->as.member.struct_name, func->as.member.length,
+             func->as.member.name);
+        // Emit the receiver as first argument (already a pointer)
+        emit_expr(gen, func->as.member.object);
+        // Emit remaining arguments
+        for (int i = 0; i < node->as.call.args.count; i++) {
+            emit(gen, ", ");
+            emit_expr(gen, node->as.call.args.nodes[i]);
+        }
+        emit(gen, ")");
+    } else if (func->type == NODE_MEMBER && func->as.member.struct_name == NULL && gen->subst_ctx) {
+        // In a generic method body — checker didn't annotate struct_name or module_name.
+        // First check if this is a module-qualified call (e.g., std.print)
+        int is_module_call = 0;
+        if (func->as.member.object->type == NODE_IDENT) {
+            const char* obj_name = func->as.member.object->as.ident.name;
+            for (int i = 0; i < gen->accessible_modules_count; i++) {
+                if (strcmp(gen->accessible_modules[i], obj_name) == 0) {
+                    is_module_call = 1;
+                    break;
+                }
+            }
+        }
+        if (is_module_call) {
+            // Module-qualified call: emit module_func(args...)
+            emit(gen, "%s_%.*s(", func->as.member.object->as.ident.name, func->as.member.length,
+                 func->as.member.name);
+            for (int i = 0; i < node->as.call.args.count; i++) {
+                if (i > 0)
+                    emit(gen, ", ");
+                emit_expr(gen, node->as.call.args.nodes[i]);
+            }
+            emit(gen, ")");
+        } else {
+            // Try to resolve the target type from the struct template field types.
+            char* resolved_name = resolve_generic_method_target(gen, func);
+            if (resolved_name) {
+                emit(gen, "%s_%.*s(", resolved_name, func->as.member.length, func->as.member.name);
+                emit_expr(gen, func->as.member.object);
+                for (int i = 0; i < node->as.call.args.count; i++) {
+                    emit(gen, ", ");
+                    emit_expr(gen, node->as.call.args.nodes[i]);
+                }
+                emit(gen, ")");
+                free(resolved_name);
+            } else {
+                // Fallback: regular function call
+                emit_expr(gen, func);
+                emit(gen, "(");
+                for (int i = 0; i < node->as.call.args.count; i++) {
+                    if (i > 0)
+                        emit(gen, ", ");
+                    emit_expr(gen, node->as.call.args.nodes[i]);
+                }
+                emit(gen, ")");
+            }
+        }
+    } else {
+        // Regular function call
+        emit_expr(gen, func);
+        emit(gen, "(");
+        for (int i = 0; i < node->as.call.args.count; i++) {
+            if (i > 0)
+                emit(gen, ", ");
+            emit_expr(gen, node->as.call.args.nodes[i]);
+        }
+        emit(gen, ")");
+    }
+}
+
+static void emit_index_expr(CodeGen* gen, Node* node) {
+    if (node->as.index.is_vec_index) {
+        // Bounds-checked vec access
+        emit(gen, "(__w0_vec_check(");
+        emit_expr(gen, node->as.index.object);
+        emit(gen, "->count, ");
+        emit_expr(gen, node->as.index.index);
+        emit(gen, ", %d, %d), ", node->line, node->column);
+        emit_expr(gen, node->as.index.object);
+        emit(gen, "->data[");
+        emit_expr(gen, node->as.index.index);
+        emit(gen, "])");
+    } else if (node->as.index.is_span_index) {
+        // Bounds-checked span access
+        emit(gen, "(__w0_span_check(");
+        emit_expr(gen, node->as.index.object);
+        emit(gen, ".count, ");
+        emit_expr(gen, node->as.index.index);
+        emit(gen, ", %d, %d), ", node->line, node->column);
+        emit_expr(gen, node->as.index.object);
+        emit(gen, ".data[");
+        emit_expr(gen, node->as.index.index);
+        emit(gen, "])");
+    } else if (node->as.index.is_tuple_index) {
+        // Tuple indexing: obj._N
+        emit_expr(gen, node->as.index.object);
+        emit(gen, "._%ld", node->as.index.index->as.int_lit.value);
+    } else {
+        // Array/string indexing: obj[index]
+        emit_expr(gen, node->as.index.object);
+        emit(gen, "[");
+        emit_expr(gen, node->as.index.index);
+        emit(gen, "]");
+    }
+}
+
+static void emit_slice_expr(CodeGen* gen, Node* node) {
+    // Slice produces a span: (__Span_T){ .data = ..., .count = ... }
+    Type* span_type = node->as.slice.resolved_type;
+    Type* elem_type = span_type->as.span.elem;
+
+    // Emit compound literal
+    emit(gen, "((__Span_%s){ .data = ", type_name(elem_type));
+
+    if (node->as.slice.is_vec) {
+        // Vec slicing: .data = vec->data + start
+        emit_expr(gen, node->as.slice.object);
+        emit(gen, "->data + ");
+        if (node->as.slice.start) {
+            emit_expr(gen, node->as.slice.start);
+        } else {
+            emit(gen, "0");
+        }
+    } else if (node->as.slice.is_array) {
+        // Array slicing: .data = &arr[start]
+        emit(gen, "&(");
+        emit_expr(gen, node->as.slice.object);
+        emit(gen, ")[");
+        if (node->as.slice.start) {
+            emit_expr(gen, node->as.slice.start);
+        } else {
+            emit(gen, "0");
+        }
+        emit(gen, "]");
+    } else {
+        // Span slicing: .data = span.data + start
+        emit_expr(gen, node->as.slice.object);
+        emit(gen, ".data + ");
+        if (node->as.slice.start) {
+            emit_expr(gen, node->as.slice.start);
+        } else {
+            emit(gen, "0");
+        }
+    }
+
+    emit(gen, ", .count = ");
+
+    // Calculate count: end - start
+    // For omitted end, use array length or span/vec.count
+    if (node->as.slice.end) {
+        emit(gen, "(");
+        emit_expr(gen, node->as.slice.end);
+        emit(gen, ")");
+    } else {
+        // Use full length
+        if (node->as.slice.is_vec) {
+            emit_expr(gen, node->as.slice.object);
+            emit(gen, "->count");
+        } else if (node->as.slice.is_array) {
+            emit(gen, "(sizeof(");
+            emit_expr(gen, node->as.slice.object);
+            emit(gen, ")/sizeof((");
+            emit_expr(gen, node->as.slice.object);
+            emit(gen, ")[0]))");
+        } else {
+            emit_expr(gen, node->as.slice.object);
+            emit(gen, ".count");
+        }
+    }
+
+    // Subtract start if present
+    if (node->as.slice.start) {
+        emit(gen, " - (");
+        emit_expr(gen, node->as.slice.start);
+        emit(gen, ")");
+    }
+
+    emit(gen, " })");
+}
+
+static void emit_member_expr(CodeGen* gen, Node* node) {
+    // Check if this is module-qualified access (already handled struct_name case)
+    if (node->as.member.struct_name == NULL && node->as.member.module_name == NULL) {
+        // Check if object is 'self' - always a pointer in methods
+        // This handles generic methods where is_ref isn't set because body isn't type-checked
+        int is_self = (node->as.member.object->type == NODE_IDENT &&
+                       strcmp(node->as.member.object->as.ident.name, "self") == 0);
+
+        if (node->as.member.is_ref || is_self) {
+            // Struct reference or self - use ->
+            emit_expr(gen, node->as.member.object);
+            emit(gen, "->%.*s", node->as.member.length, node->as.member.name);
+        } else {
+            // Value type member access (tuples, spans) - use .
+            emit_expr(gen, node->as.member.object);
+            emit(gen, ".%.*s", node->as.member.length, node->as.member.name);
+        }
+    } else {
+        // Struct method or module access
+        emit_expr(gen, node->as.member.object);
+        emit(gen, "->%.*s", node->as.member.length, node->as.member.name);
+    }
+}
+
+static void emit_new_expr(CodeGen* gen, Node* node) {
+    Type* rtype = node->as.new_expr.resolved_type;
+    // In generic method bodies, the checker doesn't visit the body, so resolved_type
+    // may be NULL. Resolve from the type_node using the current substitution context.
+    if (!rtype) {
+        Node* tn = node->as.new_expr.type_node;
+        if (tn->type == NODE_GENERIC_TYPE) {
+            if (strcmp(tn->as.generic_type.base_name, "Vec") == 0) {
+                // Look up the Vec instance by mangled name
+                char* mangled = build_mangled_name_from_generic_node(gen, tn);
+                for (int vi = 0; vi < gen->vec_instance_count; vi++) {
+                    if (strcmp(gen->vec_instances[vi].mangled_name, mangled) == 0) {
+                        rtype = gen->vec_instances[vi].type;
+                        break;
+                    }
+                }
+                free(mangled);
+            } else {
+                // Look up the generic struct instance by mangled name
+                char* mangled = build_mangled_name_from_generic_node(gen, tn);
+                for (int gi = 0; gi < gen->generic_instance_count; gi++) {
+                    if (strcmp(gen->generic_instances[gi].mangled_name, mangled) == 0) {
+                        rtype = gen->generic_instances[gi].type;
+                        break;
+                    }
+                }
+                free(mangled);
+            }
+        } else if (tn->type == NODE_IDENT) {
+            // Simple type name — check substitution context first
+            const char* name = tn->as.ident.name;
+            if (gen->subst_ctx) {
+                for (int si = 0; si < gen->subst_ctx->count; si++) {
+                    if (strcmp(gen->subst_ctx->type_params[si], name) == 0) {
+                        rtype = gen->subst_ctx->type_args[si];
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if (rtype->kind == TYPE_VEC) {
+        // new Vec<T>{elems} as inline expression using GCC statement expression
+        const char* elem_tname = type_name(rtype->as.vec.elem);
+        int         tmp        = gen->temp_count++;
+        emit(gen,
+             "({ __Vec_%s* __rc_tmp%d = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s)); "
+             "__rc_tmp%d->data = NULL; __rc_tmp%d->count = 0; __rc_tmp%d->capacity = 0;",
+             elem_tname, tmp, elem_tname, elem_tname, tmp, tmp, tmp);
+        // Push initial elements
+        Node* init = node->as.new_expr.init;
+        for (int i = 0; i < init->as.struct_init.fields.count; i++) {
+            Node* field = init->as.struct_init.fields.nodes[i];
+            if (field && field->type == NODE_FIELD_INIT) {
+                emit(gen, " __Vec_%s_push(__rc_tmp%d, ", elem_tname, tmp);
+                emit_expr(gen, field->as.field_init.value);
+                emit(gen, ");");
+            }
+        }
+        emit(gen, " __rc_tmp%d; })", tmp);
+    } else {
+        // new Type { fields } as inline expression using GCC statement expression
+        const char* tname = rtype->as.struc.name;
+        int         tmp   = gen->temp_count++;
+        emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s)); *__rc_tmp%d = (%s)", tname, tmp,
+             tname, tname, tmp, tname);
+        emit_struct_init(gen, node->as.new_expr.init);
+        emit(gen, ";");
+        // Increment refcount for any RC-tracked idents stored in struct fields
+        Node* rc_init = node->as.new_expr.init;
+        for (int i = 0; i < rc_init->as.struct_init.fields.count; i++) {
+            Node* field = rc_init->as.struct_init.fields.nodes[i];
+            if (field && field->type == NODE_FIELD_INIT &&
+                field->as.field_init.value->type == NODE_IDENT &&
+                rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
+                const char* vname  = field->as.field_init.value->as.ident.name;
+                Type*       vtype  = rc_get_var_type(gen, vname);
+                const char* inc_fn = get_inc_func_for_type(vtype);
+                emit(gen, " %s(%s);", inc_fn, vname);
+                free((char*)inc_fn);
+            }
+        }
+        emit(gen, " __rc_tmp%d; })", tmp);
+    }
+}
+
 static void emit_expr(CodeGen* gen, Node* node) {
     if (!node)
         return;
@@ -938,48 +1353,11 @@ static void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_STRING_LIT:
-        emit(gen, "\"");
-        // Escape special characters
-        for (int i = 0; i < node->as.string_lit.length; i++) {
-            char c = node->as.string_lit.value[i];
-            switch (c) {
-            case '\n':
-                emit(gen, "\\n");
-                break;
-            case '\t':
-                emit(gen, "\\t");
-                break;
-            case '\r':
-                emit(gen, "\\r");
-                break;
-            case '\\':
-                emit(gen, "\\\\");
-                break;
-            case '"':
-                emit(gen, "\\\"");
-                break;
-            default:
-                emit(gen, "%c", c);
-                break;
-            }
-        }
-        emit(gen, "\"");
+        emit_string_lit(gen, node);
         break;
 
     case NODE_CHAR_LIT:
-        if (node->as.char_lit.value == '\n') {
-            emit(gen, "'\\n'");
-        } else if (node->as.char_lit.value == '\t') {
-            emit(gen, "'\\t'");
-        } else if (node->as.char_lit.value == '\r') {
-            emit(gen, "'\\r'");
-        } else if (node->as.char_lit.value == '\\') {
-            emit(gen, "'\\\\'");
-        } else if (node->as.char_lit.value == '\'') {
-            emit(gen, "'\\''");
-        } else {
-            emit(gen, "'%c'", node->as.char_lit.value);
-        }
+        emit_char_lit(gen, node);
         break;
 
     case NODE_BOOL_LIT:
@@ -995,58 +1373,7 @@ static void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_ENUM_VALUE:
-        if (!node->as.enum_value.is_data_enum) {
-            // Simple enum: emit qualified value name (EnumName_ValueName)
-            emit(gen, "%.*s_%.*s", node->as.enum_value.enum_name_length,
-                 node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
-                 node->as.enum_value.value_name);
-        } else if (node->as.enum_value.args.count == 0) {
-            // Data enum, bare tag: (EnumName){.tag = EnumName_ValueName}
-            emit(gen, "(%.*s){.tag = %.*s_%.*s}", node->as.enum_value.enum_name_length,
-                 node->as.enum_value.enum_name, node->as.enum_value.enum_name_length,
-                 node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
-                 node->as.enum_value.value_name);
-        } else {
-            // Data enum with args: (EnumName){.tag = EnumName_ValueName, .ValueName = {.f0 = ..}}
-            int needs_rc_inc = 0;
-            for (int i = 0; i < node->as.enum_value.args.count; i++) {
-                Node* arg = node->as.enum_value.args.nodes[i];
-                if (arg->type == NODE_IDENT && rc_is_tracked(gen, arg->as.ident.name)) {
-                    needs_rc_inc = 1;
-                    break;
-                }
-            }
-
-            if (needs_rc_inc) {
-                emit(gen, "({ ");
-                for (int i = 0; i < node->as.enum_value.args.count; i++) {
-                    Node* arg = node->as.enum_value.args.nodes[i];
-                    if (arg->type == NODE_IDENT && rc_is_tracked(gen, arg->as.ident.name)) {
-                        Type*       arg_type = rc_get_var_type(gen, arg->as.ident.name);
-                        const char* inc_fn   = get_inc_func_for_type(arg_type);
-                        emit(gen, "%s(%s); ", inc_fn, arg->as.ident.name);
-                        free((char*)inc_fn);
-                    }
-                }
-            }
-
-            emit(gen, "(%.*s){.tag = %.*s_%.*s, .%.*s = {", node->as.enum_value.enum_name_length,
-                 node->as.enum_value.enum_name, node->as.enum_value.enum_name_length,
-                 node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
-                 node->as.enum_value.value_name, node->as.enum_value.value_name_length,
-                 node->as.enum_value.value_name);
-            for (int i = 0; i < node->as.enum_value.args.count; i++) {
-                if (i > 0)
-                    emit(gen, ", ");
-                emit(gen, ".f%d = ", i);
-                emit_expr(gen, node->as.enum_value.args.nodes[i]);
-            }
-            emit(gen, "}}");
-
-            if (needs_rc_inc) {
-                emit(gen, "; })");
-            }
-        }
+        emit_enum_value(gen, node);
         break;
 
     case NODE_BINARY:
@@ -1063,230 +1390,21 @@ static void emit_expr(CodeGen* gen, Node* node) {
         emit(gen, ")");
         break;
 
-    case NODE_CALL: {
-        Node* func = node->as.call.func;
-        // Check if this is a module-qualified call (e.g., std.print())
-        if (func->type == NODE_MEMBER && func->as.member.module_name != NULL) {
-            // Module-qualified call: emit module_func(args...)
-            emit(gen, "%s_%.*s(", func->as.member.module_name, func->as.member.length,
-                 func->as.member.name);
-            for (int i = 0; i < node->as.call.args.count; i++) {
-                if (i > 0)
-                    emit(gen, ", ");
-                emit_expr(gen, node->as.call.args.nodes[i]);
-            }
-            emit(gen, ")");
-        } else if (func->type == NODE_MEMBER && func->as.member.struct_name != NULL) {
-            // Method call: emit StructName_method(obj, args...)
-            // With struct references, objects are already pointers
-            emit(gen, "%s_%.*s(", func->as.member.struct_name, func->as.member.length,
-                 func->as.member.name);
-            // Emit the receiver as first argument (already a pointer)
-            emit_expr(gen, func->as.member.object);
-            // Emit remaining arguments
-            for (int i = 0; i < node->as.call.args.count; i++) {
-                emit(gen, ", ");
-                emit_expr(gen, node->as.call.args.nodes[i]);
-            }
-            emit(gen, ")");
-        } else if (func->type == NODE_MEMBER && func->as.member.struct_name == NULL &&
-                   gen->subst_ctx) {
-            // In a generic method body — checker didn't annotate struct_name or module_name.
-            // First check if this is a module-qualified call (e.g., std.print)
-            int is_module_call = 0;
-            if (func->as.member.object->type == NODE_IDENT) {
-                const char* obj_name = func->as.member.object->as.ident.name;
-                for (int i = 0; i < gen->accessible_modules_count; i++) {
-                    if (strcmp(gen->accessible_modules[i], obj_name) == 0) {
-                        is_module_call = 1;
-                        break;
-                    }
-                }
-            }
-            if (is_module_call) {
-                // Module-qualified call: emit module_func(args...)
-                emit(gen, "%s_%.*s(", func->as.member.object->as.ident.name, func->as.member.length,
-                     func->as.member.name);
-                for (int i = 0; i < node->as.call.args.count; i++) {
-                    if (i > 0)
-                        emit(gen, ", ");
-                    emit_expr(gen, node->as.call.args.nodes[i]);
-                }
-                emit(gen, ")");
-            } else {
-                // Try to resolve the target type from the struct template field types.
-                char* resolved_name = resolve_generic_method_target(gen, func);
-                if (resolved_name) {
-                    emit(gen, "%s_%.*s(", resolved_name, func->as.member.length,
-                         func->as.member.name);
-                    emit_expr(gen, func->as.member.object);
-                    for (int i = 0; i < node->as.call.args.count; i++) {
-                        emit(gen, ", ");
-                        emit_expr(gen, node->as.call.args.nodes[i]);
-                    }
-                    emit(gen, ")");
-                    free(resolved_name);
-                } else {
-                    // Fallback: regular function call
-                    emit_expr(gen, func);
-                    emit(gen, "(");
-                    for (int i = 0; i < node->as.call.args.count; i++) {
-                        if (i > 0)
-                            emit(gen, ", ");
-                        emit_expr(gen, node->as.call.args.nodes[i]);
-                    }
-                    emit(gen, ")");
-                }
-            }
-        } else {
-            // Regular function call
-            emit_expr(gen, func);
-            emit(gen, "(");
-            for (int i = 0; i < node->as.call.args.count; i++) {
-                if (i > 0)
-                    emit(gen, ", ");
-                emit_expr(gen, node->as.call.args.nodes[i]);
-            }
-            emit(gen, ")");
-        }
+    case NODE_CALL:
+        emit_call_expr(gen, node);
         break;
-    }
 
     case NODE_INDEX:
-        if (node->as.index.is_vec_index) {
-            // Bounds-checked vec access
-            emit(gen, "(__w0_vec_check(");
-            emit_expr(gen, node->as.index.object);
-            emit(gen, "->count, ");
-            emit_expr(gen, node->as.index.index);
-            emit(gen, ", %d, %d), ", node->line, node->column);
-            emit_expr(gen, node->as.index.object);
-            emit(gen, "->data[");
-            emit_expr(gen, node->as.index.index);
-            emit(gen, "])");
-        } else if (node->as.index.is_span_index) {
-            // Bounds-checked span access
-            emit(gen, "(__w0_span_check(");
-            emit_expr(gen, node->as.index.object);
-            emit(gen, ".count, ");
-            emit_expr(gen, node->as.index.index);
-            emit(gen, ", %d, %d), ", node->line, node->column);
-            emit_expr(gen, node->as.index.object);
-            emit(gen, ".data[");
-            emit_expr(gen, node->as.index.index);
-            emit(gen, "])");
-        } else if (node->as.index.is_tuple_index) {
-            // Tuple indexing: obj._N
-            emit_expr(gen, node->as.index.object);
-            emit(gen, "._%ld", node->as.index.index->as.int_lit.value);
-        } else {
-            // Array/string indexing: obj[index]
-            emit_expr(gen, node->as.index.object);
-            emit(gen, "[");
-            emit_expr(gen, node->as.index.index);
-            emit(gen, "]");
-        }
+        emit_index_expr(gen, node);
         break;
 
-    case NODE_SLICE: {
-        // Slice produces a span: (__Span_T){ .data = ..., .count = ... }
-        Type* span_type = node->as.slice.resolved_type;
-        Type* elem_type = span_type->as.span.elem;
-
-        // Emit compound literal
-        emit(gen, "((__Span_%s){ .data = ", type_name(elem_type));
-
-        if (node->as.slice.is_vec) {
-            // Vec slicing: .data = vec->data + start
-            emit_expr(gen, node->as.slice.object);
-            emit(gen, "->data + ");
-            if (node->as.slice.start) {
-                emit_expr(gen, node->as.slice.start);
-            } else {
-                emit(gen, "0");
-            }
-        } else if (node->as.slice.is_array) {
-            // Array slicing: .data = &arr[start]
-            emit(gen, "&(");
-            emit_expr(gen, node->as.slice.object);
-            emit(gen, ")[");
-            if (node->as.slice.start) {
-                emit_expr(gen, node->as.slice.start);
-            } else {
-                emit(gen, "0");
-            }
-            emit(gen, "]");
-        } else {
-            // Span slicing: .data = span.data + start
-            emit_expr(gen, node->as.slice.object);
-            emit(gen, ".data + ");
-            if (node->as.slice.start) {
-                emit_expr(gen, node->as.slice.start);
-            } else {
-                emit(gen, "0");
-            }
-        }
-
-        emit(gen, ", .count = ");
-
-        // Calculate count: end - start
-        // For omitted end, use array length or span/vec.count
-        if (node->as.slice.end) {
-            emit(gen, "(");
-            emit_expr(gen, node->as.slice.end);
-            emit(gen, ")");
-        } else {
-            // Use full length
-            if (node->as.slice.is_vec) {
-                emit_expr(gen, node->as.slice.object);
-                emit(gen, "->count");
-            } else if (node->as.slice.is_array) {
-                emit(gen, "(sizeof(");
-                emit_expr(gen, node->as.slice.object);
-                emit(gen, ")/sizeof((");
-                emit_expr(gen, node->as.slice.object);
-                emit(gen, ")[0]))");
-            } else {
-                emit_expr(gen, node->as.slice.object);
-                emit(gen, ".count");
-            }
-        }
-
-        // Subtract start if present
-        if (node->as.slice.start) {
-            emit(gen, " - (");
-            emit_expr(gen, node->as.slice.start);
-            emit(gen, ")");
-        }
-
-        emit(gen, " })");
+    case NODE_SLICE:
+        emit_slice_expr(gen, node);
         break;
-    }
 
-    case NODE_MEMBER: {
-        // Check if this is module-qualified access (already handled struct_name case)
-        if (node->as.member.struct_name == NULL && node->as.member.module_name == NULL) {
-            // Check if object is 'self' - always a pointer in methods
-            // This handles generic methods where is_ref isn't set because body isn't type-checked
-            int is_self = (node->as.member.object->type == NODE_IDENT &&
-                           strcmp(node->as.member.object->as.ident.name, "self") == 0);
-
-            if (node->as.member.is_ref || is_self) {
-                // Struct reference or self - use ->
-                emit_expr(gen, node->as.member.object);
-                emit(gen, "->%.*s", node->as.member.length, node->as.member.name);
-            } else {
-                // Value type member access (tuples, spans) - use .
-                emit_expr(gen, node->as.member.object);
-                emit(gen, ".%.*s", node->as.member.length, node->as.member.name);
-            }
-        } else {
-            // Struct method or module access
-            emit_expr(gen, node->as.member.object);
-            emit(gen, "->%.*s", node->as.member.length, node->as.member.name);
-        }
+    case NODE_MEMBER:
+        emit_member_expr(gen, node);
         break;
-    }
 
     case NODE_ASSIGN:
         emit(gen, "(");
@@ -1322,92 +1440,9 @@ static void emit_expr(CodeGen* gen, Node* node) {
         emit(gen, "}");
         break;
 
-    case NODE_NEW_EXPR: {
-        Type* rtype = node->as.new_expr.resolved_type;
-        // In generic method bodies, the checker doesn't visit the body, so resolved_type
-        // may be NULL. Resolve from the type_node using the current substitution context.
-        if (!rtype) {
-            Node* tn = node->as.new_expr.type_node;
-            if (tn->type == NODE_GENERIC_TYPE) {
-                if (strcmp(tn->as.generic_type.base_name, "Vec") == 0) {
-                    // Look up the Vec instance by mangled name
-                    char* mangled = build_mangled_name_from_generic_node(gen, tn);
-                    for (int vi = 0; vi < gen->vec_instance_count; vi++) {
-                        if (strcmp(gen->vec_instances[vi].mangled_name, mangled) == 0) {
-                            rtype = gen->vec_instances[vi].type;
-                            break;
-                        }
-                    }
-                    free(mangled);
-                } else {
-                    // Look up the generic struct instance by mangled name
-                    char* mangled = build_mangled_name_from_generic_node(gen, tn);
-                    for (int gi = 0; gi < gen->generic_instance_count; gi++) {
-                        if (strcmp(gen->generic_instances[gi].mangled_name, mangled) == 0) {
-                            rtype = gen->generic_instances[gi].type;
-                            break;
-                        }
-                    }
-                    free(mangled);
-                }
-            } else if (tn->type == NODE_IDENT) {
-                // Simple type name — check substitution context first
-                const char* name = tn->as.ident.name;
-                if (gen->subst_ctx) {
-                    for (int si = 0; si < gen->subst_ctx->count; si++) {
-                        if (strcmp(gen->subst_ctx->type_params[si], name) == 0) {
-                            rtype = gen->subst_ctx->type_args[si];
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if (rtype->kind == TYPE_VEC) {
-            // new Vec<T>{elems} as inline expression using GCC statement expression
-            const char* elem_tname = type_name(rtype->as.vec.elem);
-            int         tmp        = gen->temp_count++;
-            emit(gen,
-                 "({ __Vec_%s* __rc_tmp%d = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s)); "
-                 "__rc_tmp%d->data = NULL; __rc_tmp%d->count = 0; __rc_tmp%d->capacity = 0;",
-                 elem_tname, tmp, elem_tname, elem_tname, tmp, tmp, tmp);
-            // Push initial elements
-            Node* init = node->as.new_expr.init;
-            for (int i = 0; i < init->as.struct_init.fields.count; i++) {
-                Node* field = init->as.struct_init.fields.nodes[i];
-                if (field && field->type == NODE_FIELD_INIT) {
-                    emit(gen, " __Vec_%s_push(__rc_tmp%d, ", elem_tname, tmp);
-                    emit_expr(gen, field->as.field_init.value);
-                    emit(gen, ");");
-                }
-            }
-            emit(gen, " __rc_tmp%d; })", tmp);
-        } else {
-            // new Type { fields } as inline expression using GCC statement expression
-            const char* tname = rtype->as.struc.name;
-            int         tmp   = gen->temp_count++;
-            emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s)); *__rc_tmp%d = (%s)", tname,
-                 tmp, tname, tname, tmp, tname);
-            emit_struct_init(gen, node->as.new_expr.init);
-            emit(gen, ";");
-            // Increment refcount for any RC-tracked idents stored in struct fields
-            Node* rc_init = node->as.new_expr.init;
-            for (int i = 0; i < rc_init->as.struct_init.fields.count; i++) {
-                Node* field = rc_init->as.struct_init.fields.nodes[i];
-                if (field && field->type == NODE_FIELD_INIT &&
-                    field->as.field_init.value->type == NODE_IDENT &&
-                    rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
-                    const char* vname  = field->as.field_init.value->as.ident.name;
-                    Type*       vtype  = rc_get_var_type(gen, vname);
-                    const char* inc_fn = get_inc_func_for_type(vtype);
-                    emit(gen, " %s(%s);", inc_fn, vname);
-                    free((char*)inc_fn);
-                }
-            }
-            emit(gen, " __rc_tmp%d; })", tmp);
-        }
+    case NODE_NEW_EXPR:
+        emit_new_expr(gen, node);
         break;
-    }
 
     default:
         emit(gen, "/* unknown expr %d */", node->type);
