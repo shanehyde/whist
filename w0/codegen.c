@@ -1324,6 +1324,90 @@ static void emit_function_forward_decls(CodeGen* gen, Node* ast) {
     emit(gen, "\n");
 }
 
+static int struct_implements_drop(CodeGen* gen, const char* type_name) {
+    for (int t = 0; t < gen->trait_impl_count; t++) {
+        if (strcmp(gen->trait_impls[t].trait_name, "Drop") == 0 &&
+            strcmp(gen->trait_impls[t].type_name, type_name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+typedef struct {
+    char* field_name;
+    char* type_name;
+    int   is_enum;
+} RcFieldInfo;
+
+static int collect_rc_field_info(CodeGen* gen, Node* struct_decl, RcFieldInfo** out_fields) {
+    int          count  = 0;
+    RcFieldInfo* fields = NULL;
+    for (int f = 0; f < struct_decl->as.struct_decl.fields.count; f++) {
+        Node* field = struct_decl->as.struct_decl.fields.nodes[f];
+        if (!field->as.field.type || !type_node_has_rc(gen, field->as.field.type))
+            continue;
+        count++;
+        fields            = xrealloc(fields, count * sizeof(RcFieldInfo));
+        RcFieldInfo* info = &fields[count - 1];
+        info->field_name  = xstrdup(field->as.field.name);
+        if (field->as.field.type->type == NODE_IDENT) {
+            info->type_name = xstrdup(field->as.field.type->as.ident.name);
+            info->is_enum   = is_enum_type_name(gen, field->as.field.type->as.ident.name);
+        } else if (field->as.field.type->type == NODE_GENERIC_TYPE) {
+            Node*  gtype     = field->as.field.type;
+            int    arg_count = gtype->as.generic_type.type_args.count;
+            Type** args      = xmalloc(arg_count * sizeof(Type*));
+            for (int a = 0; a < arg_count; a++) {
+                args[a] = type_from_node(gtype->as.generic_type.type_args.nodes[a]);
+            }
+            info->type_name =
+                type_mangle_generic(gtype->as.generic_type.base_name, args, arg_count);
+            free(args);
+            info->is_enum = 0;
+        } else {
+            info->type_name = NULL;
+            info->is_enum   = 0;
+        }
+    }
+    *out_fields = fields;
+    return count;
+}
+
+static int field_needs_custom_dec(CodeGen* gen, const char* field_type_name, Node* ast) {
+    if (!field_type_name)
+        return 0;
+    if (struct_implements_drop(gen, field_type_name))
+        return 1;
+    // Check if field type has RC fields (scan non-generic structs)
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type == NODE_STRUCT_DECL && decl->as.struct_decl.type_param_count == 0 &&
+                strcmp(decl->as.struct_decl.name, field_type_name) == 0) {
+                for (int f = 0; f < decl->as.struct_decl.fields.count; f++) {
+                    Node* field = decl->as.struct_decl.fields.nodes[f];
+                    if (field->as.field.type && type_node_has_rc(gen, field->as.field.type))
+                        return 1;
+                }
+                return 0;
+            }
+        }
+    }
+    // Check generic instances (e.g., field type "Box_Inner")
+    for (int i = 0; i < gen->generic_instance_count; i++) {
+        if (strcmp(gen->generic_instances[i].mangled_name, field_type_name) == 0) {
+            Type* t = gen->generic_instances[i].type;
+            if (t && t->kind == TYPE_STRUCT && (t->as.struc.has_drop || t->as.struc.has_rc_fields))
+                return 1;
+            return 0;
+        }
+    }
+    return 0;
+}
+
 static void emit_struct_rc_dec_forward_decls(CodeGen* gen, Node* ast) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
@@ -1335,16 +1419,8 @@ static void emit_struct_rc_dec_forward_decls(CodeGen* gen, Node* ast) {
                 continue;
             if (decl->as.struct_decl.type_param_count > 0)
                 continue;
-            const char* sname = decl->as.struct_decl.name;
-            // Check if this struct needs a custom dec function
-            int needs_dec = 0;
-            for (int t = 0; t < gen->trait_impl_count; t++) {
-                if (strcmp(gen->trait_impls[t].trait_name, "Drop") == 0 &&
-                    strcmp(gen->trait_impls[t].type_name, sname) == 0) {
-                    needs_dec = 1;
-                    break;
-                }
-            }
+            const char* sname     = decl->as.struct_decl.name;
+            int         needs_dec = struct_implements_drop(gen, sname);
             if (!needs_dec) {
                 for (int f = 0; f < decl->as.struct_decl.fields.count; f++) {
                     Node* field = decl->as.struct_decl.fields.nodes[f];
@@ -1364,15 +1440,7 @@ static void emit_struct_rc_dec_forward_decls(CodeGen* gen, Node* ast) {
         Type*            t    = info->type;
         if (!t || t->kind != TYPE_STRUCT)
             continue;
-        int has_drop = 0;
-        for (int ti = 0; ti < gen->trait_impl_count; ti++) {
-            if (strcmp(gen->trait_impls[ti].trait_name, "Drop") == 0 &&
-                strcmp(gen->trait_impls[ti].type_name, info->base_name) == 0) {
-                has_drop = 1;
-                break;
-            }
-        }
-        if (has_drop || t->as.struc.has_rc_fields) {
+        if (struct_implements_drop(gen, info->base_name) || t->as.struc.has_rc_fields) {
             emit(gen, "static inline void __rc_dec_%s(%s* ptr);\n", info->mangled_name,
                  info->mangled_name);
         }
@@ -1494,75 +1562,15 @@ static void emit_struct_rc_dec(CodeGen* gen, Node* ast) {
             if (decl->as.struct_decl.type_param_count > 0)
                 continue; // Skip generic templates
 
-            // Look up the resolved type from the checker's symbol table
-            // We stored it when defining the struct - find it via generic_instances or
-            // re-derive from the AST decl. Since we don't have direct access to the checker's
-            // symbol table from codegen, we use the struct name to find the type in
-            // generic_instances. For non-generic structs we need to find the Type*.
-            // However, we can scan the AST and look at the struct decl's type info.
-            // The actual Type* with flags is in checker scope, not directly available here.
-            // We need to find the type through the struct fields in the emitted forward decls.
-            // Alternative: iterate trait_impls to check has_drop, and scan field types for
-            // has_rc_fields by looking at field type names.
+            const char* sname    = decl->as.struct_decl.name;
+            int         has_drop = struct_implements_drop(gen, sname);
 
-            const char* sname = decl->as.struct_decl.name;
+            RcFieldInfo* rc_fields      = NULL;
+            int          rc_field_count = collect_rc_field_info(gen, decl, &rc_fields);
 
-            // Check if this struct implements Drop
-            int has_drop = 0;
-            for (int t = 0; t < gen->trait_impl_count; t++) {
-                if (strcmp(gen->trait_impls[t].trait_name, "Drop") == 0 &&
-                    strcmp(gen->trait_impls[t].type_name, sname) == 0) {
-                    has_drop = 1;
-                    break;
-                }
-            }
-
-            // Check if any field carries RC-managed values
-            int has_rc_fields = 0;
-            // Collect RC field info for emission
-            int    rc_field_count      = 0;
-            char** rc_field_names      = NULL;
-            char** rc_field_type_names = NULL;
-            int*   rc_field_is_enum    = NULL;
-            for (int f = 0; f < decl->as.struct_decl.fields.count; f++) {
-                Node* field = decl->as.struct_decl.fields.nodes[f];
-                if (field->as.field.type && type_node_has_rc(gen, field->as.field.type)) {
-                    has_rc_fields = 1;
-                    rc_field_count++;
-                    rc_field_names = xrealloc(rc_field_names, rc_field_count * sizeof(char*));
-                    rc_field_type_names =
-                        xrealloc(rc_field_type_names, rc_field_count * sizeof(char*));
-                    rc_field_is_enum = xrealloc(rc_field_is_enum, rc_field_count * sizeof(int));
-                    rc_field_names[rc_field_count - 1] = xstrdup(field->as.field.name);
-                    // Get the type name for the field
-                    if (field->as.field.type->type == NODE_IDENT) {
-                        rc_field_type_names[rc_field_count - 1] =
-                            xstrdup(field->as.field.type->as.ident.name);
-                        rc_field_is_enum[rc_field_count - 1] =
-                            is_enum_type_name(gen, field->as.field.type->as.ident.name);
-                    } else if (field->as.field.type->type == NODE_GENERIC_TYPE) {
-                        // Build mangled name for generic type field (e.g., Box<Inner> -> Box_Inner)
-                        Node*  gtype     = field->as.field.type;
-                        int    arg_count = gtype->as.generic_type.type_args.count;
-                        Type** args      = xmalloc(arg_count * sizeof(Type*));
-                        for (int a = 0; a < arg_count; a++) {
-                            args[a] = type_from_node(gtype->as.generic_type.type_args.nodes[a]);
-                        }
-                        rc_field_type_names[rc_field_count - 1] =
-                            type_mangle_generic(gtype->as.generic_type.base_name, args, arg_count);
-                        free(args);
-                        rc_field_is_enum[rc_field_count - 1] = 0;
-                    } else {
-                        rc_field_type_names[rc_field_count - 1] = NULL;
-                        rc_field_is_enum[rc_field_count - 1]    = 0;
-                    }
-                }
-            }
-
-            if (!has_drop && !has_rc_fields)
+            if (!has_drop && rc_field_count == 0)
                 continue;
 
-            // Emit: static inline void __rc_dec_TypeName(TypeName* ptr) { ... }
             emit(gen, "static inline void __rc_dec_%s(%s* ptr) {\n", sname, sname);
             emit(gen, "    if (!ptr) return;\n");
             emit(gen, "    __RcHeader* h = (__RcHeader*)ptr - 1;\n");
@@ -1571,69 +1579,15 @@ static void emit_struct_rc_dec(CodeGen* gen, Node* ast) {
                 emit(gen, "        %s_drop(ptr);\n", sname);
             }
             for (int f = 0; f < rc_field_count; f++) {
-                const char* field_tname = rc_field_type_names[f];
-                if (rc_field_is_enum[f]) {
-                    emit(gen, "        __rc_dec_%s(ptr->%s);\n", field_tname, rc_field_names[f]);
+                const char* field_tname = rc_fields[f].type_name;
+                if (rc_fields[f].is_enum) {
+                    emit(gen, "        __rc_dec_%s(ptr->%s);\n", field_tname,
+                         rc_fields[f].field_name);
+                } else if (field_needs_custom_dec(gen, field_tname, ast)) {
+                    emit(gen, "        __rc_dec_%s(ptr->%s);\n", field_tname,
+                         rc_fields[f].field_name);
                 } else {
-                    // Check if the field's type itself has a type-specific dec function
-                    int field_needs_custom_dec = 0;
-                    if (field_tname) {
-                        // Check if field type implements Drop (exact name match for non-generic)
-                        for (int t = 0; t < gen->trait_impl_count; t++) {
-                            if (strcmp(gen->trait_impls[t].trait_name, "Drop") == 0 &&
-                                strcmp(gen->trait_impls[t].type_name, field_tname) == 0) {
-                                field_needs_custom_dec = 1;
-                                break;
-                            }
-                        }
-                        // Check if field type has RC fields (scan non-generic structs)
-                        if (!field_needs_custom_dec) {
-                            for (int si = 0;
-                                 si < ast->as.program.modules.count && !field_needs_custom_dec;
-                                 si++) {
-                                Node* smod = ast->as.program.modules.nodes[si];
-                                if (!smod || smod->type != NODE_MODULE)
-                                    continue;
-                                for (int sj = 0; sj < smod->as.module.decls.count; sj++) {
-                                    Node* sdecl = smod->as.module.decls.nodes[sj];
-                                    if (sdecl->type == NODE_STRUCT_DECL &&
-                                        sdecl->as.struct_decl.type_param_count == 0 &&
-                                        strcmp(sdecl->as.struct_decl.name, field_tname) == 0) {
-                                        for (int sf = 0; sf < sdecl->as.struct_decl.fields.count;
-                                             sf++) {
-                                            Node* sfield = sdecl->as.struct_decl.fields.nodes[sf];
-                                            if (sfield->as.field.type &&
-                                                type_node_has_rc(gen, sfield->as.field.type)) {
-                                                field_needs_custom_dec = 1;
-                                                break;
-                                            }
-                                        }
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        // Also check generic instances (e.g., field type "Box_Inner")
-                        if (!field_needs_custom_dec) {
-                            for (int gi = 0; gi < gen->generic_instance_count; gi++) {
-                                if (strcmp(gen->generic_instances[gi].mangled_name, field_tname) ==
-                                    0) {
-                                    Type* git = gen->generic_instances[gi].type;
-                                    if (git && git->kind == TYPE_STRUCT &&
-                                        (git->as.struc.has_drop || git->as.struc.has_rc_fields)) {
-                                        field_needs_custom_dec = 1;
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (field_needs_custom_dec) {
-                        emit(gen, "        __rc_dec_%s(ptr->%s);\n", field_tname,
-                             rc_field_names[f]);
-                    } else {
-                        emit(gen, "        __rc_dec(ptr->%s);\n", rc_field_names[f]);
-                    }
+                    emit(gen, "        __rc_dec(ptr->%s);\n", rc_fields[f].field_name);
                 }
             }
             if (gen->rc_debug) {
@@ -1649,11 +1603,10 @@ static void emit_struct_rc_dec(CodeGen* gen, Node* ast) {
             emit(gen, "}\n\n");
 
             for (int f = 0; f < rc_field_count; f++) {
-                free(rc_field_names[f]);
-                free(rc_field_type_names[f]);
+                free(rc_fields[f].field_name);
+                free(rc_fields[f].type_name);
             }
-            free(rc_field_names);
-            free(rc_field_type_names);
+            free(rc_fields);
         }
     }
 
@@ -1664,16 +1617,7 @@ static void emit_struct_rc_dec(CodeGen* gen, Node* ast) {
         if (!t || t->kind != TYPE_STRUCT)
             continue;
 
-        // Check if this generic type implements Drop
-        int has_drop = 0;
-        for (int ti = 0; ti < gen->trait_impl_count; ti++) {
-            if (strcmp(gen->trait_impls[ti].trait_name, "Drop") == 0 &&
-                strcmp(gen->trait_impls[ti].type_name, info->base_name) == 0) {
-                has_drop = 1;
-                break;
-            }
-        }
-
+        int has_drop      = struct_implements_drop(gen, info->base_name);
         int has_rc_fields = t->as.struc.has_rc_fields;
 
         if (!has_drop && !has_rc_fields)

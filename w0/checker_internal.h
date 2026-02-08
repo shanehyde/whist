@@ -5,8 +5,8 @@
 
 // --- From checker.c: error reporting ---
 void check_error(Checker* checker, int line, int col, const char* fmt, ...);
-void check_error_type(Checker* checker, int line, int col, const char* context,
-                      Type* expected, Type* got);
+void check_error_type(Checker* checker, int line, int col, const char* context, Type* expected,
+                      Type* got);
 void check_error_cannot(Checker* checker, int line, int col, const char* action, Type* type);
 
 // --- From checker.c: statement checking ---
@@ -22,7 +22,7 @@ void             register_generic_def(Checker* checker, const char* name, char**
                                       char** type_param_bounds, int type_param_count, Node* decl);
 void             register_generic_method(GenericDef* def, Node* method);
 GenericDef*      lookup_generic_def(Checker* checker, const char* name);
-GenericInstance*  lookup_generic_instance(Checker* checker, const char* mangled_name);
+GenericInstance* lookup_generic_instance(Checker* checker, const char* mangled_name);
 
 // --- From checker_expr.c: expression checking ---
 Type* check_expression(Checker* checker, Node* node);

@@ -1,10 +1,9 @@
-#include "checker_internal.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "alloc.h"
+#include "checker_internal.h"
 #include "vec.h"
 
 // =============================================================================
@@ -13,7 +12,7 @@
 
 // Register a generic struct definition
 void register_generic_def(Checker* checker, const char* name, char** type_params,
-                           char** type_param_bounds, int type_param_count, Node* decl) {
+                          char** type_param_bounds, int type_param_count, Node* decl) {
     VEC_GROW(checker->generic_defs, checker->generic_def_count, checker->generic_def_capacity);
     GenericDef* def        = &checker->generic_defs[checker->generic_def_count++];
     def->name              = xstrdup(name);

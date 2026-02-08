@@ -1,10 +1,9 @@
-#include "checker_internal.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "alloc.h"
+#include "checker_internal.h"
 
 // Forward declaration for check_struct_init (called by check_new_expr)
 static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);

@@ -1,11 +1,10 @@
-#include "checker_internal.h"
-
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "alloc.h"
+#include "checker_internal.h"
 #include "vec.h"
 
 #define SCOPE_SIZE 64
@@ -54,15 +53,14 @@ void check_error(Checker* checker, int line, int col, const char* fmt, ...) {
 }
 
 // Helper for type mismatch errors with consistent "expected X, got Y" format
-void check_error_type(Checker* checker, int line, int col, const char* context,
-                      Type* expected, Type* got) {
+void check_error_type(Checker* checker, int line, int col, const char* context, Type* expected,
+                      Type* got) {
     check_error(checker, line, col, "%s: expected '%s', got '%s'", context, type_name(expected),
                 type_name(got));
 }
 
 // Helper for "cannot do X to type Y" errors
-void check_error_cannot(Checker* checker, int line, int col, const char* action,
-                        Type* type) {
+void check_error_cannot(Checker* checker, int line, int col, const char* action, Type* type) {
     check_error(checker, line, col, "Cannot %s type '%s'", action, type_name(type));
 }
 
