@@ -2320,20 +2320,32 @@ static void check_statement(Checker* checker, Node* node) {
         Type* start_type = check_expression(checker, node->as.foreach_stmt.start);
         Type* end_type   = check_expression(checker, node->as.foreach_stmt.end);
 
-        if (start_type->kind != TYPE_INT64 && start_type->kind != TYPE_ERROR) {
+        if (!type_is_integer(start_type) && start_type->kind != TYPE_ERROR) {
             check_error(checker, node->as.foreach_stmt.start->line,
                         node->as.foreach_stmt.start->column,
                         "Foreach range start must be int, got '%s'", type_name(start_type));
         }
 
-        if (end_type->kind != TYPE_INT64 && end_type->kind != TYPE_ERROR) {
+        if (!type_is_integer(end_type) && end_type->kind != TYPE_ERROR) {
             check_error(checker, node->as.foreach_stmt.end->line, node->as.foreach_stmt.end->column,
                         "Foreach range end must be int, got '%s'", type_name(end_type));
         }
 
-        // Add the loop variable as a const int64 (immutable)
-        Symbol* sym = checker_define(checker, node->as.foreach_stmt.var_name, SYM_VAR, type_int64,
-                                     1, 0, NULL);
+        // Determine loop variable type: prefer end type when start is a default i64 literal
+        Type* loop_type;
+        if (type_is_integer(end_type) &&
+            (start_type->kind == TYPE_INT64 || !type_is_integer(start_type))) {
+            loop_type = end_type;
+        } else if (type_is_integer(start_type)) {
+            loop_type = start_type;
+        } else {
+            loop_type = type_int64;
+        }
+        node->as.foreach_stmt.resolved_type = loop_type;
+
+        // Add the loop variable as a const integer (immutable)
+        Symbol* sym =
+            checker_define(checker, node->as.foreach_stmt.var_name, SYM_VAR, loop_type, 1, 0, NULL);
         if (!sym) {
             check_error(checker, node->line, node->column,
                         "Variable '%s' already declared in this scope",
@@ -2362,7 +2374,7 @@ static void check_statement(Checker* checker, Node* node) {
             if (expected->kind == TYPE_ENUM) {
                 checker->enum_target_hint = expected;
             }
-            Type* actual = check_expression(checker, node->as.return_stmt.value);
+            Type* actual              = check_expression(checker, node->as.return_stmt.value);
             checker->enum_target_hint = old_hint;
             if (!type_assignable(expected, actual)) {
                 check_error_type(checker, node->line, node->column, "Return", expected, actual);
@@ -2965,8 +2977,7 @@ int checker_check(Checker* checker, Node* ast) {
                 check_decl(checker, decl);
             }
             // Generic impl block: impl Drop for Box<T>
-            else if (decl->type == NODE_IMPL_DECL &&
-                     decl->as.impl_decl.type_args.count > 0) {
+            else if (decl->type == NODE_IMPL_DECL && decl->as.impl_decl.type_args.count > 0) {
                 check_decl(checker, decl);
             }
         }
@@ -2993,8 +3004,7 @@ int checker_check(Checker* checker, Node* ast) {
                 decl->as.func_decl.receiver_type_args.count > 0) {
                 continue;
             }
-            if (decl->type == NODE_IMPL_DECL &&
-                decl->as.impl_decl.type_args.count > 0) {
+            if (decl->type == NODE_IMPL_DECL && decl->as.impl_decl.type_args.count > 0) {
                 continue;
             }
             check_decl(checker, decl);
@@ -3021,8 +3031,7 @@ int checker_check(Checker* checker, Node* ast) {
                 decl->as.func_decl.receiver_type_args.count > 0) {
                 continue;
             }
-            if (decl->type == NODE_IMPL_DECL &&
-                decl->as.impl_decl.type_args.count > 0) {
+            if (decl->type == NODE_IMPL_DECL && decl->as.impl_decl.type_args.count > 0) {
                 continue;
             }
             check_decl(checker, decl);

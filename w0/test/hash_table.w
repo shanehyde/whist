@@ -37,8 +37,8 @@ struct HashTable<K, V>  {
 func (HashTable<K,V>) init(): void {
     // self.buckets = new Vec<HashEntry<V>>{};
     self.buckets.clear();
-    self.size = 2;
-    foreach (const i in 0..1) {
+    self.size = 20;
+    foreach (const i in 0..self.size) {
         self.buckets.push(new HashEntry<K, V>{next: null, value: 0});
     }
     // Implementation of insert method

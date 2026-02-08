@@ -331,6 +331,7 @@ struct Node {
             Node* end;
             Node* step;
             Node* body;
+            Type* resolved_type; // Set by checker (loop variable type)
         } foreach_stmt;
 
         // Return statement
