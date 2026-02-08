@@ -4,6 +4,20 @@ A weekly changelog of the Whist compiler, tracking development from initial comm
 
 ---
 
+## Week of Feb 9 – Feb 15, 2026
+
+Self-hosting checklist items land rapidly: string operations, pattern matching with payloads, match exhaustiveness checking, and collection iteration. A refactoring pass continues to reduce function complexity across the compiler.
+
+- **refactor: extract helpers from print_ast and check_binary_expr** ([#101](https://github.com/shanehyde/whist/pull/101)) — further complexity reduction in AST printing and binary expression checking
+- **feat: implement foreach over Span\<T\> collections** ([#100](https://github.com/shanehyde/whist/pull/100), [#80](https://github.com/shanehyde/whist/issues/80)) — `foreach item in span { ... }` iterates over Span\<T\> elements
+- **feat: implement foreach over Vec\<T\> collections** ([#99](https://github.com/shanehyde/whist/pull/99), [#79](https://github.com/shanehyde/whist/issues/79)) — `foreach item in vec { ... }` iterates over Vec\<T\> elements
+- **feat: add match exhaustiveness checking** ([#98](https://github.com/shanehyde/whist/pull/98), [#76](https://github.com/shanehyde/whist/issues/76)) — compiler errors on non-exhaustive match statements, ensuring all enum variants are handled
+- **feat: implement match statements with payload binding** ([#97](https://github.com/shanehyde/whist/pull/97), [#75](https://github.com/shanehyde/whist/issues/75)) — match arms can bind enum payloads (`case Some(val) => ...`)
+- **feat: implement string operations** ([#96](https://github.com/shanehyde/whist/pull/96), [#67](https://github.com/shanehyde/whist/issues/67)–[#73](https://github.com/shanehyde/whist/issues/73)) — string comparison, concatenation, slicing, and methods (contains, starts_with, ends_with, std.format)
+- **feat: implement string.length() method** ([#95](https://github.com/shanehyde/whist/pull/95), [#66](https://github.com/shanehyde/whist/issues/66)) — `str.length()` returns the string length
+- **docs: add self-hosting checklist with phased roadmap** ([#65](https://github.com/shanehyde/whist/pull/65)) — comprehensive self-hosting checklist on the GitHub Wiki
+- **refactor: extract 36 helper functions from large switch dispatchers** ([#64](https://github.com/shanehyde/whist/pull/64)) — major complexity reduction across checker and codegen; checker split into three files
+
 ## Week of Feb 3 – Feb 8, 2026
 
 A big week for memory management and type system maturity. The compiler gained reference-counted heap allocation, a Drop trait for deterministic cleanup, and generic struct support. The type system expanded with tagged unions, generic enums, type aliases, and a builtin Vec\<T\>. Developer tooling improved with a VS Code syntax highlighting extension and a codegen refactor. Several targeted fixes rounded out generic method resolution, enum type inference, and foreach range semantics.
