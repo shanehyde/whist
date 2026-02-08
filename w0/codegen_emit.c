@@ -1701,6 +1701,191 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
     emit(gen, ";\n");
 }
 
+// Emit an RC-managed Vec declaration: var v = new Vec<T>{...}
+static void emit_var_decl_rc_new_vec(CodeGen* gen, Node* node) {
+    Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
+    const char* elem_tname = type_name(rtype->as.vec.elem);
+    emit_indent(gen);
+    emit(gen, "__Vec_%s* %s = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s));\n", elem_tname,
+         node->as.var_decl.name, elem_tname, elem_tname);
+    emit_indent(gen);
+    emit(gen, "%s->data = NULL; %s->count = 0; %s->capacity = 0;\n",
+         node->as.var_decl.name, node->as.var_decl.name, node->as.var_decl.name);
+    Node* init = node->as.var_decl.init->as.new_expr.init;
+    for (int i = 0; i < init->as.struct_init.fields.count; i++) {
+        Node* field = init->as.struct_init.fields.nodes[i];
+        if (field && field->type == NODE_FIELD_INIT) {
+            emit_indent(gen);
+            emit(gen, "__Vec_%s_push(%s, ", elem_tname, node->as.var_decl.name);
+            emit_expr(gen, field->as.field_init.value);
+            emit(gen, ");\n");
+        }
+    }
+    char dec_buf[256];
+    snprintf(dec_buf, sizeof(dec_buf), "__rc_dec_Vec_%s", elem_tname);
+    rc_push_var(gen, node->as.var_decl.name, dec_buf, rtype);
+}
+
+// Emit an RC-managed struct declaration: var p = new Point { x: 1, y: 2 }
+static void emit_var_decl_rc_new_struct(CodeGen* gen, Node* node) {
+    Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
+    const char* tname = rtype->as.struc.name;
+    emit_indent(gen);
+    emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s));\n", tname, node->as.var_decl.name,
+         tname, tname);
+    emit_indent(gen);
+    emit(gen, "*%s = (%s)", node->as.var_decl.name, tname);
+    emit_struct_init(gen, node->as.var_decl.init->as.new_expr.init);
+    emit(gen, ";\n");
+    // Increment refcount for any RC-tracked idents stored in struct fields
+    Node* rc_init = node->as.var_decl.init->as.new_expr.init;
+    for (int i = 0; i < rc_init->as.struct_init.fields.count; i++) {
+        Node* field = rc_init->as.struct_init.fields.nodes[i];
+        if (field && field->type == NODE_FIELD_INIT &&
+            field->as.field_init.value->type == NODE_IDENT &&
+            rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
+            const char* vname  = field->as.field_init.value->as.ident.name;
+            Type*       vtype  = rc_get_var_type(gen, vname);
+            const char* inc_fn = get_inc_func_for_type(vtype);
+            emit_indent(gen);
+            emit(gen, "%s(%s);\n", inc_fn, vname);
+            free((char*)inc_fn);
+        }
+    }
+    const char* dec_fn = get_dec_func_for_type(rtype);
+    rc_push_var(gen, node->as.var_decl.name, dec_fn, rtype);
+    free((char*)dec_fn);
+}
+
+// Emit an RC copy or ownership transfer: var x = existing_rc_var or func_call()
+static void emit_var_decl_rc_copy(CodeGen* gen, Node* node) {
+    emit_indent(gen);
+    if (node->as.var_decl.type) {
+        emit_type_with_name(gen, node->as.var_decl.type, node->as.var_decl.name);
+    } else if (node->as.var_decl.resolved_type) {
+        Type* rtype = node->as.var_decl.resolved_type;
+        if (rtype->kind == TYPE_STRUCT) {
+            emit(gen, "%s* %s", rtype->as.struc.name, node->as.var_decl.name);
+        } else {
+            emit_resolved_type(gen, rtype);
+            emit(gen, " %s", node->as.var_decl.name);
+        }
+    } else {
+        emit(gen, "void* %s", node->as.var_decl.name);
+    }
+    emit(gen, " = ");
+    emit_expr(gen, node->as.var_decl.init);
+    emit(gen, ";\n");
+    // Function calls transfer ownership (rc already 1), no inc needed
+    Type* rc_type  = node->as.var_decl.resolved_type;
+    int   skip_inc = node->as.var_decl.init->type == NODE_CALL ||
+                   (rc_type && rc_type->kind == TYPE_ENUM &&
+                    node->as.var_decl.init->type == NODE_ENUM_VALUE);
+    if (!skip_inc && rc_type) {
+        const char* inc_fn = get_inc_func_for_type(rc_type);
+        emit_indent(gen);
+        emit(gen, "%s(%s);\n", inc_fn, node->as.var_decl.name);
+        free((char*)inc_fn);
+    }
+    const char* dec_fn = get_dec_func_for_type(rc_type);
+    rc_push_var(gen, node->as.var_decl.name, dec_fn, rc_type);
+    free((char*)dec_fn);
+}
+
+// Emit a type-and-name declaration inferred from the initializer expression.
+static void emit_var_decl_inferred_type(CodeGen* gen, Node* node) {
+    if (!node->as.var_decl.init) {
+        emit(gen, "int64_t %s", node->as.var_decl.name);
+        return;
+    }
+    switch (node->as.var_decl.init->type) {
+    case NODE_INT_LIT:
+        emit(gen, "int64_t %s", node->as.var_decl.name);
+        break;
+    case NODE_FLOAT_LIT:
+        emit(gen, "float %s", node->as.var_decl.name);
+        break;
+    case NODE_BOOL_LIT:
+        emit(gen, "bool %s", node->as.var_decl.name);
+        break;
+    case NODE_STRING_LIT:
+        emit(gen, "const char* %s", node->as.var_decl.name);
+        break;
+    case NODE_CHAR_LIT:
+        emit(gen, "char %s", node->as.var_decl.name);
+        break;
+    case NODE_TUPLE_LIT: {
+        int    count = node->as.var_decl.init->as.tuple_lit.elements.count;
+        Type** elems = xmalloc(count * sizeof(Type*));
+        for (int i = 0; i < count; i++) {
+            Node* elem = node->as.var_decl.init->as.tuple_lit.elements.nodes[i];
+            switch (elem->type) {
+            case NODE_INT_LIT:
+                elems[i] = type_int64;
+                break;
+            case NODE_FLOAT_LIT:
+                elems[i] = type_f32;
+                break;
+            case NODE_BOOL_LIT:
+                elems[i] = type_bool;
+                break;
+            case NODE_STRING_LIT:
+                elems[i] = type_string;
+                break;
+            case NODE_CHAR_LIT:
+                elems[i] = type_char;
+                break;
+            case NODE_TUPLE_LIT:
+                elems[i] = type_int64; // Fallback
+                break;
+            default:
+                elems[i] = type_int64; // Default
+                break;
+            }
+        }
+        Type* tuple = type_tuple(elems, count);
+        int idx = -1;
+        for (int i = 0; i < gen->tuple_type_count; i++) {
+            if (tuple_types_equal(gen->tuple_types[i], tuple)) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx >= 0) {
+            emit(gen, "__tuple_t%d %s", idx, node->as.var_decl.name);
+        } else {
+            emit(gen, "struct { ");
+            for (int i = 0; i < count; i++) {
+                emit_resolved_type(gen, elems[i]);
+                emit(gen, " _%d; ", i);
+            }
+            emit(gen, "} %s", node->as.var_decl.name);
+        }
+        break;
+    }
+    case NODE_ARRAY_LIT: {
+        Node* init      = node->as.var_decl.init;
+        Type* elem_type = init->as.array_lit.resolved_type;
+        int   count     = init->as.array_lit.elements.count;
+        emit_resolved_type(gen, elem_type);
+        emit(gen, " %s[%d]", node->as.var_decl.name, count);
+        break;
+    }
+    case NODE_ENUM_VALUE:
+        emit(gen, "%.*s %s", node->as.var_decl.init->as.enum_value.enum_name_length,
+             node->as.var_decl.init->as.enum_value.enum_name, node->as.var_decl.name);
+        break;
+    default:
+        if (node->as.var_decl.resolved_type) {
+            emit_resolved_type(gen, node->as.var_decl.resolved_type);
+            emit(gen, " %s", node->as.var_decl.name);
+        } else {
+            emit(gen, "int64_t %s", node->as.var_decl.name);
+        }
+        break;
+    }
+}
+
 // Emit a variable declaration statement (NODE_VAR_DECL).
 // Handles destructuring, RC-managed declarations, type inference, and struct init.
 static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
@@ -1708,16 +1893,12 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
     DestructPattern* pattern = node->as.var_decl.destruct_pattern;
     if (pattern) {
         Type* tuple_type = pattern->resolved_type;
-
-        // Emit a temporary variable to hold the tuple value
         emit_indent(gen);
         emit_resolved_type(gen, tuple_type);
         int temp_id = gen->temp_count++;
         emit(gen, " __tuple%d = ", temp_id);
         emit_expr(gen, node->as.var_decl.init);
         emit(gen, ";\n");
-
-        // Recursively emit the destructured variables
         char temp_prefix[64];
         snprintf(temp_prefix, sizeof(temp_prefix), "__tuple%d", temp_id);
         emit_destruct_pattern(gen, pattern, temp_prefix, node->as.var_decl.is_const);
@@ -1729,97 +1910,14 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
         if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
             Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
             if (rtype && rtype->kind == TYPE_VEC) {
-                // var v = new Vec<T>{} or new Vec<T>{1, 2, 3}
-                const char* elem_tname = type_name(rtype->as.vec.elem);
-                emit_indent(gen);
-                emit(gen, "__Vec_%s* %s = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s));\n", elem_tname,
-                     node->as.var_decl.name, elem_tname, elem_tname);
-                emit_indent(gen);
-                emit(gen, "%s->data = NULL; %s->count = 0; %s->capacity = 0;\n",
-                     node->as.var_decl.name, node->as.var_decl.name, node->as.var_decl.name);
-                // Push initial elements
-                Node* init = node->as.var_decl.init->as.new_expr.init;
-                for (int i = 0; i < init->as.struct_init.fields.count; i++) {
-                    Node* field = init->as.struct_init.fields.nodes[i];
-                    if (field && field->type == NODE_FIELD_INIT) {
-                        emit_indent(gen);
-                        emit(gen, "__Vec_%s_push(%s, ", elem_tname, node->as.var_decl.name);
-                        emit_expr(gen, field->as.field_init.value);
-                        emit(gen, ");\n");
-                    }
-                }
-                char dec_buf[256];
-                snprintf(dec_buf, sizeof(dec_buf), "__rc_dec_Vec_%s", elem_tname);
-                rc_push_var(gen, node->as.var_decl.name, dec_buf, rtype);
-                return;
-            }
-            // var p = new Point { x: 1, y: 2 }
-            // => Point* p = (Point*)__rc_alloc(sizeof(Point));
-            //    *p = (Point){ .x = 1, .y = 2 };
-            const char* tname = rtype->as.struc.name;
-            emit_indent(gen);
-            emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s));\n", tname, node->as.var_decl.name,
-                 tname, tname);
-            emit_indent(gen);
-            emit(gen, "*%s = (%s)", node->as.var_decl.name, tname);
-            emit_struct_init(gen, node->as.var_decl.init->as.new_expr.init);
-            emit(gen, ";\n");
-            // Increment refcount for any RC-tracked idents stored in struct fields
-            Node* rc_init = node->as.var_decl.init->as.new_expr.init;
-            for (int i = 0; i < rc_init->as.struct_init.fields.count; i++) {
-                Node* field = rc_init->as.struct_init.fields.nodes[i];
-                if (field && field->type == NODE_FIELD_INIT &&
-                    field->as.field_init.value->type == NODE_IDENT &&
-                    rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
-                    const char* vname  = field->as.field_init.value->as.ident.name;
-                    Type*       vtype  = rc_get_var_type(gen, vname);
-                    const char* inc_fn = get_inc_func_for_type(vtype);
-                    emit_indent(gen);
-                    emit(gen, "%s(%s);\n", inc_fn, vname);
-                    free((char*)inc_fn);
-                }
-            }
-            const char* dec_fn = get_dec_func_for_type(rtype);
-            rc_push_var(gen, node->as.var_decl.name, dec_fn, rtype);
-            free((char*)dec_fn);
-            return;
-        } else {
-            // RC copy or ownership transfer from function call
-            emit_indent(gen);
-            if (node->as.var_decl.type) {
-                emit_type_with_name(gen, node->as.var_decl.type, node->as.var_decl.name);
-            } else if (node->as.var_decl.resolved_type) {
-                // Use resolved struct type from checker
-                Type* rtype = node->as.var_decl.resolved_type;
-                if (rtype->kind == TYPE_STRUCT) {
-                    emit(gen, "%s* %s", rtype->as.struc.name, node->as.var_decl.name);
-                } else {
-                    emit_resolved_type(gen, rtype);
-                    emit(gen, " %s", node->as.var_decl.name);
-                }
+                emit_var_decl_rc_new_vec(gen, node);
             } else {
-                emit(gen, "void* %s", node->as.var_decl.name);
+                emit_var_decl_rc_new_struct(gen, node);
             }
-            emit(gen, " = ");
-            emit_expr(gen, node->as.var_decl.init);
-            emit(gen, ";\n");
-            // Function calls transfer ownership (rc already 1), no inc needed
-            Type* rc_type  = node->as.var_decl.resolved_type;
-            int   skip_inc = node->as.var_decl.init->type == NODE_CALL ||
-                           (rc_type && rc_type->kind == TYPE_ENUM &&
-                            node->as.var_decl.init->type == NODE_ENUM_VALUE);
-            if (!skip_inc && rc_type) {
-                // Copy of existing RC var: increment refcount
-                const char* inc_fn = get_inc_func_for_type(rc_type);
-                emit_indent(gen);
-                emit(gen, "%s(%s);\n", inc_fn, node->as.var_decl.name);
-                free((char*)inc_fn);
-            }
-            const char* dec_fn2 = get_dec_func_for_type(rc_type);
-            rc_push_var(gen, node->as.var_decl.name, dec_fn2, rc_type);
-            free((char*)dec_fn2);
-            return;
+        } else {
+            emit_var_decl_rc_copy(gen, node);
         }
+        return;
     }
 
     emit_indent(gen);
@@ -1827,116 +1925,16 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
         emit(gen, "const ");
     }
 
-    // Check if this is a struct type variable with initializer
     int struct_type = node->as.var_decl.type && is_struct_type(gen, node->as.var_decl.type);
 
     if (node->as.var_decl.type) {
         emit_type_with_name(gen, node->as.var_decl.type, node->as.var_decl.name);
     } else {
-        // Type inference - use auto or infer from init
-        // For C, we need to determine the type from the initializer
-        // For simplicity, use int64_t for int literals, float for f32 literals
-        if (node->as.var_decl.init) {
-            switch (node->as.var_decl.init->type) {
-            case NODE_INT_LIT:
-                emit(gen, "int64_t %s", node->as.var_decl.name);
-                break;
-            case NODE_FLOAT_LIT:
-                emit(gen, "float %s", node->as.var_decl.name);
-                break;
-            case NODE_BOOL_LIT:
-                emit(gen, "bool %s", node->as.var_decl.name);
-                break;
-            case NODE_STRING_LIT:
-                emit(gen, "const char* %s", node->as.var_decl.name);
-                break;
-            case NODE_CHAR_LIT:
-                emit(gen, "char %s", node->as.var_decl.name);
-                break;
-            case NODE_TUPLE_LIT: {
-                // Build a tuple type from the literal's elements
-                int    count = node->as.var_decl.init->as.tuple_lit.elements.count;
-                Type** elems = xmalloc(count * sizeof(Type*));
-                for (int i = 0; i < count; i++) {
-                    Node* elem = node->as.var_decl.init->as.tuple_lit.elements.nodes[i];
-                    switch (elem->type) {
-                    case NODE_INT_LIT:
-                        elems[i] = type_int64;
-                        break;
-                    case NODE_FLOAT_LIT:
-                        elems[i] = type_f32;
-                        break;
-                    case NODE_BOOL_LIT:
-                        elems[i] = type_bool;
-                        break;
-                    case NODE_STRING_LIT:
-                        elems[i] = type_string;
-                        break;
-                    case NODE_CHAR_LIT:
-                        elems[i] = type_char;
-                        break;
-                    case NODE_TUPLE_LIT:
-                        // Nested tuple - would need recursive handling
-                        elems[i] = type_int64; // Fallback
-                        break;
-                    default:
-                        elems[i] = type_int64; // Default
-                        break;
-                    }
-                }
-                Type* tuple = type_tuple(elems, count);
-                // Find matching typedef
-                int idx = -1;
-                for (int i = 0; i < gen->tuple_type_count; i++) {
-                    if (tuple_types_equal(gen->tuple_types[i], tuple)) {
-                        idx = i;
-                        break;
-                    }
-                }
-                if (idx >= 0) {
-                    emit(gen, "__tuple_t%d %s", idx, node->as.var_decl.name);
-                } else {
-                    // Fallback to inline struct
-                    emit(gen, "struct { ");
-                    for (int i = 0; i < count; i++) {
-                        emit_resolved_type(gen, elems[i]);
-                        emit(gen, " _%d; ", i);
-                    }
-                    emit(gen, "} %s", node->as.var_decl.name);
-                }
-                break;
-            }
-            case NODE_ARRAY_LIT: {
-                // Use the resolved element type from checker
-                Node* init      = node->as.var_decl.init;
-                Type* elem_type = init->as.array_lit.resolved_type;
-                int   count     = init->as.array_lit.elements.count;
-                emit_resolved_type(gen, elem_type);
-                emit(gen, " %s[%d]", node->as.var_decl.name, count);
-                break;
-            }
-            case NODE_ENUM_VALUE:
-                // Emit enum type name from the initializer
-                emit(gen, "%.*s %s", node->as.var_decl.init->as.enum_value.enum_name_length,
-                     node->as.var_decl.init->as.enum_value.enum_name, node->as.var_decl.name);
-                break;
-            default:
-                if (node->as.var_decl.resolved_type) {
-                    emit_resolved_type(gen, node->as.var_decl.resolved_type);
-                    emit(gen, " %s", node->as.var_decl.name);
-                } else {
-                    // Default to int64_t if we can't determine
-                    emit(gen, "int64_t %s", node->as.var_decl.name);
-                }
-                break;
-            }
-        } else {
-            emit(gen, "int64_t %s", node->as.var_decl.name);
-        }
+        emit_var_decl_inferred_type(gen, node);
     }
+
     if (node->as.var_decl.init) {
         if (struct_type && node->as.var_decl.init->type == NODE_NULL_LIT) {
-            // Struct type with null: just assign NULL
             emit(gen, " = NULL");
         } else {
             emit(gen, " = ");
