@@ -2464,7 +2464,11 @@ void emit_decl(CodeGen* gen, Node* node) {
             if (node->as.func_decl.receiver_is_const) {
                 emit(gen, "const ");
             }
-            emit(gen, "%s* self", node->as.func_decl.receiver_type);
+            if (type_is_builtin_name(node->as.func_decl.receiver_type)) {
+                emit(gen, "%s self", type_c_name(node->as.func_decl.receiver_type));
+            } else {
+                emit(gen, "%s* self", node->as.func_decl.receiver_type);
+            }
             if (node->as.func_decl.params.count > 0) {
                 emit(gen, ", ");
             }

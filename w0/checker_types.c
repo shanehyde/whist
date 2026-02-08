@@ -730,10 +730,13 @@ Type* resolve_type(Checker* checker, Node* type_node) {
         for (int i = 0; i < arg_count; i++) {
             if (def->type_param_bounds[i]) {
                 const char* bound             = def->type_param_bounds[i];
-                const char* arg_type_name_str = (resolved_args[i]->kind == TYPE_STRUCT)
-                                                    ? resolved_args[i]->as.struc.name
-                                                    : NULL;
-                int         satisfied         = 0;
+                const char* arg_type_name_str = NULL;
+                if (resolved_args[i]->kind == TYPE_STRUCT) {
+                    arg_type_name_str = resolved_args[i]->as.struc.name;
+                } else {
+                    arg_type_name_str = type_name(resolved_args[i]);
+                }
+                int satisfied = 0;
                 if (arg_type_name_str) {
                     for (int t = 0; t < checker->trait_impl_count; t++) {
                         if (strcmp(checker->trait_impls[t].trait_name, bound) == 0 &&

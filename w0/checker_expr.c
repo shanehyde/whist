@@ -394,7 +394,18 @@ static Type* check_member_expr(Checker* checker, Node* node) {
         return type_error;
     }
 
+    // Check for methods on primitive types (from trait impls)
     if (object->kind != TYPE_STRUCT) {
+        const char* prim_name   = type_name(object);
+        const char* member_name = node->as.member.name;
+        for (int i = 0; i < checker->primitive_method_count; i++) {
+            if (strcmp(checker->primitive_methods[i].type_name, prim_name) == 0 &&
+                strcmp(checker->primitive_methods[i].method_name, member_name) == 0) {
+                node->as.member.is_ref      = 0;
+                node->as.member.struct_name = xstrdup(prim_name);
+                return checker->primitive_methods[i].method_type;
+            }
+        }
         check_error(checker, node->line, node->column,
                     "Member access requires struct type, got '%s'", type_name(object));
         return type_error;

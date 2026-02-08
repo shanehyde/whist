@@ -38,6 +38,14 @@ typedef struct {
     char* type_name;
 } TraitImpl;
 
+// Method registered on a primitive type (from trait impls)
+typedef struct {
+    char* type_name;   // "i32", "u32", etc.
+    char* method_name; // "hash"
+    Type* method_type; // function type (params + return)
+    int   is_const;    // const receiver?
+} PrimitiveMethod;
+
 // Generic struct definition (template)
 typedef struct {
     char*  name;              // "Box", "Pair"
@@ -122,6 +130,11 @@ struct Checker {
     TraitImpl* trait_impls;
     int        trait_impl_count;
     int        trait_impl_capacity;
+
+    // Methods on primitive types (from trait impls)
+    PrimitiveMethod* primitive_methods;
+    int              primitive_method_count;
+    int              primitive_method_capacity;
 
     // Type alias cycle detection
     int alias_depth;
