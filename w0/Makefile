@@ -8,7 +8,7 @@ DEPS = $(SRC:.c=.d)
 BIN = bin
 TARGET = $(BIN)/w0
 
-.PHONY: all clean test test-verbose test-valid test-errors format
+.PHONY: all clean test test-verbose test-valid test-errors format metrics
 
 all: $(TARGET)
 
@@ -39,5 +39,8 @@ test-errors: $(TARGET)
 
 format:
 	clang-format -i *.c *.h
+
+metrics:
+	@lizard *.c --sort nloc
 
 -include $(DEPS)

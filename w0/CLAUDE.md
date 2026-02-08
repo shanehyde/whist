@@ -11,6 +11,7 @@ Whist Grammar specification: [grammar.md](../grammar.md)
 make          # Build bin/w0
 make test     # Run test suite
 make format   # Format source files (run after modifying .c/.h)
+make metrics  # Show function sizes/complexity sorted by line count (uses lizard)
 ```
 
 ## Usage
