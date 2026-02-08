@@ -9,5 +9,5 @@ func main(): i32 {
     foreach (const num in 10..14 by z) {
         result = result + num;
     }
-    return result;  // Should return 10 + 12 + 14 = 36
+    return result;  // Should return 10 + 12 = 22 (14 excluded)
 }
