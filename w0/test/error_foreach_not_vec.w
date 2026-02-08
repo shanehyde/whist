@@ -1,4 +1,4 @@
-// Expected error: Foreach collection must be Vec<T>
+// Expected error: Foreach collection must be Vec<T> or Span<T>
 
 func main(): i32 {
     var x: i64 = 42;

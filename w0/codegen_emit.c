@@ -2317,26 +2317,23 @@ void emit_stmt(CodeGen* gen, Node* node) {
 
     case NODE_FOREACH:
         if (node->as.foreach_stmt.collection) {
-            // Collection foreach: foreach (const item in vec)
-            // Generate:
-            //   for (int64_t __foreach_N = 0; __foreach_N < vec->count; __foreach_N++) {
-            //       <type> item = vec->data[__foreach_N];
-            //       // body
-            //   }
-            int idx_id = gen->temp_count++;
+            // Collection foreach: foreach (const item in collection)
+            // Vec uses -> (pointer), Span uses . (value type)
+            const char* access = node->as.foreach_stmt.is_span ? "." : "->";
+            int         idx_id = gen->temp_count++;
             emit_indent(gen);
             emit(gen, "for (int64_t __foreach_%d = 0; __foreach_%d < ", idx_id, idx_id);
             emit_expr(gen, node->as.foreach_stmt.collection);
-            emit(gen, "->count; __foreach_%d++) {\n", idx_id);
+            emit(gen, "%scount; __foreach_%d++) {\n", access, idx_id);
             gen->indent++;
-            // Declare the loop variable from vec->data[idx]
+            // Declare the loop variable from collection data[idx]
             emit_indent(gen);
             emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
                                         ? node->as.foreach_stmt.resolved_type
                                         : type_int64);
             emit(gen, " %s = ", node->as.foreach_stmt.var_name);
             emit_expr(gen, node->as.foreach_stmt.collection);
-            emit(gen, "->data[__foreach_%d];\n", idx_id);
+            emit(gen, "%sdata[__foreach_%d];\n", access, idx_id);
             if (node->as.foreach_stmt.body->type == NODE_BLOCK) {
                 emit_block_contents(gen, node->as.foreach_stmt.body);
             } else {

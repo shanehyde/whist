@@ -653,10 +653,14 @@ static void check_foreach_stmt(Checker* checker, Node* node) {
 
         if (coll_type->kind == TYPE_VEC) {
             loop_type = coll_type->as.vec.elem;
+        } else if (coll_type->kind == TYPE_SPAN) {
+            loop_type                     = coll_type->as.span.elem;
+            node->as.foreach_stmt.is_span = 1;
         } else if (coll_type->kind != TYPE_ERROR) {
             check_error(checker, node->as.foreach_stmt.collection->line,
                         node->as.foreach_stmt.collection->column,
-                        "Foreach collection must be Vec<T>, got '%s'", type_name(coll_type));
+                        "Foreach collection must be Vec<T> or Span<T>, got '%s'",
+                        type_name(coll_type));
             loop_type = type_int64;
         } else {
             loop_type = type_int64;
