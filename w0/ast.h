@@ -335,6 +335,7 @@ struct Node {
             Node* end;
             Node* step;
             Node* body;
+            Node* collection;    // Non-NULL for collection foreach (e.g. Vec<T>)
             Type* resolved_type; // Set by checker (loop variable type)
         } foreach_stmt;
 

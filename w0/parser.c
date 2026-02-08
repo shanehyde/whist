@@ -891,22 +891,29 @@ static Node* parse_foreach_stmt(Parser* parser) {
     // Parse: in
     consume_token(parser, TOK_IN, "Expected 'in' after foreach variable");
 
-    // Parse: start expression
-    Node* start = parse_expression(parser);
+    // Parse: first expression (either range start or collection)
+    Node* expr = parse_expression(parser);
 
-    // Parse: ..
-    consume_token(parser, TOK_DOT_DOT, "Expected '..' in range expression");
+    Node* start      = NULL;
+    Node* end        = NULL;
+    Node* step       = NULL;
+    Node* collection = NULL;
 
-    // Parse: end expression
-    Node* end  = parse_expression(parser);
-    Node* step = NULL;
+    if (match_token(parser, TOK_DOT_DOT)) {
+        // Range foreach: foreach (const i in start..end [by step])
+        start = expr;
+        end   = parse_expression(parser);
 
-    if (match_token(parser, TOK_BY)) {
-        step = parse_expression(parser);
+        if (match_token(parser, TOK_BY)) {
+            step = parse_expression(parser);
+        } else {
+            // Default step is 1
+            step                   = node_new(NODE_INT_LIT, token.line, token.column);
+            step->as.int_lit.value = 1;
+        }
     } else {
-        // Default step is 1
-        step                   = node_new(NODE_INT_LIT, token.line, token.column);
-        step->as.int_lit.value = 1;
+        // Collection foreach: foreach (const item in vec)
+        collection = expr;
     }
 
     consume_token(parser, TOK_RPAREN, "Expected ')' after foreach clauses");
@@ -920,6 +927,7 @@ static Node* parse_foreach_stmt(Parser* parser) {
     node->as.foreach_stmt.end             = end;
     node->as.foreach_stmt.step            = step;
     node->as.foreach_stmt.body            = body;
+    node->as.foreach_stmt.collection      = collection;
     return node;
 }
 

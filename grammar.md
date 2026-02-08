@@ -212,8 +212,11 @@ Create vecs: `var v = new Vec<i64>{};` or `var v = new Vec<i64>{1, 2, 3};`
             | <expression>
 
 <foreach-stmt> ::= 'foreach' '(' 'const' <identifier> 'in' <expression> '..' <expression> [ 'by' <expression> ] ')' '{' <block> '}'
+                 | 'foreach' '(' 'const' <identifier> 'in' <expression> ')' '{' <block> '}'
 
-The range `start..end` is **end-exclusive**: iterates from `start` up to but not including `end`. For example, `0..5` iterates `0, 1, 2, 3, 4`.
+The first form iterates over a range. The range `start..end` is **end-exclusive**: iterates from `start` up to but not including `end`. For example, `0..5` iterates `0, 1, 2, 3, 4`.
+
+The second form iterates over a collection. Currently supported: `Vec<T>`.
 
 <return-stmt> ::= 'return' [ <expression> ] ';'
 

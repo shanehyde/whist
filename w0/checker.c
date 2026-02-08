@@ -645,33 +645,52 @@ static void check_for_stmt(Checker* checker, Node* node) {
 static void check_foreach_stmt(Checker* checker, Node* node) {
     checker_push_scope(checker); // New scope for loop variable
 
-    // Check that start and end are integers
-    Type* start_type = check_expression(checker, node->as.foreach_stmt.start);
-    Type* end_type   = check_expression(checker, node->as.foreach_stmt.end);
-
-    if (!type_is_integer(start_type) && start_type->kind != TYPE_ERROR) {
-        check_error(checker, node->as.foreach_stmt.start->line, node->as.foreach_stmt.start->column,
-                    "Foreach range start must be int, got '%s'", type_name(start_type));
-    }
-
-    if (!type_is_integer(end_type) && end_type->kind != TYPE_ERROR) {
-        check_error(checker, node->as.foreach_stmt.end->line, node->as.foreach_stmt.end->column,
-                    "Foreach range end must be int, got '%s'", type_name(end_type));
-    }
-
-    // Determine loop variable type: prefer end type when start is a default i64 literal
     Type* loop_type;
-    if (type_is_integer(end_type) &&
-        (start_type->kind == TYPE_INT64 || !type_is_integer(start_type))) {
-        loop_type = end_type;
-    } else if (type_is_integer(start_type)) {
-        loop_type = start_type;
+
+    if (node->as.foreach_stmt.collection) {
+        // Collection foreach: foreach (const item in vec)
+        Type* coll_type = check_expression(checker, node->as.foreach_stmt.collection);
+
+        if (coll_type->kind == TYPE_VEC) {
+            loop_type = coll_type->as.vec.elem;
+        } else if (coll_type->kind != TYPE_ERROR) {
+            check_error(checker, node->as.foreach_stmt.collection->line,
+                        node->as.foreach_stmt.collection->column,
+                        "Foreach collection must be Vec<T>, got '%s'", type_name(coll_type));
+            loop_type = type_int64;
+        } else {
+            loop_type = type_int64;
+        }
     } else {
-        loop_type = type_int64;
+        // Range foreach: foreach (const i in start..end [by step])
+        Type* start_type = check_expression(checker, node->as.foreach_stmt.start);
+        Type* end_type   = check_expression(checker, node->as.foreach_stmt.end);
+
+        if (!type_is_integer(start_type) && start_type->kind != TYPE_ERROR) {
+            check_error(checker, node->as.foreach_stmt.start->line,
+                        node->as.foreach_stmt.start->column,
+                        "Foreach range start must be int, got '%s'", type_name(start_type));
+        }
+
+        if (!type_is_integer(end_type) && end_type->kind != TYPE_ERROR) {
+            check_error(checker, node->as.foreach_stmt.end->line, node->as.foreach_stmt.end->column,
+                        "Foreach range end must be int, got '%s'", type_name(end_type));
+        }
+
+        // Determine loop variable type: prefer end type when start is a default i64 literal
+        if (type_is_integer(end_type) &&
+            (start_type->kind == TYPE_INT64 || !type_is_integer(start_type))) {
+            loop_type = end_type;
+        } else if (type_is_integer(start_type)) {
+            loop_type = start_type;
+        } else {
+            loop_type = type_int64;
+        }
     }
+
     node->as.foreach_stmt.resolved_type = loop_type;
 
-    // Add the loop variable as a const integer (immutable)
+    // Add the loop variable as a const (immutable)
     Symbol* sym =
         checker_define(checker, node->as.foreach_stmt.var_name, SYM_VAR, loop_type, 1, 0, NULL);
     if (!sym) {
