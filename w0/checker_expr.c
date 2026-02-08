@@ -26,6 +26,16 @@ static Type* check_binary_expr(Checker* checker, Node* node) {
     // Comparison operators return bool
     if (op == TOK_EQ_EQ || op == TOK_BANG_EQ || op == TOK_LT || op == TOK_GT || op == TOK_LT_EQ ||
         op == TOK_GT_EQ) {
+        // String comparison: only == and != allowed
+        if (left->kind == TYPE_STRING && right->kind == TYPE_STRING) {
+            if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
+                node->as.binary.is_string_op = 1;
+                return type_bool;
+            }
+            check_error(checker, node->line, node->column,
+                        "Strings only support == and != comparison");
+            return type_error;
+        }
         if (type_equals(left, right))
             return type_bool;
         // voidptr/struct == null and null == voidptr/struct (only for == and !=)
@@ -59,6 +69,11 @@ static Type* check_binary_expr(Checker* checker, Node* node) {
     // Arithmetic operators
     if (op == TOK_PLUS || op == TOK_MINUS || op == TOK_STAR || op == TOK_SLASH ||
         op == TOK_PERCENT) {
+        // String concatenation: string + string
+        if (op == TOK_PLUS && left->kind == TYPE_STRING && right->kind == TYPE_STRING) {
+            node->as.binary.is_string_op = 1;
+            return type_string;
+        }
         if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
             (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
             if (left->kind == TYPE_F64 || right->kind == TYPE_F64)
@@ -204,6 +219,26 @@ static Type* check_slice_expr(Checker* checker, Node* node) {
     } else if (object->kind == TYPE_VEC) {
         elem_type             = object->as.vec.elem;
         node->as.slice.is_vec = 1;
+    } else if (object->kind == TYPE_STRING) {
+        // String slicing returns a new string
+        node->as.slice.is_string = 1;
+
+        // Check bounds are integers (if present)
+        if (node->as.slice.start) {
+            Type* t = check_expression(checker, node->as.slice.start);
+            if (!type_is_integer(t) && t->kind != TYPE_ERROR) {
+                check_error(checker, node->as.slice.start->line, node->as.slice.start->column,
+                            "Slice start index must be an integer, got '%s'", type_name(t));
+            }
+        }
+        if (node->as.slice.end) {
+            Type* t = check_expression(checker, node->as.slice.end);
+            if (!type_is_integer(t) && t->kind != TYPE_ERROR) {
+                check_error(checker, node->as.slice.end->line, node->as.slice.end->column,
+                            "Slice end index must be an integer, got '%s'", type_name(t));
+            }
+        }
+        return type_string;
     } else {
         check_error(checker, node->line, node->column, "Cannot slice type '%s'", type_name(object));
         return type_error;
@@ -236,6 +271,13 @@ static Type* check_member_expr(Checker* checker, Node* node) {
     if (node->as.member.object->type == NODE_IDENT) {
         const char* name = node->as.member.object->as.ident.name;
         if (is_imported_module(checker, name)) {
+            // Built-in: std.format(string, ...) -> string
+            if (strcmp(name, "std") == 0 && strcmp(node->as.member.name, "format") == 0) {
+                node->as.member.module_name = xstrdup(name);
+                Type** params               = xmalloc(1 * sizeof(Type*));
+                params[0]                   = type_string;
+                return type_func(params, 1, type_string, 1);
+            }
             Symbol* sym = checker_lookup_in_module(checker, name, node->as.member.name);
             if (!sym) {
                 check_error(checker, node->line, node->column,
@@ -326,8 +368,14 @@ static Type* check_member_expr(Checker* checker, Node* node) {
             node->as.member.struct_name = xstrdup("__String");
             return type_func(NULL, 0, type_int64, 0);
         }
-        check_error(checker, node->line, node->column,
-                    "String has no member '%s'", member_name);
+        if (strcmp(member_name, "contains") == 0 || strcmp(member_name, "starts_with") == 0 ||
+            strcmp(member_name, "ends_with") == 0) {
+            node->as.member.struct_name = xstrdup("__String");
+            Type** params               = xmalloc(1 * sizeof(Type*));
+            params[0]                   = type_string;
+            return type_func(params, 1, type_bool, 0);
+        }
+        check_error(checker, node->line, node->column, "String has no member '%s'", member_name);
         return type_error;
     }
 

@@ -181,6 +181,7 @@ struct Node {
             TokenType op;
             Node*     left;
             Node*     right;
+            int       is_string_op; // Set by checker for string ==, !=, +
         } binary;
 
         // Unary expression
@@ -212,6 +213,7 @@ struct Node {
             Type* resolved_type; // Set by checker
             int   is_array;      // Set by checker: 1 if slicing array, 0 if slicing span
             int   is_vec;        // Set by checker: 1 if slicing a vec
+            int   is_string;     // Set by checker: 1 if slicing a string
         } slice;
 
         // Member access: obj.member
