@@ -1882,8 +1882,13 @@ void emit_stmt(CodeGen* gen, Node* node) {
                          node->as.var_decl.init->as.enum_value.enum_name, node->as.var_decl.name);
                     break;
                 default:
-                    // Default to auto if we can't determine
-                    emit(gen, "int64_t %s", node->as.var_decl.name);
+                    if (node->as.var_decl.resolved_type) {
+                        emit_resolved_type(gen, node->as.var_decl.resolved_type);
+                        emit(gen, " %s", node->as.var_decl.name);
+                    } else {
+                        // Default to int64_t if we can't determine
+                        emit(gen, "int64_t %s", node->as.var_decl.name);
+                    }
                     break;
                 }
             } else {
@@ -1918,11 +1923,19 @@ void emit_stmt(CodeGen* gen, Node* node) {
         emit(gen, "}\n");
         break;
 
-    case NODE_IF:
+    case NODE_IF: {
         emit_indent(gen);
-        emit(gen, "if (");
-        emit_expr(gen, node->as.if_stmt.cond);
-        emit(gen, ") {\n");
+        int cond_has_parens = (node->as.if_stmt.cond->type == NODE_BINARY ||
+                               node->as.if_stmt.cond->type == NODE_UNARY);
+        if (cond_has_parens) {
+            emit(gen, "if ");
+            emit_expr(gen, node->as.if_stmt.cond);
+            emit(gen, " {\n");
+        } else {
+            emit(gen, "if (");
+            emit_expr(gen, node->as.if_stmt.cond);
+            emit(gen, ") {\n");
+        }
         gen->indent++;
         // Emit then block contents directly (it's already a block)
         if (node->as.if_stmt.then_block->type == NODE_BLOCK) {
@@ -1958,12 +1971,21 @@ void emit_stmt(CodeGen* gen, Node* node) {
             emit(gen, "\n");
         }
         break;
+    }
 
-    case NODE_WHILE:
+    case NODE_WHILE: {
         emit_indent(gen);
-        emit(gen, "while (");
-        emit_expr(gen, node->as.while_stmt.cond);
-        emit(gen, ") {\n");
+        int wcond_has_parens = (node->as.while_stmt.cond->type == NODE_BINARY ||
+                                node->as.while_stmt.cond->type == NODE_UNARY);
+        if (wcond_has_parens) {
+            emit(gen, "while ");
+            emit_expr(gen, node->as.while_stmt.cond);
+            emit(gen, " {\n");
+        } else {
+            emit(gen, "while (");
+            emit_expr(gen, node->as.while_stmt.cond);
+            emit(gen, ") {\n");
+        }
         gen->indent++;
         if (node->as.while_stmt.body->type == NODE_BLOCK) {
             emit_block_contents(gen, node->as.while_stmt.body);
@@ -1974,6 +1996,7 @@ void emit_stmt(CodeGen* gen, Node* node) {
         emit_indent(gen);
         emit(gen, "}\n");
         break;
+    }
 
     case NODE_FOR:
         emit_indent(gen);

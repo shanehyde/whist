@@ -74,8 +74,8 @@ func (HashTable<K,V>) get(key: K): Option<V> {
 //     }
 // }
 
-type HashMap = HashTable<u32, i32>;
-type HashMapEntry = HashEntry<u32, i32>;
+type HashMap = HashTable<i32, i32>;
+type HashMapEntry = HashEntry<i32, i32>;
 
 func main(): i32 {
 
