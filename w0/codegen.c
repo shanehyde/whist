@@ -522,6 +522,7 @@ static void emit_c_headers(CodeGen* gen) {
     emit(gen, "#include <stddef.h>\n");
     emit(gen, "#include <stdlib.h>\n");
     emit(gen, "#include <stdio.h>\n");
+    emit(gen, "#include <string.h>\n");
     emit(gen, "\n");
 }
 
@@ -597,6 +598,12 @@ static void emit_bounds_checks(CodeGen* gen) {
         emit(gen, "    }\n");
         emit(gen, "}\n\n");
     }
+}
+
+// Emit string method helpers
+static void emit_string_helpers(CodeGen* gen) {
+    emit(gen, "static inline int64_t __String_length(const char* s) { return (int64_t)strlen(s); "
+              "}\n\n");
 }
 
 // Emit C struct typedefs for each collected tuple type (__tuple_tN)
@@ -1848,6 +1855,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit_c_headers(gen);
     emit_rc_runtime(gen);
     emit_bounds_checks(gen);
+    emit_string_helpers(gen);
     emit_tuple_typedefs(gen);
     register_enum_names(gen, ast);
     compute_enum_rc_flags(gen, ast);

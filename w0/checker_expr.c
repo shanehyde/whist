@@ -319,6 +319,18 @@ static Type* check_member_expr(Checker* checker, Node* node) {
         return type_error;
     }
 
+    if (object->kind == TYPE_STRING) {
+        const char* member_name = node->as.member.name;
+        node->as.member.is_ref  = 0;
+        if (strcmp(member_name, "length") == 0) {
+            node->as.member.struct_name = xstrdup("__String");
+            return type_func(NULL, 0, type_int64, 0);
+        }
+        check_error(checker, node->line, node->column,
+                    "String has no member '%s'", member_name);
+        return type_error;
+    }
+
     if (object->kind != TYPE_STRUCT) {
         check_error(checker, node->line, node->column,
                     "Member access requires struct type, got '%s'", type_name(object));
