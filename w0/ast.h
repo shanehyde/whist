@@ -68,6 +68,8 @@ typedef enum {
     NODE_BREAK,
     NODE_CONTINUE,
     NODE_DEFER,
+    NODE_MATCH,
+    NODE_MATCH_ARM,
 
     // Declarations
     NODE_FUNC_DECL,
@@ -345,6 +347,25 @@ struct Node {
         struct {
             Node* stmt;
         } defer_stmt;
+
+        // Match statement
+        struct {
+            Node*    expr;          // Expression being matched
+            NodeList arms;          // List of NODE_MATCH_ARM nodes
+            Type*    resolved_type; // Set by checker: enum type of expr
+        } match_stmt;
+
+        // Match arm
+        struct {
+            char*  enum_name; // Explicit enum name (NULL if inferred)
+            int    enum_name_length;
+            char*  variant_name; // Variant name (NULL if wildcard)
+            int    variant_name_length;
+            char** bindings; // Binding names [f0_name, f1_name, ...]
+            int    binding_count;
+            int    is_wildcard; // 1 if this is a `_` arm
+            Node*  body;        // Statement/block to execute
+        } match_arm;
 
         // Function declaration
         func_decl_node func_decl;

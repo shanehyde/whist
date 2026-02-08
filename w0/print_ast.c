@@ -257,6 +257,43 @@ void print_ast(Node* node, int depth) {
         print_ast(node->as.defer_stmt.stmt, depth + 1);
         break;
 
+    case NODE_MATCH:
+        printf("Match\n");
+        print_indent(depth + 1);
+        printf("Expr:\n");
+        print_ast(node->as.match_stmt.expr, depth + 2);
+        print_indent(depth + 1);
+        printf("Arms:\n");
+        for (int i = 0; i < node->as.match_stmt.arms.count; i++) {
+            print_ast(node->as.match_stmt.arms.nodes[i], depth + 2);
+        }
+        break;
+
+    case NODE_MATCH_ARM:
+        if (node->as.match_arm.is_wildcard) {
+            printf("MatchArm: _\n");
+        } else {
+            printf("MatchArm: ");
+            if (node->as.match_arm.enum_name) {
+                printf("%.*s::", node->as.match_arm.enum_name_length, node->as.match_arm.enum_name);
+            }
+            printf("%.*s", node->as.match_arm.variant_name_length, node->as.match_arm.variant_name);
+            if (node->as.match_arm.binding_count > 0) {
+                printf("(");
+                for (int i = 0; i < node->as.match_arm.binding_count; i++) {
+                    if (i > 0)
+                        printf(", ");
+                    printf("%s", node->as.match_arm.bindings[i]);
+                }
+                printf(")");
+            }
+            printf("\n");
+        }
+        print_indent(depth + 1);
+        printf("Body:\n");
+        print_ast(node->as.match_arm.body, depth + 2);
+        break;
+
     case NODE_EXPR_STMT:
         printf("ExprStmt\n");
         print_ast(node->as.expr_stmt.expr, depth + 1);

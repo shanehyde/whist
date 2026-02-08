@@ -192,6 +192,19 @@ void node_free(Node* node) {
     case NODE_DEFER:
         node_free(node->as.defer_stmt.stmt);
         break;
+    case NODE_MATCH:
+        node_free(node->as.match_stmt.expr);
+        nodelist_free(&node->as.match_stmt.arms);
+        break;
+    case NODE_MATCH_ARM:
+        free(node->as.match_arm.enum_name);
+        free(node->as.match_arm.variant_name);
+        for (int i = 0; i < node->as.match_arm.binding_count; i++) {
+            free(node->as.match_arm.bindings[i]);
+        }
+        free(node->as.match_arm.bindings);
+        node_free(node->as.match_arm.body);
+        break;
     case NODE_FUNC_DECL:
         free(node->as.func_decl.receiver_type);
         // Free receiver type args if present

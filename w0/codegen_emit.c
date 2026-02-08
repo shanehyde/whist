@@ -2090,6 +2090,85 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a match statement as an if/else-if chain over the enum tag
+static void emit_match_stmt(CodeGen* gen, Node* node) {
+    Type* enum_type = node->as.match_stmt.resolved_type;
+    if (!enum_type)
+        return;
+
+    int         is_data   = enum_type->as.enm.has_data;
+    const char* enum_name = enum_type->as.enm.name;
+
+    // Emit temp variable: EnumType __matchN = <expr>;
+    int match_id = gen->temp_count++;
+    emit_indent(gen);
+    emit(gen, "%s __match%d = ", enum_name, match_id);
+    emit_expr(gen, node->as.match_stmt.expr);
+    emit(gen, ";\n");
+
+    int first = 1;
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        Node* arm = node->as.match_stmt.arms.nodes[a];
+
+        emit_indent(gen);
+        if (arm->as.match_arm.is_wildcard) {
+            if (first) {
+                emit(gen, "{\n");
+            } else {
+                emit(gen, "else {\n");
+            }
+        } else {
+            const char* variant = arm->as.match_arm.variant_name;
+            if (first) {
+                emit(gen, "if (");
+            } else {
+                emit(gen, "else if (");
+            }
+            if (is_data) {
+                emit(gen, "__match%d.tag == %s_%s", match_id, enum_name, variant);
+            } else {
+                emit(gen, "__match%d == %s_%s", match_id, enum_name, variant);
+            }
+            emit(gen, ") {\n");
+        }
+        first = 0;
+
+        gen->indent++;
+
+        // Emit binding declarations for data enum variants
+        if (!arm->as.match_arm.is_wildcard && is_data && arm->as.match_arm.binding_count > 0) {
+            const char* variant = arm->as.match_arm.variant_name;
+            // Look up variant index to get types
+            int variant_idx = -1;
+            for (int i = 0; i < enum_type->as.enm.value_count; i++) {
+                if (strcmp(enum_type->as.enm.value_names[i], variant) == 0) {
+                    variant_idx = i;
+                    break;
+                }
+            }
+            for (int j = 0; j < arm->as.match_arm.binding_count; j++) {
+                emit_indent(gen);
+                emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);
+                emit(gen, " %s = __match%d.%s.f%d;\n", arm->as.match_arm.bindings[j], match_id,
+                     variant, j);
+            }
+        }
+
+        // Emit arm body
+        if (arm->as.match_arm.body) {
+            if (arm->as.match_arm.body->type == NODE_BLOCK) {
+                emit_block_contents(gen, arm->as.match_arm.body);
+            } else {
+                emit_stmt(gen, arm->as.match_arm.body);
+            }
+        }
+
+        gen->indent--;
+        emit_indent(gen);
+        emit(gen, "}\n");
+    }
+}
+
 // Dispatch statement code generation based on node type
 void emit_stmt(CodeGen* gen, Node* node) {
     if (!node)
@@ -2267,6 +2346,10 @@ void emit_stmt(CodeGen* gen, Node* node) {
     case NODE_DEFER:
         // Don't emit anything here - just push to defer stack
         defer_push(gen, node->as.defer_stmt.stmt);
+        break;
+
+    case NODE_MATCH:
+        emit_match_stmt(gen, node);
         break;
 
     case NODE_BREAK:

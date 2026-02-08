@@ -192,6 +192,7 @@ Create vecs: `var v = new Vec<i64>{};` or `var v = new Vec<i64>{1, 2, 3};`
              | <while-stmt>
              | <for-stmt>
              | <foreach-stmt>
+             | <match-stmt>
              | <return-stmt>
              | <break-stmt>
              | <continue-stmt>
@@ -222,6 +223,18 @@ The range `start..end` is **end-exclusive**: iterates from `start` up to but not
 
 <defer-stmt> ::= 'defer' <statement>
 
+<match-stmt> ::= 'match' '(' <expression> ')' '{' { <match-arm> } '}'
+
+<match-arm> ::= <match-pattern> '=>' <statement> [ ',' ]
+
+<match-pattern> ::= '_'
+                  | <identifier> [ '(' <identifier> { ',' <identifier> } ')' ]
+                  | <identifier> '::' <identifier> [ '(' <identifier> { ',' <identifier> } ')' ]
+```
+
+Match statements destructure enum values by variant. The expression must be an enum type. Each arm matches a variant pattern and binds payload fields to local variables. Variant names can be unqualified (`Some(v)`) or qualified (`Option::Some(v)`). The wildcard pattern `_` matches any variant. Commas between arms are optional.
+
+```bnf
 <expr-stmt> ::= <expression> ';'
 ```
 
@@ -344,9 +357,9 @@ The range `start..end` is **end-exclusive**: iterates from `start` up to but not
 ```
 break    const    continue    defer     else      enum
 extern   false    for         foreach   func      if
-impl     import   in          new       null      public
-private  return   self        struct    trait     true
-type     var      while
+impl     import   in          match     new       null
+public   private  return      self      struct    trait
+true     type     var         while
 ```
 
 ### Identifiers
@@ -407,7 +420,7 @@ type     var      while
 =     <     >
 +=    -=    *=    /=    %=    &=    |=    ^=
 ==    !=    <=    >=    &&    ||    <<    >>    <<=   >>=
-->    ::    ..
+->    =>    ::    ..
 (     )     {     }     [     ]     ;     :     ,     .
 ```
 

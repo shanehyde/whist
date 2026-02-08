@@ -121,6 +121,7 @@ void synchronize(Parser* parser) {
         case TOK_IF:
         case TOK_WHILE:
         case TOK_FOR:
+        case TOK_MATCH:
         case TOK_RETURN:
             return;
         default:
@@ -948,6 +949,109 @@ static Node* parse_defer_stmt(Parser* parser) {
 }
 
 // ============================================================================
+// Match Statement Parsing
+// ============================================================================
+
+static Node* parse_match_stmt(Parser* parser) {
+    Token token = parser->previous; // TOK_MATCH already consumed
+    consume_token(parser, TOK_LPAREN, "Expected '(' after 'match'");
+    Node* expr = parse_expression(parser);
+    consume_token(parser, TOK_RPAREN, "Expected ')' after match expression");
+    consume_token(parser, TOK_LBRACE, "Expected '{' after match expression");
+
+    Node* node                        = node_new(NODE_MATCH, token.line, token.column);
+    node->as.match_stmt.expr          = expr;
+    node->as.match_stmt.resolved_type = NULL;
+    nodelist_init(&node->as.match_stmt.arms);
+
+    while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
+        Token arm_token             = parser->current;
+        Node* arm                   = node_new(NODE_MATCH_ARM, arm_token.line, arm_token.column);
+        arm->as.match_arm.enum_name = NULL;
+        arm->as.match_arm.enum_name_length    = 0;
+        arm->as.match_arm.variant_name        = NULL;
+        arm->as.match_arm.variant_name_length = 0;
+        arm->as.match_arm.bindings            = NULL;
+        arm->as.match_arm.binding_count       = 0;
+        arm->as.match_arm.is_wildcard         = 0;
+        arm->as.match_arm.body                = NULL;
+
+        // Parse pattern
+        if (parser->current.type == TOK_IDENT && parser->current.length == 1 &&
+            parser->current.start[0] == '_') {
+            // Wildcard: _
+            advance_token(parser);
+            arm->as.match_arm.is_wildcard = 1;
+        } else if (check_token(parser, TOK_IDENT)) {
+            Token first_ident = parser->current;
+            advance_token(parser);
+
+            if (check_token(parser, TOK_COLON_COLON)) {
+                // Qualified: EnumName::VariantName or EnumName::VariantName(bindings...)
+                advance_token(parser); // consume ::
+                Token variant = parser->current;
+                consume_token(parser, TOK_IDENT, "Expected variant name after '::'");
+                arm->as.match_arm.enum_name           = copy_token_string(&first_ident);
+                arm->as.match_arm.enum_name_length    = first_ident.length;
+                arm->as.match_arm.variant_name        = copy_token_string(&variant);
+                arm->as.match_arm.variant_name_length = variant.length;
+            } else {
+                // Unqualified: VariantName or VariantName(bindings...)
+                arm->as.match_arm.variant_name        = copy_token_string(&first_ident);
+                arm->as.match_arm.variant_name_length = first_ident.length;
+            }
+
+            // Optional bindings: (a, b, ...)
+            if (match_token(parser, TOK_LPAREN)) {
+                int    capacity = 4;
+                char** bindings = xmalloc(capacity * sizeof(char*));
+                int    count    = 0;
+
+                while (!check_token(parser, TOK_RPAREN) && !check_token(parser, TOK_EOF)) {
+                    Token binding = parser->current;
+                    consume_token(parser, TOK_IDENT, "Expected binding name in match pattern");
+                    if (count >= capacity) {
+                        capacity *= 2;
+                        bindings = xrealloc(bindings, capacity * sizeof(char*));
+                    }
+                    bindings[count++] = copy_token_string(&binding);
+                    if (!check_token(parser, TOK_RPAREN)) {
+                        consume_token(parser, TOK_COMMA, "Expected ',' or ')' after binding name");
+                    }
+                }
+                consume_token(parser, TOK_RPAREN, "Expected ')' after bindings");
+                arm->as.match_arm.bindings      = bindings;
+                arm->as.match_arm.binding_count = count;
+            }
+        } else {
+            parse_error(parser, "Expected match pattern");
+            node_free(arm);
+            node_free(node);
+            return NULL;
+        }
+
+        // Expect =>
+        consume_token(parser, TOK_FAT_ARROW, "Expected '=>' after match pattern");
+
+        // Parse arm body: block or single statement
+        if (check_token(parser, TOK_LBRACE)) {
+            advance_token(parser);
+            arm->as.match_arm.body = parse_block(parser);
+        } else {
+            arm->as.match_arm.body = parse_statement(parser);
+        }
+
+        nodelist_push(&node->as.match_stmt.arms, arm);
+
+        // Optional comma between arms
+        match_token(parser, TOK_COMMA);
+    }
+
+    consume_token(parser, TOK_RBRACE, "Expected '}' after match arms");
+    return node;
+}
+
+// ============================================================================
 // Statement Parsing
 // ============================================================================
 
@@ -975,6 +1079,9 @@ static Node* parse_statement(Parser* parser) {
     }
     if (match_token(parser, TOK_DEFER)) {
         return parse_defer_stmt(parser);
+    }
+    if (match_token(parser, TOK_MATCH)) {
+        return parse_match_stmt(parser);
     }
     if (match_token(parser, TOK_BREAK)) {
         Token token = parser->previous;

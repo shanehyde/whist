@@ -39,6 +39,7 @@ typedef enum {
     TOK_NEW,
     TOK_SELF,
     TOK_DEFER,
+    TOK_MATCH,
     TOK_PUBLIC,
     TOK_PRIVATE,
     TOK_EXTERN,
@@ -79,6 +80,7 @@ typedef enum {
     TOK_LT_LT_EQ,   // <<=
     TOK_GT_GT_EQ,   // >>=
     TOK_ARROW,      // ->
+    TOK_FAT_ARROW,  // =>
 
     // Punctuation
     TOK_LPAREN,      // (
