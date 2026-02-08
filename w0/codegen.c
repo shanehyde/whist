@@ -1684,8 +1684,8 @@ void codegen_emit(CodeGen* gen, Node* ast) {
                     emit(gen, "        __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
                 }
             } else if (ft && ft->kind == TYPE_VEC) {
-                emit(gen, "        __rc_dec_Vec_%s(ptr->%s);\n",
-                     type_name(ft->as.vec.elem), t->as.struc.field_names[f]);
+                emit(gen, "        __rc_dec_Vec_%s(ptr->%s);\n", type_name(ft->as.vec.elem),
+                     t->as.struc.field_names[f]);
             }
         }
         if (gen->rc_debug) {

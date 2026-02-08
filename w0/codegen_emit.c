@@ -2042,8 +2042,12 @@ void emit_stmt(CodeGen* gen, Node* node) {
 
     case NODE_FOREACH:
         emit_indent(gen);
-        // Generate: for (int64_t var = start; var < end; var += step) {
-        emit(gen, "for (int64_t %s = ", node->as.foreach_stmt.var_name);
+        // Generate: for (<type> var = start; var < end; var += step) {
+        emit(gen, "for (");
+        emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
+                                    ? node->as.foreach_stmt.resolved_type
+                                    : type_int64);
+        emit(gen, " %s = ", node->as.foreach_stmt.var_name);
         emit_expr(gen, node->as.foreach_stmt.start);
         emit(gen, "; %s < ", node->as.foreach_stmt.var_name);
         emit_expr(gen, node->as.foreach_stmt.end);
