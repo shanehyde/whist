@@ -784,6 +784,34 @@ static void check_match_stmt(Checker* checker, Node* node) {
         check_statement(checker, arm->as.match_arm.body);
         checker_pop_scope(checker);
     }
+
+    // Exhaustiveness check: if no wildcard arm, every variant must be covered
+    int has_wildcard = 0;
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
+            has_wildcard = 1;
+            break;
+        }
+    }
+
+    if (!has_wildcard) {
+        for (int i = 0; i < expr_type->as.enm.value_count; i++) {
+            int found = 0;
+            for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+                Node* arm = node->as.match_stmt.arms.nodes[a];
+                if (!arm->as.match_arm.is_wildcard && arm->as.match_arm.variant_name &&
+                    strcmp(arm->as.match_arm.variant_name, expr_type->as.enm.value_names[i]) == 0) {
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found) {
+                check_error(checker, node->line, node->column,
+                            "Match is not exhaustive: missing variant '%s'",
+                            expr_type->as.enm.value_names[i]);
+            }
+        }
+    }
 }
 
 // =============================================================================
