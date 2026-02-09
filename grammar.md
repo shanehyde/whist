@@ -218,7 +218,7 @@ Create vecs: `var v = new Vec<i64>{};` or `var v = new Vec<i64>{1, 2, 3};`
 
 The first form iterates over a range. The range `start..end` is **end-exclusive**: iterates from `start` up to but not including `end`. For example, `0..5` iterates `0, 1, 2, 3, 4`.
 
-The second form iterates over a collection. Currently supported: `Vec<T>`.
+The second form iterates over a collection. Currently supported: `Vec<T>`, `Span<T>`, `string`.
 
 <return-stmt> ::= 'return' [ <expression> ] ';'
 
@@ -311,6 +311,7 @@ Match statements destructure enum values by variant. The expression must be an e
 <primary-expr> ::= <int-literal>
                 | <float-literal>
                 | <string-literal>
+                | <interp-string-literal>
                 | <char-literal>
                 | 'true'
                 | 'false'
@@ -360,11 +361,11 @@ Match statements destructure enum values by variant. The expression must be an e
 ### Keywords
 
 ```
-as       break    const       continue  defer     else
-enum     extern   false       for       foreach   func
-if       impl     import      in        match     new
-null     public   private     return    self      struct
-trait    true     type        var       while
+as       break    by          const     continue  defer
+else     enum     extern      false     for       foreach
+func     if       impl        import    in        match
+new      null     public      private   return    self
+struct   trait    true        type      var       while
 ```
 
 ### Identifiers
@@ -406,6 +407,12 @@ trait    true     type        var       while
 
 <string-literal> ::= '"' { <string-char> } '"'
 
+<interp-string-literal> ::= '$"' { <interp-part> } '"'
+
+<interp-part> ::= <string-char>
+               | '{{' | '}}'
+               | '{' <expression> '}'
+
 <string-char> ::= <any-char-except-quote-or-backslash>
                | <escape-sequence>
 
@@ -417,6 +424,8 @@ trait    true     type        var       while
                    | '\\x' <hex-digit> <hex-digit>
                    | '\\' <octal-digit> [ <octal-digit> [ <octal-digit> ] ]
 ```
+
+**String interpolation:** `$"Hello {name}!"` embeds expressions inside `{...}` braces. Any expression that resolves to a printable type (`i8`–`i64`, `u8`–`u64`, `f32`, `f64`, `bool`, `char`, `string`) can appear inside braces. Use `{{` and `}}` for literal brace characters. Interpolated strings produce a `string` value.
 
 ### Operators and Punctuation
 

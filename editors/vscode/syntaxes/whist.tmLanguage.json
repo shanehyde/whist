@@ -4,6 +4,7 @@
   "scopeName": "source.whist",
   "patterns": [
     { "include": "#comments" },
+    { "include": "#interp-strings" },
     { "include": "#strings" },
     { "include": "#characters" },
     { "include": "#numbers" },
@@ -34,6 +35,45 @@
           "name": "comment.block.whist",
           "begin": "/\\*",
           "end": "\\*/"
+        }
+      ]
+    },
+    "interp-strings": {
+      "patterns": [
+        {
+          "name": "string.interpolated.whist",
+          "begin": "\\$\"",
+          "end": "\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.whist" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.whist" }
+          },
+          "patterns": [
+            {
+              "name": "constant.character.escape.brace.whist",
+              "match": "\\{\\{|\\}\\}"
+            },
+            {
+              "name": "meta.interpolation.whist",
+              "begin": "\\{",
+              "end": "\\}",
+              "beginCaptures": {
+                "0": { "name": "punctuation.section.interpolation.begin.whist" }
+              },
+              "endCaptures": {
+                "0": { "name": "punctuation.section.interpolation.end.whist" }
+              },
+              "patterns": [
+                { "include": "$self" }
+              ]
+            },
+            {
+              "name": "constant.character.escape.whist",
+              "match": "\\\\(x[0-9a-fA-F]{2}|[0-7]{1,3}|[nrt\\\\'\"/0])"
+            }
+          ]
         }
       ]
     },
@@ -99,11 +139,11 @@
       "patterns": [
         {
           "name": "keyword.control.whist",
-          "match": "\\b(if|else|for|foreach|while|return|break|continue|in|by)\\b"
+          "match": "\\b(if|else|for|foreach|while|match|return|break|continue|in|by)\\b"
         },
         {
           "name": "keyword.other.whist",
-          "match": "\\b(func|new|self|defer)\\b"
+          "match": "\\b(as|func|new|self|defer)\\b"
         },
         {
           "name": "storage.type.whist",
@@ -265,6 +305,10 @@
         {
           "name": "keyword.operator.arrow.whist",
           "match": "->"
+        },
+        {
+          "name": "keyword.operator.fat-arrow.whist",
+          "match": "=>"
         },
         {
           "name": "punctuation.separator.scope.whist",
