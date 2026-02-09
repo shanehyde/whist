@@ -1157,6 +1157,21 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
             }
         }
         if (!alias_found) {
+            // If inside a module, prefix non-extern function calls with module name
+            if (gen->current_module && func->type == NODE_IDENT) {
+                int is_extern = 0;
+                for (int i = 0; i < gen->extern_func_count; i++) {
+                    if (strncmp(gen->extern_funcs[i], func->as.ident.name,
+                                func->as.ident.length) == 0 &&
+                        gen->extern_funcs[i][func->as.ident.length] == '\0') {
+                        is_extern = 1;
+                        break;
+                    }
+                }
+                if (!is_extern) {
+                    emit(gen, "%s_", gen->current_module);
+                }
+            }
             emit_expr(gen, func);
             emit(gen, "(");
         }
@@ -2584,15 +2599,23 @@ void emit_decl(CodeGen* gen, Node* node) {
     switch (node->type) {
     case NODE_EXTERN_MODULE:
         emit(gen, "\n#include <%s.h>\n", node->as.extern_module.module_name);
-        // Register extern function aliases (Whist name -> C name)
+        // Register extern function aliases and names
         for (int i = 0; i < node->as.extern_module.decls.count; i++) {
             Node* decl = node->as.extern_module.decls.nodes[i];
-            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.extern_name) {
-                VEC_GROW(gen->extern_aliases, gen->extern_alias_count, gen->extern_alias_capacity);
-                gen->extern_aliases[gen->extern_alias_count].whist_name = decl->as.func_decl.name;
-                gen->extern_aliases[gen->extern_alias_count].c_name =
-                    decl->as.func_decl.extern_name;
-                gen->extern_alias_count++;
+            if (decl->type == NODE_FUNC_DECL) {
+                // Track all extern function names (for intra-module call prefixing)
+                VEC_GROW(gen->extern_funcs, gen->extern_func_count, gen->extern_func_capacity);
+                gen->extern_funcs[gen->extern_func_count++] = decl->as.func_decl.name;
+                // Register aliases (Whist name -> C name) for renamed externs
+                if (decl->as.func_decl.extern_name) {
+                    VEC_GROW(gen->extern_aliases, gen->extern_alias_count,
+                             gen->extern_alias_capacity);
+                    gen->extern_aliases[gen->extern_alias_count].whist_name =
+                        decl->as.func_decl.name;
+                    gen->extern_aliases[gen->extern_alias_count].c_name =
+                        decl->as.func_decl.extern_name;
+                    gen->extern_alias_count++;
+                }
             }
         }
         break;
