@@ -4,6 +4,10 @@ private extern stdio {
     func printf(fmt: string, ...): i32;
 }
 
+private extern stdlib {
+    func exit(status: i32) as _exit;
+}
+
 func print(s: string): void {
     printf("%s", s);
 }
@@ -12,6 +16,9 @@ func println(s: string): void {
     printf("%s\n", s);
 }
 
+func exit(status: i32): void {
+    _exit(status);
+}
 
 func abs_i64(x: i64): i64 {
     if (x < 0) {
