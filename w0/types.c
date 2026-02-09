@@ -473,10 +473,18 @@ int type_is_builtin_name(const char* name) {
 }
 
 // Buffer for mangled span names
-static char type_mangle_buf[256];
+#define TYPE_MANGLE_BUFS 4
+static char type_mangle_bufs[TYPE_MANGLE_BUFS][256];
+static int  type_mangle_idx = 0;
 
-// Helper to get a simple name for mangling (without spaces or special chars)
-static const char* type_mangle_name(Type* type) {
+static char* next_type_mangle_buf(void) {
+    char* buf       = type_mangle_bufs[type_mangle_idx];
+    type_mangle_idx = (type_mangle_idx + 1) % TYPE_MANGLE_BUFS;
+    return buf;
+}
+
+// Get a C-identifier-safe name for a type (no angle brackets or special chars)
+const char* type_mangle_name(Type* type) {
     if (!type)
         return "void";
 
@@ -511,14 +519,16 @@ static const char* type_mangle_name(Type* type) {
         return "string";
     case TYPE_VOIDPTR:
         return "voidptr";
-    case TYPE_SPAN:
-        snprintf(type_mangle_buf, sizeof(type_mangle_buf), "Span_%s",
-                 type_mangle_name(type->as.span.elem));
-        return type_mangle_buf;
-    case TYPE_VEC:
-        snprintf(type_mangle_buf, sizeof(type_mangle_buf), "Vec_%s",
-                 type_mangle_name(type->as.vec.elem));
-        return type_mangle_buf;
+    case TYPE_SPAN: {
+        char* buf = next_type_mangle_buf();
+        snprintf(buf, 256, "Span_%s", type_mangle_name(type->as.span.elem));
+        return buf;
+    }
+    case TYPE_VEC: {
+        char* buf = next_type_mangle_buf();
+        snprintf(buf, 256, "Vec_%s", type_mangle_name(type->as.vec.elem));
+        return buf;
+    }
     case TYPE_STRUCT:
         return type->as.struc.name;
     case TYPE_ENUM:
