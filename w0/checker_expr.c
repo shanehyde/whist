@@ -927,6 +927,33 @@ Type* check_expression(Checker* checker, Node* node) {
     case NODE_ARRAY_LIT:
         return check_array_lit_expr(checker, node);
 
+    case NODE_STRING_INTERP: {
+        int count                         = node->as.string_interp.parts.count;
+        node->as.string_interp.part_types = xcalloc(count, sizeof(Type*));
+        node->as.string_interp.part_count = count;
+        for (int i = 0; i < count; i++) {
+            Node* part = node->as.string_interp.parts.nodes[i];
+            if (part->type == NODE_STRING_LIT) {
+                node->as.string_interp.part_types[i] = type_string;
+            } else {
+                Type* t = check_expression(checker, part);
+                if (t->kind == TYPE_ERROR) {
+                    node->as.string_interp.part_types[i] = type_error;
+                    continue;
+                }
+                if (!type_is_integer(t) && t->kind != TYPE_F32 && t->kind != TYPE_F64 &&
+                    t->kind != TYPE_BOOL && t->kind != TYPE_STRING && t->kind != TYPE_CHAR) {
+                    check_error(checker, part->line, part->column,
+                                "String interpolation does not support type '%s'", type_name(t));
+                    node->as.string_interp.part_types[i] = type_error;
+                    continue;
+                }
+                node->as.string_interp.part_types[i] = t;
+            }
+        }
+        return type_string;
+    }
+
     default:
         check_error(checker, node->line, node->column, "Unknown expression type %d", node->type);
         return type_error;

@@ -55,6 +55,7 @@ typedef enum {
     NODE_FIELD_INIT,
     NODE_ENUM_VALUE,
     NODE_NEW_EXPR,
+    NODE_STRING_INTERP,
 
     // Statements
     NODE_EXPR_STMT,
@@ -264,6 +265,13 @@ struct Node {
             Node* init;          // NODE_STRUCT_INIT
             Type* resolved_type; // Set by checker
         } new_expr;
+
+        // String interpolation: $"text {expr} text"
+        struct {
+            NodeList parts;      // Alternating NODE_STRING_LIT and expression nodes
+            Type**   part_types; // Set by checker: type of each part (NULL for text)
+            int      part_count; // Number of parts
+        } string_interp;
 
         // Tuple type: (T1, T2, ...)
         struct {
