@@ -115,6 +115,10 @@ void node_free(Node* node) {
         nodelist_free(&node->as.string_interp.parts);
         free(node->as.string_interp.part_types);
         break;
+    case NODE_CAST:
+        node_free(node->as.cast_expr.expr);
+        node_free(node->as.cast_expr.type_node);
+        break;
     case NODE_BINARY:
         node_free(node->as.binary.left);
         node_free(node->as.binary.right);
@@ -416,6 +420,11 @@ Node* node_clone(Node* node) {
         c->as.string_interp.parts      = nodelist_clone(&node->as.string_interp.parts);
         c->as.string_interp.part_types = NULL;
         c->as.string_interp.part_count = node->as.string_interp.part_count;
+        break;
+    case NODE_CAST:
+        c->as.cast_expr.expr          = node_clone(node->as.cast_expr.expr);
+        c->as.cast_expr.type_node     = node_clone(node->as.cast_expr.type_node);
+        c->as.cast_expr.resolved_type = NULL;
         break;
     case NODE_TUPLE_TYPE:
         c->as.tuple_type.elem_types = nodelist_clone(&node->as.tuple_type.elem_types);

@@ -513,6 +513,16 @@ void print_ast(Node* node, int depth) {
         }
         break;
 
+    case NODE_CAST:
+        printf("Cast\n");
+        print_indent(depth + 1);
+        printf("Expr:\n");
+        print_ast(node->as.cast_expr.expr, depth + 2);
+        print_indent(depth + 1);
+        printf("TargetType:\n");
+        print_ast(node->as.cast_expr.type_node, depth + 2);
+        break;
+
     case NODE_TUPLE_TYPE:
         printf("TupleType\n");
         for (int i = 0; i < node->as.tuple_type.elem_types.count; i++) {

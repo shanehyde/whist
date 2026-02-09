@@ -1161,8 +1161,8 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
             if (gen->current_module && func->type == NODE_IDENT) {
                 int is_extern = 0;
                 for (int i = 0; i < gen->extern_func_count; i++) {
-                    if (strncmp(gen->extern_funcs[i], func->as.ident.name,
-                                func->as.ident.length) == 0 &&
+                    if (strncmp(gen->extern_funcs[i], func->as.ident.name, func->as.ident.length) ==
+                            0 &&
                         gen->extern_funcs[i][func->as.ident.length] == '\0') {
                         is_extern = 1;
                         break;
@@ -1705,6 +1705,14 @@ static void emit_expr(CodeGen* gen, Node* node) {
 
     case NODE_STRING_INTERP:
         emit_string_interp(gen, node);
+        break;
+
+    case NODE_CAST:
+        emit(gen, "((");
+        emit_resolved_type(gen, node->as.cast_expr.resolved_type);
+        emit(gen, ")(");
+        emit_expr(gen, node->as.cast_expr.expr);
+        emit(gen, "))");
         break;
 
     default:

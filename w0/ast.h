@@ -56,6 +56,7 @@ typedef enum {
     NODE_ENUM_VALUE,
     NODE_NEW_EXPR,
     NODE_STRING_INTERP,
+    NODE_CAST,
 
     // Statements
     NODE_EXPR_STMT,
@@ -274,6 +275,13 @@ struct Node {
             Type**   part_types; // Set by checker: type of each part (NULL for text)
             int      part_count; // Number of parts
         } string_interp;
+
+        // Cast expression: expr as Type
+        struct {
+            Node* expr;
+            Node* type_node;
+            Type* resolved_type; // Set by checker
+        } cast_expr;
 
         // Tuple type: (T1, T2, ...)
         struct {

@@ -885,6 +885,23 @@ static Node* parse_binary(Parser* parser, Precedence min_prec) {
         return NULL;
     }
 
+    // Cast expressions: expr as Type (binds tighter than binary operators)
+    while (match_token(parser, TOK_AS)) {
+        int   cast_line = parser->previous.line;
+        int   cast_col  = parser->previous.column;
+        Node* target    = parse_type(parser);
+        if (!target) {
+            parse_error(parser, "Expected type after 'as'");
+            parser->parse_depth--;
+            return left;
+        }
+        Node* cast                       = node_new(NODE_CAST, cast_line, cast_col);
+        cast->as.cast_expr.expr          = left;
+        cast->as.cast_expr.type_node     = target;
+        cast->as.cast_expr.resolved_type = NULL;
+        left                             = cast;
+    }
+
     while (get_precedence(parser->current.type) >= min_prec &&
            get_precedence(parser->current.type) != PREC_NONE) {
         Token op = parser->current;
