@@ -358,7 +358,7 @@ static Type* check_member_expr(Checker* checker, Node* node) {
             strcmp(member_name, "clear") == 0) {
             // Build mangled vec name for method dispatch
             char mangled[256];
-            snprintf(mangled, sizeof(mangled), "__Vec_%s", type_name(elem_type));
+            snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
             node->as.member.struct_name = xstrdup(mangled);
 
             if (strcmp(member_name, "push") == 0) {

@@ -72,7 +72,7 @@ static const char* get_dec_func_for_type(Type* t) {
         return buf;
     }
     if (t && t->kind == TYPE_VEC) {
-        const char* elem_tname = type_name(t->as.vec.elem);
+        const char* elem_tname = type_mangle_name(t->as.vec.elem);
         size_t      len        = strlen("__rc_dec_Vec_") + strlen(elem_tname) + 1;
         char*       buf        = xmalloc(len);
         snprintf(buf, len, "__rc_dec_Vec_%s", elem_tname);
@@ -522,7 +522,7 @@ void emit_type(CodeGen* gen, Node* type_node) {
                     for (int s = 0; s < gen->subst_ctx->count; s++) {
                         if (strcmp(gen->subst_ctx->type_params[s], arg_name) == 0) {
                             Type* subst_type = gen->subst_ctx->type_args[s];
-                            emit(gen, "%s", type_name(subst_type));
+                            emit(gen, "%s", type_mangle_name(subst_type));
                             substituted = 1;
                             break;
                         }
@@ -675,10 +675,10 @@ void emit_resolved_type(CodeGen* gen, Type* type) {
         emit(gen, "%s*", type->as.struc.name);
         break;
     case TYPE_SPAN:
-        emit(gen, "__Span_%s", type_name(type->as.span.elem));
+        emit(gen, "__Span_%s", type_mangle_name(type->as.span.elem));
         break;
     case TYPE_VEC:
-        emit(gen, "__Vec_%s*", type_name(type->as.vec.elem));
+        emit(gen, "__Vec_%s*", type_mangle_name(type->as.vec.elem));
         break;
     case TYPE_ENUM:
         emit(gen, "%s", type->as.enm.name);
@@ -869,7 +869,7 @@ static char* resolve_generic_method_target(CodeGen* gen, Node* member) {
                 for (int s = 0; s < gen->subst_ctx->count; s++) {
                     if (strcmp(gen->subst_ctx->type_params[s], elem_name) == 0) {
                         snprintf(buf, sizeof(buf), "__Vec_%s",
-                                 type_name(gen->subst_ctx->type_args[s]));
+                                 type_mangle_name(gen->subst_ctx->type_args[s]));
                         return xstrdup(buf);
                     }
                 }
@@ -1221,7 +1221,7 @@ static void emit_slice_expr(CodeGen* gen, Node* node) {
     Type* elem_type = span_type->as.span.elem;
 
     // Emit compound literal
-    emit(gen, "((__Span_%s){ .data = ", type_name(elem_type));
+    emit(gen, "((__Span_%s){ .data = ", type_mangle_name(elem_type));
 
     if (node->as.slice.is_vec) {
         // Vec slicing: .data = vec->data + start
@@ -1358,7 +1358,7 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
     }
     if (rtype->kind == TYPE_VEC) {
         // new Vec<T>{elems} as inline expression using GCC statement expression
-        const char* elem_tname = type_name(rtype->as.vec.elem);
+        const char* elem_tname = type_mangle_name(rtype->as.vec.elem);
         int         tmp        = gen->temp_count++;
         emit(gen,
              "({ __Vec_%s* __rc_tmp%d = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s)); "
@@ -1934,7 +1934,7 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
 // Emit an RC-managed Vec declaration: var v = new Vec<T>{...}
 static void emit_var_decl_rc_new_vec(CodeGen* gen, Node* node) {
     Type*       rtype      = node->as.var_decl.init->as.new_expr.resolved_type;
-    const char* elem_tname = type_name(rtype->as.vec.elem);
+    const char* elem_tname = type_mangle_name(rtype->as.vec.elem);
     emit_indent(gen);
     emit(gen, "__Vec_%s* %s = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s));\n", elem_tname,
          node->as.var_decl.name, elem_tname, elem_tname);

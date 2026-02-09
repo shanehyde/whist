@@ -153,8 +153,9 @@ Type* type_generic_param(const char* name);
 Type* type_span(Type* elem);
 Type* type_vec(Type* elem);
 
-// Generic type name mangling
-char* type_mangle_generic(const char* base, Type** args, int count);
+// Type name mangling for C identifiers (no angle brackets or special chars)
+const char* type_mangle_name(Type* type);
+char*       type_mangle_generic(const char* base, Type** args, int count);
 
 void        type_free(Type* type);
 int         type_equals(Type* a, Type* b);

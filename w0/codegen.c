@@ -771,7 +771,7 @@ static void emit_span_typedefs(CodeGen* gen) {
         emit_resolved_type(gen, inst->elem_type);
         emit(gen, "* data;\n");
         emit(gen, "    uint64_t count;\n");
-        emit(gen, "} __Span_%s;\n\n", type_name(inst->elem_type));
+        emit(gen, "} __Span_%s;\n\n", type_mangle_name(inst->elem_type));
     }
 }
 
@@ -780,7 +780,7 @@ static void emit_vec_typedefs(CodeGen* gen) {
     for (int i = 0; i < gen->vec_instance_count; i++) {
         VecInstance* inst       = &gen->vec_instances[i];
         Type*        elem_type  = inst->elem_type;
-        const char*  elem_tname = type_name(elem_type);
+        const char*  elem_tname = type_mangle_name(elem_type);
 
         emit(gen, "typedef struct {\n");
         emit(gen, "    ");
@@ -1522,7 +1522,7 @@ static void emit_vec_methods(CodeGen* gen) {
     for (int i = 0; i < gen->vec_instance_count; i++) {
         VecInstance* inst        = &gen->vec_instances[i];
         Type*        elem_type   = inst->elem_type;
-        const char*  elem_tname  = type_name(elem_type);
+        const char*  elem_tname  = type_mangle_name(elem_type);
         int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC);
 
         // Push
@@ -1558,7 +1558,7 @@ static void emit_vec_methods(CodeGen* gen) {
             emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
             if (elem_type->kind == TYPE_VEC) {
                 emit(gen, "        __rc_dec_Vec_%s(self->data[i]);\n",
-                     type_name(elem_type->as.vec.elem));
+                     type_mangle_name(elem_type->as.vec.elem));
             } else if (elem_type->kind == TYPE_STRUCT &&
                        (elem_type->as.struc.has_drop || elem_type->as.struc.has_rc_fields)) {
                 emit(gen, "        __rc_dec_%s(self->data[i]);\n", elem_type->as.struc.name);
@@ -1576,7 +1576,7 @@ static void emit_vec_methods(CodeGen* gen) {
 static void emit_vec_rc_dec(CodeGen* gen) {
     for (int i = 0; i < gen->vec_instance_count; i++) {
         VecInstance* inst       = &gen->vec_instances[i];
-        const char*  elem_tname = type_name(inst->elem_type);
+        const char*  elem_tname = type_mangle_name(inst->elem_type);
         emit(gen, "static inline void __rc_dec_Vec_%s(__Vec_%s* ptr);\n", elem_tname, elem_tname);
     }
 
@@ -1584,7 +1584,7 @@ static void emit_vec_rc_dec(CodeGen* gen) {
     for (int i = 0; i < gen->vec_instance_count; i++) {
         VecInstance* inst        = &gen->vec_instances[i];
         Type*        elem_type   = inst->elem_type;
-        const char*  elem_tname  = type_name(elem_type);
+        const char*  elem_tname  = type_mangle_name(elem_type);
         int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC);
 
         emit(gen, "static inline void __rc_dec_Vec_%s(__Vec_%s* ptr) {\n", elem_tname, elem_tname);
@@ -1595,7 +1595,7 @@ static void emit_vec_rc_dec(CodeGen* gen) {
             emit(gen, "        for (int64_t i = 0; i < ptr->count; i++) {\n");
             if (elem_type->kind == TYPE_VEC) {
                 emit(gen, "            __rc_dec_Vec_%s(ptr->data[i]);\n",
-                     type_name(elem_type->as.vec.elem));
+                     type_mangle_name(elem_type->as.vec.elem));
             } else if (elem_type->kind == TYPE_STRUCT &&
                        (elem_type->as.struc.has_drop || elem_type->as.struc.has_rc_fields)) {
                 emit(gen, "            __rc_dec_%s(ptr->data[i]);\n", elem_type->as.struc.name);
@@ -1713,7 +1713,7 @@ static void emit_struct_rc_dec(CodeGen* gen, Node* ast) {
                     emit(gen, "        __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
                 }
             } else if (ft && ft->kind == TYPE_VEC) {
-                emit(gen, "        __rc_dec_Vec_%s(ptr->%s);\n", type_name(ft->as.vec.elem),
+                emit(gen, "        __rc_dec_Vec_%s(ptr->%s);\n", type_mangle_name(ft->as.vec.elem),
                      t->as.struc.field_names[f]);
             }
         }
@@ -1909,16 +1909,16 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     register_enum_names(gen, ast);
     compute_enum_rc_flags(gen, ast);
     emit_struct_forward_decls(gen, ast);
-    emit_span_typedefs(gen);
     emit_vec_typedefs(gen);
+    emit_span_typedefs(gen);
     emit_enum_typedefs(gen, ast);
     emit_generic_enum_typedefs(gen, ast);
     emit_enum_rc_helpers(gen, ast);
     emit_struct_body_typedefs(gen, ast);
     emit_function_forward_decls(gen, ast);
     emit_struct_rc_dec_forward_decls(gen, ast);
-    emit_vec_methods(gen);
     emit_vec_rc_dec(gen);
+    emit_vec_methods(gen);
     emit_struct_rc_dec(gen, ast);
     emit_declarations(gen, ast);
     emit_generic_method_impls(gen, ast);

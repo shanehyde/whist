@@ -364,7 +364,7 @@ static Type* resolve_vec_type(Checker* checker, Node* type_node) {
 
     // Generate mangled name for the vec instance
     char mangled[256];
-    snprintf(mangled, sizeof(mangled), "Vec_%s", type_name(elem_type));
+    snprintf(mangled, sizeof(mangled), "Vec_%s", type_mangle_name(elem_type));
 
     // Check if already instantiated
     VecInstance* existing = lookup_vec_instance(checker, mangled);
@@ -380,7 +380,7 @@ static Type* resolve_vec_type(Checker* checker, Node* type_node) {
 
     // Also ensure a Span instance for the same element type exists (for slicing)
     char span_mangled[256];
-    snprintf(span_mangled, sizeof(span_mangled), "Span_%s", type_name(elem_type));
+    snprintf(span_mangled, sizeof(span_mangled), "Span_%s", type_mangle_name(elem_type));
     if (!lookup_span_instance(checker, span_mangled)) {
         Type* span_type = type_span(elem_type);
         register_span_instance(checker, span_mangled, elem_type, span_type);
@@ -406,7 +406,7 @@ static Type* resolve_span_type(Checker* checker, Node* type_node) {
 
     // Generate mangled name for the span instance
     char mangled[256];
-    snprintf(mangled, sizeof(mangled), "Span_%s", type_name(elem_type));
+    snprintf(mangled, sizeof(mangled), "Span_%s", type_mangle_name(elem_type));
 
     // Check if already instantiated
     SpanInstance* existing = lookup_span_instance(checker, mangled);
