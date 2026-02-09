@@ -99,6 +99,7 @@ void node_free(Node* node) {
         break;
     case NODE_ENUM_VALUE:
         free(node->as.enum_value.enum_name);
+        free(node->as.enum_value.original_enum_name);
         free(node->as.enum_value.value_name);
         nodelist_free(&node->as.enum_value.args);
         break;
@@ -290,4 +291,233 @@ void node_free(Node* node) {
         break;
     }
     free(node);
+}
+
+// Deep clone a NodeList
+static NodeList nodelist_clone(NodeList* list) {
+    NodeList result;
+    nodelist_init(&result);
+    for (int i = 0; i < list->count; i++) {
+        nodelist_push(&result, node_clone(list->nodes[i]));
+    }
+    return result;
+}
+
+// Deep clone an AST node and all its children.
+// Used to give each generic instantiation its own copy of method bodies,
+// preventing checker-set flags from one instantiation affecting another.
+Node* node_clone(Node* node) {
+    if (!node)
+        return NULL;
+
+    Node* c   = xcalloc(1, sizeof(Node));
+    c->type   = node->type;
+    c->line   = node->line;
+    c->column = node->column;
+
+    switch (node->type) {
+    case NODE_INT_LIT:
+        c->as.int_lit.value = node->as.int_lit.value;
+        break;
+    case NODE_FLOAT_LIT:
+        c->as.float_lit.value = node->as.float_lit.value;
+        break;
+    case NODE_STRING_LIT:
+        c->as.string_lit.value  = xstrdup(node->as.string_lit.value);
+        c->as.string_lit.length = node->as.string_lit.length;
+        break;
+    case NODE_CHAR_LIT:
+        c->as.char_lit.value = node->as.char_lit.value;
+        break;
+    case NODE_BOOL_LIT:
+        c->as.bool_lit.value = node->as.bool_lit.value;
+        break;
+    case NODE_NULL_LIT:
+        break;
+    case NODE_IDENT:
+        c->as.ident.name   = xstrdup(node->as.ident.name);
+        c->as.ident.length = node->as.ident.length;
+        break;
+    case NODE_BINARY:
+        c->as.binary.op           = node->as.binary.op;
+        c->as.binary.left         = node_clone(node->as.binary.left);
+        c->as.binary.right        = node_clone(node->as.binary.right);
+        c->as.binary.is_string_op = 0; // Reset checker flag
+        break;
+    case NODE_UNARY:
+        c->as.unary.op      = node->as.unary.op;
+        c->as.unary.operand = node_clone(node->as.unary.operand);
+        break;
+    case NODE_CALL:
+        c->as.call.func = node_clone(node->as.call.func);
+        c->as.call.args = nodelist_clone(&node->as.call.args);
+        break;
+    case NODE_INDEX:
+        c->as.index.object = node_clone(node->as.index.object);
+        c->as.index.index  = node_clone(node->as.index.index);
+        // Reset checker flags
+        c->as.index.is_tuple_index = 0;
+        c->as.index.is_span_index  = 0;
+        c->as.index.is_vec_index   = 0;
+        break;
+    case NODE_SLICE:
+        c->as.slice.object = node_clone(node->as.slice.object);
+        c->as.slice.start  = node_clone(node->as.slice.start);
+        c->as.slice.end    = node_clone(node->as.slice.end);
+        // Reset checker flags
+        c->as.slice.resolved_type = NULL;
+        c->as.slice.is_array      = 0;
+        c->as.slice.is_vec        = 0;
+        c->as.slice.is_string     = 0;
+        break;
+    case NODE_MEMBER:
+        c->as.member.object = node_clone(node->as.member.object);
+        c->as.member.name   = xstrdup(node->as.member.name);
+        c->as.member.length = node->as.member.length;
+        // Reset checker flags
+        c->as.member.is_ref      = 0;
+        c->as.member.struct_name = NULL;
+        c->as.member.module_name = NULL;
+        break;
+    case NODE_ASSIGN:
+        c->as.assign.op     = node->as.assign.op;
+        c->as.assign.target = node_clone(node->as.assign.target);
+        c->as.assign.value  = node_clone(node->as.assign.value);
+        break;
+    case NODE_STRUCT_INIT:
+        c->as.struct_init.fields = nodelist_clone(&node->as.struct_init.fields);
+        break;
+    case NODE_FIELD_INIT:
+        c->as.field_init.name        = xstrdup(node->as.field_init.name);
+        c->as.field_init.name_length = node->as.field_init.name_length;
+        c->as.field_init.value       = node_clone(node->as.field_init.value);
+        break;
+    case NODE_ENUM_VALUE:
+        c->as.enum_value.enum_name         = xstrdup(node->as.enum_value.enum_name);
+        c->as.enum_value.enum_name_length  = node->as.enum_value.enum_name_length;
+        c->as.enum_value.value_name        = xstrdup(node->as.enum_value.value_name);
+        c->as.enum_value.value_name_length = node->as.enum_value.value_name_length;
+        c->as.enum_value.args              = nodelist_clone(&node->as.enum_value.args);
+        // Reset checker flags
+        c->as.enum_value.is_data_enum       = 0;
+        c->as.enum_value.original_enum_name = NULL;
+        break;
+    case NODE_NEW_EXPR:
+        c->as.new_expr.type_node     = node_clone(node->as.new_expr.type_node);
+        c->as.new_expr.init          = node_clone(node->as.new_expr.init);
+        c->as.new_expr.resolved_type = NULL;
+        break;
+    case NODE_TUPLE_TYPE:
+        c->as.tuple_type.elem_types = nodelist_clone(&node->as.tuple_type.elem_types);
+        break;
+    case NODE_TUPLE_LIT:
+        c->as.tuple_lit.elements = nodelist_clone(&node->as.tuple_lit.elements);
+        break;
+    case NODE_ARRAY_LIT:
+        c->as.array_lit.elements      = nodelist_clone(&node->as.array_lit.elements);
+        c->as.array_lit.resolved_type = NULL;
+        break;
+    case NODE_ARRAY_TYPE:
+        c->as.array_type.elem_type = node_clone(node->as.array_type.elem_type);
+        c->as.array_type.size      = node_clone(node->as.array_type.size);
+        break;
+    case NODE_GENERIC_TYPE:
+        c->as.generic_type.base_name        = xstrdup(node->as.generic_type.base_name);
+        c->as.generic_type.base_name_length = node->as.generic_type.base_name_length;
+        c->as.generic_type.type_args        = nodelist_clone(&node->as.generic_type.type_args);
+        break;
+    case NODE_EXPR_STMT:
+        c->as.expr_stmt.expr = node_clone(node->as.expr_stmt.expr);
+        break;
+    case NODE_VAR_DECL:
+        c->as.var_decl.name = node->as.var_decl.name ? xstrdup(node->as.var_decl.name) : NULL;
+        c->as.var_decl.name_length = node->as.var_decl.name_length;
+        c->as.var_decl.type        = node_clone(node->as.var_decl.type);
+        c->as.var_decl.init        = node_clone(node->as.var_decl.init);
+        c->as.var_decl.is_const    = node->as.var_decl.is_const;
+        // Reset checker flags
+        c->as.var_decl.is_rc         = 0;
+        c->as.var_decl.resolved_type = NULL;
+        c->as.var_decl.destruct_pattern =
+            NULL; // Not cloning patterns (not needed in method bodies)
+        break;
+    case NODE_BLOCK:
+        c->as.block.stmts = nodelist_clone(&node->as.block.stmts);
+        break;
+    case NODE_IF:
+        c->as.if_stmt.cond       = node_clone(node->as.if_stmt.cond);
+        c->as.if_stmt.then_block = node_clone(node->as.if_stmt.then_block);
+        c->as.if_stmt.else_block = node_clone(node->as.if_stmt.else_block);
+        break;
+    case NODE_WHILE:
+        c->as.while_stmt.cond = node_clone(node->as.while_stmt.cond);
+        c->as.while_stmt.body = node_clone(node->as.while_stmt.body);
+        break;
+    case NODE_FOR:
+        c->as.for_stmt.init = node_clone(node->as.for_stmt.init);
+        c->as.for_stmt.cond = node_clone(node->as.for_stmt.cond);
+        c->as.for_stmt.post = node_clone(node->as.for_stmt.post);
+        c->as.for_stmt.body = node_clone(node->as.for_stmt.body);
+        break;
+    case NODE_FOREACH:
+        c->as.foreach_stmt.var_name        = xstrdup(node->as.foreach_stmt.var_name);
+        c->as.foreach_stmt.var_name_length = node->as.foreach_stmt.var_name_length;
+        c->as.foreach_stmt.start           = node_clone(node->as.foreach_stmt.start);
+        c->as.foreach_stmt.end             = node_clone(node->as.foreach_stmt.end);
+        c->as.foreach_stmt.step            = node_clone(node->as.foreach_stmt.step);
+        c->as.foreach_stmt.body            = node_clone(node->as.foreach_stmt.body);
+        c->as.foreach_stmt.collection      = node_clone(node->as.foreach_stmt.collection);
+        // Reset checker flags
+        c->as.foreach_stmt.resolved_type = NULL;
+        c->as.foreach_stmt.is_span       = 0;
+        c->as.foreach_stmt.is_string     = 0;
+        break;
+    case NODE_RETURN:
+        c->as.return_stmt.value = node_clone(node->as.return_stmt.value);
+        break;
+    case NODE_BREAK:
+    case NODE_CONTINUE:
+        break;
+    case NODE_DEFER:
+        c->as.defer_stmt.stmt = node_clone(node->as.defer_stmt.stmt);
+        break;
+    case NODE_MATCH:
+        c->as.match_stmt.expr          = node_clone(node->as.match_stmt.expr);
+        c->as.match_stmt.arms          = nodelist_clone(&node->as.match_stmt.arms);
+        c->as.match_stmt.resolved_type = NULL;
+        break;
+    case NODE_MATCH_ARM:
+        c->as.match_arm.enum_name =
+            node->as.match_arm.enum_name ? xstrdup(node->as.match_arm.enum_name) : NULL;
+        c->as.match_arm.enum_name_length = node->as.match_arm.enum_name_length;
+        c->as.match_arm.variant_name =
+            node->as.match_arm.variant_name ? xstrdup(node->as.match_arm.variant_name) : NULL;
+        c->as.match_arm.variant_name_length = node->as.match_arm.variant_name_length;
+        c->as.match_arm.binding_count       = node->as.match_arm.binding_count;
+        c->as.match_arm.is_wildcard         = node->as.match_arm.is_wildcard;
+        c->as.match_arm.body                = node_clone(node->as.match_arm.body);
+        if (node->as.match_arm.binding_count > 0) {
+            c->as.match_arm.bindings = xmalloc(node->as.match_arm.binding_count * sizeof(char*));
+            for (int i = 0; i < node->as.match_arm.binding_count; i++) {
+                c->as.match_arm.bindings[i] = xstrdup(node->as.match_arm.bindings[i]);
+            }
+        }
+        break;
+    case NODE_PARAM:
+        c->as.param.name        = xstrdup(node->as.param.name);
+        c->as.param.name_length = node->as.param.name_length;
+        c->as.param.type        = node_clone(node->as.param.type);
+        c->as.param.is_const    = node->as.param.is_const;
+        break;
+    case NODE_FIELD:
+        c->as.field.name        = xstrdup(node->as.field.name);
+        c->as.field.name_length = node->as.field.name_length;
+        c->as.field.type        = node_clone(node->as.field.type);
+        break;
+    default:
+        // For node types not expected in method bodies, do a shallow copy
+        c->as = node->as;
+        break;
+    }
+    return c;
 }

@@ -271,7 +271,7 @@ int type_is_integer(Type* type) {
         return 0;
     return type->kind == TYPE_INT64 || type->kind == TYPE_INT8 || type->kind == TYPE_INT16 ||
            type->kind == TYPE_INT32 || type->kind == TYPE_UINT64 || type->kind == TYPE_UINT8 ||
-           type->kind == TYPE_UINT16 || type->kind == TYPE_UINT32;
+           type->kind == TYPE_UINT16 || type->kind == TYPE_UINT32 || type->kind == TYPE_CHAR;
 }
 
 int type_is_signed_integer(Type* type) {

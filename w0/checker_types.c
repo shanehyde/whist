@@ -512,6 +512,13 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
         }
     }
 
+    // Allocate per-instantiation method body storage
+    GenericInstance* inst = lookup_generic_instance(checker, mangled);
+    if (inst && def->method_count > 0) {
+        inst->method_bodies     = xcalloc(def->method_count, sizeof(Node*));
+        inst->method_body_count = def->method_count;
+    }
+
     // Instantiate methods on the generic struct
     for (int m = 0; m < def->method_count; m++) {
         Node*           method_decl = def->methods[m];
@@ -566,6 +573,16 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
 
         // Type-check the method body with the combined substitution context
         if (mfdn->body) {
+            // Clone the method body so each instantiation gets its own copy.
+            // This prevents checker-set flags (is_string_op, struct_name, etc.)
+            // from one instantiation affecting another.
+            Node* body_clone = node_clone(mfdn->body);
+
+            // Store cloned body on the instance for codegen to use
+            if (inst && m < inst->method_body_count) {
+                inst->method_bodies[m] = body_clone;
+            }
+
             checker_push_scope(checker);
             Type* old_return             = checker->current_func_return;
             checker->current_func_return = return_type;
@@ -585,9 +602,9 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
                                param->as.param.is_const, 0, NULL);
             }
 
-            // Check body statements
-            for (int s = 0; s < mfdn->body->as.block.stmts.count; s++) {
-                check_statement(checker, mfdn->body->as.block.stmts.nodes[s]);
+            // Check body statements on the cloned body
+            for (int s = 0; s < body_clone->as.block.stmts.count; s++) {
+                check_statement(checker, body_clone->as.block.stmts.nodes[s]);
             }
 
             checker->current_accessible_modules       = old_accessible_modules;

@@ -253,8 +253,9 @@ struct Node {
             int      enum_name_length;
             char*    value_name;
             int      value_name_length;
-            NodeList args;         // constructor arg expressions (count==0 for bare tag)
-            int      is_data_enum; // set by checker: 1 if parent enum has data variants
+            NodeList args;               // constructor arg expressions (count==0 for bare tag)
+            int      is_data_enum;       // set by checker: 1 if parent enum has data variants
+            char*    original_enum_name; // set by checker: base name before mangling
         } enum_value;
 
         // New expression: new Type { fields }
@@ -338,6 +339,7 @@ struct Node {
             Node* collection;    // Non-NULL for collection foreach (e.g. Vec<T>)
             Type* resolved_type; // Set by checker (loop variable type)
             int   is_span;       // Set by checker if collection is Span<T>
+            int   is_string;     // Set by checker if collection is string
         } foreach_stmt;
 
         // Return statement
@@ -476,6 +478,7 @@ struct Node {
 // Node creation
 Node* node_new(NodeType type, int line, int column);
 void  node_free(Node* node);
+Node* node_clone(Node* node);
 
 // NodeList operations
 void nodelist_init(NodeList* list);

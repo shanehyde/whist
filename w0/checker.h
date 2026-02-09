@@ -67,6 +67,9 @@ typedef struct {
     Type*  type;         // Concrete TYPE_STRUCT
     Type** type_args;    // Resolved type arguments [i64], [i64, string]
     int    type_arg_count;
+    // Per-instantiation cloned method bodies (parallel to GenericDef.methods)
+    Node** method_bodies; // Array of cloned body nodes (NULL entries for skipped methods)
+    int    method_body_count;
 } GenericInstance;
 
 // Instantiated span type
