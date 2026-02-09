@@ -45,6 +45,7 @@ typedef enum {
     TOK_PRIVATE,
     TOK_EXTERN,
     TOK_IMPORT,
+    TOK_AS,
 
     // Operators
     TOK_PLUS,    // +

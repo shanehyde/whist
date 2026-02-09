@@ -44,6 +44,10 @@ static void print_func_decl(Node* node, int depth) {
         printf("MethodDecl: (%s%.*s) %.*s\n", node->as.func_decl.receiver_is_const ? "const " : "",
                node->as.func_decl.receiver_type_len, node->as.func_decl.receiver_type,
                node->as.func_decl.name_length, node->as.func_decl.name);
+    } else if (node->as.func_decl.extern_name) {
+        printf("FuncDecl: %.*s (extern: %.*s)\n", node->as.func_decl.name_length,
+               node->as.func_decl.name, node->as.func_decl.extern_name_length,
+               node->as.func_decl.extern_name);
     } else {
         printf("FuncDecl: %.*s\n", node->as.func_decl.name_length, node->as.func_decl.name);
     }

@@ -58,7 +58,9 @@ Import statements load declarations from external Whist source files. There are 
 
 <param> ::= <identifier> [ ':' <type> ]
 
-<extern-module> ::= 'extern' <identifier> '{' { <func-decl> ';' } '}'
+<extern-func-decl> ::= <func-decl> [ 'as' <identifier> ] ';'
+
+<extern-module> ::= 'extern' <identifier> '{' { <extern-func-decl> } '}'
 ```
 
 **Generic methods:** Methods can be defined on generic structs using type arguments in the receiver:
@@ -358,11 +360,11 @@ Match statements destructure enum values by variant. The expression must be an e
 ### Keywords
 
 ```
-break    const    continue    defer     else      enum
-extern   false    for         foreach   func      if
-impl     import   in          match     new       null
-public   private  return      self      struct    trait
-true     type     var         while
+as       break    const       continue  defer     else
+enum     extern   false       for       foreach   func
+if       impl     import      in        match     new
+null     public   private     return    self      struct
+trait    true     type        var       while
 ```
 
 ### Identifiers

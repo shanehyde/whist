@@ -216,6 +216,7 @@ void node_free(Node* node) {
         // Free receiver type args if present
         nodelist_free(&node->as.func_decl.receiver_type_args);
         free(node->as.func_decl.name);
+        free(node->as.func_decl.extern_name);
         nodelist_free(&node->as.func_decl.params);
         node_free(node->as.func_decl.return_type);
         node_free(node->as.func_decl.body);

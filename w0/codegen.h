@@ -68,6 +68,13 @@ typedef struct {
     Node** alias_targets;
     int    alias_count;
     int    alias_capacity;
+    // Extern function alias tracking (Whist name -> C name)
+    struct {
+        char* whist_name; // Whist-side alias
+        char* c_name;     // Original C function name
+    }*  extern_aliases;
+    int extern_alias_count;
+    int extern_alias_capacity;
 } CodeGen;
 
 void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,

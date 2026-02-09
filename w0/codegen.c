@@ -489,6 +489,9 @@ void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, i
     gen->alias_targets          = NULL;
     gen->alias_count            = 0;
     gen->alias_capacity         = 0;
+    gen->extern_aliases         = NULL;
+    gen->extern_alias_count     = 0;
+    gen->extern_alias_capacity  = 0;
 }
 
 // Collect tuple types from all declarations and register non-generic type aliases
