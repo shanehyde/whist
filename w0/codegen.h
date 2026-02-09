@@ -75,6 +75,10 @@ typedef struct {
     }*  extern_aliases;
     int extern_alias_count;
     int extern_alias_capacity;
+    // Extern function name tracking (all extern functions, for intra-module call prefixing)
+    char** extern_funcs;
+    int    extern_func_count;
+    int    extern_func_capacity;
 } CodeGen;
 
 void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,

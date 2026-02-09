@@ -5,7 +5,7 @@ private extern stdio {
 }
 
 private extern stdlib {
-    func exit(status: i32) as _exit;
+    func exit(status: i32): void as _exit;
 }
 
 func print(s: string): void {
@@ -18,6 +18,11 @@ func println(s: string): void {
 
 func exit(status: i32): void {
     _exit(status);
+}
+
+func panic(s: string): void {
+    println($"Panic: {s}");
+    exit(1);
 }
 
 func abs_i64(x: i64): i64 {

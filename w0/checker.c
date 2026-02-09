@@ -983,8 +983,13 @@ static void check_extern_module_decl(Checker* checker, Node* node) {
     for (int i = 0; i < node->as.extern_module.decls.count; i++) {
         Node* decl = node->as.extern_module.decls.nodes[i];
         if (decl->type == NODE_FUNC_DECL) {
-            func_decl_node* fdn       = &decl->as.func_decl;
-            Type*           func_type = get_function_type(checker, decl);
+            func_decl_node* fdn = &decl->as.func_decl;
+            if (fdn->return_type == NULL) {
+                check_error(checker, decl->line, decl->column,
+                            "Extern function '%s' must have an explicit return type", fdn->name);
+                continue;
+            }
+            Type* func_type = get_function_type(checker, decl);
 
             checker_define(checker, fdn->name, SYM_FUNC, func_type, 0, fdn->is_public,
                            checker->current_module);
