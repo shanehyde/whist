@@ -123,6 +123,8 @@ typedef struct {
     NodeList receiver_type_args; // Type nodes for type arguments in receiver
     char*    name;
     int      name_length;
+    char*    extern_name; // Original C function name (when 'as' alias used), NULL otherwise
+    int      extern_name_length;
     NodeList params;
     int      is_varargs;
     Node*    return_type;

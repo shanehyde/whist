@@ -1475,6 +1475,8 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     fdn->receiver_type_args = receiver_type_args;
     fdn->name               = copy_token_string(&name);
     fdn->name_length        = name.length;
+    fdn->extern_name        = NULL;
+    fdn->extern_name_length = 0;
     fdn->is_varargs         = 0;
     nodelist_init(&fdn->params);
 
@@ -1529,6 +1531,15 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
 
     // Body
     if (check_token(parser, TOK_LBRACE) == 0) {
+        // Check for 'as <alias>' renaming (extern functions only)
+        if (match_token(parser, TOK_AS)) {
+            Token alias = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected identifier after 'as'");
+            fdn->extern_name        = fdn->name;
+            fdn->extern_name_length = fdn->name_length;
+            fdn->name               = copy_token_string(&alias);
+            fdn->name_length        = alias.length;
+        }
         consume_token(parser, TOK_SEMICOLON, "Expected ';' after function declaration");
         // extern function declaration
         fdn->body = NULL;
