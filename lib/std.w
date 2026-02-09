@@ -1,5 +1,10 @@
 // Standard library for Whist
 
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
 private extern stdio {
     func printf(fmt: string, ...): i32;
 }
