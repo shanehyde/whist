@@ -2072,6 +2072,57 @@ static void build_import_path(Parser* parser, char* path, size_t path_size, cons
     snprintf(path, path_size, "lib/%.*s.w", (int)module_length, module_name);
 }
 
+// Parse a use statement: use module.symbol; or use module.{sym1, sym2};
+static Node* parse_use_stmt(Parser* parser) {
+    Token module_token = parser->current;
+    consume_token(parser, TOK_IDENT, "Expected module name after 'use'");
+
+    consume_token(parser, TOK_DOT, "Expected '.' after module name in use statement");
+
+    // Allocate arrays for symbol names
+    int    capacity     = 4;
+    char** symbol_names = xmalloc(capacity * sizeof(char*));
+    int*   name_lengths = xmalloc(capacity * sizeof(int));
+    int    count        = 0;
+
+    if (match_token(parser, TOK_LBRACE)) {
+        // Grouped: use module.{sym1, sym2}
+        while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
+            Token sym = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected symbol name in use group");
+            if (count >= capacity) {
+                capacity *= 2;
+                symbol_names = xrealloc(symbol_names, capacity * sizeof(char*));
+                name_lengths = xrealloc(name_lengths, capacity * sizeof(int));
+            }
+            symbol_names[count] = copy_token_string(&sym);
+            name_lengths[count] = sym.length;
+            count++;
+            if (!check_token(parser, TOK_RBRACE)) {
+                consume_token(parser, TOK_COMMA, "Expected ',' or '}' in use group");
+            }
+        }
+        consume_token(parser, TOK_RBRACE, "Expected '}' after use group");
+    } else {
+        // Single: use module.symbol
+        Token sym = parser->current;
+        consume_token(parser, TOK_IDENT, "Expected symbol name after '.'");
+        symbol_names[0] = copy_token_string(&sym);
+        name_lengths[0] = sym.length;
+        count           = 1;
+    }
+
+    consume_token(parser, TOK_SEMICOLON, "Expected ';' after use statement");
+
+    Node* node                    = node_new(NODE_USE_DECL, module_token.line, module_token.column);
+    node->as.use_decl.module_name = copy_token_string(&module_token);
+    node->as.use_decl.module_name_length  = module_token.length;
+    node->as.use_decl.symbol_names        = symbol_names;
+    node->as.use_decl.symbol_name_lengths = name_lengths;
+    node->as.use_decl.symbol_count        = count;
+    return node;
+}
+
 static int parse_import_stmt(Parser* parser, Node* program, Node* current_module) {
     // Expect identifier or string after 'import'
     Token       import_token = parser->current;
@@ -2357,6 +2408,17 @@ Node* parser_parse(Parser* parser) {
                 if (parser->panic_mode)
                     synchronize(parser);
             }
+            continue;
+        }
+
+        // Handle use statements
+        if (match_token(parser, TOK_USE)) {
+            Node* use_node = parse_use_stmt(parser);
+            if (use_node) {
+                nodelist_push(&main_module->as.module.decls, use_node);
+            }
+            if (parser->panic_mode)
+                synchronize(parser);
             continue;
         }
 

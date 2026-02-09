@@ -1156,6 +1156,18 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
                 }
             }
         }
+        // Check use aliases (use std.print -> std_print)
+        if (!alias_found && func->type == NODE_IDENT) {
+            for (int i = 0; i < gen->use_alias_count; i++) {
+                if (strncmp(gen->use_aliases[i].whist_name, func->as.ident.name,
+                            func->as.ident.length) == 0 &&
+                    gen->use_aliases[i].whist_name[func->as.ident.length] == '\0') {
+                    emit(gen, "%s(", gen->use_aliases[i].c_name);
+                    alias_found = 1;
+                    break;
+                }
+            }
+        }
         if (!alias_found) {
             // If inside a module, prefix non-extern function calls with module name
             if (gen->current_module && func->type == NODE_IDENT) {
@@ -2611,10 +2623,8 @@ static void emit_extern_module(CodeGen* gen, Node* node) {
             gen->extern_funcs[gen->extern_func_count++] = decl->as.func_decl.name;
             // Register aliases (Whist name -> C name) for renamed externs
             if (decl->as.func_decl.extern_name) {
-                VEC_GROW(gen->extern_aliases, gen->extern_alias_count,
-                         gen->extern_alias_capacity);
-                gen->extern_aliases[gen->extern_alias_count].whist_name =
-                    decl->as.func_decl.name;
+                VEC_GROW(gen->extern_aliases, gen->extern_alias_count, gen->extern_alias_capacity);
+                gen->extern_aliases[gen->extern_alias_count].whist_name = decl->as.func_decl.name;
                 gen->extern_aliases[gen->extern_alias_count].c_name =
                     decl->as.func_decl.extern_name;
                 gen->extern_alias_count++;
@@ -2647,8 +2657,7 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
 
     // Function name (mangled for methods and library functions)
     emit_function_name(gen, node->as.func_decl.name,
-                       is_method ? node->as.func_decl.receiver_type : NULL,
-                       gen->current_module);
+                       is_method ? node->as.func_decl.receiver_type : NULL, gen->current_module);
 
     // Parameters
     if (is_method) {
@@ -2763,6 +2772,29 @@ void emit_decl(CodeGen* gen, Node* node) {
 
     case NODE_TYPE_ALIAS:
         // Type aliases produce no C code - they are resolved during type checking
+        break;
+
+    case NODE_USE_DECL:
+        // Register use aliases for function calls (types don't need aliases since
+        // struct/enum names in generated C are bare, not module-prefixed)
+        for (int i = 0; i < node->as.use_decl.symbol_count; i++) {
+            char* sym_name = node->as.use_decl.symbol_names[i];
+            char* mod_name = node->as.use_decl.module_name;
+
+            // Build the C function name: module_symbolname
+            // Special case: std.format -> __std_format (compiler builtin)
+            char c_name[256];
+            if (strcmp(mod_name, "std") == 0 && strcmp(sym_name, "format") == 0) {
+                snprintf(c_name, sizeof(c_name), "__std_format");
+            } else {
+                snprintf(c_name, sizeof(c_name), "%s_%s", mod_name, sym_name);
+            }
+
+            VEC_GROW(gen->use_aliases, gen->use_alias_count, gen->use_alias_capacity);
+            gen->use_aliases[gen->use_alias_count].whist_name = xstrdup(sym_name);
+            gen->use_aliases[gen->use_alias_count].c_name     = xstrdup(c_name);
+            gen->use_alias_count++;
+        }
         break;
 
     case NODE_IMPL_DECL:

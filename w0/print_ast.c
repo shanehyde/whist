@@ -560,6 +560,24 @@ void print_ast(Node* node, int depth) {
         print_impl_decl(node, depth);
         break;
 
+    case NODE_USE_DECL:
+        printf("UseDecl: %.*s.", node->as.use_decl.module_name_length,
+               node->as.use_decl.module_name);
+        if (node->as.use_decl.symbol_count == 1) {
+            printf("%.*s\n", node->as.use_decl.symbol_name_lengths[0],
+                   node->as.use_decl.symbol_names[0]);
+        } else {
+            printf("{");
+            for (int i = 0; i < node->as.use_decl.symbol_count; i++) {
+                if (i > 0)
+                    printf(", ");
+                printf("%.*s", node->as.use_decl.symbol_name_lengths[i],
+                       node->as.use_decl.symbol_names[i]);
+            }
+            printf("}\n");
+        }
+        break;
+
     default:
         printf("Unknown node type: %d\n", node->type);
         break;

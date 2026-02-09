@@ -79,6 +79,13 @@ typedef struct {
     char** extern_funcs;
     int    extern_func_count;
     int    extern_func_capacity;
+    // Use declaration aliases (unqualified Whist name -> qualified C name)
+    struct {
+        char* whist_name;
+        char* c_name;
+    }*  use_aliases;
+    int use_alias_count;
+    int use_alias_capacity;
 } CodeGen;
 
 void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,

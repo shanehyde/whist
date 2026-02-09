@@ -60,6 +60,20 @@ func main(): i32 {
 }
 ```
 
+**Use declarations** selectively bring module symbols into unqualified scope:
+```whist
+import std;
+use std.print;                  // single symbol
+use std.{abs_i64, max_i64};    // grouped symbols
+
+func main(): i32 {
+    print("Hello!\n");          // ✓ Correct: brought in by use
+    var x = abs_i64(-42);       // ✓ Correct: brought in by use
+    var y = std.min_i64(1, 2);  // ✓ Correct: qualified still works
+    return 0;
+}
+```
+
 **Relative imports** merge symbols into current namespace:
 ```whist
 import "./helper.w";

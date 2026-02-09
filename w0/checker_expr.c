@@ -872,8 +872,8 @@ static Type* check_cast_expr(Checker* checker, Node* node) {
     if (type_is_integer(expr_type) && type_is_integer(target))
         return target;
 
-    check_error(checker, node->line, node->column, "Cannot cast '%s' to '%s'",
-                type_name(expr_type), type_name(target));
+    check_error(checker, node->line, node->column, "Cannot cast '%s' to '%s'", type_name(expr_type),
+                type_name(target));
     return type_error;
 }
 

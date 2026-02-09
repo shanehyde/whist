@@ -144,6 +144,7 @@ static const Keyword keywords[] = {
     {"trait", 5, TOK_TRAIT},
     {"true", 4, TOK_TRUE},
     {"type", 4, TOK_TYPE},
+    {"use", 3, TOK_USE},
     {"var", 3, TOK_VAR},
     {"while", 5, TOK_WHILE},
 };
@@ -486,6 +487,8 @@ static const char* token_names[] = {
     [TOK_PRIVATE]       = "PRIVATE",
     [TOK_EXTERN]        = "EXTERN",
     [TOK_IMPORT]        = "IMPORT",
+    [TOK_AS]            = "AS",
+    [TOK_USE]           = "USE",
     [TOK_PLUS]          = "PLUS",
     [TOK_MINUS]         = "MINUS",
     [TOK_STAR]          = "STAR",

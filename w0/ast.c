@@ -292,6 +292,14 @@ void node_free(Node* node) {
         free(node->as.type_alias.type_params);
         free(node->as.type_alias.type_param_bounds);
         break;
+    case NODE_USE_DECL:
+        free(node->as.use_decl.module_name);
+        for (int i = 0; i < node->as.use_decl.symbol_count; i++) {
+            free(node->as.use_decl.symbol_names[i]);
+        }
+        free(node->as.use_decl.symbol_names);
+        free(node->as.use_decl.symbol_name_lengths);
+        break;
     case NODE_EXTERN_MODULE:
         nodelist_free(&node->as.extern_module.decls);
         free(node->as.extern_module.module_name);
