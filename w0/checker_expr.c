@@ -846,6 +846,76 @@ static Type* check_array_lit_expr(Checker* checker, Node* node) {
 }
 
 // =============================================================================
+// Expression checking — small helpers
+// =============================================================================
+
+// Type-check a cast expression: validate that source and target types are compatible
+static Type* check_cast_expr(Checker* checker, Node* node) {
+    Type* expr_type = check_expression(checker, node->as.cast_expr.expr);
+    if (expr_type->kind == TYPE_ERROR)
+        return type_error;
+    Type* target = resolve_type(checker, node->as.cast_expr.type_node);
+    if (target->kind == TYPE_ERROR)
+        return type_error;
+    node->as.cast_expr.resolved_type = target;
+
+    // Allow: identity cast
+    if (expr_type == target)
+        return target;
+    // Allow: char -> integer
+    if (expr_type->kind == TYPE_CHAR && type_is_integer(target))
+        return target;
+    // Allow: integer -> char
+    if (type_is_integer(expr_type) && target->kind == TYPE_CHAR)
+        return target;
+    // Allow: integer -> integer (widening/narrowing)
+    if (type_is_integer(expr_type) && type_is_integer(target))
+        return target;
+
+    check_error(checker, node->line, node->column, "Cannot cast '%s' to '%s'",
+                type_name(expr_type), type_name(target));
+    return type_error;
+}
+
+// Type-check a tuple literal: resolve each element type and return a tuple type
+static Type* check_tuple_lit_expr(Checker* checker, Node* node) {
+    int    count = node->as.tuple_lit.elements.count;
+    Type** elems = xmalloc(count * sizeof(Type*));
+    for (int i = 0; i < count; i++) {
+        elems[i] = check_expression(checker, node->as.tuple_lit.elements.nodes[i]);
+    }
+    return type_tuple(elems, count);
+}
+
+// Type-check a string interpolation: validate that all parts are formattable types
+static Type* check_string_interp_expr(Checker* checker, Node* node) {
+    int count                         = node->as.string_interp.parts.count;
+    node->as.string_interp.part_types = xcalloc(count, sizeof(Type*));
+    node->as.string_interp.part_count = count;
+    for (int i = 0; i < count; i++) {
+        Node* part = node->as.string_interp.parts.nodes[i];
+        if (part->type == NODE_STRING_LIT) {
+            node->as.string_interp.part_types[i] = type_string;
+        } else {
+            Type* t = check_expression(checker, part);
+            if (t->kind == TYPE_ERROR) {
+                node->as.string_interp.part_types[i] = type_error;
+                continue;
+            }
+            if (!type_is_integer(t) && t->kind != TYPE_F32 && t->kind != TYPE_F64 &&
+                t->kind != TYPE_BOOL && t->kind != TYPE_STRING && t->kind != TYPE_CHAR) {
+                check_error(checker, part->line, part->column,
+                            "String interpolation does not support type '%s'", type_name(t));
+                node->as.string_interp.part_types[i] = type_error;
+                continue;
+            }
+            node->as.string_interp.part_types[i] = t;
+        }
+    }
+    return type_string;
+}
+
+// =============================================================================
 // Expression checking
 // =============================================================================
 
@@ -910,76 +980,22 @@ Type* check_expression(Checker* checker, Node* node) {
     case NODE_NEW_EXPR:
         return check_new_expr(checker, node);
 
-    case NODE_CAST: {
-        Type* expr_type = check_expression(checker, node->as.cast_expr.expr);
-        if (expr_type->kind == TYPE_ERROR)
-            return type_error;
-        Type* target = resolve_type(checker, node->as.cast_expr.type_node);
-        if (target->kind == TYPE_ERROR)
-            return type_error;
-        node->as.cast_expr.resolved_type = target;
-
-        // Allow: identity cast
-        if (expr_type == target)
-            return target;
-        // Allow: char -> integer
-        if (expr_type->kind == TYPE_CHAR && type_is_integer(target))
-            return target;
-        // Allow: integer -> char
-        if (type_is_integer(expr_type) && target->kind == TYPE_CHAR)
-            return target;
-        // Allow: integer -> integer (widening/narrowing)
-        if (type_is_integer(expr_type) && type_is_integer(target))
-            return target;
-
-        check_error(checker, node->line, node->column, "Cannot cast '%s' to '%s'",
-                    type_name(expr_type), type_name(target));
-        return type_error;
-    }
+    case NODE_CAST:
+        return check_cast_expr(checker, node);
 
     case NODE_STRUCT_INIT:
         check_error(checker, node->line, node->column,
                     "Struct initializer requires a contextual struct type");
         return type_error;
 
-    case NODE_TUPLE_LIT: {
-        int    count = node->as.tuple_lit.elements.count;
-        Type** elems = xmalloc(count * sizeof(Type*));
-        for (int i = 0; i < count; i++) {
-            elems[i] = check_expression(checker, node->as.tuple_lit.elements.nodes[i]);
-        }
-        return type_tuple(elems, count);
-    }
+    case NODE_TUPLE_LIT:
+        return check_tuple_lit_expr(checker, node);
 
     case NODE_ARRAY_LIT:
         return check_array_lit_expr(checker, node);
 
-    case NODE_STRING_INTERP: {
-        int count                         = node->as.string_interp.parts.count;
-        node->as.string_interp.part_types = xcalloc(count, sizeof(Type*));
-        node->as.string_interp.part_count = count;
-        for (int i = 0; i < count; i++) {
-            Node* part = node->as.string_interp.parts.nodes[i];
-            if (part->type == NODE_STRING_LIT) {
-                node->as.string_interp.part_types[i] = type_string;
-            } else {
-                Type* t = check_expression(checker, part);
-                if (t->kind == TYPE_ERROR) {
-                    node->as.string_interp.part_types[i] = type_error;
-                    continue;
-                }
-                if (!type_is_integer(t) && t->kind != TYPE_F32 && t->kind != TYPE_F64 &&
-                    t->kind != TYPE_BOOL && t->kind != TYPE_STRING && t->kind != TYPE_CHAR) {
-                    check_error(checker, part->line, part->column,
-                                "String interpolation does not support type '%s'", type_name(t));
-                    node->as.string_interp.part_types[i] = type_error;
-                    continue;
-                }
-                node->as.string_interp.part_types[i] = t;
-            }
-        }
-        return type_string;
-    }
+    case NODE_STRING_INTERP:
+        return check_string_interp_expr(checker, node);
 
     default:
         check_error(checker, node->line, node->column, "Unknown expression type %d", node->type);

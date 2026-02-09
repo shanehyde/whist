@@ -2599,6 +2599,146 @@ void emit_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit an extern module: #include directive and register function aliases/names
+static void emit_extern_module(CodeGen* gen, Node* node) {
+    emit(gen, "\n#include <%s.h>\n", node->as.extern_module.module_name);
+    // Register extern function aliases and names
+    for (int i = 0; i < node->as.extern_module.decls.count; i++) {
+        Node* decl = node->as.extern_module.decls.nodes[i];
+        if (decl->type == NODE_FUNC_DECL) {
+            // Track all extern function names (for intra-module call prefixing)
+            VEC_GROW(gen->extern_funcs, gen->extern_func_count, gen->extern_func_capacity);
+            gen->extern_funcs[gen->extern_func_count++] = decl->as.func_decl.name;
+            // Register aliases (Whist name -> C name) for renamed externs
+            if (decl->as.func_decl.extern_name) {
+                VEC_GROW(gen->extern_aliases, gen->extern_alias_count,
+                         gen->extern_alias_capacity);
+                gen->extern_aliases[gen->extern_alias_count].whist_name =
+                    decl->as.func_decl.name;
+                gen->extern_aliases[gen->extern_alias_count].c_name =
+                    decl->as.func_decl.extern_name;
+                gen->extern_alias_count++;
+            }
+        }
+    }
+}
+
+// Emit a function declaration: signature, body, defer cleanup, and RC cleanup
+static void emit_func_decl(CodeGen* gen, Node* node) {
+    int is_method = (node->as.func_decl.receiver_type != NULL);
+
+    // Skip generic method templates - they get instantiated separately
+    if (is_method && node->as.func_decl.receiver_type_args.count > 0) {
+        return;
+    }
+
+    // Check if function is void
+    int is_void = !node->as.func_decl.return_type ||
+                  (node->as.func_decl.return_type->type == NODE_IDENT &&
+                   strcmp(node->as.func_decl.return_type->as.ident.name, "void") == 0);
+
+    // Emit static for private functions (except main)
+    if (!node->as.func_decl.is_public && strcmp(node->as.func_decl.name, "main") != 0) {
+        emit(gen, "static ");
+    }
+
+    // Return type
+    emit_type(gen, node->as.func_decl.return_type);
+
+    // Function name (mangled for methods and library functions)
+    emit_function_name(gen, node->as.func_decl.name,
+                       is_method ? node->as.func_decl.receiver_type : NULL,
+                       gen->current_module);
+
+    // Parameters
+    if (is_method) {
+        // Emit self parameter first
+        if (node->as.func_decl.receiver_is_const &&
+            strcmp(node->as.func_decl.receiver_type, "string") != 0) {
+            emit(gen, "const ");
+        }
+        if (type_is_builtin_name(node->as.func_decl.receiver_type)) {
+            emit(gen, "%s self", type_c_name(node->as.func_decl.receiver_type));
+        } else {
+            emit(gen, "%s* self", node->as.func_decl.receiver_type);
+        }
+        if (node->as.func_decl.params.count > 0) {
+            emit(gen, ", ");
+        }
+    }
+
+    if (node->as.func_decl.params.count == 0 && !is_method) {
+        emit(gen, "void");
+    } else {
+        for (int i = 0; i < node->as.func_decl.params.count; i++) {
+            if (i > 0)
+                emit(gen, ", ");
+            Node* param = node->as.func_decl.params.nodes[i];
+            if (param->as.param.is_const) {
+                emit(gen, "const ");
+            }
+            emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+        }
+    }
+    emit(gen, ") {\n");
+
+    // Clear defer stack for this function
+    defer_clear(gen);
+    gen->current_return_type = node->as.func_decl.return_type;
+
+    // First pass: count defers to know if we need __ret
+    int has_defers = 0;
+    if (node->as.func_decl.body) {
+        for (int i = 0; i < node->as.func_decl.body->as.block.stmts.count; i++) {
+            Node* stmt = node->as.func_decl.body->as.block.stmts.nodes[i];
+            if (stmt && stmt->type == NODE_DEFER) {
+                has_defers = 1;
+                break;
+            }
+        }
+    }
+
+    // Body
+    gen->indent++;
+
+    // Declare __ret if function has defers and is non-void
+    if (has_defers && !is_void) {
+        emit_indent(gen);
+        emit_type(gen, node->as.func_decl.return_type);
+        emit(gen, " __ret;\n");
+    }
+
+    if (node->as.func_decl.body) {
+        for (int i = 0; i < node->as.func_decl.body->as.block.stmts.count; i++) {
+            emit_stmt(gen, node->as.func_decl.body->as.block.stmts.nodes[i]);
+        }
+    }
+
+    // Emit cleanup section if there are defers
+    if (gen->defer_count > 0) {
+        emit(gen, "__cleanup:;\n");
+        // Emit deferred statements in reverse order (LIFO)
+        for (int i = gen->defer_count - 1; i >= 0; i--) {
+            emit_stmt(gen, gen->defer_stack[i]);
+        }
+        // Emit final return
+        emit_indent(gen);
+        if (is_void) {
+            emit(gen, "return;\n");
+        } else {
+            emit(gen, "return __ret;\n");
+        }
+    }
+
+    gen->indent--;
+    emit(gen, "}\n\n");
+
+    // Clear defer stack and RC tracking
+    defer_clear(gen);
+    rc_clear_all(gen);
+    gen->current_return_type = NULL;
+}
+
 // Emit a top-level declaration: function, struct, enum, extern, impl, or global var
 void emit_decl(CodeGen* gen, Node* node) {
     if (!node)
@@ -2606,26 +2746,7 @@ void emit_decl(CodeGen* gen, Node* node) {
 
     switch (node->type) {
     case NODE_EXTERN_MODULE:
-        emit(gen, "\n#include <%s.h>\n", node->as.extern_module.module_name);
-        // Register extern function aliases and names
-        for (int i = 0; i < node->as.extern_module.decls.count; i++) {
-            Node* decl = node->as.extern_module.decls.nodes[i];
-            if (decl->type == NODE_FUNC_DECL) {
-                // Track all extern function names (for intra-module call prefixing)
-                VEC_GROW(gen->extern_funcs, gen->extern_func_count, gen->extern_func_capacity);
-                gen->extern_funcs[gen->extern_func_count++] = decl->as.func_decl.name;
-                // Register aliases (Whist name -> C name) for renamed externs
-                if (decl->as.func_decl.extern_name) {
-                    VEC_GROW(gen->extern_aliases, gen->extern_alias_count,
-                             gen->extern_alias_capacity);
-                    gen->extern_aliases[gen->extern_alias_count].whist_name =
-                        decl->as.func_decl.name;
-                    gen->extern_aliases[gen->extern_alias_count].c_name =
-                        decl->as.func_decl.extern_name;
-                    gen->extern_alias_count++;
-                }
-            }
-        }
+        emit_extern_module(gen, node);
         break;
 
     case NODE_STRUCT_DECL:
@@ -2651,121 +2772,9 @@ void emit_decl(CodeGen* gen, Node* node) {
         }
         break;
 
-    case NODE_FUNC_DECL: {
-        int is_method = (node->as.func_decl.receiver_type != NULL);
-
-        // Skip generic method templates - they get instantiated separately
-        if (is_method && node->as.func_decl.receiver_type_args.count > 0) {
-            break;
-        }
-
-        // Check if function is void
-        int is_void = !node->as.func_decl.return_type ||
-                      (node->as.func_decl.return_type->type == NODE_IDENT &&
-                       strcmp(node->as.func_decl.return_type->as.ident.name, "void") == 0);
-
-        // Emit static for private functions (except main)
-        if (!node->as.func_decl.is_public && strcmp(node->as.func_decl.name, "main") != 0) {
-            emit(gen, "static ");
-        }
-
-        // Return type
-        emit_type(gen, node->as.func_decl.return_type);
-
-        // Function name (mangled for methods and library functions)
-        emit_function_name(gen, node->as.func_decl.name,
-                           is_method ? node->as.func_decl.receiver_type : NULL,
-                           gen->current_module);
-
-        // Parameters
-        if (is_method) {
-            // Emit self parameter first
-            if (node->as.func_decl.receiver_is_const &&
-                strcmp(node->as.func_decl.receiver_type, "string") != 0) {
-                emit(gen, "const ");
-            }
-            if (type_is_builtin_name(node->as.func_decl.receiver_type)) {
-                emit(gen, "%s self", type_c_name(node->as.func_decl.receiver_type));
-            } else {
-                emit(gen, "%s* self", node->as.func_decl.receiver_type);
-            }
-            if (node->as.func_decl.params.count > 0) {
-                emit(gen, ", ");
-            }
-        }
-
-        if (node->as.func_decl.params.count == 0 && !is_method) {
-            emit(gen, "void");
-        } else {
-            for (int i = 0; i < node->as.func_decl.params.count; i++) {
-                if (i > 0)
-                    emit(gen, ", ");
-                Node* param = node->as.func_decl.params.nodes[i];
-                if (param->as.param.is_const) {
-                    emit(gen, "const ");
-                }
-                emit_type_with_name(gen, param->as.param.type, param->as.param.name);
-            }
-        }
-        emit(gen, ") {\n");
-
-        // Clear defer stack for this function
-        defer_clear(gen);
-        gen->current_return_type = node->as.func_decl.return_type;
-
-        // First pass: count defers to know if we need __ret
-        int has_defers = 0;
-        if (node->as.func_decl.body) {
-            for (int i = 0; i < node->as.func_decl.body->as.block.stmts.count; i++) {
-                Node* stmt = node->as.func_decl.body->as.block.stmts.nodes[i];
-                if (stmt && stmt->type == NODE_DEFER) {
-                    has_defers = 1;
-                    break;
-                }
-            }
-        }
-
-        // Body
-        gen->indent++;
-
-        // Declare __ret if function has defers and is non-void
-        if (has_defers && !is_void) {
-            emit_indent(gen);
-            emit_type(gen, node->as.func_decl.return_type);
-            emit(gen, " __ret;\n");
-        }
-
-        if (node->as.func_decl.body) {
-            for (int i = 0; i < node->as.func_decl.body->as.block.stmts.count; i++) {
-                emit_stmt(gen, node->as.func_decl.body->as.block.stmts.nodes[i]);
-            }
-        }
-
-        // Emit cleanup section if there are defers
-        if (gen->defer_count > 0) {
-            emit(gen, "__cleanup:;\n");
-            // Emit deferred statements in reverse order (LIFO)
-            for (int i = gen->defer_count - 1; i >= 0; i--) {
-                emit_stmt(gen, gen->defer_stack[i]);
-            }
-            // Emit final return
-            emit_indent(gen);
-            if (is_void) {
-                emit(gen, "return;\n");
-            } else {
-                emit(gen, "return __ret;\n");
-            }
-        }
-
-        gen->indent--;
-        emit(gen, "}\n\n");
-
-        // Clear defer stack and RC tracking
-        defer_clear(gen);
-        rc_clear_all(gen);
-        gen->current_return_type = NULL;
+    case NODE_FUNC_DECL:
+        emit_func_decl(gen, node);
         break;
-    }
 
     case NODE_VAR_DECL:
         // Global variable - emit static for private vars
