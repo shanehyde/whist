@@ -2317,23 +2317,37 @@ void emit_stmt(CodeGen* gen, Node* node) {
 
     case NODE_FOREACH:
         if (node->as.foreach_stmt.collection) {
-            // Collection foreach: foreach (const item in collection)
-            // Vec uses -> (pointer), Span uses . (value type)
-            const char* access = node->as.foreach_stmt.is_span ? "." : "->";
-            int         idx_id = gen->temp_count++;
-            emit_indent(gen);
-            emit(gen, "for (int64_t __foreach_%d = 0; __foreach_%d < ", idx_id, idx_id);
-            emit_expr(gen, node->as.foreach_stmt.collection);
-            emit(gen, "%scount; __foreach_%d++) {\n", access, idx_id);
-            gen->indent++;
-            // Declare the loop variable from collection data[idx]
-            emit_indent(gen);
-            emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
-                                        ? node->as.foreach_stmt.resolved_type
-                                        : type_int64);
-            emit(gen, " %s = ", node->as.foreach_stmt.var_name);
-            emit_expr(gen, node->as.foreach_stmt.collection);
-            emit(gen, "%sdata[__foreach_%d];\n", access, idx_id);
+            int idx_id = gen->temp_count++;
+            if (node->as.foreach_stmt.is_string) {
+                // String foreach: foreach (const c in str)
+                emit_indent(gen);
+                emit(gen, "for (int64_t __foreach_%d = 0; __foreach_%d < (int64_t)strlen(", idx_id,
+                     idx_id);
+                emit_expr(gen, node->as.foreach_stmt.collection);
+                emit(gen, "); __foreach_%d++) {\n", idx_id);
+                gen->indent++;
+                emit_indent(gen);
+                emit(gen, "char %s = ", node->as.foreach_stmt.var_name);
+                emit_expr(gen, node->as.foreach_stmt.collection);
+                emit(gen, "[__foreach_%d];\n", idx_id);
+            } else {
+                // Collection foreach: foreach (const item in collection)
+                // Vec uses -> (pointer), Span uses . (value type)
+                const char* access = node->as.foreach_stmt.is_span ? "." : "->";
+                emit_indent(gen);
+                emit(gen, "for (int64_t __foreach_%d = 0; __foreach_%d < ", idx_id, idx_id);
+                emit_expr(gen, node->as.foreach_stmt.collection);
+                emit(gen, "%scount; __foreach_%d++) {\n", access, idx_id);
+                gen->indent++;
+                // Declare the loop variable from collection data[idx]
+                emit_indent(gen);
+                emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
+                                            ? node->as.foreach_stmt.resolved_type
+                                            : type_int64);
+                emit(gen, " %s = ", node->as.foreach_stmt.var_name);
+                emit_expr(gen, node->as.foreach_stmt.collection);
+                emit(gen, "%sdata[__foreach_%d];\n", access, idx_id);
+            }
             if (node->as.foreach_stmt.body->type == NODE_BLOCK) {
                 emit_block_contents(gen, node->as.foreach_stmt.body);
             } else {
@@ -2461,7 +2475,8 @@ void emit_decl(CodeGen* gen, Node* node) {
         // Parameters
         if (is_method) {
             // Emit self parameter first
-            if (node->as.func_decl.receiver_is_const) {
+            if (node->as.func_decl.receiver_is_const &&
+                strcmp(node->as.func_decl.receiver_type, "string") != 0) {
                 emit(gen, "const ");
             }
             if (type_is_builtin_name(node->as.func_decl.receiver_type)) {

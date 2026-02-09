@@ -390,8 +390,7 @@ static Type* check_member_expr(Checker* checker, Node* node) {
             params[0]                   = type_string;
             return type_func(params, 1, type_bool, 0);
         }
-        check_error(checker, node->line, node->column, "String has no member '%s'", member_name);
-        return type_error;
+        // Fall through to primitive_methods check for trait impls (e.g., Hashable)
     }
 
     // Check for methods on primitive types (from trait impls)
@@ -406,8 +405,13 @@ static Type* check_member_expr(Checker* checker, Node* node) {
                 return checker->primitive_methods[i].method_type;
             }
         }
-        check_error(checker, node->line, node->column,
-                    "Member access requires struct type, got '%s'", type_name(object));
+        if (object->kind == TYPE_STRING) {
+            check_error(checker, node->line, node->column, "String has no member '%s'",
+                        member_name);
+        } else {
+            check_error(checker, node->line, node->column,
+                        "Member access requires struct type, got '%s'", type_name(object));
+        }
         return type_error;
     }
 
@@ -524,8 +528,11 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
 
 // Type-check an enum variant constructor, including generic enum type inference
 static Type* check_enum_value_expr(Checker* checker, Node* node) {
-    // Look up the enum type
-    const char* enum_name = node->as.enum_value.enum_name;
+    // Use original (pre-mangled) name if available, to support re-checking
+    // the same AST node across multiple generic instantiations
+    const char* enum_name = node->as.enum_value.original_enum_name
+                                ? node->as.enum_value.original_enum_name
+                                : node->as.enum_value.enum_name;
     Symbol*     sym       = checker_lookup(checker, enum_name);
     Type*       enum_type = NULL;
 
@@ -662,8 +669,14 @@ static Type* check_enum_value_expr(Checker* checker, Node* node) {
         free(inferred);
         free(arg_types);
 
+        // Save original base name before mangling (for re-checking across
+        // multiple generic instantiations that share the same method body AST)
+        if (!node->as.enum_value.original_enum_name) {
+            node->as.enum_value.original_enum_name = node->as.enum_value.enum_name;
+        } else {
+            free(node->as.enum_value.enum_name);
+        }
         // Update AST node to use mangled name (critical for codegen)
-        free(node->as.enum_value.enum_name);
         node->as.enum_value.enum_name        = xstrdup(enum_type->as.enm.name);
         node->as.enum_value.enum_name_length = (int)strlen(enum_type->as.enm.name);
     }
