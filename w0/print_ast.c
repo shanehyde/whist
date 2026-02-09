@@ -502,6 +502,13 @@ void print_ast(Node* node, int depth) {
         print_ast(node->as.new_expr.init, depth + 2);
         break;
 
+    case NODE_STRING_INTERP:
+        printf("StringInterp (%d parts)\n", node->as.string_interp.parts.count);
+        for (int i = 0; i < node->as.string_interp.parts.count; i++) {
+            print_ast(node->as.string_interp.parts.nodes[i], depth + 1);
+        }
+        break;
+
     case NODE_TUPLE_TYPE:
         printf("TupleType\n");
         for (int i = 0; i < node->as.tuple_type.elem_types.count; i++) {

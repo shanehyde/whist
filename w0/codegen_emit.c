@@ -37,6 +37,7 @@ static void emit_return_stmt(CodeGen* gen, Node* node);
 // Forward declarations for emit_expr helpers
 static void emit_string_lit(CodeGen* gen, Node* node);
 static void emit_char_lit(CodeGen* gen, Node* node);
+static void emit_string_interp(CodeGen* gen, Node* node);
 static void emit_enum_value(CodeGen* gen, Node* node);
 static void emit_call_expr(CodeGen* gen, Node* node);
 static void emit_index_expr(CodeGen* gen, Node* node);
@@ -1400,6 +1401,150 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit string interpolation: $"text {expr} text" -> __std_format("fmt", args...)
+static void emit_string_interp(CodeGen* gen, Node* node) {
+    int count = node->as.string_interp.part_count;
+
+    // Optimization: if no expression parts, emit as a plain C string literal
+    int has_expr = 0;
+    for (int i = 0; i < count; i++) {
+        if (node->as.string_interp.parts.nodes[i]->type != NODE_STRING_LIT) {
+            has_expr = 1;
+            break;
+        }
+    }
+
+    if (!has_expr) {
+        // All parts are text — concatenate into a single string literal
+        emit(gen, "\"");
+        for (int i = 0; i < count; i++) {
+            Node* part = node->as.string_interp.parts.nodes[i];
+            // Emit with C escaping
+            const char* s = part->as.string_lit.value;
+            int         n = part->as.string_lit.length;
+            for (int j = 0; j < n; j++) {
+                switch (s[j]) {
+                case '\n':
+                    emit(gen, "\\n");
+                    break;
+                case '\t':
+                    emit(gen, "\\t");
+                    break;
+                case '\r':
+                    emit(gen, "\\r");
+                    break;
+                case '\\':
+                    emit(gen, "\\\\");
+                    break;
+                case '"':
+                    emit(gen, "\\\"");
+                    break;
+                case '\0':
+                    emit(gen, "\\0");
+                    break;
+                default:
+                    emit(gen, "%c", s[j]);
+                    break;
+                }
+            }
+        }
+        emit(gen, "\"");
+        return;
+    }
+
+    // Build __std_format("fmt", args...)
+    emit(gen, "__std_format(\"");
+
+    // First pass: format string
+    for (int i = 0; i < count; i++) {
+        Node* part = node->as.string_interp.parts.nodes[i];
+        Type* t    = node->as.string_interp.part_types[i];
+        if (part->type == NODE_STRING_LIT) {
+            // Text segment: emit with C escaping, and escape % as %%
+            const char* s = part->as.string_lit.value;
+            int         n = part->as.string_lit.length;
+            for (int j = 0; j < n; j++) {
+                switch (s[j]) {
+                case '\n':
+                    emit(gen, "\\n");
+                    break;
+                case '\t':
+                    emit(gen, "\\t");
+                    break;
+                case '\r':
+                    emit(gen, "\\r");
+                    break;
+                case '\\':
+                    emit(gen, "\\\\");
+                    break;
+                case '"':
+                    emit(gen, "\\\"");
+                    break;
+                case '\0':
+                    emit(gen, "\\0");
+                    break;
+                case '%':
+                    emit(gen, "%%%%");
+                    break;
+                default:
+                    emit(gen, "%c", s[j]);
+                    break;
+                }
+            }
+        } else {
+            // Expression: emit format specifier based on type
+            if (!t)
+                continue;
+            switch (t->kind) {
+            case TYPE_STRING:
+                emit(gen, "%%s");
+                break;
+            case TYPE_BOOL:
+                emit(gen, "%%s");
+                break;
+            case TYPE_CHAR:
+                emit(gen, "%%c");
+                break;
+            case TYPE_F32:
+            case TYPE_F64:
+                emit(gen, "%%g");
+                break;
+            case TYPE_INT64:
+                emit(gen, "%%lld");
+                break;
+            case TYPE_UINT64:
+                emit(gen, "%%llu");
+                break;
+            default:
+                // Other integer types
+                emit(gen, "%%d");
+                break;
+            }
+        }
+    }
+    emit(gen, "\"");
+
+    // Second pass: arguments
+    for (int i = 0; i < count; i++) {
+        Node* part = node->as.string_interp.parts.nodes[i];
+        Type* t    = node->as.string_interp.part_types[i];
+        if (part->type == NODE_STRING_LIT)
+            continue;
+        if (!t)
+            continue;
+        emit(gen, ", ");
+        if (t->kind == TYPE_BOOL) {
+            emit(gen, "(");
+            emit_expr(gen, part);
+            emit(gen, " ? \"true\" : \"false\")");
+        } else {
+            emit_expr(gen, part);
+        }
+    }
+
+    emit(gen, ")");
+}
+
 // Dispatch expression code generation based on node type
 static void emit_expr(CodeGen* gen, Node* node) {
     if (!node)
@@ -1527,6 +1672,10 @@ static void emit_expr(CodeGen* gen, Node* node) {
 
     case NODE_NEW_EXPR:
         emit_new_expr(gen, node);
+        break;
+
+    case NODE_STRING_INTERP:
+        emit_string_interp(gen, node);
         break;
 
     default:

@@ -227,6 +227,61 @@ static Token string(Lexer* lexer) {
     return make_token(lexer, TOK_STRING);
 }
 
+static Token interp_string(Lexer* lexer) {
+    // Scan from after $" to closing ", tracking brace depth for {expr} regions
+    int brace_depth = 0;
+    while (!is_at_end(lexer)) {
+        char c = peek(lexer);
+        if (brace_depth == 0) {
+            if (c == '"') {
+                advance(lexer); // closing quote
+                return make_token(lexer, TOK_INTERP_STRING);
+            }
+            if (c == '{') {
+                if (peek_next(lexer) == '{') {
+                    advance(lexer); // skip first {
+                    advance(lexer); // skip second {
+                    continue;
+                }
+                brace_depth++;
+                advance(lexer);
+                continue;
+            }
+            if (c == '}' && peek_next(lexer) == '}') {
+                advance(lexer); // skip first }
+                advance(lexer); // skip second }
+                continue;
+            }
+            if (c == '\\' && peek_next(lexer) != '\0') {
+                advance(lexer); // skip backslash
+            }
+            advance(lexer);
+        } else {
+            // Inside {expr} region
+            if (c == '{') {
+                brace_depth++;
+            } else if (c == '}') {
+                brace_depth--;
+            } else if (c == '"') {
+                // String literal inside expression - skip it
+                advance(lexer); // opening quote
+                while (!is_at_end(lexer) && peek(lexer) != '"') {
+                    if (peek(lexer) == '\\' && peek_next(lexer) != '\0') {
+                        advance(lexer);
+                    }
+                    advance(lexer);
+                }
+                if (!is_at_end(lexer)) {
+                    advance(lexer); // closing quote
+                }
+                continue;
+            }
+            advance(lexer);
+        }
+    }
+    return error_token(lexer, "Unterminated interpolated string");
+}
+
 static Token character(Lexer* lexer) {
     if (is_at_end(lexer)) {
         return error_token(lexer, "Unterminated character literal");
@@ -368,6 +423,11 @@ Token lexer_next(Lexer* lexer) {
         return string(lexer);
     case '\'':
         return character(lexer);
+    case '$':
+        if (match(lexer, '"')) {
+            return interp_string(lexer);
+        }
+        return error_token(lexer, "Unexpected character '$'");
     }
 
     return error_token(lexer, "Unexpected character");
@@ -375,88 +435,89 @@ Token lexer_next(Lexer* lexer) {
 
 // Token type names indexed by TokenType enum value (must match lexer.h order)
 static const char* token_names[] = {
-    [TOK_EOF]         = "EOF",
-    [TOK_IDENT]       = "IDENT",
-    [TOK_INT]         = "INT",
-    [TOK_FLOAT]       = "FLOAT",
-    [TOK_STRING]      = "STRING",
-    [TOK_CHAR]        = "CHAR",
-    [TOK_IF]          = "IF",
-    [TOK_ELSE]        = "ELSE",
-    [TOK_WHILE]       = "WHILE",
-    [TOK_FOR]         = "FOR",
-    [TOK_FOREACH]     = "FOREACH",
-    [TOK_RETURN]      = "RETURN",
-    [TOK_BREAK]       = "BREAK",
-    [TOK_CONTINUE]    = "CONTINUE",
-    [TOK_STRUCT]      = "STRUCT",
-    [TOK_ENUM]        = "ENUM",
-    [TOK_TRAIT]       = "TRAIT",
-    [TOK_TYPE]        = "TYPE",
-    [TOK_IMPL]        = "IMPL",
-    [TOK_FUNC]        = "FUNC",
-    [TOK_VAR]         = "VAR",
-    [TOK_CONST]       = "CONST",
-    [TOK_BY]          = "BY",
-    [TOK_TRUE]        = "TRUE",
-    [TOK_FALSE]       = "FALSE",
-    [TOK_IN]          = "IN",
-    [TOK_NULL]        = "NULL",
-    [TOK_NEW]         = "NEW",
-    [TOK_SELF]        = "SELF",
-    [TOK_DEFER]       = "DEFER",
-    [TOK_MATCH]       = "MATCH",
-    [TOK_PUBLIC]      = "PUBLIC",
-    [TOK_PRIVATE]     = "PRIVATE",
-    [TOK_EXTERN]      = "EXTERN",
-    [TOK_IMPORT]      = "IMPORT",
-    [TOK_PLUS]        = "PLUS",
-    [TOK_MINUS]       = "MINUS",
-    [TOK_STAR]        = "STAR",
-    [TOK_SLASH]       = "SLASH",
-    [TOK_PERCENT]     = "PERCENT",
-    [TOK_AMP]         = "AMP",
-    [TOK_PIPE]        = "PIPE",
-    [TOK_CARET]       = "CARET",
-    [TOK_TILDE]       = "TILDE",
-    [TOK_BANG]        = "BANG",
-    [TOK_EQ]          = "EQ",
-    [TOK_LT]          = "LT",
-    [TOK_GT]          = "GT",
-    [TOK_PLUS_EQ]     = "PLUS_EQ",
-    [TOK_MINUS_EQ]    = "MINUS_EQ",
-    [TOK_STAR_EQ]     = "STAR_EQ",
-    [TOK_SLASH_EQ]    = "SLASH_EQ",
-    [TOK_PERCENT_EQ]  = "PERCENT_EQ",
-    [TOK_AMP_EQ]      = "AMP_EQ",
-    [TOK_PIPE_EQ]     = "PIPE_EQ",
-    [TOK_CARET_EQ]    = "CARET_EQ",
-    [TOK_EQ_EQ]       = "EQ_EQ",
-    [TOK_BANG_EQ]     = "BANG_EQ",
-    [TOK_LT_EQ]       = "LT_EQ",
-    [TOK_GT_EQ]       = "GT_EQ",
-    [TOK_AMP_AMP]     = "AMP_AMP",
-    [TOK_PIPE_PIPE]   = "PIPE_PIPE",
-    [TOK_LT_LT]       = "LT_LT",
-    [TOK_GT_GT]       = "GT_GT",
-    [TOK_LT_LT_EQ]    = "LT_LT_EQ",
-    [TOK_GT_GT_EQ]    = "GT_GT_EQ",
-    [TOK_ARROW]       = "ARROW",
-    [TOK_FAT_ARROW]   = "FAT_ARROW",
-    [TOK_LPAREN]      = "LPAREN",
-    [TOK_RPAREN]      = "RPAREN",
-    [TOK_LBRACE]      = "LBRACE",
-    [TOK_RBRACE]      = "RBRACE",
-    [TOK_LBRACKET]    = "LBRACKET",
-    [TOK_RBRACKET]    = "RBRACKET",
-    [TOK_SEMICOLON]   = "SEMICOLON",
-    [TOK_COLON]       = "COLON",
-    [TOK_COLON_COLON] = "COLON_COLON",
-    [TOK_COMMA]       = "COMMA",
-    [TOK_DOT]         = "DOT",
-    [TOK_DOT_DOT]     = "DOT_DOT",
-    [TOK_ELLIPSIS]    = "ELLIPSIS",
-    [TOK_ERROR]       = "ERROR",
+    [TOK_EOF]           = "EOF",
+    [TOK_IDENT]         = "IDENT",
+    [TOK_INT]           = "INT",
+    [TOK_FLOAT]         = "FLOAT",
+    [TOK_STRING]        = "STRING",
+    [TOK_CHAR]          = "CHAR",
+    [TOK_INTERP_STRING] = "INTERP_STRING",
+    [TOK_IF]            = "IF",
+    [TOK_ELSE]          = "ELSE",
+    [TOK_WHILE]         = "WHILE",
+    [TOK_FOR]           = "FOR",
+    [TOK_FOREACH]       = "FOREACH",
+    [TOK_RETURN]        = "RETURN",
+    [TOK_BREAK]         = "BREAK",
+    [TOK_CONTINUE]      = "CONTINUE",
+    [TOK_STRUCT]        = "STRUCT",
+    [TOK_ENUM]          = "ENUM",
+    [TOK_TRAIT]         = "TRAIT",
+    [TOK_TYPE]          = "TYPE",
+    [TOK_IMPL]          = "IMPL",
+    [TOK_FUNC]          = "FUNC",
+    [TOK_VAR]           = "VAR",
+    [TOK_CONST]         = "CONST",
+    [TOK_BY]            = "BY",
+    [TOK_TRUE]          = "TRUE",
+    [TOK_FALSE]         = "FALSE",
+    [TOK_IN]            = "IN",
+    [TOK_NULL]          = "NULL",
+    [TOK_NEW]           = "NEW",
+    [TOK_SELF]          = "SELF",
+    [TOK_DEFER]         = "DEFER",
+    [TOK_MATCH]         = "MATCH",
+    [TOK_PUBLIC]        = "PUBLIC",
+    [TOK_PRIVATE]       = "PRIVATE",
+    [TOK_EXTERN]        = "EXTERN",
+    [TOK_IMPORT]        = "IMPORT",
+    [TOK_PLUS]          = "PLUS",
+    [TOK_MINUS]         = "MINUS",
+    [TOK_STAR]          = "STAR",
+    [TOK_SLASH]         = "SLASH",
+    [TOK_PERCENT]       = "PERCENT",
+    [TOK_AMP]           = "AMP",
+    [TOK_PIPE]          = "PIPE",
+    [TOK_CARET]         = "CARET",
+    [TOK_TILDE]         = "TILDE",
+    [TOK_BANG]          = "BANG",
+    [TOK_EQ]            = "EQ",
+    [TOK_LT]            = "LT",
+    [TOK_GT]            = "GT",
+    [TOK_PLUS_EQ]       = "PLUS_EQ",
+    [TOK_MINUS_EQ]      = "MINUS_EQ",
+    [TOK_STAR_EQ]       = "STAR_EQ",
+    [TOK_SLASH_EQ]      = "SLASH_EQ",
+    [TOK_PERCENT_EQ]    = "PERCENT_EQ",
+    [TOK_AMP_EQ]        = "AMP_EQ",
+    [TOK_PIPE_EQ]       = "PIPE_EQ",
+    [TOK_CARET_EQ]      = "CARET_EQ",
+    [TOK_EQ_EQ]         = "EQ_EQ",
+    [TOK_BANG_EQ]       = "BANG_EQ",
+    [TOK_LT_EQ]         = "LT_EQ",
+    [TOK_GT_EQ]         = "GT_EQ",
+    [TOK_AMP_AMP]       = "AMP_AMP",
+    [TOK_PIPE_PIPE]     = "PIPE_PIPE",
+    [TOK_LT_LT]         = "LT_LT",
+    [TOK_GT_GT]         = "GT_GT",
+    [TOK_LT_LT_EQ]      = "LT_LT_EQ",
+    [TOK_GT_GT_EQ]      = "GT_GT_EQ",
+    [TOK_ARROW]         = "ARROW",
+    [TOK_FAT_ARROW]     = "FAT_ARROW",
+    [TOK_LPAREN]        = "LPAREN",
+    [TOK_RPAREN]        = "RPAREN",
+    [TOK_LBRACE]        = "LBRACE",
+    [TOK_RBRACE]        = "RBRACE",
+    [TOK_LBRACKET]      = "LBRACKET",
+    [TOK_RBRACKET]      = "RBRACKET",
+    [TOK_SEMICOLON]     = "SEMICOLON",
+    [TOK_COLON]         = "COLON",
+    [TOK_COLON_COLON]   = "COLON_COLON",
+    [TOK_COMMA]         = "COMMA",
+    [TOK_DOT]           = "DOT",
+    [TOK_DOT_DOT]       = "DOT_DOT",
+    [TOK_ELLIPSIS]      = "ELLIPSIS",
+    [TOK_ERROR]         = "ERROR",
 };
 
 const char* token_type_name(TokenType type) {

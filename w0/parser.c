@@ -341,6 +341,170 @@ static Node* parse_struct_init(Parser* parser) {
 }
 
 // ============================================================================
+// String Interpolation Parsing
+// ============================================================================
+
+// Decode a single escape character for interpolated string text segments
+static char interp_decode_escape(char c) {
+    switch (c) {
+    case 'n':
+        return '\n';
+    case 't':
+        return '\t';
+    case 'r':
+        return '\r';
+    case '0':
+        return '\0';
+    case '\\':
+        return '\\';
+    case '"':
+        return '"';
+    default:
+        return c;
+    }
+}
+
+// Flush accumulated text buffer as a NODE_STRING_LIT part
+static void flush_text_part(NodeList* parts, char* buf, int* buf_len, int line, int column) {
+    if (*buf_len == 0)
+        return;
+    Node* text_node                = node_new(NODE_STRING_LIT, line, column);
+    text_node->as.string_lit.value = xmalloc(*buf_len + 1);
+    memcpy(text_node->as.string_lit.value, buf, *buf_len);
+    text_node->as.string_lit.value[*buf_len] = '\0';
+    text_node->as.string_lit.length          = *buf_len;
+    nodelist_push(parts, text_node);
+    *buf_len = 0;
+}
+
+static Node* parse_interp_string(Parser* parser) {
+    Token token = parser->previous; // TOK_INTERP_STRING already consumed
+
+    // Raw source: token.start points to '$', so content is from start+2 to start+length-1
+    const char* src = token.start + 2;                // skip $"
+    const char* end = token.start + token.length - 1; // before closing "
+
+    Node* node = node_new(NODE_STRING_INTERP, token.line, token.column);
+    nodelist_init(&node->as.string_interp.parts);
+    node->as.string_interp.part_types = NULL;
+    node->as.string_interp.part_count = 0;
+
+    // Text buffer for accumulating literal text
+    int   buf_cap = (int)(end - src) + 1;
+    char* buf     = xmalloc(buf_cap);
+    int   buf_len = 0;
+
+    while (src < end) {
+        if (*src == '\\' && src + 1 < end) {
+            // Escape sequence in text
+            src++;
+            buf[buf_len++] = interp_decode_escape(*src);
+            src++;
+        } else if (*src == '{') {
+            if (src + 1 < end && src[1] == '{') {
+                // Escaped brace: {{ -> literal {
+                buf[buf_len++] = '{';
+                src += 2;
+            } else {
+                // Expression: {expr}
+                src++; // skip '{'
+
+                // Find matching '}' tracking brace depth
+                const char* expr_start = src;
+                int         depth      = 1;
+                while (src < end && depth > 0) {
+                    if (*src == '{') {
+                        depth++;
+                    } else if (*src == '}') {
+                        depth--;
+                        if (depth == 0)
+                            break;
+                    } else if (*src == '"') {
+                        // Skip string literals inside expressions
+                        src++;
+                        while (src < end && *src != '"') {
+                            if (*src == '\\' && src + 1 < end)
+                                src++;
+                            src++;
+                        }
+                        if (src < end)
+                            src++; // skip closing "
+                        continue;
+                    }
+                    src++;
+                }
+
+                int expr_len = (int)(src - expr_start);
+                if (src < end)
+                    src++; // skip '}'
+
+                // Check for empty expression
+                if (expr_len == 0) {
+                    if (!parser->panic_mode) {
+                        parser->panic_mode = 1;
+                        parser->had_error  = 1;
+                        fprintf(stderr,
+                                "[line %d:%d] Error: Empty expression in string interpolation\n",
+                                token.line, token.column);
+                    }
+                    free(buf);
+                    node_free(node);
+                    return NULL;
+                }
+
+                // Flush any accumulated text
+                flush_text_part(&node->as.string_interp.parts, buf, &buf_len, token.line,
+                                token.column);
+
+                // Create a null-terminated copy of the expression source
+                char* expr_source = xmalloc(expr_len + 2); // +1 for ';', +1 for '\0'
+                memcpy(expr_source, expr_start, expr_len);
+                expr_source[expr_len]     = ';';
+                expr_source[expr_len + 1] = '\0';
+
+                // Parse the expression with a sub-parser
+                Parser sub_parser;
+                parser_init(&sub_parser, expr_source);
+                Node* expr_node = parse_expression(&sub_parser);
+
+                if (sub_parser.had_error || !expr_node) {
+                    char error_msg[256];
+                    snprintf(error_msg, sizeof(error_msg),
+                             "Invalid expression in string interpolation");
+                    parse_error_at(parser, &token, error_msg);
+                    free(expr_source);
+                    free(buf);
+                    node_free(expr_node);
+                    node_free(node);
+                    return NULL;
+                }
+
+                // Fix line/column info (sub-parser uses line 1, col 1)
+                expr_node->line   = token.line;
+                expr_node->column = token.column;
+
+                nodelist_push(&node->as.string_interp.parts, expr_node);
+                free(expr_source);
+            }
+        } else if (*src == '}' && src + 1 < end && src[1] == '}') {
+            // Escaped brace: }} -> literal }
+            buf[buf_len++] = '}';
+            src += 2;
+        } else {
+            buf[buf_len++] = *src;
+            src++;
+        }
+    }
+
+    // Flush any remaining text
+    flush_text_part(&node->as.string_interp.parts, buf, &buf_len, token.line, token.column);
+
+    free(buf);
+    node->as.string_interp.part_count = node->as.string_interp.parts.count;
+    return node;
+}
+
+// ============================================================================
 // Primary Expression Parsing
 // ============================================================================
 
@@ -378,6 +542,10 @@ static Node* parse_primary_expression(Parser* parser) {
         Node* node               = node_new(NODE_FLOAT_LIT, token.line, token.column);
         node->as.float_lit.value = strtod(token.start, NULL);
         return node;
+    }
+
+    if (match_token(parser, TOK_INTERP_STRING)) {
+        return parse_interp_string(parser);
     }
 
     if (match_token(parser, TOK_STRING)) {

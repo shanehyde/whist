@@ -8,6 +8,11 @@ func print(s: string): void {
     printf("%s", s);
 }
 
+func println(s: string): void {
+    printf("%s\n", s);
+}
+
+
 func abs_i64(x: i64): i64 {
     if (x < 0) {
         return -x;
