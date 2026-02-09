@@ -279,8 +279,22 @@ Match statements destructure enum values by variant. The expression must be an e
 
 <term-expr> ::= <factor-expr> { ( '+' | '-' ) <factor-expr> }
 
-<factor-expr> ::= <unary-expr> { ( '*' | '/' | '%' ) <unary-expr> }
+<factor-expr> ::= <cast-expr> { ( '*' | '/' | '%' ) <cast-expr> }
 ```
+
+### Cast Expressions
+
+```bnf
+<cast-expr> ::= <unary-expr> { 'as' <type> }
+```
+
+Cast expressions convert between compatible types. Supported conversions:
+- `char` to any integer type (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`)
+- Any integer type to `char`
+- Integer to integer (widening or narrowing)
+- Identity casts (same type to same type)
+
+Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
 
 ### Unary Expressions
 
@@ -465,5 +479,6 @@ From lowest to highest precedence:
 | 9          | `<<` `>>`                                                | Left          |
 | 10         | `+` `-`                                                  | Left          |
 | 11         | `*` `/` `%`                                              | Left          |
-| 12         | `!` `-` `~` `&` `*` (unary prefix)                       | Right         |
-| 13         | `()` `[]` `.` `->` (postfix)                             | Left          |
+| 12         | `as` (type cast)                                         | Left          |
+| 13         | `!` `-` `~` `&` `*` (unary prefix)                       | Right         |
+| 14         | `()` `[]` `.` `->` (postfix)                             | Left          |

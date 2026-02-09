@@ -910,6 +910,33 @@ Type* check_expression(Checker* checker, Node* node) {
     case NODE_NEW_EXPR:
         return check_new_expr(checker, node);
 
+    case NODE_CAST: {
+        Type* expr_type = check_expression(checker, node->as.cast_expr.expr);
+        if (expr_type->kind == TYPE_ERROR)
+            return type_error;
+        Type* target = resolve_type(checker, node->as.cast_expr.type_node);
+        if (target->kind == TYPE_ERROR)
+            return type_error;
+        node->as.cast_expr.resolved_type = target;
+
+        // Allow: identity cast
+        if (expr_type == target)
+            return target;
+        // Allow: char -> integer
+        if (expr_type->kind == TYPE_CHAR && type_is_integer(target))
+            return target;
+        // Allow: integer -> char
+        if (type_is_integer(expr_type) && target->kind == TYPE_CHAR)
+            return target;
+        // Allow: integer -> integer (widening/narrowing)
+        if (type_is_integer(expr_type) && type_is_integer(target))
+            return target;
+
+        check_error(checker, node->line, node->column, "Cannot cast '%s' to '%s'",
+                    type_name(expr_type), type_name(target));
+        return type_error;
+    }
+
     case NODE_STRUCT_INIT:
         check_error(checker, node->line, node->column,
                     "Struct initializer requires a contextual struct type");
