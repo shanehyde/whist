@@ -81,6 +81,7 @@ typedef enum {
     NODE_TRAIT_DECL,
     NODE_IMPL_DECL,
     NODE_TYPE_ALIAS,
+    NODE_USE_DECL,
 
     NODE_EXTERN_MODULE,
     NODE_MODULE,
@@ -472,6 +473,15 @@ struct Node {
             char** type_param_bounds; // Trait bounds (parallel array)
             int    type_param_count;
         } type_alias;
+
+        // Use declaration: use module.symbol or use module.{sym1, sym2}
+        struct {
+            char*  module_name;
+            int    module_name_length;
+            char** symbol_names;
+            int*   symbol_name_lengths;
+            int    symbol_count;
+        } use_decl;
 
         struct {
             char*    module_name;

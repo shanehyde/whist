@@ -16,7 +16,7 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 ## Program Structure
 
 ```bnf
-<program> ::= { <import-stmt> | <declaration> }
+<program> ::= { <import-stmt> | <use-stmt> | <declaration> }
 
 <declaration> ::= [ 'public' | 'private' ] <func-defn>
                | [ 'public' | 'private' ] <struct-decl>
@@ -42,8 +42,16 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 
 Import statements load declarations from external Whist source files. There are two forms:
 
-- **Module import:** `import std;` resolves the module name from the `lib/` directory (e.g., `lib/std.w`). Symbols from module imports must be accessed with module qualification: `std.print("hello")`. Unqualified access is an error.
+- **Module import:** `import std;` resolves the module name from the `lib/` directory (e.g., `lib/std.w`). Symbols from module imports must be accessed with module qualification: `std.print("hello")`. Unqualified access is an error unless brought into scope with `use`.
 - **Relative import:** `import "./path/to/file.w";` or `import "../file.w";` resolves the path relative to the importing file's directory. String imports must start with `./` or `../`. Symbols from relative imports are merged into the current module and accessed without qualification.
+
+### Use Statement
+
+```bnf
+<use-stmt> ::= 'use' <identifier> '.' ( <identifier> | '{' <identifier> { ',' <identifier> } [ ',' ] '}' ) ';'
+```
+
+Use statements selectively bring symbols from an imported module into unqualified scope. The module must be imported with `import` before `use`. After `use std.print;`, `print(...)` can be called without the `std.` prefix. Grouped syntax `use std.{print, abs_i64};` brings multiple symbols at once.
 
 ### Function Declaration
 
@@ -379,7 +387,8 @@ as       break    by          const     continue  defer
 else     enum     extern      false     for       foreach
 func     if       impl        import    in        match
 new      null     public      private   return    self
-struct   trait    true        type      var       while
+struct   trait    true        type      use       var
+while
 ```
 
 ### Identifiers

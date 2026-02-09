@@ -40,6 +40,7 @@ static void check_enum_decl(Checker* checker, Node* node);
 static void check_trait_decl(Checker* checker, Node* node);
 static void check_type_alias_decl(Checker* checker, Node* node);
 static void check_impl_decl(Checker* checker, Node* node);
+static void check_use_decl(Checker* checker, Node* node);
 
 // =============================================================================
 // Utility functions
@@ -1471,6 +1472,51 @@ static void check_impl_decl(Checker* checker, Node* node) {
     }
 }
 
+// Check a use declaration: validate module, look up each symbol, and register unqualified alias
+static void check_use_decl(Checker* checker, Node* node) {
+    const char* mod_name = node->as.use_decl.module_name;
+
+    // Verify module is imported
+    if (!is_imported_module(checker, mod_name)) {
+        check_error(checker, node->line, node->column, "Module '%s' is not imported", mod_name);
+        return;
+    }
+
+    for (int i = 0; i < node->as.use_decl.symbol_count; i++) {
+        const char* sym_name = node->as.use_decl.symbol_names[i];
+
+        // Look up symbol in the module
+        Symbol* sym = checker_lookup_in_module(checker, mod_name, sym_name);
+        if (!sym) {
+            check_error(checker, node->line, node->column, "No public symbol '%s' in module '%s'",
+                        sym_name, mod_name);
+            continue;
+        }
+
+        // Check for redefinition with a same-module symbol (checker_lookup skips library symbols)
+        if (checker_lookup(checker, sym_name)) {
+            check_error(checker, node->line, node->column, "'%s' is already defined", sym_name);
+            continue;
+        }
+
+        // Insert an unqualified alias directly into the scope.
+        // We can't use checker_define because it would find the existing module-qualified
+        // symbol with the same name and reject it as a redefinition.
+        Scope*       scope = checker->scope;
+        unsigned int index = hash_string(sym_name) % scope->size;
+
+        Symbol* alias         = xcalloc(1, sizeof(Symbol));
+        alias->kind           = sym->kind;
+        alias->name           = xstrdup(sym_name);
+        alias->type           = sym->type;
+        alias->is_const       = sym->is_const;
+        alias->is_public      = sym->is_public;
+        alias->source_module  = NULL; // NULL = accessible without qualification
+        alias->next           = scope->symbols[index];
+        scope->symbols[index] = alias;
+    }
+}
+
 // Dispatch declaration type-checking based on node type
 static void check_decl(Checker* checker, Node* node) {
     if (!node)
@@ -1503,6 +1549,10 @@ static void check_decl(Checker* checker, Node* node) {
 
     case NODE_IMPL_DECL:
         check_impl_decl(checker, node);
+        break;
+
+    case NODE_USE_DECL:
+        check_use_decl(checker, node);
         break;
 
     case NODE_VAR_DECL:
