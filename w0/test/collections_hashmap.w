@@ -60,7 +60,7 @@ func test_string_keys(): i32 {
     var v3 = m.get("missing");
     match (v3) {
         Some(val) => {
-            std.print("FAIL: missing should be None\n");
+            std.print(std.format("FAIL: missing should be None, got %d\n", val));
             return 8;
         },
         None => {},

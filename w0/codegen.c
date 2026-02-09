@@ -765,7 +765,9 @@ static void emit_span_typedefs(CodeGen* gen) {
     for (int i = 0; i < gen->span_instance_count; i++) {
         SpanInstance* inst = &gen->span_instances[i];
         emit(gen, "typedef struct {\n");
-        emit(gen, "    const ");
+        emit(gen, "    ");
+        if (inst->elem_type->kind != TYPE_STRING)
+            emit(gen, "const ");
         emit_resolved_type(gen, inst->elem_type);
         emit(gen, "* data;\n");
         emit(gen, "    uint64_t count;\n");
@@ -1273,7 +1275,7 @@ static void emit_function_forward_decls(CodeGen* gen, Node* ast) {
 
                 // Emit self parameter for methods
                 if (is_method) {
-                    if (fdn->receiver_is_const) {
+                    if (fdn->receiver_is_const && strcmp(fdn->receiver_type, "string") != 0) {
                         emit(gen, "const ");
                     }
                     if (type_is_builtin_name(fdn->receiver_type)) {

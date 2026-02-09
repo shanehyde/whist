@@ -2475,7 +2475,8 @@ void emit_decl(CodeGen* gen, Node* node) {
         // Parameters
         if (is_method) {
             // Emit self parameter first
-            if (node->as.func_decl.receiver_is_const) {
+            if (node->as.func_decl.receiver_is_const &&
+                strcmp(node->as.func_decl.receiver_type, "string") != 0) {
                 emit(gen, "const ");
             }
             if (type_is_builtin_name(node->as.func_decl.receiver_type)) {
