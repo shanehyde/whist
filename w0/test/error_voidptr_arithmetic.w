@@ -1,5 +1,5 @@
 // ERROR TEST: voidptr does not support arithmetic
-// Expected error: Invalid operands to 'PLUS'
+// Expected error: Invalid operands to '+'
 
 func main(): i32 {
     var p: voidptr = null;

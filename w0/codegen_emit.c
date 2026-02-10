@@ -233,6 +233,8 @@ int codegen_extract_method_bindings(NodeList* pattern_args, Type** concrete_args
             size_t base_len = strlen(pattern_base);
             if (strncmp(concrete_name, pattern_base, base_len) != 0 ||
                 concrete_name[base_len] != '_') {
+                for (int k = 0; k < count; k++)
+                    free(params[k]);
                 free(params);
                 free(args);
                 return 0;

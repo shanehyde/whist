@@ -591,6 +591,12 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
             }
         }
     }
+    if (!rtype) {
+        fprintf(stderr,
+                "codegen: emit_new_expr: could not resolve type for new expression at line %d\n",
+                node->line);
+        return;
+    }
     if (rtype->kind == TYPE_VEC) {
         // new Vec<T>{elems} as inline expression using GCC statement expression
         const char* elem_tname = type_mangle_name(rtype->as.vec.elem);

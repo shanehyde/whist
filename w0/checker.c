@@ -1248,7 +1248,7 @@ static void check_enum_decl(Checker* checker, Node* node) {
             for (int j = 0; j < type_count; j++) {
                 Type* resolved = resolve_type(checker, val->as.enum_variant.types.nodes[j]);
                 enum_type->as.enm.variant_types[i][j] = resolved;
-                if (resolved && (resolved->kind == TYPE_STRUCT ||
+                if (resolved && (resolved->kind == TYPE_STRUCT || resolved->kind == TYPE_VEC ||
                                  (resolved->kind == TYPE_ENUM && resolved->as.enm.has_rc_fields))) {
                     enum_type->as.enm.has_rc_fields = 1;
                 }

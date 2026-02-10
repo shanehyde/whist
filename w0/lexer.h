@@ -125,5 +125,6 @@ typedef struct {
 void        lexer_init(Lexer* lexer, const char* source);
 Token       lexer_next(Lexer* lexer);
 const char* token_type_name(TokenType type);
+const char* token_type_symbol(TokenType type); // User-facing: returns "+" not "PLUS"
 
 #endif

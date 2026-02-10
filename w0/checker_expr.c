@@ -74,7 +74,7 @@ static Type* check_arithmetic_op(Checker* checker, Node* node, Type* left, Type*
         return type_int64;
     }
     check_error(checker, node->line, node->column, "Invalid operands to '%s': '%s' and '%s'",
-                token_type_name(op), type_name(left), type_name(right));
+                token_type_symbol(op), type_name(left), type_name(right));
     return type_error;
 }
 

@@ -1712,7 +1712,7 @@ static Node* parse_impl_decl(Parser* parser) {
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
         // Check for 'const func' (immutable receiver) or 'func' (mutable receiver)
         int method_is_const = 0;
-        if (check_token(parser, TOK_CONST) && parser->current.type == TOK_CONST) {
+        if (check_token(parser, TOK_CONST)) {
             // Peek ahead: if next is 'func', this is 'const func' (const receiver method)
             // If next is something else, it's an error
             advance_token(parser); // consume 'const'
