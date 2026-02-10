@@ -8,13 +8,15 @@
 // Forward declaration for check_struct_init (called by check_new_expr)
 static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
 
-// Return the const variable name if node is a NODE_IDENT referring to a const symbol, else NULL
+// Return the const variable/field name if node is a const binding or const field access, else NULL
 static const char* get_const_binding_name(Checker* checker, Node* node) {
     if (node && node->type == NODE_IDENT) {
         Symbol* sym = checker_lookup(checker, node->as.ident.name);
         if (sym && sym->is_const)
             return node->as.ident.name;
     }
+    if (node && node->type == NODE_MEMBER && node->as.member.is_const_access)
+        return node->as.member.name;
     return NULL;
 }
 
@@ -448,7 +450,8 @@ static Type* check_member_expr(Checker* checker, Node* node) {
     // Find field first
     for (int i = 0; i < object->as.struc.field_count; i++) {
         if (strcmp(object->as.struc.field_names[i], member_name) == 0) {
-            node->as.member.struct_name = NULL;
+            node->as.member.struct_name     = NULL;
+            node->as.member.is_const_access = object->as.struc.field_is_const[i];
             return object->as.struc.field_types[i];
         }
     }
@@ -528,6 +531,11 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
                             obj->as.ident.name);
                 return type_error;
             }
+        }
+        if (t->as.member.is_const_access) {
+            check_error(checker, node->line, node->column, "Cannot assign to const field '%s'",
+                        t->as.member.name);
+            return type_error;
         }
     } else if (t->type == NODE_INDEX) {
         const char* const_name = get_const_binding_name(checker, t->as.index.object);

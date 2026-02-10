@@ -402,9 +402,10 @@ Node* node_clone(Node* node) {
         c->as.member.name   = xstrdup(node->as.member.name);
         c->as.member.length = node->as.member.length;
         // Reset checker flags
-        c->as.member.is_ref      = 0;
-        c->as.member.struct_name = NULL;
-        c->as.member.module_name = NULL;
+        c->as.member.is_ref          = 0;
+        c->as.member.is_const_access = 0;
+        c->as.member.struct_name     = NULL;
+        c->as.member.module_name     = NULL;
         break;
     case NODE_ASSIGN:
         c->as.assign.op     = node->as.assign.op;
@@ -550,6 +551,7 @@ Node* node_clone(Node* node) {
         c->as.field.name        = xstrdup(node->as.field.name);
         c->as.field.name_length = node->as.field.name_length;
         c->as.field.type        = node_clone(node->as.field.type);
+        c->as.field.is_const    = node->as.field.is_const;
         break;
     default:
         fprintf(stderr, "node_clone: unhandled node type %d\n", node->type);

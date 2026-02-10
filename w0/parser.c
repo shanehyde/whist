@@ -1617,12 +1617,18 @@ static Node* parse_struct_decl(Parser* parser, int is_public) {
     consume_token(parser, TOK_LBRACE, "Expected '{' after struct name");
 
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
+        int field_is_const = 0;
+        if (match_token(parser, TOK_CONST)) {
+            field_is_const = 1;
+        }
+
         Token field_name = parser->current;
         consume_token(parser, TOK_IDENT, "Expected field name");
 
         Node* field                 = node_new(NODE_FIELD, field_name.line, field_name.column);
         field->as.field.name        = copy_token_string(&field_name);
         field->as.field.name_length = field_name.length;
+        field->as.field.is_const    = field_is_const;
 
         consume_token(parser, TOK_COLON, "Expected ':' after field name");
         field->as.field.type = parse_type(parser);

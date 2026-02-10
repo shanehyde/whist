@@ -1185,14 +1185,16 @@ static void check_struct_decl(Checker* checker, Node* node) {
     Type* struct_type = type_struct(name);
     int   field_count = node->as.struct_decl.fields.count;
 
-    struct_type->as.struc.field_count = field_count;
-    struct_type->as.struc.field_names = xmalloc(field_count * sizeof(char*));
-    struct_type->as.struc.field_types = xmalloc(field_count * sizeof(Type*));
+    struct_type->as.struc.field_count    = field_count;
+    struct_type->as.struc.field_names    = xmalloc(field_count * sizeof(char*));
+    struct_type->as.struc.field_types    = xmalloc(field_count * sizeof(Type*));
+    struct_type->as.struc.field_is_const = xmalloc(field_count * sizeof(int));
 
     for (int i = 0; i < field_count; i++) {
-        Node* field                          = node->as.struct_decl.fields.nodes[i];
-        struct_type->as.struc.field_names[i] = xstrdup(field->as.field.name);
-        struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
+        Node* field                             = node->as.struct_decl.fields.nodes[i];
+        struct_type->as.struc.field_names[i]    = xstrdup(field->as.field.name);
+        struct_type->as.struc.field_types[i]    = resolve_type(checker, field->as.field.type);
+        struct_type->as.struc.field_is_const[i] = field->as.field.is_const;
     }
 
     // Check if any field is an RC-managed type (struct, Vec, or enum with RC fields)
