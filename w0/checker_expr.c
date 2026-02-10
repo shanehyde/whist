@@ -397,12 +397,12 @@ static Type* check_member_expr(Checker* checker, Node* node) {
     if (object->kind != TYPE_STRUCT) {
         const char* prim_name   = type_name(object);
         const char* member_name = node->as.member.name;
-        for (int i = 0; i < checker->primitive_method_count; i++) {
-            if (strcmp(checker->primitive_methods[i].type_name, prim_name) == 0 &&
-                strcmp(checker->primitive_methods[i].method_name, member_name) == 0) {
+        for (int i = 0; i < checker->traits.primitive_method_count; i++) {
+            if (strcmp(checker->traits.primitive_methods[i].type_name, prim_name) == 0 &&
+                strcmp(checker->traits.primitive_methods[i].method_name, member_name) == 0) {
                 node->as.member.is_ref      = 0;
                 node->as.member.struct_name = xstrdup(prim_name);
-                return checker->primitive_methods[i].method_type;
+                return checker->traits.primitive_methods[i].method_type;
             }
         }
         if (object->kind == TYPE_STRING) {
@@ -616,8 +616,8 @@ static Type* check_enum_value_expr(Checker* checker, Node* node) {
             checker->enum_target_hint->kind == TYPE_ENUM) {
             // The target hint is an already-instantiated generic enum
             // Find the instance to get the type args
-            for (int gi = 0; gi < checker->generic_instance_count; gi++) {
-                GenericInstance* inst = &checker->generic_instances[gi];
+            for (int gi = 0; gi < checker->generics.instance_count; gi++) {
+                GenericInstance* inst = &checker->generics.instances[gi];
                 if (inst->type == checker->enum_target_hint &&
                     strcmp(inst->base_name, enum_name) == 0) {
                     // Use instance type args for any missing inferred params

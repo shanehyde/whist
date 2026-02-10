@@ -43,14 +43,14 @@ static int compile_to_c(const char* source, const char* source_path, const char*
     CodeGen gen;
     codegen_init(&gen, out,
                  (CodeGenChecker){
-                     .instances      = checker.generic_instances,
-                     .instance_count = checker.generic_instance_count,
-                     .spans          = checker.span_instances,
-                     .span_count     = checker.span_instance_count,
-                     .vecs           = checker.vec_instances,
-                     .vec_count      = checker.vec_instance_count,
-                     .traits         = checker.trait_impls,
-                     .trait_count    = checker.trait_impl_count,
+                     .instances      = checker.generics.instances,
+                     .instance_count = checker.generics.instance_count,
+                     .spans          = checker.containers.spans,
+                     .span_count     = checker.containers.span_count,
+                     .vecs           = checker.containers.vecs,
+                     .vec_count      = checker.containers.vec_count,
+                     .traits         = checker.traits.impls,
+                     .trait_count    = checker.traits.impl_count,
                  },
                  rc_debug);
     codegen_emit(&gen, ast);
@@ -369,14 +369,14 @@ int main(int argc, char** argv) {
                 CodeGen gen;
                 codegen_init(&gen, out,
                              (CodeGenChecker){
-                                 .instances      = checker.generic_instances,
-                                 .instance_count = checker.generic_instance_count,
-                                 .spans          = checker.span_instances,
-                                 .span_count     = checker.span_instance_count,
-                                 .vecs           = checker.vec_instances,
-                                 .vec_count      = checker.vec_instance_count,
-                                 .traits         = checker.trait_impls,
-                                 .trait_count    = checker.trait_impl_count,
+                                 .instances      = checker.generics.instances,
+                                 .instance_count = checker.generics.instance_count,
+                                 .spans          = checker.containers.spans,
+                                 .span_count     = checker.containers.span_count,
+                                 .vecs           = checker.containers.vecs,
+                                 .vec_count      = checker.containers.vec_count,
+                                 .traits         = checker.traits.impls,
+                                 .trait_count    = checker.traits.impl_count,
                              },
                              rc_debug);
                 codegen_emit(&gen, ast);

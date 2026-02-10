@@ -13,8 +13,8 @@
 // Register a generic struct definition
 void register_generic_def(Checker* checker, const char* name, char** type_params,
                           char** type_param_bounds, int type_param_count, Node* decl) {
-    VEC_GROW(checker->generic_defs, checker->generic_def_count, checker->generic_def_capacity);
-    GenericDef* def        = &checker->generic_defs[checker->generic_def_count++];
+    VEC_GROW(checker->generics.defs, checker->generics.def_count, checker->generics.def_capacity);
+    GenericDef* def        = &checker->generics.defs[checker->generics.def_count++];
     def->name              = xstrdup(name);
     def->type_params       = xmalloc(type_param_count * sizeof(char*));
     def->type_param_bounds = xmalloc(type_param_count * sizeof(char*));
@@ -39,9 +39,9 @@ void register_generic_method(GenericDef* def, Node* method) {
 
 // Look up a generic struct definition by name
 GenericDef* lookup_generic_def(Checker* checker, const char* name) {
-    for (int i = 0; i < checker->generic_def_count; i++) {
-        if (strcmp(checker->generic_defs[i].name, name) == 0) {
-            return &checker->generic_defs[i];
+    for (int i = 0; i < checker->generics.def_count; i++) {
+        if (strcmp(checker->generics.defs[i].name, name) == 0) {
+            return &checker->generics.defs[i];
         }
     }
     return NULL;
@@ -49,9 +49,9 @@ GenericDef* lookup_generic_def(Checker* checker, const char* name) {
 
 // Look up an already-instantiated generic struct by mangled name
 GenericInstance* lookup_generic_instance(Checker* checker, const char* mangled_name) {
-    for (int i = 0; i < checker->generic_instance_count; i++) {
-        if (strcmp(checker->generic_instances[i].mangled_name, mangled_name) == 0) {
-            return &checker->generic_instances[i];
+    for (int i = 0; i < checker->generics.instance_count; i++) {
+        if (strcmp(checker->generics.instances[i].mangled_name, mangled_name) == 0) {
+            return &checker->generics.instances[i];
         }
     }
     return NULL;
@@ -59,9 +59,9 @@ GenericInstance* lookup_generic_instance(Checker* checker, const char* mangled_n
 
 // Look up an already-instantiated span type by mangled name
 static SpanInstance* lookup_span_instance(Checker* checker, const char* mangled_name) {
-    for (int i = 0; i < checker->span_instance_count; i++) {
-        if (strcmp(checker->span_instances[i].mangled_name, mangled_name) == 0) {
-            return &checker->span_instances[i];
+    for (int i = 0; i < checker->containers.span_count; i++) {
+        if (strcmp(checker->containers.spans[i].mangled_name, mangled_name) == 0) {
+            return &checker->containers.spans[i];
         }
     }
     return NULL;
@@ -70,9 +70,9 @@ static SpanInstance* lookup_span_instance(Checker* checker, const char* mangled_
 // Register an instantiated span type
 static void register_span_instance(Checker* checker, const char* mangled_name, Type* elem_type,
                                    Type* span_type) {
-    VEC_GROW(checker->span_instances, checker->span_instance_count,
-             checker->span_instance_capacity);
-    SpanInstance* inst = &checker->span_instances[checker->span_instance_count++];
+    VEC_GROW(checker->containers.spans, checker->containers.span_count,
+             checker->containers.span_capacity);
+    SpanInstance* inst = &checker->containers.spans[checker->containers.span_count++];
     inst->mangled_name = xstrdup(mangled_name);
     inst->elem_type    = elem_type;
     inst->type         = span_type;
@@ -80,9 +80,9 @@ static void register_span_instance(Checker* checker, const char* mangled_name, T
 
 // Look up an already-instantiated vec type by mangled name
 static VecInstance* lookup_vec_instance(Checker* checker, const char* mangled_name) {
-    for (int i = 0; i < checker->vec_instance_count; i++) {
-        if (strcmp(checker->vec_instances[i].mangled_name, mangled_name) == 0) {
-            return &checker->vec_instances[i];
+    for (int i = 0; i < checker->containers.vec_count; i++) {
+        if (strcmp(checker->containers.vecs[i].mangled_name, mangled_name) == 0) {
+            return &checker->containers.vecs[i];
         }
     }
     return NULL;
@@ -91,8 +91,9 @@ static VecInstance* lookup_vec_instance(Checker* checker, const char* mangled_na
 // Register an instantiated vec type
 static void register_vec_instance(Checker* checker, const char* mangled_name, Type* elem_type,
                                   Type* vec_type) {
-    VEC_GROW(checker->vec_instances, checker->vec_instance_count, checker->vec_instance_capacity);
-    VecInstance* inst  = &checker->vec_instances[checker->vec_instance_count++];
+    VEC_GROW(checker->containers.vecs, checker->containers.vec_count,
+             checker->containers.vec_capacity);
+    VecInstance* inst  = &checker->containers.vecs[checker->containers.vec_count++];
     inst->mangled_name = xstrdup(mangled_name);
     inst->elem_type    = elem_type;
     inst->type         = vec_type;
@@ -102,9 +103,9 @@ static void register_vec_instance(Checker* checker, const char* mangled_name, Ty
 static void register_generic_instance(Checker* checker, const char* mangled_name,
                                       const char* base_name, Type* type, Type** type_args,
                                       int type_arg_count) {
-    VEC_GROW(checker->generic_instances, checker->generic_instance_count,
-             checker->generic_instance_capacity);
-    GenericInstance* inst = &checker->generic_instances[checker->generic_instance_count++];
+    VEC_GROW(checker->generics.instances, checker->generics.instance_count,
+             checker->generics.instance_capacity);
+    GenericInstance* inst = &checker->generics.instances[checker->generics.instance_count++];
     inst->mangled_name    = xstrdup(mangled_name);
     inst->base_name       = xstrdup(base_name);
     inst->type            = type;
@@ -294,13 +295,13 @@ Type* instantiate_generic_enum(Checker* checker, GenericDef* def, char* mangled,
     register_generic_instance(checker, mangled, def->name, enum_type, resolved_args, arg_count);
 
     // Set up substitution context
-    char** old_params = checker->current_type_params;
-    Type** old_args   = checker->current_type_args;
-    int    old_count  = checker->current_type_param_count;
+    char** old_params = checker->generics.current_type_params;
+    Type** old_args   = checker->generics.current_type_args;
+    int    old_count  = checker->generics.current_type_param_count;
 
-    checker->current_type_params      = def->type_params;
-    checker->current_type_args        = resolved_args;
-    checker->current_type_param_count = def->type_param_count;
+    checker->generics.current_type_params      = def->type_params;
+    checker->generics.current_type_args        = resolved_args;
+    checker->generics.current_type_param_count = def->type_param_count;
 
     // Process enum variants
     Node* decl        = def->decl;
@@ -335,12 +336,12 @@ Type* instantiate_generic_enum(Checker* checker, GenericDef* def, char* mangled,
     }
 
     // Restore substitution context
-    checker->current_type_params      = old_params;
-    checker->current_type_args        = old_args;
-    checker->current_type_param_count = old_count;
+    checker->generics.current_type_params      = old_params;
+    checker->generics.current_type_args        = old_args;
+    checker->generics.current_type_param_count = old_count;
 
     // Register in symbol table
-    checker_define(checker, mangled, SYM_TYPE, enum_type, 0, 1, checker->current_module);
+    checker_define(checker, mangled, SYM_TYPE, enum_type, 0, 1, checker->modules.current_module);
 
     free(mangled);
     free(resolved_args);
@@ -438,20 +439,20 @@ static Type* resolve_generic_type_alias(Checker* checker, Node* type_node, Gener
     }
 
     // Set up substitution context
-    char** old_params = checker->current_type_params;
-    Type** old_args   = checker->current_type_args;
-    int    old_count  = checker->current_type_param_count;
+    char** old_params = checker->generics.current_type_params;
+    Type** old_args   = checker->generics.current_type_args;
+    int    old_count  = checker->generics.current_type_param_count;
 
-    checker->current_type_params      = def->type_params;
-    checker->current_type_args        = resolved_args;
-    checker->current_type_param_count = def->type_param_count;
+    checker->generics.current_type_params      = def->type_params;
+    checker->generics.current_type_args        = resolved_args;
+    checker->generics.current_type_param_count = def->type_param_count;
 
     Type* result = resolve_type(checker, def->decl->as.type_alias.target_type);
 
     // Restore context
-    checker->current_type_params      = old_params;
-    checker->current_type_args        = old_args;
-    checker->current_type_param_count = old_count;
+    checker->generics.current_type_params      = old_params;
+    checker->generics.current_type_args        = old_args;
+    checker->generics.current_type_param_count = old_count;
 
     checker->alias_depth--;
     free(resolved_args);
@@ -471,13 +472,13 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
     register_generic_instance(checker, mangled, base_name, struct_type, resolved_args, arg_count);
 
     // Set up substitution context
-    char** old_params = checker->current_type_params;
-    Type** old_args   = checker->current_type_args;
-    int    old_count  = checker->current_type_param_count;
+    char** old_params = checker->generics.current_type_params;
+    Type** old_args   = checker->generics.current_type_args;
+    int    old_count  = checker->generics.current_type_param_count;
 
-    checker->current_type_params      = def->type_params;
-    checker->current_type_args        = resolved_args;
-    checker->current_type_param_count = def->type_param_count;
+    checker->generics.current_type_params      = def->type_params;
+    checker->generics.current_type_args        = resolved_args;
+    checker->generics.current_type_param_count = def->type_param_count;
 
     // Resolve field types with substitution
     Node* decl        = def->decl;
@@ -504,9 +505,9 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
     }
 
     // Check if the base generic has a Drop trait impl and propagate to instantiation
-    for (int ti = 0; ti < checker->trait_impl_count; ti++) {
-        if (strcmp(checker->trait_impls[ti].trait_name, "Drop") == 0 &&
-            strcmp(checker->trait_impls[ti].type_name, base_name) == 0) {
+    for (int ti = 0; ti < checker->traits.impl_count; ti++) {
+        if (strcmp(checker->traits.impls[ti].trait_name, "Drop") == 0 &&
+            strcmp(checker->traits.impls[ti].type_name, base_name) == 0) {
             struct_type->as.struc.has_drop = 1;
             break;
         }
@@ -552,9 +553,9 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
         }
 
         // Set up combined substitution context
-        checker->current_type_params      = combined_params;
-        checker->current_type_args        = combined_args;
-        checker->current_type_param_count = combined_count;
+        checker->generics.current_type_params      = combined_params;
+        checker->generics.current_type_args        = combined_args;
+        checker->generics.current_type_param_count = combined_count;
 
         // Build function type with substituted types
         int    param_count = mfdn->params.count;
@@ -587,10 +588,10 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
             Type* old_return             = checker->current_func_return;
             checker->current_func_return = return_type;
 
-            char** old_accessible_modules             = checker->current_accessible_modules;
-            int    old_accessible_modules_count       = checker->current_accessible_modules_count;
-            checker->current_accessible_modules       = mfdn->accessible_modules;
-            checker->current_accessible_modules_count = mfdn->accessible_modules_count;
+            char** old_accessible_modules       = checker->modules.current_accessible_modules;
+            int    old_accessible_modules_count = checker->modules.current_accessible_modules_count;
+            checker->modules.current_accessible_modules       = mfdn->accessible_modules;
+            checker->modules.current_accessible_modules_count = mfdn->accessible_modules_count;
 
             // Inject 'self' into scope
             checker_define(checker, "self", SYM_VAR, struct_type, mfdn->receiver_is_const, 0, NULL);
@@ -607,16 +608,16 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
                 check_statement(checker, body_clone->as.block.stmts.nodes[s]);
             }
 
-            checker->current_accessible_modules       = old_accessible_modules;
-            checker->current_accessible_modules_count = old_accessible_modules_count;
-            checker->current_func_return              = old_return;
+            checker->modules.current_accessible_modules       = old_accessible_modules;
+            checker->modules.current_accessible_modules_count = old_accessible_modules_count;
+            checker->current_func_return                      = old_return;
             checker_pop_scope(checker);
         }
 
         // Restore struct-only context
-        checker->current_type_params      = def->type_params;
-        checker->current_type_args        = resolved_args;
-        checker->current_type_param_count = def->type_param_count;
+        checker->generics.current_type_params      = def->type_params;
+        checker->generics.current_type_args        = resolved_args;
+        checker->generics.current_type_param_count = def->type_param_count;
 
         // Free combined arrays (but not the strings - they're borrowed or will be freed later)
         free(combined_params);
@@ -650,19 +651,19 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
         snprintf(full_method_name, method_name_len, "%s_%s", method_mangled, mfdn->name);
 
         checker_define(checker, full_method_name, SYM_FUNC, method_type, 1, mfdn->is_public,
-                       checker->current_module);
+                       checker->modules.current_module);
 
         free(method_mangled);
         free(full_method_name);
     }
 
     // Restore substitution context
-    checker->current_type_params      = old_params;
-    checker->current_type_args        = old_args;
-    checker->current_type_param_count = old_count;
+    checker->generics.current_type_params      = old_params;
+    checker->generics.current_type_args        = old_args;
+    checker->generics.current_type_param_count = old_count;
 
     // Register in symbol table so it can be looked up
-    checker_define(checker, mangled, SYM_TYPE, struct_type, 0, 1, checker->current_module);
+    checker_define(checker, mangled, SYM_TYPE, struct_type, 0, 1, checker->modules.current_module);
 
     free(mangled);
     free(resolved_args);
@@ -685,10 +686,10 @@ Type* resolve_type(Checker* checker, Node* type_node) {
             return builtin;
 
         // Check for type parameter substitution (when instantiating generics)
-        if (checker->current_type_params) {
-            for (int i = 0; i < checker->current_type_param_count; i++) {
-                if (strcmp(checker->current_type_params[i], name) == 0) {
-                    return checker->current_type_args[i];
+        if (checker->generics.current_type_params) {
+            for (int i = 0; i < checker->generics.current_type_param_count; i++) {
+                if (strcmp(checker->generics.current_type_params[i], name) == 0) {
+                    return checker->generics.current_type_args[i];
                 }
             }
         }
@@ -755,9 +756,9 @@ Type* resolve_type(Checker* checker, Node* type_node) {
                 }
                 int satisfied = 0;
                 if (arg_type_name_str) {
-                    for (int t = 0; t < checker->trait_impl_count; t++) {
-                        if (strcmp(checker->trait_impls[t].trait_name, bound) == 0 &&
-                            strcmp(checker->trait_impls[t].type_name, arg_type_name_str) == 0) {
+                    for (int t = 0; t < checker->traits.impl_count; t++) {
+                        if (strcmp(checker->traits.impls[t].trait_name, bound) == 0 &&
+                            strcmp(checker->traits.impls[t].type_name, arg_type_name_str) == 0) {
                             satisfied = 1;
                             break;
                         }

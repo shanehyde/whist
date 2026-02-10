@@ -86,57 +86,58 @@ typedef struct {
     Type* type;         // The TYPE_VEC instance
 } VecInstance;
 
+// Module import tracking
+typedef struct {
+    char**      direct_imports;
+    int         direct_imports_count;
+    char**      current_accessible_modules;
+    int         current_accessible_modules_count;
+    const char* current_module; // NULL = main module
+} CheckerModules;
+
+// Generic definitions and instantiations
+typedef struct {
+    GenericDef*      defs;
+    int              def_count;
+    int              def_capacity;
+    GenericInstance* instances;
+    int              instance_count;
+    int              instance_capacity;
+    char**           current_type_params; // Type parameter names
+    Type**           current_type_args;   // Concrete types for each param
+    int              current_type_param_count;
+} CheckerGenerics;
+
+// Instantiated container types (Span, Vec)
+typedef struct {
+    SpanInstance* spans;
+    int           span_count;
+    int           span_capacity;
+    VecInstance*  vecs;
+    int           vec_count;
+    int           vec_capacity;
+} CheckerContainers;
+
+// Trait implementations and primitive methods
+typedef struct {
+    TraitImpl*       impls;
+    int              impl_count;
+    int              impl_capacity;
+    PrimitiveMethod* primitive_methods;
+    int              primitive_method_count;
+    int              primitive_method_capacity;
+} CheckerTraits;
+
 struct Checker {
     Scope* scope;
     Type*  current_func_return; // Return type of current function
     int    in_loop;             // Are we inside a loop?
     int    error_count;
 
-    // Library modules directly imported by the root file (for global scope)
-    char** direct_imports;
-    int    direct_imports_count;
-
-    // Library modules accessible from the current function (NULL = use direct_imports)
-    char** current_accessible_modules;
-    int    current_accessible_modules_count;
-
-    // Current module being processed (NULL = main module)
-    const char* current_module;
-
-    // Generic struct definitions (templates)
-    GenericDef* generic_defs;
-    int         generic_def_count;
-    int         generic_def_capacity;
-
-    // Instantiated generic structs
-    GenericInstance* generic_instances;
-    int              generic_instance_count;
-    int              generic_instance_capacity;
-
-    // Context for type parameter substitution during instantiation
-    char** current_type_params; // Type parameter names
-    Type** current_type_args;   // Concrete types for each param
-    int    current_type_param_count;
-
-    // Instantiated span types
-    SpanInstance* span_instances;
-    int           span_instance_count;
-    int           span_instance_capacity;
-
-    // Instantiated vec types
-    VecInstance* vec_instances;
-    int          vec_instance_count;
-    int          vec_instance_capacity;
-
-    // Trait implementations
-    TraitImpl* trait_impls;
-    int        trait_impl_count;
-    int        trait_impl_capacity;
-
-    // Methods on primitive types (from trait impls)
-    PrimitiveMethod* primitive_methods;
-    int              primitive_method_count;
-    int              primitive_method_capacity;
+    CheckerModules    modules;
+    CheckerGenerics   generics;
+    CheckerContainers containers;
+    CheckerTraits     traits;
 
     // Type alias cycle detection
     int alias_depth;

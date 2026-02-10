@@ -85,50 +85,50 @@ static unsigned int hash_string(const char* str) {
 
 // Initialize all checker state to zero/NULL defaults
 void checker_init(Checker* checker) {
-    checker->scope                            = NULL;
-    checker->current_func_return              = NULL;
-    checker->in_loop                          = 0;
-    checker->error_count                      = 0;
-    checker->direct_imports                   = NULL;
-    checker->direct_imports_count             = 0;
-    checker->current_accessible_modules       = NULL;
-    checker->current_accessible_modules_count = 0;
-    checker->current_module                   = NULL;
+    checker->scope                                    = NULL;
+    checker->current_func_return                      = NULL;
+    checker->in_loop                                  = 0;
+    checker->error_count                              = 0;
+    checker->modules.direct_imports                   = NULL;
+    checker->modules.direct_imports_count             = 0;
+    checker->modules.current_accessible_modules       = NULL;
+    checker->modules.current_accessible_modules_count = 0;
+    checker->modules.current_module                   = NULL;
     // Generic support
-    checker->generic_defs              = NULL;
-    checker->generic_def_count         = 0;
-    checker->generic_def_capacity      = 0;
-    checker->generic_instances         = NULL;
-    checker->generic_instance_count    = 0;
-    checker->generic_instance_capacity = 0;
-    checker->current_type_params       = NULL;
-    checker->current_type_args         = NULL;
-    checker->current_type_param_count  = 0;
+    checker->generics.defs                     = NULL;
+    checker->generics.def_count                = 0;
+    checker->generics.def_capacity             = 0;
+    checker->generics.instances                = NULL;
+    checker->generics.instance_count           = 0;
+    checker->generics.instance_capacity        = 0;
+    checker->generics.current_type_params      = NULL;
+    checker->generics.current_type_args        = NULL;
+    checker->generics.current_type_param_count = 0;
     // Span support
-    checker->span_instances         = NULL;
-    checker->span_instance_count    = 0;
-    checker->span_instance_capacity = 0;
+    checker->containers.spans         = NULL;
+    checker->containers.span_count    = 0;
+    checker->containers.span_capacity = 0;
     // Vec support
-    checker->vec_instances         = NULL;
-    checker->vec_instance_count    = 0;
-    checker->vec_instance_capacity = 0;
+    checker->containers.vecs         = NULL;
+    checker->containers.vec_count    = 0;
+    checker->containers.vec_capacity = 0;
     // Trait support
-    checker->trait_impls         = NULL;
-    checker->trait_impl_count    = 0;
-    checker->trait_impl_capacity = 0;
+    checker->traits.impls         = NULL;
+    checker->traits.impl_count    = 0;
+    checker->traits.impl_capacity = 0;
     // Primitive methods
-    checker->primitive_methods         = NULL;
-    checker->primitive_method_count    = 0;
-    checker->primitive_method_capacity = 0;
-    checker->alias_depth               = 0;
-    checker->enum_target_hint          = NULL;
+    checker->traits.primitive_methods         = NULL;
+    checker->traits.primitive_method_count    = 0;
+    checker->traits.primitive_method_capacity = 0;
+    checker->alias_depth                      = 0;
+    checker->enum_target_hint                 = NULL;
     types_init();
 }
 
 // Set the list of directly imported module names for visibility checking
 void checker_set_direct_imports(Checker* checker, char** direct_imports, int count) {
-    checker->direct_imports       = direct_imports;
-    checker->direct_imports_count = count;
+    checker->modules.direct_imports       = direct_imports;
+    checker->modules.direct_imports_count = count;
 }
 
 // Push a new scope onto the scope chain for block-level symbol resolution
@@ -168,47 +168,47 @@ void checker_free(Checker* checker) {
         checker_pop_scope(checker);
     }
     // Free generic definitions
-    for (int i = 0; i < checker->generic_def_count; i++) {
-        free(checker->generic_defs[i].name);
-        for (int j = 0; j < checker->generic_defs[i].type_param_count; j++) {
-            free(checker->generic_defs[i].type_params[j]);
-            free(checker->generic_defs[i].type_param_bounds[j]);
+    for (int i = 0; i < checker->generics.def_count; i++) {
+        free(checker->generics.defs[i].name);
+        for (int j = 0; j < checker->generics.defs[i].type_param_count; j++) {
+            free(checker->generics.defs[i].type_params[j]);
+            free(checker->generics.defs[i].type_param_bounds[j]);
         }
-        free(checker->generic_defs[i].type_params);
-        free(checker->generic_defs[i].type_param_bounds);
+        free(checker->generics.defs[i].type_params);
+        free(checker->generics.defs[i].type_param_bounds);
         // Note: methods array contains pointers to AST nodes, don't free them
-        free(checker->generic_defs[i].methods);
+        free(checker->generics.defs[i].methods);
     }
-    free(checker->generic_defs);
+    free(checker->generics.defs);
     // Free generic instances
-    for (int i = 0; i < checker->generic_instance_count; i++) {
-        free(checker->generic_instances[i].mangled_name);
-        free(checker->generic_instances[i].base_name);
-        free(checker->generic_instances[i].type_args);
+    for (int i = 0; i < checker->generics.instance_count; i++) {
+        free(checker->generics.instances[i].mangled_name);
+        free(checker->generics.instances[i].base_name);
+        free(checker->generics.instances[i].type_args);
     }
-    free(checker->generic_instances);
+    free(checker->generics.instances);
     // Free span instances
-    for (int i = 0; i < checker->span_instance_count; i++) {
-        free(checker->span_instances[i].mangled_name);
+    for (int i = 0; i < checker->containers.span_count; i++) {
+        free(checker->containers.spans[i].mangled_name);
     }
-    free(checker->span_instances);
+    free(checker->containers.spans);
     // Free vec instances
-    for (int i = 0; i < checker->vec_instance_count; i++) {
-        free(checker->vec_instances[i].mangled_name);
+    for (int i = 0; i < checker->containers.vec_count; i++) {
+        free(checker->containers.vecs[i].mangled_name);
     }
-    free(checker->vec_instances);
+    free(checker->containers.vecs);
     // Free trait implementations
-    for (int i = 0; i < checker->trait_impl_count; i++) {
-        free(checker->trait_impls[i].trait_name);
-        free(checker->trait_impls[i].type_name);
+    for (int i = 0; i < checker->traits.impl_count; i++) {
+        free(checker->traits.impls[i].trait_name);
+        free(checker->traits.impls[i].type_name);
     }
-    free(checker->trait_impls);
+    free(checker->traits.impls);
     // Free primitive methods
-    for (int i = 0; i < checker->primitive_method_count; i++) {
-        free(checker->primitive_methods[i].type_name);
-        free(checker->primitive_methods[i].method_name);
+    for (int i = 0; i < checker->traits.primitive_method_count; i++) {
+        free(checker->traits.primitive_methods[i].type_name);
+        free(checker->traits.primitive_methods[i].method_name);
     }
-    free(checker->primitive_methods);
+    free(checker->traits.primitive_methods);
     types_cleanup();
 }
 
@@ -249,17 +249,18 @@ static int is_module_accessible(Checker* checker, const char* source_module) {
     }
 
     // If we're currently in the same module, it's accessible
-    if (checker->current_module && strcmp(checker->current_module, source_module) == 0) {
+    if (checker->modules.current_module &&
+        strcmp(checker->modules.current_module, source_module) == 0) {
         return 1;
     }
 
     // Use current function's accessible modules if set, otherwise use global direct_imports
-    char** modules = checker->current_accessible_modules;
-    int    count   = checker->current_accessible_modules_count;
+    char** modules = checker->modules.current_accessible_modules;
+    int    count   = checker->modules.current_accessible_modules_count;
 
     if (!modules) {
-        modules = checker->direct_imports;
-        count   = checker->direct_imports_count;
+        modules = checker->modules.direct_imports;
+        count   = checker->modules.direct_imports_count;
     }
 
     // Check if module is in the accessible list
@@ -275,12 +276,12 @@ static int is_module_accessible(Checker* checker, const char* source_module) {
 // Check if a name is a directly imported library module
 int is_imported_module(Checker* checker, const char* name) {
     // Use current function's accessible modules if set, otherwise use global direct_imports
-    char** modules = checker->current_accessible_modules;
-    int    count   = checker->current_accessible_modules_count;
+    char** modules = checker->modules.current_accessible_modules;
+    int    count   = checker->modules.current_accessible_modules_count;
 
     if (!modules) {
-        modules = checker->direct_imports;
-        count   = checker->direct_imports_count;
+        modules = checker->modules.direct_imports;
+        count   = checker->modules.direct_imports_count;
     }
 
     for (int i = 0; i < count; i++) {
@@ -322,9 +323,10 @@ Symbol* checker_lookup(Checker* checker, const char* name) {
                 }
                 // Symbols from library imports require module qualification
                 // Skip them here - they must be accessed via module.symbol syntax
-                int same_module = (sym->source_module == NULL && checker->current_module == NULL) ||
-                                  (sym->source_module && checker->current_module &&
-                                   strcmp(sym->source_module, checker->current_module) == 0);
+                int same_module =
+                    (sym->source_module == NULL && checker->modules.current_module == NULL) ||
+                    (sym->source_module && checker->modules.current_module &&
+                     strcmp(sym->source_module, checker->modules.current_module) == 0);
                 if (sym->source_module && !same_module) {
                     continue; // Library symbol - require module qualification
                 }
@@ -491,7 +493,7 @@ static void define_destruct_pattern_vars(Checker* checker, DestructPattern* patt
     switch (pattern->kind) {
     case PATTERN_IDENT:
         checker_define(checker, pattern->as.ident.name, SYM_VAR, type, is_const, is_public,
-                       checker->current_module);
+                       checker->modules.current_module);
         break;
 
     case PATTERN_TUPLE:
@@ -585,7 +587,7 @@ static void check_var_decl_stmt(Checker* checker, Node* node) {
     }
 
     Symbol* sym = checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const,
-                                 node->as.var_decl.is_public, checker->current_module);
+                                 node->as.var_decl.is_public, checker->modules.current_module);
 
     // Store resolved type for codegen when type is inferred from non-literal expressions
     if (!node->as.var_decl.type && init_type && init_type->kind == TYPE_STRING &&
@@ -992,7 +994,7 @@ static void check_extern_module_decl(Checker* checker, Node* node) {
             Type* func_type = get_function_type(checker, decl);
 
             checker_define(checker, fdn->name, SYM_FUNC, func_type, 0, fdn->is_public,
-                           checker->current_module);
+                           checker->modules.current_module);
         }
     }
 }
@@ -1066,7 +1068,7 @@ static void check_func_decl(Checker* checker, Node* node) {
 
     // Pre-declare function for recursion
     checker_define(checker, mangled_name, SYM_FUNC, func_type, 1, fdn->is_public,
-                   checker->current_module);
+                   checker->modules.current_module);
 
     // For methods, also register the method on the struct type (or primitive)
     if (is_method) {
@@ -1088,13 +1090,14 @@ static void check_func_decl(Checker* checker, Node* node) {
             st->as.struc.method_count       = n + 1;
         } else if (type_builtin_from_name(receiver_type)) {
             // Register method on a primitive type
-            VEC_GROW(checker->primitive_methods, checker->primitive_method_count,
-                     checker->primitive_method_capacity);
-            PrimitiveMethod* pm = &checker->primitive_methods[checker->primitive_method_count++];
-            pm->type_name       = xstrdup(receiver_type);
-            pm->method_name     = xstrdup(name);
-            pm->method_type     = func_type;
-            pm->is_const        = fdn->receiver_is_const;
+            VEC_GROW(checker->traits.primitive_methods, checker->traits.primitive_method_count,
+                     checker->traits.primitive_method_capacity);
+            PrimitiveMethod* pm =
+                &checker->traits.primitive_methods[checker->traits.primitive_method_count++];
+            pm->type_name   = xstrdup(receiver_type);
+            pm->method_name = xstrdup(name);
+            pm->method_type = func_type;
+            pm->is_const    = fdn->receiver_is_const;
         } else {
             check_error(checker, node->line, node->column, "Unknown receiver type '%s'",
                         receiver_type);
@@ -1107,10 +1110,10 @@ static void check_func_decl(Checker* checker, Node* node) {
     checker->current_func_return = func_type->as.func.return_type;
 
     // Set this function's accessible modules for visibility checking
-    char** old_accessible_modules             = checker->current_accessible_modules;
-    int    old_accessible_modules_count       = checker->current_accessible_modules_count;
-    checker->current_accessible_modules       = fdn->accessible_modules;
-    checker->current_accessible_modules_count = fdn->accessible_modules_count;
+    char** old_accessible_modules               = checker->modules.current_accessible_modules;
+    int    old_accessible_modules_count         = checker->modules.current_accessible_modules_count;
+    checker->modules.current_accessible_modules = fdn->accessible_modules;
+    checker->modules.current_accessible_modules_count = fdn->accessible_modules_count;
 
     // For methods, inject 'self' into scope
     // self is a struct reference (the struct type itself, with reference semantics)
@@ -1151,8 +1154,8 @@ static void check_func_decl(Checker* checker, Node* node) {
     }
 
     // Restore previous accessible modules context
-    checker->current_accessible_modules       = old_accessible_modules;
-    checker->current_accessible_modules_count = old_accessible_modules_count;
+    checker->modules.current_accessible_modules       = old_accessible_modules;
+    checker->modules.current_accessible_modules_count = old_accessible_modules_count;
 
     checker->current_func_return = old_return;
     checker_pop_scope(checker);
@@ -1203,7 +1206,7 @@ static void check_struct_decl(Checker* checker, Node* node) {
     }
 
     checker_define(checker, name, SYM_TYPE, struct_type, 0, node->as.struct_decl.is_public,
-                   checker->current_module);
+                   checker->modules.current_module);
 }
 
 // Type-check an enum declaration: resolve variant types or register generic template
@@ -1232,7 +1235,7 @@ static void check_enum_decl(Checker* checker, Node* node) {
     enum_type->as.enm.variant_type_counts = xmalloc(value_count * sizeof(int));
 
     checker_define(checker, name, SYM_TYPE, enum_type, 0, node->as.enum_decl.is_public,
-                   checker->current_module);
+                   checker->modules.current_module);
 
     // Process enum variants
     for (int i = 0; i < value_count; i++) {
@@ -1286,7 +1289,7 @@ static void check_trait_decl(Checker* checker, Node* node) {
     }
 
     checker_define(checker, name, SYM_TYPE, trait_type, 0, node->as.trait_decl.is_public,
-                   checker->current_module);
+                   checker->modules.current_module);
 }
 
 // Type-check a type alias: resolve target type or register generic alias template
@@ -1325,7 +1328,7 @@ static void check_type_alias_decl(Checker* checker, Node* node) {
     }
 
     checker_define(checker, name, SYM_TYPE, resolved, 0, node->as.type_alias.is_public,
-                   checker->current_module);
+                   checker->modules.current_module);
 }
 
 // Type-check an impl block: verify methods match trait signatures and register trait impl
@@ -1460,8 +1463,8 @@ static void check_impl_decl(Checker* checker, Node* node) {
     }
 
     // Record the trait implementation
-    VEC_GROW(checker->trait_impls, checker->trait_impl_count, checker->trait_impl_capacity);
-    TraitImpl* impl  = &checker->trait_impls[checker->trait_impl_count++];
+    VEC_GROW(checker->traits.impls, checker->traits.impl_count, checker->traits.impl_capacity);
+    TraitImpl* impl  = &checker->traits.impls[checker->traits.impl_count++];
     impl->trait_name = xstrdup(trait_name);
     impl->type_name  = xstrdup(type_name_str);
 
@@ -1590,7 +1593,7 @@ static void check_decl(Checker* checker, Node* node) {
 //
 //   Pass 4: Check all declarations in the main module.
 //
-// Convention: checker->current_module is NULL for the "main" module and
+// Convention: checker->modules.current_module is NULL for the "main" module and
 // set to the module name string for library modules. A symbol's
 // source_module follows the same convention (NULL = main module).
 int checker_check(Checker* checker, Node* ast) {
@@ -1605,7 +1608,7 @@ int checker_check(Checker* checker, Node* ast) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
             continue;
-        checker->current_module =
+        checker->modules.current_module =
             strcmp(mod->as.module.name, "main") == 0 ? NULL : mod->as.module.name;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
@@ -1622,7 +1625,7 @@ int checker_check(Checker* checker, Node* ast) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
             continue;
-        checker->current_module =
+        checker->modules.current_module =
             strcmp(mod->as.module.name, "main") == 0 ? NULL : mod->as.module.name;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
@@ -1647,7 +1650,7 @@ int checker_check(Checker* checker, Node* ast) {
             continue;
         if (strcmp(mod->as.module.name, "main") == 0)
             continue;
-        checker->current_module = mod->as.module.name;
+        checker->modules.current_module = mod->as.module.name;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
             // Skip already-processed declarations
@@ -1674,7 +1677,7 @@ int checker_check(Checker* checker, Node* ast) {
             continue;
         if (strcmp(mod->as.module.name, "main") != 0)
             continue;
-        checker->current_module = NULL;
+        checker->modules.current_module = NULL;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
             // Skip already-processed declarations
@@ -1693,7 +1696,7 @@ int checker_check(Checker* checker, Node* ast) {
         }
     }
 
-    checker->current_module = NULL;
+    checker->modules.current_module = NULL;
     checker_pop_scope(checker);
 
     return checker->error_count == 0;
