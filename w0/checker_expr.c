@@ -450,8 +450,15 @@ static Type* check_member_expr(Checker* checker, Node* node) {
     // Find field first
     for (int i = 0; i < object->as.struc.field_count; i++) {
         if (strcmp(object->as.struc.field_names[i], member_name) == 0) {
+            int object_is_const = 0;
+            if (node->as.member.object->type == NODE_IDENT) {
+                Symbol* sym = checker_lookup(checker, node->as.member.object->as.ident.name);
+                object_is_const = (sym && sym->is_const);
+            } else if (node->as.member.object->type == NODE_MEMBER) {
+                object_is_const = node->as.member.object->as.member.is_const_access;
+            }
             node->as.member.struct_name     = NULL;
-            node->as.member.is_const_access = object->as.struc.field_is_const[i];
+            node->as.member.is_const_access = object->as.struc.field_is_const[i] || object_is_const;
             return object->as.struc.field_types[i];
         }
     }
