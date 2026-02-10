@@ -65,73 +65,73 @@ const char* get_inc_func_for_type(Type* t) {
 
 // Register an RC-managed variable for scope-based cleanup tracking
 void rc_push_var(CodeGen* gen, const char* name, const char* dec_func, Type* type) {
-    VEC_GROW(gen->rc_vars, gen->rc_var_count, gen->rc_var_capacity);
-    gen->rc_vars[gen->rc_var_count].name        = xstrdup(name);
-    gen->rc_vars[gen->rc_var_count].dec_func    = xstrdup(dec_func);
-    gen->rc_vars[gen->rc_var_count].type        = type;
-    gen->rc_vars[gen->rc_var_count].scope_depth = gen->rc_scope_depth;
-    gen->rc_var_count++;
+    VEC_GROW(gen->rc.vars, gen->rc.count, gen->rc.capacity);
+    gen->rc.vars[gen->rc.count].name        = xstrdup(name);
+    gen->rc.vars[gen->rc.count].dec_func    = xstrdup(dec_func);
+    gen->rc.vars[gen->rc.count].type        = type;
+    gen->rc.vars[gen->rc.count].scope_depth = gen->rc.depth;
+    gen->rc.count++;
 }
 
 // Emit dec for vars at the given depth, remove them from list
 void rc_cleanup_scope(CodeGen* gen, int depth) {
     int dst = 0;
-    for (int i = 0; i < gen->rc_var_count; i++) {
-        if (gen->rc_vars[i].scope_depth == depth) {
+    for (int i = 0; i < gen->rc.count; i++) {
+        if (gen->rc.vars[i].scope_depth == depth) {
             emit_indent(gen);
-            emit(gen, "%s(%s);\n", gen->rc_vars[i].dec_func, gen->rc_vars[i].name);
-            free(gen->rc_vars[i].name);
-            free(gen->rc_vars[i].dec_func);
+            emit(gen, "%s(%s);\n", gen->rc.vars[i].dec_func, gen->rc.vars[i].name);
+            free(gen->rc.vars[i].name);
+            free(gen->rc.vars[i].dec_func);
         } else {
-            gen->rc_vars[dst++] = gen->rc_vars[i];
+            gen->rc.vars[dst++] = gen->rc.vars[i];
         }
     }
-    gen->rc_var_count = dst;
+    gen->rc.count = dst;
 }
 
 // Emit dec for ALL remaining vars (skip one by name). Does NOT modify list.
 void rc_cleanup_all(CodeGen* gen, const char* skip_name) {
-    for (int i = 0; i < gen->rc_var_count; i++) {
-        if (skip_name && strcmp(gen->rc_vars[i].name, skip_name) == 0) {
+    for (int i = 0; i < gen->rc.count; i++) {
+        if (skip_name && strcmp(gen->rc.vars[i].name, skip_name) == 0) {
             continue;
         }
         emit_indent(gen);
-        emit(gen, "%s(%s);\n", gen->rc_vars[i].dec_func, gen->rc_vars[i].name);
+        emit(gen, "%s(%s);\n", gen->rc.vars[i].dec_func, gen->rc.vars[i].name);
     }
 }
 
 // Free and reset the RC var list (at function boundary)
 void rc_clear_all(CodeGen* gen) {
-    for (int i = 0; i < gen->rc_var_count; i++) {
-        free(gen->rc_vars[i].name);
-        free(gen->rc_vars[i].dec_func);
+    for (int i = 0; i < gen->rc.count; i++) {
+        free(gen->rc.vars[i].name);
+        free(gen->rc.vars[i].dec_func);
     }
-    gen->rc_var_count   = 0;
-    gen->rc_scope_depth = 0;
+    gen->rc.count = 0;
+    gen->rc.depth = 0;
 }
 
 // Look up the stored dec_func for a tracked RC variable
 const char* rc_get_dec_func(CodeGen* gen, const char* name) {
-    for (int i = 0; i < gen->rc_var_count; i++) {
-        if (strcmp(gen->rc_vars[i].name, name) == 0)
-            return gen->rc_vars[i].dec_func;
+    for (int i = 0; i < gen->rc.count; i++) {
+        if (strcmp(gen->rc.vars[i].name, name) == 0)
+            return gen->rc.vars[i].dec_func;
     }
     return "__rc_dec";
 }
 
 // Look up the stored Type* for a tracked RC variable
 Type* rc_get_var_type(CodeGen* gen, const char* name) {
-    for (int i = 0; i < gen->rc_var_count; i++) {
-        if (strcmp(gen->rc_vars[i].name, name) == 0)
-            return gen->rc_vars[i].type;
+    for (int i = 0; i < gen->rc.count; i++) {
+        if (strcmp(gen->rc.vars[i].name, name) == 0)
+            return gen->rc.vars[i].type;
     }
     return NULL;
 }
 
 // Check if a variable name is in the RC tracking list
 int rc_is_tracked(CodeGen* gen, const char* name) {
-    for (int i = 0; i < gen->rc_var_count; i++) {
-        if (strcmp(gen->rc_vars[i].name, name) == 0)
+    for (int i = 0; i < gen->rc.count; i++) {
+        if (strcmp(gen->rc.vars[i].name, name) == 0)
             return 1;
     }
     return 0;

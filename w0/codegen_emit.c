@@ -9,8 +9,8 @@
 
 // Emit indentation spaces (4 per level) at the current indent depth
 void emit_indent(CodeGen* gen) {
-    for (int i = 0; i < gen->indent; i++) {
-        fprintf(gen->out, "    ");
+    for (int i = 0; i < gen->out.indent; i++) {
+        fprintf(gen->out.file, "    ");
     }
 }
 
@@ -18,26 +18,26 @@ void emit_indent(CodeGen* gen) {
 void emit(CodeGen* gen, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    vfprintf(gen->out, fmt, args);
+    vfprintf(gen->out.file, fmt, args);
     va_end(args);
 }
 
 // Push a deferred statement onto the defer stack for later LIFO emission
 void defer_push(CodeGen* gen, Node* node) {
-    VEC_GROW(gen->defer_stack, gen->defer_count, gen->defer_capacity);
-    gen->defer_stack[gen->defer_count++] = node;
+    VEC_GROW(gen->defer.stack, gen->defer.count, gen->defer.capacity);
+    gen->defer.stack[gen->defer.count++] = node;
 }
 
 // Reset the defer stack (called at function boundaries)
 void defer_clear(CodeGen* gen) {
-    gen->defer_count = 0;
+    gen->defer.count = 0;
 }
 
 // Check if a name is a registered enum type
 // Check if a name is a registered enum type in the codegen context
 int is_enum_type_name(CodeGen* gen, const char* name) {
-    for (int i = 0; i < gen->enum_name_count; i++) {
-        if (strcmp(gen->enum_names[i], name) == 0)
+    for (int i = 0; i < gen->enums.count; i++) {
+        if (strcmp(gen->enums.names[i], name) == 0)
             return 1;
     }
     return 0;
@@ -45,8 +45,8 @@ int is_enum_type_name(CodeGen* gen, const char* name) {
 
 // Return the index of an enum name in the registered enum list, or -1 if not found
 int enum_index(CodeGen* gen, const char* name) {
-    for (int i = 0; i < gen->enum_name_count; i++) {
-        if (strcmp(gen->enum_names[i], name) == 0)
+    for (int i = 0; i < gen->enums.count; i++) {
+        if (strcmp(gen->enums.names[i], name) == 0)
             return i;
     }
     return -1;
@@ -55,9 +55,9 @@ int enum_index(CodeGen* gen, const char* name) {
 // Check if a named enum type has RC-managed fields
 int enum_has_rc_fields(CodeGen* gen, const char* name) {
     int idx = enum_index(gen, name);
-    if (idx < 0 || !gen->enum_has_rc_fields)
+    if (idx < 0 || !gen->enums.has_rc_fields)
         return 0;
-    return gen->enum_has_rc_fields[idx];
+    return gen->enums.has_rc_fields[idx];
 }
 
 // Resolve a type node through aliases. If the node is a NODE_IDENT
@@ -65,9 +65,9 @@ int enum_has_rc_fields(CodeGen* gen, const char* name) {
 Node* resolve_alias(CodeGen* gen, Node* type_node) {
     if (!type_node || type_node->type != NODE_IDENT)
         return type_node;
-    for (int i = 0; i < gen->alias_count; i++) {
-        if (strcmp(gen->alias_names[i], type_node->as.ident.name) == 0) {
-            return gen->alias_targets[i];
+    for (int i = 0; i < gen->aliases.type_count; i++) {
+        if (strcmp(gen->aliases.types[i], type_node->as.ident.name) == 0) {
+            return gen->aliases.type_targets[i];
         }
     }
     return type_node;
@@ -127,10 +127,10 @@ int type_node_has_rc(CodeGen* gen, Node* type_node) {
     const char* name = type_node->as.ident.name;
 
     // Handle type parameter substitution
-    if (gen->subst_ctx) {
-        for (int i = 0; i < gen->subst_ctx->count; i++) {
-            if (strcmp(gen->subst_ctx->type_params[i], name) == 0) {
-                Type* resolved = gen->subst_ctx->type_args[i];
+    if (gen->generics.subst) {
+        for (int i = 0; i < gen->generics.subst->count; i++) {
+            if (strcmp(gen->generics.subst->type_params[i], name) == 0) {
+                Type* resolved = gen->generics.subst->type_args[i];
                 if (resolved->kind == TYPE_ENUM)
                     return resolved->as.enm.has_rc_fields;
                 if (resolved->kind == TYPE_STRUCT)
@@ -158,10 +158,10 @@ const char* resolve_enum_name(CodeGen* gen, Node* type_node) {
         char* mangled = build_mangled_name_from_generic_node(gen, type_node);
         if (is_enum_type_name(gen, mangled)) {
             // Return the registered name from enum_names (don't free mangled yet)
-            for (int i = 0; i < gen->enum_name_count; i++) {
-                if (strcmp(gen->enum_names[i], mangled) == 0) {
+            for (int i = 0; i < gen->enums.count; i++) {
+                if (strcmp(gen->enums.names[i], mangled) == 0) {
                     free(mangled);
-                    return gen->enum_names[i];
+                    return gen->enums.names[i];
                 }
             }
         }
@@ -171,10 +171,10 @@ const char* resolve_enum_name(CodeGen* gen, Node* type_node) {
     if (type_node->type == NODE_IDENT) {
         const char* name = type_node->as.ident.name;
         // Check substitution context
-        if (gen->subst_ctx) {
-            for (int i = 0; i < gen->subst_ctx->count; i++) {
-                if (strcmp(gen->subst_ctx->type_params[i], name) == 0) {
-                    Type* resolved = gen->subst_ctx->type_args[i];
+        if (gen->generics.subst) {
+            for (int i = 0; i < gen->generics.subst->count; i++) {
+                if (strcmp(gen->generics.subst->type_params[i], name) == 0) {
+                    Type* resolved = gen->generics.subst->type_args[i];
                     if (resolved->kind == TYPE_ENUM)
                         return resolved->as.enm.name;
                     return NULL;
@@ -301,11 +301,11 @@ void emit_type(CodeGen* gen, Node* type_node) {
         const char* name = type_node->as.ident.name;
 
         // Check for type parameter substitution (for generic methods)
-        if (gen->subst_ctx) {
-            for (int i = 0; i < gen->subst_ctx->count; i++) {
-                if (strcmp(gen->subst_ctx->type_params[i], name) == 0) {
+        if (gen->generics.subst) {
+            for (int i = 0; i < gen->generics.subst->count; i++) {
+                if (strcmp(gen->generics.subst->type_params[i], name) == 0) {
                     // Substitute with concrete type
-                    emit_resolved_type(gen, gen->subst_ctx->type_args[i]);
+                    emit_resolved_type(gen, gen->generics.subst->type_args[i]);
                     return;
                 }
             }
@@ -320,9 +320,9 @@ void emit_type(CodeGen* gen, Node* type_node) {
         } else {
             // Check if this is a type alias — resolve to target type
             int alias_found = 0;
-            for (int i = 0; i < gen->alias_count; i++) {
-                if (strcmp(gen->alias_names[i], name) == 0) {
-                    emit_type(gen, gen->alias_targets[i]);
+            for (int i = 0; i < gen->aliases.type_count; i++) {
+                if (strcmp(gen->aliases.types[i], name) == 0) {
+                    emit_type(gen, gen->aliases.type_targets[i]);
                     alias_found = 1;
                     break;
                 }
@@ -387,10 +387,10 @@ void emit_type(CodeGen* gen, Node* type_node) {
             if (arg->type == NODE_IDENT) {
                 const char* arg_name    = arg->as.ident.name;
                 int         substituted = 0;
-                if (gen->subst_ctx) {
-                    for (int s = 0; s < gen->subst_ctx->count; s++) {
-                        if (strcmp(gen->subst_ctx->type_params[s], arg_name) == 0) {
-                            Type* subst_type = gen->subst_ctx->type_args[s];
+                if (gen->generics.subst) {
+                    for (int s = 0; s < gen->generics.subst->count; s++) {
+                        if (strcmp(gen->generics.subst->type_params[s], arg_name) == 0) {
+                            Type* subst_type = gen->generics.subst->type_args[s];
                             emit(gen, "%s", type_mangle_name(subst_type));
                             substituted = 1;
                             break;
@@ -421,11 +421,11 @@ void emit_type(CodeGen* gen, Node* type_node) {
                 const char* arg_name = arg->as.ident.name;
                 // Check for type parameter substitution
                 int substituted = 0;
-                if (gen->subst_ctx) {
-                    for (int s = 0; s < gen->subst_ctx->count; s++) {
-                        if (strcmp(gen->subst_ctx->type_params[s], arg_name) == 0) {
+                if (gen->generics.subst) {
+                    for (int s = 0; s < gen->generics.subst->count; s++) {
+                        if (strcmp(gen->generics.subst->type_params[s], arg_name) == 0) {
                             // Emit the substituted type's name for mangling
-                            Type*       subst_type  = gen->subst_ctx->type_args[s];
+                            Type*       subst_type  = gen->generics.subst->type_args[s];
                             const char* mangle_name = type_name(subst_type);
                             emit(gen, "%s", mangle_name);
                             substituted = 1;
@@ -446,10 +446,10 @@ void emit_type(CodeGen* gen, Node* type_node) {
                         const char* nested_name = nested->as.ident.name;
                         // Check for type parameter substitution
                         int subst = 0;
-                        if (gen->subst_ctx) {
-                            for (int s = 0; s < gen->subst_ctx->count; s++) {
-                                if (strcmp(gen->subst_ctx->type_params[s], nested_name) == 0) {
-                                    Type* subst_type = gen->subst_ctx->type_args[s];
+                        if (gen->generics.subst) {
+                            for (int s = 0; s < gen->generics.subst->count; s++) {
+                                if (strcmp(gen->generics.subst->type_params[s], nested_name) == 0) {
+                                    Type* subst_type = gen->generics.subst->type_args[s];
                                     emit(gen, "%s", type_name(subst_type));
                                     subst = 1;
                                     break;
@@ -699,15 +699,18 @@ static void emit_extern_module(CodeGen* gen, Node* node) {
         Node* decl = node->as.extern_module.decls.nodes[i];
         if (decl->type == NODE_FUNC_DECL) {
             // Track all extern function names (for intra-module call prefixing)
-            VEC_GROW(gen->extern_funcs, gen->extern_func_count, gen->extern_func_capacity);
-            gen->extern_funcs[gen->extern_func_count++] = decl->as.func_decl.name;
+            VEC_GROW(gen->aliases.extern_funcs, gen->aliases.extern_func_count,
+                     gen->aliases.extern_func_capacity);
+            gen->aliases.extern_funcs[gen->aliases.extern_func_count++] = decl->as.func_decl.name;
             // Register aliases (Whist name -> C name) for renamed externs
             if (decl->as.func_decl.extern_name) {
-                VEC_GROW(gen->extern_aliases, gen->extern_alias_count, gen->extern_alias_capacity);
-                gen->extern_aliases[gen->extern_alias_count].whist_name = decl->as.func_decl.name;
-                gen->extern_aliases[gen->extern_alias_count].c_name =
+                VEC_GROW(gen->aliases.externs, gen->aliases.extern_count,
+                         gen->aliases.extern_capacity);
+                gen->aliases.externs[gen->aliases.extern_count].whist_name =
+                    decl->as.func_decl.name;
+                gen->aliases.externs[gen->aliases.extern_count].c_name =
                     decl->as.func_decl.extern_name;
-                gen->extern_alias_count++;
+                gen->aliases.extern_count++;
             }
         }
     }
@@ -773,7 +776,7 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
 
     // Clear defer stack for this function
     defer_clear(gen);
-    gen->current_return_type = node->as.func_decl.return_type;
+    gen->defer.return_type = node->as.func_decl.return_type;
 
     // First pass: count defers to know if we need __ret
     int has_defers = 0;
@@ -788,7 +791,7 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
     }
 
     // Body
-    gen->indent++;
+    gen->out.indent++;
 
     // Declare __ret if function has defers and is non-void
     if (has_defers && !is_void) {
@@ -804,11 +807,11 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
     }
 
     // Emit cleanup section if there are defers
-    if (gen->defer_count > 0) {
+    if (gen->defer.count > 0) {
         emit(gen, "__cleanup:;\n");
         // Emit deferred statements in reverse order (LIFO)
-        for (int i = gen->defer_count - 1; i >= 0; i--) {
-            emit_stmt(gen, gen->defer_stack[i]);
+        for (int i = gen->defer.count - 1; i >= 0; i--) {
+            emit_stmt(gen, gen->defer.stack[i]);
         }
         // Emit final return
         emit_indent(gen);
@@ -819,13 +822,13 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
         }
     }
 
-    gen->indent--;
+    gen->out.indent--;
     emit(gen, "}\n\n");
 
     // Clear defer stack and RC tracking
     defer_clear(gen);
     rc_clear_all(gen);
-    gen->current_return_type = NULL;
+    gen->defer.return_type = NULL;
 }
 
 // Emit a top-level declaration: function, struct, enum, extern, impl, or global var
@@ -870,10 +873,10 @@ void emit_decl(CodeGen* gen, Node* node) {
                 snprintf(c_name, sizeof(c_name), "%s_%s", mod_name, sym_name);
             }
 
-            VEC_GROW(gen->use_aliases, gen->use_alias_count, gen->use_alias_capacity);
-            gen->use_aliases[gen->use_alias_count].whist_name = xstrdup(sym_name);
-            gen->use_aliases[gen->use_alias_count].c_name     = xstrdup(c_name);
-            gen->use_alias_count++;
+            VEC_GROW(gen->aliases.uses, gen->aliases.use_count, gen->aliases.use_capacity);
+            gen->aliases.uses[gen->aliases.use_count].whist_name = xstrdup(sym_name);
+            gen->aliases.uses[gen->aliases.use_count].c_name     = xstrdup(c_name);
+            gen->aliases.use_count++;
         }
         break;
 

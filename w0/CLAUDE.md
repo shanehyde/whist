@@ -195,7 +195,7 @@ Key checker-set flags that codegen depends on:
 
 **RC (Reference Counting)**: Variables created via `new` are tracked in `codegen_emit.c` with scope-based cleanup. Each RC variable has a decrement function -- either generic `__rc_dec` or type-specific `__rc_dec_TypeName` for types with Drop impls or nested RC fields. See the architectural comment at the top of `codegen_emit.c`.
 
-**`codegen_init` parameters**: The codegen receives generic instances, span/vec instances, trait impls, enum info, and aliases from the checker via 11 positional parameters. The checker must outlive the codegen (borrowed pointers).
+**`codegen_init` parameters**: The codegen receives checker data via a `CodeGenChecker` struct (generic instances, span/vec instances, trait impls) passed by value. The checker must outlive the codegen (borrowed pointers). The `CodeGen` struct uses inline sub-structures: `out` (output), `defer`, `rc`, `generics`, `checker`, `enums`, `aliases`.
 
 ### Test Conventions
 
@@ -223,4 +223,4 @@ These are things that are easy to get wrong when modifying the compiler:
 
 **Parser `>>` token splitting** (`parser.c:237-247`): When parsing `Box<Vec<i64>>`, the lexer produces `>>` as a single token. The parser mutates `parser->current` in-place to split it into `>`. This only works because the modified token is consumed immediately.
 
-**Codegen type substitution pattern**: The pattern of iterating `gen->subst_ctx` to find a matching type parameter name appears ~15 times across codegen files. When adding new codegen that needs type parameter substitution, follow the existing pattern in `emit_type` (`codegen_emit.c`).
+**Codegen type substitution pattern**: The pattern of iterating `gen->generics.subst` to find a matching type parameter name appears ~15 times across codegen files. When adding new codegen that needs type parameter substitution, follow the existing pattern in `emit_type` (`codegen_emit.c`).
