@@ -8,6 +8,7 @@
 #include "checker.h"
 #include "codegen.h"
 #include "lexer.h"
+#include "module_loader.h"
 #include "parser.h"
 #include "print_ast.h"
 #include "util.h"
@@ -16,20 +17,24 @@
 // Returns 0 on success, 1 on error.
 static int compile_to_c(const char* source, const char* source_path, const char* lib_path,
                         int rc_debug, FILE* out) {
+    ModuleLoader loader;
+    module_loader_init(&loader, lib_path);
+
     Parser parser;
-    parser_init_with_path(&parser, source, source_path, lib_path);
+    parser_init_with_loader(&parser, source, source_path, &loader);
     Node* ast = parser_parse(&parser);
 
     if (parser.had_error) {
         fprintf(stderr, "Parse failed\n");
         node_free(ast);
         parser_free(&parser);
+        module_loader_free(&loader);
         return 1;
     }
 
     Checker checker;
     checker_init(&checker);
-    checker_set_direct_imports(&checker, parser.direct_imports, parser.direct_imports_count);
+    checker_set_direct_imports(&checker, loader.direct_imports, loader.direct_imports_count);
     int ok = checker_check(&checker, ast);
 
     if (!ok) {
@@ -37,6 +42,7 @@ static int compile_to_c(const char* source, const char* source_path, const char*
         fprintf(stderr, "Type check failed\n");
         node_free(ast);
         parser_free(&parser);
+        module_loader_free(&loader);
         return 1;
     }
 
@@ -58,6 +64,7 @@ static int compile_to_c(const char* source, const char* source_path, const char*
     checker_free(&checker);
     node_free(ast);
     parser_free(&parser);
+    module_loader_free(&loader);
     return 0;
 }
 
@@ -313,14 +320,18 @@ int main(int argc, char** argv) {
         return result;
     } else {
         // Debug modes: --parse, --check, --ast
+        ModuleLoader loader;
+        module_loader_init(&loader, lib_path);
+
         Parser parser;
-        parser_init_with_path(&parser, source, source_file, lib_path);
+        parser_init_with_loader(&parser, source, source_file, &loader);
         Node* ast = parser_parse(&parser);
 
         if (parser.had_error) {
             fprintf(stderr, "Parse failed\n");
             node_free(ast);
             parser_free(&parser);
+            module_loader_free(&loader);
             if (free_source)
                 free(source);
             return 1;
@@ -336,8 +347,8 @@ int main(int argc, char** argv) {
         if (!parse_only) {
             Checker checker;
             checker_init(&checker);
-            checker_set_direct_imports(&checker, parser.direct_imports,
-                                       parser.direct_imports_count);
+            checker_set_direct_imports(&checker, loader.direct_imports,
+                                       loader.direct_imports_count);
             int ok = checker_check(&checker, ast);
 
             if (!ok) {
@@ -345,6 +356,7 @@ int main(int argc, char** argv) {
                 fprintf(stderr, "Type check failed\n");
                 node_free(ast);
                 parser_free(&parser);
+                module_loader_free(&loader);
                 if (free_source)
                     free(source);
                 return 1;
@@ -360,6 +372,7 @@ int main(int argc, char** argv) {
                         fprintf(stderr, "Could not open output file: %s\n", output_file);
                         node_free(ast);
                         parser_free(&parser);
+                        module_loader_free(&loader);
                         if (free_source)
                             free(source);
                         return 1;
@@ -394,6 +407,7 @@ int main(int argc, char** argv) {
 
         node_free(ast);
         parser_free(&parser);
+        module_loader_free(&loader);
     }
 
     if (free_source)

@@ -1,15 +1,11 @@
 #include "parser.h"
 
 #include <errno.h>
-#include <libgen.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "alloc.h"
-#include "util.h"
-#include "vec.h"
 
 // ============================================================================
 // Parser Utilities
@@ -1547,13 +1543,15 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     consume_token(parser, TOK_LBRACE, "Expected '{' before function body");
     fdn->body = parse_block(parser);
 
-    // Copy current file's direct imports to accessible_modules
+    // Copy current file's imports to accessible_modules
     // This determines which library modules this function can access
-    fdn->accessible_modules_count = parser->direct_imports_count;
-    if (parser->direct_imports_count > 0) {
-        fdn->accessible_modules = xmalloc(parser->direct_imports_count * sizeof(char*));
-        for (int i = 0; i < parser->direct_imports_count; i++) {
-            fdn->accessible_modules[i] = xstrdup(parser->direct_imports[i]);
+    ModuleLoader* loader          = parser->loader;
+    int           fi_count        = loader ? loader->file_imports_count : 0;
+    fdn->accessible_modules_count = fi_count;
+    if (fi_count > 0) {
+        fdn->accessible_modules = xmalloc(fi_count * sizeof(char*));
+        for (int i = 0; i < fi_count; i++) {
+            fdn->accessible_modules[i] = xstrdup(loader->file_imports[i]);
         }
     } else {
         fdn->accessible_modules = NULL;
@@ -1931,111 +1929,6 @@ static Node* parse_extern_decls(Parser* parser, int is_public) {
 // Import Handling
 // ============================================================================
 
-// Check if a module has already been imported
-static int is_module_imported(Parser* parser, const char* module_name, size_t length) {
-    for (int i = 0; i < parser->imported_modules_count; i++) {
-        if (strlen(parser->imported_modules[i]) == length &&
-            strncmp(parser->imported_modules[i], module_name, length) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-// Add a module name to the imported list
-static void add_imported_module(Parser* parser, const char* module_name, size_t length) {
-    VEC_GROW(parser->imported_modules, parser->imported_modules_count,
-             parser->imported_modules_capacity);
-
-    // Copy the module name
-    char* name_copy = xmalloc(length + 1);
-    memcpy(name_copy, module_name, length);
-    name_copy[length]                                          = '\0';
-    parser->imported_modules[parser->imported_modules_count++] = name_copy;
-}
-
-// Add source buffer to parser's list (keeps it alive for AST references)
-static void add_imported_source(Parser* parser, char* source) {
-    VEC_GROW(parser->imported_sources, parser->imported_sources_count,
-             parser->imported_sources_capacity);
-    parser->imported_sources[parser->imported_sources_count++] = source;
-}
-
-// Add a direct import (library module directly imported by current file)
-static void add_direct_import(Parser* parser, const char* module_name, size_t length) {
-    VEC_GROW(parser->direct_imports, parser->direct_imports_count, parser->direct_imports_capacity);
-
-    // Copy the module name
-    char* name_copy = xmalloc(length + 1);
-    memcpy(name_copy, module_name, length);
-    name_copy[length]                                      = '\0';
-    parser->direct_imports[parser->direct_imports_count++] = name_copy;
-}
-
-// Check if file exists
-static int file_exists(const char* path) {
-    FILE* f = fopen(path, "r");
-    if (f) {
-        fclose(f);
-        return 1;
-    }
-    return 0;
-}
-
-// Check if path is a relative import (starts with ./ or ../)
-static int is_relative_path(const char* path, size_t length) {
-    if (length >= 2 && path[0] == '.' && path[1] == '/') {
-        return 1;
-    }
-    if (length >= 3 && path[0] == '.' && path[1] == '.' && path[2] == '/') {
-        return 1;
-    }
-    return 0;
-}
-
-// Build path to imported module
-// For relative paths (./ or ../), resolves relative to source file
-// For module names, tries source-relative lib/ first, then falls back to cwd-relative lib/
-static void build_import_path(Parser* parser, char* path, size_t path_size, const char* module_name,
-                              size_t module_length, int is_relative) {
-    if (is_relative) {
-        // Relative import: resolve relative to source file's directory
-        if (parser->source_path) {
-            char* path_copy = xstrdup(parser->source_path);
-            char* dir       = dirname(path_copy);
-            snprintf(path, path_size, "%s/%.*s", dir, (int)module_length, module_name);
-            free(path_copy);
-            return;
-        }
-        // Fallback if no source path: use path as-is relative to cwd
-        snprintf(path, path_size, "%.*s", (int)module_length, module_name);
-        return;
-    }
-
-    // Standard library import: try lib/ directories
-    // Highest priority: --lib-path flag
-    if (parser->lib_path) {
-        snprintf(path, path_size, "%s/%.*s.w", parser->lib_path, (int)module_length, module_name);
-        if (file_exists(path)) {
-            return;
-        }
-    }
-
-    if (parser->source_path) {
-        // Make a copy because dirname may modify its argument
-        char* path_copy = xstrdup(parser->source_path);
-        char* dir       = dirname(path_copy);
-        snprintf(path, path_size, "%s/lib/%.*s.w", dir, (int)module_length, module_name);
-        free(path_copy);
-        if (file_exists(path)) {
-            return;
-        }
-        // Fall through to try cwd-relative path
-    }
-    // Fallback: use lib/ relative to current working directory
-    snprintf(path, path_size, "lib/%.*s.w", (int)module_length, module_name);
-}
-
 // Parse a use statement: use module.symbol; or use module.{sym1, sym2};
 static Node* parse_use_stmt(Parser* parser) {
     Token module_token = parser->current;
@@ -2088,25 +1981,21 @@ static Node* parse_use_stmt(Parser* parser) {
 }
 
 static int parse_import_stmt(Parser* parser, Node* program, Node* current_module) {
-    // Expect identifier or string after 'import'
     Token       import_token = parser->current;
     const char* module_name;
     size_t      module_length;
     int         is_relative = 0;
 
     if (parser->current.type == TOK_STRING) {
-        // String import: "./path/to/file.w" or "../path/to/file.w"
         advance_token(parser);
-        // Extract path without quotes
         module_name   = import_token.start + 1;
         module_length = import_token.length - 2;
-        is_relative   = is_relative_path(module_name, module_length);
+        is_relative   = module_loader_is_relative_path(module_name, module_length);
         if (!is_relative) {
             parse_error(parser, "String imports must be relative paths (start with ./ or ../)");
             return 0;
         }
     } else if (parser->current.type == TOK_IDENT) {
-        // Identifier import: std
         advance_token(parser);
         module_name   = import_token.start;
         module_length = import_token.length;
@@ -2115,140 +2004,10 @@ static int parse_import_stmt(Parser* parser, Node* program, Node* current_module
         return 0;
     }
 
-    // Expect semicolon
     consume_token(parser, TOK_SEMICOLON, "Expected ';' after import statement");
 
-    // Build path to import file first (needed for duplicate detection with relative paths)
-    char path[1024];
-    build_import_path(parser, path, sizeof(path), module_name, module_length, is_relative);
-
-    // For relative imports, use the resolved path as the module key for duplicate detection
-    const char* module_key        = is_relative ? path : module_name;
-    size_t      module_key_length = is_relative ? strlen(path) : module_length;
-
-    // Check if already imported
-    if (is_module_imported(parser, module_key, module_key_length)) {
-        // Module already imported - but still track as direct import if it's a library import
-        // This allows this file to access the module's symbols even if a dependency imported it
-        // first
-        if (!is_relative) {
-            add_direct_import(parser, module_name, module_length);
-        }
-        return 1; // Already imported, nothing more to do
-    }
-
-    // Mark as imported before parsing (prevents cycles)
-    add_imported_module(parser, module_key, module_key_length);
-
-    // Read the imported file
-    char* source = read_file(path);
-    if (!source) {
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Could not read import file: %s", path);
-        parse_error(parser, error_msg);
-        return 0;
-    }
-
-    // Store source buffer to keep it alive (AST nodes reference strings in it)
-    add_imported_source(parser, source);
-
-    // Parse the imported file (inherits source_path for nested imports)
-    Parser import_parser;
-    parser_init_with_path(&import_parser, source, path, parser->lib_path);
-
-    // Share the imported modules list with the sub-parser to handle transitive imports
-    import_parser.imported_modules          = parser->imported_modules;
-    import_parser.imported_modules_count    = parser->imported_modules_count;
-    import_parser.imported_modules_capacity = parser->imported_modules_capacity;
-
-    Node* import_ast = parser_parse(&import_parser);
-
-    // Update parent parser's imported modules list (sub-parser may have added more)
-    parser->imported_modules          = import_parser.imported_modules;
-    parser->imported_modules_count    = import_parser.imported_modules_count;
-    parser->imported_modules_capacity = import_parser.imported_modules_capacity;
-
-    // Move any imported sources from sub-parser to parent
-    for (int i = 0; i < import_parser.imported_sources_count; i++) {
-        add_imported_source(parser, import_parser.imported_sources[i]);
-    }
-    // Clear sub-parser's list (don't free, ownership transferred)
-    free(import_parser.imported_sources);
-    import_parser.imported_sources       = NULL;
-    import_parser.imported_sources_count = 0;
-
-    // Clear the imported_modules in sub-parser to prevent double-free
-    import_parser.imported_modules       = NULL;
-    import_parser.imported_modules_count = 0;
-
-    // Free sub-parser's direct_imports (not needed - each file tracks its own imports via
-    // source_file)
-    for (int i = 0; i < import_parser.direct_imports_count; i++) {
-        free(import_parser.direct_imports[i]);
-    }
-    free(import_parser.direct_imports);
-    import_parser.direct_imports       = NULL;
-    import_parser.direct_imports_count = 0;
-
-    if (import_parser.had_error) {
-        fprintf(stderr, "Failed to parse imported file: %s\n", path);
-        node_free(import_ast);
-        return 0;
-    }
-
-    // For library imports, track as direct import
-    if (!is_relative) {
-        add_direct_import(parser, module_name, module_length);
-    }
-
-    // Handle the imported AST based on import type
-    if (import_ast && import_ast->type == NODE_PROGRAM) {
-        if (is_relative) {
-            // Relative import: merge only the "main" module's declarations into current_module
-            // Keep library modules (non-main) as separate modules in the program
-            for (int m = 0; m < import_ast->as.program.modules.count; m++) {
-                Node* imported_module = import_ast->as.program.modules.nodes[m];
-                if (imported_module && imported_module->type == NODE_MODULE) {
-                    if (strcmp(imported_module->as.module.name, "main") == 0) {
-                        // Merge main module's declarations into current module
-                        for (int i = 0; i < imported_module->as.module.decls.count; i++) {
-                            Node* decl = imported_module->as.module.decls.nodes[i];
-                            nodelist_push(&current_module->as.module.decls, decl);
-                        }
-                        // Clear to prevent double-free
-                        imported_module->as.module.decls.count = 0;
-                    } else {
-                        // Keep library modules as separate modules
-                        nodelist_push(&program->as.program.modules, imported_module);
-                    }
-                }
-            }
-            // Clear to prevent double-free (only main was freed, others moved)
-            import_ast->as.program.modules.count = 0;
-        } else {
-            // Library import: move modules from imported AST to program
-            // The first module (main) of the library becomes a module named after the import
-            for (int m = 0; m < import_ast->as.program.modules.count; m++) {
-                Node* imported_module = import_ast->as.program.modules.nodes[m];
-                if (imported_module && imported_module->type == NODE_MODULE) {
-                    // Rename "main" module to the library name
-                    if (strcmp(imported_module->as.module.name, "main") == 0) {
-                        free(imported_module->as.module.name);
-                        imported_module->as.module.name = xmalloc(module_length + 1);
-                        memcpy(imported_module->as.module.name, module_name, module_length);
-                        imported_module->as.module.name[module_length] = '\0';
-                        imported_module->as.module.name_length         = (int)module_length;
-                    }
-                    nodelist_push(&program->as.program.modules, imported_module);
-                }
-            }
-            // Clear to prevent double-free
-            import_ast->as.program.modules.count = 0;
-        }
-    }
-
-    node_free(import_ast);
-    return 1;
+    return module_loader_import(parser->loader, parser, program, current_module, module_name,
+                                module_length, is_relative);
 }
 
 // ============================================================================
@@ -2301,56 +2060,25 @@ static Node* parse_declaration(Parser* parser) {
 // ============================================================================
 
 void parser_init(Parser* parser, const char* source) {
-    parser_init_with_path(parser, source, NULL, NULL);
+    parser_init_with_loader(parser, source, NULL, NULL);
 }
 
-void parser_init_with_path(Parser* parser, const char* source, const char* source_path,
-                           const char* lib_path) {
+void parser_init_with_loader(Parser* parser, const char* source, const char* source_path,
+                             ModuleLoader* loader) {
     lexer_init(&parser->lexer, source);
     parser->had_error    = 0;
     parser->panic_mode   = 0;
     parser->error_msg[0] = '\0';
-    parser->parse_depth  = 0; // Reset recursion depth
+    parser->parse_depth  = 0;
 
     parser->source_path = source_path;
-    parser->lib_path    = lib_path;
+    parser->loader      = loader;
 
-    // Initialize imported sources tracking
-    parser->imported_sources          = NULL;
-    parser->imported_sources_count    = 0;
-    parser->imported_sources_capacity = 0;
-
-    // Initialize imported modules tracking
-    parser->imported_modules          = NULL;
-    parser->imported_modules_count    = 0;
-    parser->imported_modules_capacity = 0;
-
-    // Initialize direct imports tracking (library modules directly imported by this file)
-    parser->direct_imports          = NULL;
-    parser->direct_imports_count    = 0;
-    parser->direct_imports_capacity = 0;
-
-    advance_token(parser); // Prime the parser
+    advance_token(parser);
 }
 
 void parser_free(Parser* parser) {
-    // Free all imported source buffers
-    for (int i = 0; i < parser->imported_sources_count; i++) {
-        free(parser->imported_sources[i]);
-    }
-    free(parser->imported_sources);
-
-    // Free all imported module names
-    for (int i = 0; i < parser->imported_modules_count; i++) {
-        free(parser->imported_modules[i]);
-    }
-    free(parser->imported_modules);
-
-    // Free all direct import names
-    for (int i = 0; i < parser->direct_imports_count; i++) {
-        free(parser->direct_imports[i]);
-    }
-    free(parser->direct_imports);
+    (void)parser;
 }
 
 Node* parser_parse(Parser* parser) {
