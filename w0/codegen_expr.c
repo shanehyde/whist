@@ -379,8 +379,14 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
                     emit(gen, "%s_", gen->current_module);
                 }
             }
-            emit_expr(gen, func);
-            emit(gen, "(");
+            if (func->type == NODE_IDENT && gen->current_module == NULL &&
+                strncmp(func->as.ident.name, "main", func->as.ident.length) == 0 &&
+                func->as.ident.length == 4) {
+                emit(gen, "__w0_user_main(");
+            } else {
+                emit_expr(gen, func);
+                emit(gen, "(");
+            }
         }
         for (int i = 0; i < node->as.call.args.count; i++) {
             if (i > 0)

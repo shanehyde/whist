@@ -14,6 +14,11 @@ private extern stdlib {
     func system(cmd: string): i32 as _system;
 }
 
+private extern std_args {
+    func std__argc(): i64;
+    func std__argv(i: i64): string;
+}
+
 func print(s: string): void {
     printf("%s", s);
 }
@@ -28,6 +33,19 @@ func exit(status: i32): void {
 
 func system(cmd: string): i32 {
     return _system(cmd);
+}
+
+func args(): Vec<string> {
+    var args = new Vec<string>{};
+
+    var count = std__argc();
+    var i: i64 = 0;
+    while (i < count) {
+        args.push(std__argv(i));
+        i = i + 1;
+    }
+
+    return args;
 }
 
 func panic(s: string): void {

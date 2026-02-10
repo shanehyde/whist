@@ -534,6 +534,44 @@ static void emit_c_headers(CodeGen* gen) {
     emit(gen, "#include <string.h>\n");
     emit(gen, "#include <stdarg.h>\n");
     emit(gen, "\n");
+    emit(gen, "static int __w0_argc = 0;\n");
+    emit(gen, "static char** __w0_argv = NULL;\n");
+    emit(gen, "int64_t std__argc(void) { return (int64_t)__w0_argc; }\n");
+    emit(gen, "const char* std__argv(int64_t i) {\n");
+    emit(gen, "    if (i < 0 || i >= (int64_t)__w0_argc) return \"\";\n");
+    emit(gen, "    return (const char*)__w0_argv[i];\n");
+    emit(gen, "}\n\n");
+}
+
+// Return 1 if the program declares a top-level `main` function in the main module.
+static int program_has_user_main(Node* ast) {
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        if (strcmp(mod->as.module.name, "main") != 0)
+            continue;
+
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (!decl || decl->type != NODE_FUNC_DECL)
+                continue;
+            if (decl->as.func_decl.receiver_type != NULL)
+                continue;
+            if (strcmp(decl->as.func_decl.name, "main") == 0)
+                return 1;
+        }
+    }
+    return 0;
+}
+
+// Emit the real C entrypoint wrapper that captures argc/argv for std.args().
+static void emit_main_wrapper(CodeGen* gen) {
+    emit(gen, "int main(int argc, char** argv) {\n");
+    emit(gen, "    __w0_argc = argc;\n");
+    emit(gen, "    __w0_argv = argv;\n");
+    emit(gen, "    return __w0_user_main();\n");
+    emit(gen, "}\n\n");
 }
 
 // Build the list of all enum type names (non-generic and generic instances)
@@ -780,6 +818,8 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     if (!ast || ast->type != NODE_PROGRAM)
         return;
 
+    int has_user_main = program_has_user_main(ast);
+
     collect_types_and_aliases(gen, ast);
     emit_c_headers(gen);
     emit_rc_runtime(gen);
@@ -802,4 +842,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit_struct_rc_dec(gen, ast);
     emit_declarations(gen, ast);
     emit_generic_method_impls(gen, ast);
+    if (has_user_main) {
+        emit_main_wrapper(gen);
+    }
 }
