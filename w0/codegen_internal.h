@@ -2,11 +2,10 @@
 #define WHIST_CODEGEN_INTERNAL_H
 
 #include "codegen_emit.h"
+#include "codegen_types.h"
 
 // --- From codegen_emit.c: shared helpers ---
 void        defer_push(CodeGen* gen, Node* node);
-Node*       resolve_alias(CodeGen* gen, Node* type_node);
-int         is_struct_type(CodeGen* gen, Node* type_node);
 const char* binary_op_str(TokenType op);
 const char* unary_op_str(TokenType op);
 const char* assign_op_str(TokenType op);

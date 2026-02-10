@@ -140,7 +140,7 @@ func main(): i64 {
 
 ## Compiler Architecture
 
-The compiler pipeline is: **Lexer** (`lexer.c`) -> **Parser** (`parser.c`) -> **AST** -> **Checker** (`checker.c`, `checker_types.c`, `checker_expr.c`) -> **Codegen** (`codegen.c`, `codegen_emit.c`, `codegen_expr.c`, `codegen_stmt.c`, `codegen_rc.c`).
+The compiler pipeline is: **Lexer** (`lexer.c`) -> **Parser** (`parser.c`) -> **AST** -> **Checker** (`checker.c`, `checker_types.c`, `checker_expr.c`) -> **Codegen** (`codegen.c`, `codegen_types.c`, `codegen_emit.c`, `codegen_expr.c`, `codegen_stmt.c`, `codegen_rc.c`).
 
 ### File Responsibilities
 
@@ -155,7 +155,8 @@ The compiler pipeline is: **Lexer** (`lexer.c`) -> **Parser** (`parser.c`) -> **
 | `checker_expr.c` | Expression type checking |
 | `checker_internal.h` | Cross-file checker function declarations |
 | `codegen.c/h` | Codegen orchestration, boilerplate, forward decls, RC runtime |
-| `codegen_emit.c/h` | Output helpers, type/enum queries, type emission, declaration emission |
+| `codegen_types.c/h` | Type queries, enum/alias/struct resolution, RC type analysis |
+| `codegen_emit.c/h` | Output helpers, type emission, declaration emission |
 | `codegen_rc.c` | RC variable tracking (push, cleanup, clear) |
 | `codegen_expr.c` | Expression emission |
 | `codegen_stmt.c` | Statement emission |
@@ -193,7 +194,7 @@ Key checker-set flags that codegen depends on:
 
 **String methods**: The checker uses `struct_name = "__String"` on member access nodes to signal codegen to emit `__String_methodname(self, args...)` calls. The `__String` prefix is a codegen convention, not a real struct.
 
-**RC (Reference Counting)**: Variables created via `new` are tracked in `codegen_emit.c` with scope-based cleanup. Each RC variable has a decrement function -- either generic `__rc_dec` or type-specific `__rc_dec_TypeName` for types with Drop impls or nested RC fields. See the architectural comment at the top of `codegen_emit.c`.
+**RC (Reference Counting)**: Variables created via `new` are tracked in `codegen_rc.c` with scope-based cleanup. Each RC variable has a decrement function -- either generic `__rc_dec` or type-specific `__rc_dec_TypeName` for types with Drop impls or nested RC fields. See the architectural comment at the top of `codegen_emit.c`.
 
 **`codegen_init` parameters**: The codegen receives checker data via a `CodeGenChecker` struct (generic instances, span/vec instances, trait impls) passed by value. The checker must outlive the codegen (borrowed pointers). The `CodeGen` struct uses inline sub-structures: `out` (output), `defer`, `rc`, `generics`, `checker`, `enums`, `aliases`.
 

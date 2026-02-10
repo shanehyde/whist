@@ -6,6 +6,7 @@
 
 #include "alloc.h"
 #include "codegen_emit.h"
+#include "codegen_types.h"
 #include "types.h"
 #include "vec.h"
 
