@@ -8,6 +8,16 @@
 // Forward declaration for check_struct_init (called by check_new_expr)
 static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
 
+// Return the const variable name if node is a NODE_IDENT referring to a const symbol, else NULL
+static const char* get_const_binding_name(Checker* checker, Node* node) {
+    if (node && node->type == NODE_IDENT) {
+        Symbol* sym = checker_lookup(checker, node->as.ident.name);
+        if (sym && sym->is_const)
+            return node->as.ident.name;
+    }
+    return NULL;
+}
+
 // =============================================================================
 // Expression checking helpers
 // =============================================================================
@@ -356,6 +366,13 @@ static Type* check_member_expr(Checker* checker, Node* node) {
         // Methods: push, pop, clear
         if (strcmp(member_name, "push") == 0 || strcmp(member_name, "pop") == 0 ||
             strcmp(member_name, "clear") == 0) {
+            const char* const_name = get_const_binding_name(checker, node->as.member.object);
+            if (const_name) {
+                check_error(checker, node->line, node->column,
+                            "Cannot call mutating method '%s' on const '%s'", member_name,
+                            const_name);
+                return type_error;
+            }
             // Build mangled vec name for method dispatch
             char mangled[256];
             snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
@@ -400,6 +417,16 @@ static Type* check_member_expr(Checker* checker, Node* node) {
         for (int i = 0; i < checker->traits.primitive_method_count; i++) {
             if (strcmp(checker->traits.primitive_methods[i].type_name, prim_name) == 0 &&
                 strcmp(checker->traits.primitive_methods[i].method_name, member_name) == 0) {
+                if (!checker->traits.primitive_methods[i].is_const) {
+                    const char* const_name =
+                        get_const_binding_name(checker, node->as.member.object);
+                    if (const_name) {
+                        check_error(checker, node->line, node->column,
+                                    "Cannot call mutating method '%s' on const '%s'", member_name,
+                                    const_name);
+                        return type_error;
+                    }
+                }
                 node->as.member.is_ref      = 0;
                 node->as.member.struct_name = xstrdup(prim_name);
                 return checker->traits.primitive_methods[i].method_type;
@@ -429,6 +456,15 @@ static Type* check_member_expr(Checker* checker, Node* node) {
     // If not a field, check for method
     for (int i = 0; i < object->as.struc.method_count; i++) {
         if (strcmp(object->as.struc.method_names[i], member_name) == 0) {
+            if (!object->as.struc.method_is_const[i]) {
+                const char* const_name = get_const_binding_name(checker, node->as.member.object);
+                if (const_name) {
+                    check_error(checker, node->line, node->column,
+                                "Cannot call mutating method '%s' on const '%s'", member_name,
+                                const_name);
+                    return type_error;
+                }
+            }
             node->as.member.struct_name = xstrdup(object->as.struc.name);
             return object->as.struc.method_types[i];
         }
@@ -492,6 +528,13 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
                             obj->as.ident.name);
                 return type_error;
             }
+        }
+    } else if (t->type == NODE_INDEX) {
+        const char* const_name = get_const_binding_name(checker, t->as.index.object);
+        if (const_name) {
+            check_error(checker, node->line, node->column, "Cannot write to index of const '%s'",
+                        const_name);
+            return type_error;
         }
     }
 
