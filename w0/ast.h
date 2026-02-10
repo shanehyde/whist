@@ -228,9 +228,10 @@ struct Node {
             Node* object;
             char* name;
             int   length;
-            int   is_ref;      // Set by checker: 1 if object is a struct reference
-            char* struct_name; // Set by checker if this is a method access (NULL otherwise)
-            char* module_name; // Set by checker for module-qualified access (e.g., "std")
+            int   is_ref;          // Set by checker: 1 if object is a struct reference
+            int   is_const_access; // Set by checker: 1 if accessing a const field
+            char* struct_name;     // Set by checker if this is a method access (NULL otherwise)
+            char* module_name;     // Set by checker for module-qualified access (e.g., "std")
         } member;
 
         // Assignment
@@ -420,6 +421,7 @@ struct Node {
             char* name;
             int   name_length;
             Node* type;
+            int   is_const;
         } field;
 
         // Enum declaration

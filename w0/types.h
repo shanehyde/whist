@@ -68,6 +68,7 @@ struct Type {
             char*  name;
             char** field_names;
             Type** field_types;
+            int*   field_is_const;
             int    field_count;
             // Methods
             char** method_names;

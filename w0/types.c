@@ -86,6 +86,7 @@ Type* type_struct(const char* name) {
     type->as.struc.name            = xstrdup(name);
     type->as.struc.field_names     = NULL;
     type->as.struc.field_types     = NULL;
+    type->as.struc.field_is_const  = NULL;
     type->as.struc.field_count     = 0;
     type->as.struc.method_names    = NULL;
     type->as.struc.method_types    = NULL;
@@ -170,6 +171,7 @@ void type_free(Type* type) {
         }
         free(type->as.struc.field_names);
         free(type->as.struc.field_types);
+        free(type->as.struc.field_is_const);
         for (int i = 0; i < type->as.struc.method_count; i++) {
             free(type->as.struc.method_names[i]);
         }

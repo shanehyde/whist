@@ -484,14 +484,16 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
     Node* decl        = def->decl;
     int   field_count = decl->as.struct_decl.fields.count;
 
-    struct_type->as.struc.field_count = field_count;
-    struct_type->as.struc.field_names = xmalloc(field_count * sizeof(char*));
-    struct_type->as.struc.field_types = xmalloc(field_count * sizeof(Type*));
+    struct_type->as.struc.field_count    = field_count;
+    struct_type->as.struc.field_names    = xmalloc(field_count * sizeof(char*));
+    struct_type->as.struc.field_types    = xmalloc(field_count * sizeof(Type*));
+    struct_type->as.struc.field_is_const = xmalloc(field_count * sizeof(int));
 
     for (int i = 0; i < field_count; i++) {
-        Node* field                          = decl->as.struct_decl.fields.nodes[i];
-        struct_type->as.struc.field_names[i] = xstrdup(field->as.field.name);
-        struct_type->as.struc.field_types[i] = resolve_type(checker, field->as.field.type);
+        Node* field                             = decl->as.struct_decl.fields.nodes[i];
+        struct_type->as.struc.field_names[i]    = xstrdup(field->as.field.name);
+        struct_type->as.struc.field_types[i]    = resolve_type(checker, field->as.field.type);
+        struct_type->as.struc.field_is_const[i] = field->as.field.is_const;
     }
 
     // Check if any field is an RC-managed type (struct, Vec, or enum with RC fields)
