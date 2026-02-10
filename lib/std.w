@@ -11,6 +11,7 @@ private extern stdio {
 
 private extern stdlib {
     func exit(status: i32): void as _exit;
+    func system(cmd: string): i32 as _system;
 }
 
 func print(s: string): void {
@@ -23,6 +24,10 @@ func println(s: string): void {
 
 func exit(status: i32): void {
     _exit(status);
+}
+
+func system(cmd: string): i32 {
+    return _system(cmd);
 }
 
 func panic(s: string): void {
