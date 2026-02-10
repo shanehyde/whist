@@ -3,8 +3,9 @@
 
 #include "ast.h"
 #include "lexer.h"
+#include "module_loader.h"
 
-typedef struct {
+typedef struct Parser {
     Lexer lexer;
     Token current;
     Token previous;
@@ -15,23 +16,8 @@ typedef struct {
     // Source file path for resolving imports
     const char* source_path;
 
-    // Library path for resolving module imports (--lib-path flag)
-    const char* lib_path;
-
-    // Imported source buffers (kept alive for AST string references)
-    char** imported_sources;
-    int    imported_sources_count;
-    int    imported_sources_capacity;
-
-    // Imported module names (to prevent duplicate imports)
-    char** imported_modules;
-    int    imported_modules_count;
-    int    imported_modules_capacity;
-
-    // Library modules directly imported by the root file (for visibility checking)
-    char** direct_imports;
-    int    direct_imports_count;
-    int    direct_imports_capacity;
+    // Shared module loader (not owned by parser)
+    ModuleLoader* loader;
 
     // Current recursion depth for expression parsing
     int parse_depth;
@@ -57,8 +43,8 @@ typedef enum {
 
 // Parser lifecycle
 void  parser_init(Parser* parser, const char* source);
-void  parser_init_with_path(Parser* parser, const char* source, const char* source_path,
-                            const char* lib_path);
+void  parser_init_with_loader(Parser* parser, const char* source, const char* source_path,
+                              ModuleLoader* loader);
 void  parser_free(Parser* parser);
 Node* parser_parse(Parser* parser);
 
