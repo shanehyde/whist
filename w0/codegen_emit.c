@@ -8,6 +8,27 @@
 #include "types.h"
 #include "vec.h"
 
+// =============================================================================
+// RC (Reference Counting) Variable Tracking
+// =============================================================================
+//
+// The codegen tracks RC-managed variables (those created via `new`) to emit
+// automatic cleanup calls at scope exits and function returns. This acts as
+// a compile-time deterministic "GC" — each RC variable is paired with a
+// decrement function (either generic `__rc_dec` or type-specific
+// `__rc_dec_TypeName` for types with Drop or nested RC fields).
+//
+// Key functions:
+//   rc_push_var     - Register a new RC variable with its scope depth
+//   rc_cleanup_scope - Emit dec calls for vars at a given depth, remove them
+//   rc_cleanup_all   - Emit dec calls for ALL vars (before return), keep list
+//   rc_clear_all     - Free the tracking list (at function boundaries)
+//
+// rc_cleanup_scope modifies the var list (compacts it); rc_cleanup_all only
+// emits code without modifying the list. This distinction matters because
+// rc_cleanup_all is used before early returns in conditional branches where
+// the var list must remain intact for the non-returning path.
+
 // Emit indentation spaces (4 per level) at the current indent depth
 void emit_indent(CodeGen* gen) {
     for (int i = 0; i < gen->indent; i++) {

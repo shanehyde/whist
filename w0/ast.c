@@ -1,5 +1,6 @@
 #include "ast.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -542,9 +543,8 @@ Node* node_clone(Node* node) {
         c->as.field.type        = node_clone(node->as.field.type);
         break;
     default:
-        // For node types not expected in method bodies, do a shallow copy
-        c->as = node->as;
-        break;
+        fprintf(stderr, "node_clone: unhandled node type %d\n", node->type);
+        abort();
     }
     return c;
 }

@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "alloc.h"
+#include "util.h"
 #include "vec.h"
 
 // ============================================================================
@@ -344,26 +345,6 @@ static Node* parse_struct_init(Parser* parser) {
 // String Interpolation Parsing
 // ============================================================================
 
-// Decode a single escape character for interpolated string text segments
-static char interp_decode_escape(char c) {
-    switch (c) {
-    case 'n':
-        return '\n';
-    case 't':
-        return '\t';
-    case 'r':
-        return '\r';
-    case '0':
-        return '\0';
-    case '\\':
-        return '\\';
-    case '"':
-        return '"';
-    default:
-        return c;
-    }
-}
-
 // Flush accumulated text buffer as a NODE_STRING_LIT part
 static void flush_text_part(NodeList* parts, char* buf, int* buf_len, int line, int column) {
     if (*buf_len == 0)
@@ -398,7 +379,7 @@ static Node* parse_interp_string(Parser* parser) {
         if (*src == '\\' && src + 1 < end) {
             // Escape sequence in text
             src++;
-            buf[buf_len++] = interp_decode_escape(*src);
+            buf[buf_len++] = decode_escape(*src);
             src++;
         } else if (*src == '{') {
             if (src + 1 < end && src[1] == '{') {
@@ -1934,12 +1915,12 @@ static Node* parse_extern_decls(Parser* parser, int is_public) {
             return NULL;
         }
 
-        Node* funcDeclNode = parse_func_decl(parser, func_is_public);
-        if (!funcDeclNode) {
+        Node* func_node = parse_func_decl(parser, func_is_public);
+        if (!func_node) {
             return NULL;
         }
-        funcDeclNode->as.func_decl.is_extern = 1;
-        nodelist_push(&node->as.extern_module.decls, funcDeclNode);
+        func_node->as.func_decl.is_extern = 1;
+        nodelist_push(&node->as.extern_module.decls, func_node);
     }
 
     consume_token(parser, TOK_RBRACE, "Expected '}' after extern module declarations");
@@ -1949,23 +1930,6 @@ static Node* parse_extern_decls(Parser* parser, int is_public) {
 // ============================================================================
 // Import Handling
 // ============================================================================
-
-static char* read_file(const char* path) {
-    FILE* file = fopen(path, "rb");
-    if (!file) {
-        return NULL;
-    }
-
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    char*  buffer = xmalloc(size + 1);
-    size_t read   = fread(buffer, 1, size, file);
-    buffer[read]  = '\0';
-    fclose(file);
-    return buffer;
-}
 
 // Check if a module has already been imported
 static int is_module_imported(Parser* parser, const char* module_name, size_t length) {
