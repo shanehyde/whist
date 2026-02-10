@@ -121,6 +121,9 @@ void emit_function_name(CodeGen* gen, const char* func_name, const char* receive
     if (receiver_type != NULL) {
         // Method: prefix with struct name
         emit(gen, " %s_%s(", receiver_type, func_name);
+    } else if (module_name == NULL && strcmp(func_name, "main") == 0) {
+        // User main is lowered to an internal symbol; wrapper C main is emitted separately.
+        emit(gen, " __w0_user_main(");
     } else if (module_name != NULL) {
         // Library function: prefix with module name
         emit(gen, " %s_%s(", module_name, func_name);
