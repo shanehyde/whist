@@ -10,24 +10,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "print_ast.h"
-
-static char* read_file(const char* path) {
-    FILE* file = fopen(path, "rb");
-    if (!file) {
-        fprintf(stderr, "Could not open file: %s\n", path);
-        return NULL;
-    }
-
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    char*  buffer = xmalloc(size + 1);
-    size_t read   = fread(buffer, 1, size, file);
-    buffer[read]  = '\0';
-    fclose(file);
-    return buffer;
-}
+#include "util.h"
 
 // Compile source to C code, writing to the given output file.
 // Returns 0 on success, 1 on error.
@@ -73,8 +56,10 @@ static int compile_to_c(const char* source, const char* source_path, const char*
 static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path,
                            int rc_debug) {
     char* source = read_file(source_path);
-    if (!source)
+    if (!source) {
+        fprintf(stderr, "Could not open file: %s\n", source_path);
         return 1;
+    }
 
     // Create temp files
     char c_base[]   = "/tmp/w0_XXXXXX";
@@ -251,8 +236,10 @@ int main(int argc, char** argv) {
     if (arg_idx < argc) {
         source_file = argv[arg_idx];
         source      = read_file(source_file);
-        if (!source)
+        if (!source) {
+            fprintf(stderr, "Could not open file: %s\n", source_file);
             return 1;
+        }
         free_source = 1;
     } else {
         fprintf(stderr, "Usage: %s [options] <source-file>\n", argv[0]);

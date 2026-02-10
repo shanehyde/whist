@@ -91,7 +91,6 @@ struct Checker {
     Type*  current_func_return; // Return type of current function
     int    in_loop;             // Are we inside a loop?
     int    error_count;
-    char   error_msg[256];
 
     // Library modules directly imported by the root file (for global scope)
     char** direct_imports;

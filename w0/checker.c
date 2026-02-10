@@ -89,7 +89,6 @@ void checker_init(Checker* checker) {
     checker->current_func_return              = NULL;
     checker->in_loop                          = 0;
     checker->error_count                      = 0;
-    checker->error_msg[0]                     = '\0';
     checker->direct_imports                   = NULL;
     checker->direct_imports_count             = 0;
     checker->current_accessible_modules       = NULL;
@@ -1570,9 +1569,30 @@ static void check_decl(Checker* checker, Node* node) {
 // Main entry point
 // =============================================================================
 
-// Run the checker over an entire program AST in multiple passes:
-// 1. Forward-declare types  2. Register generic methods/impls
-// 3. Check library modules  4. Check main module
+// Type-check an entire program AST using four sequential passes.
+//
+// The multi-pass design is required because declarations can reference each
+// other out of order (forward references). The passes are:
+//
+//   Pass 1: Forward-declare all types (structs, enums, traits) so that
+//           fields, function signatures, and type aliases can reference
+//           any type regardless of declaration order.
+//
+//   Pass 2: Register generic methods and trait impls on their GenericDef
+//           entries. This must happen before passes 3-4 because type aliases
+//           or `new` expressions may trigger generic instantiation, which
+//           needs the method templates to be already registered.
+//
+//   Pass 3: Check all declarations in library modules (non-main). This
+//           includes functions, type aliases, impl blocks, and use decls.
+//           Library symbols must be fully declared before the main module
+//           can reference them.
+//
+//   Pass 4: Check all declarations in the main module.
+//
+// Convention: checker->current_module is NULL for the "main" module and
+// set to the module name string for library modules. A symbol's
+// source_module follows the same convention (NULL = main module).
 int checker_check(Checker* checker, Node* ast) {
     if (!ast || ast->type != NODE_PROGRAM) {
         return 0;
