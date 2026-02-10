@@ -300,6 +300,8 @@ Cast expressions convert between compatible types. Supported conversions:
 - `char` to any integer type (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`)
 - Any integer type to `char`
 - Integer to integer (widening or narrowing)
+- Struct reference to `voidptr` (opaque pointer)
+- `voidptr` to `u64` (opaque pointer value for hashing/interop)
 - Identity casts (same type to same type)
 
 Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`

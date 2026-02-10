@@ -871,6 +871,12 @@ static Type* check_cast_expr(Checker* checker, Node* node) {
     // Allow: integer -> integer (widening/narrowing)
     if (type_is_integer(expr_type) && type_is_integer(target))
         return target;
+    // Allow: struct reference -> voidptr (opaque pointer for interop/hash use cases)
+    if (expr_type->kind == TYPE_STRUCT && target->kind == TYPE_VOIDPTR)
+        return target;
+    // Allow: voidptr -> u64 (for pointer hashing/interop handles)
+    if (expr_type->kind == TYPE_VOIDPTR && target->kind == TYPE_UINT64)
+        return target;
 
     check_error(checker, node->line, node->column, "Cannot cast '%s' to '%s'", type_name(expr_type),
                 type_name(target));
