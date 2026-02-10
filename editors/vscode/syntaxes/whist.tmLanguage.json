@@ -65,9 +65,7 @@
               "endCaptures": {
                 "0": { "name": "punctuation.section.interpolation.end.whist" }
               },
-              "patterns": [
-                { "include": "$self" }
-              ]
+              "patterns": [{ "include": "$self" }]
             },
             {
               "name": "constant.character.escape.whist",
@@ -155,7 +153,7 @@
         },
         {
           "name": "keyword.control.import.whist",
-          "match": "\\b(import)\\b"
+          "match": "\\b(import|use)\\b"
         }
       ]
     },

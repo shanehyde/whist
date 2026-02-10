@@ -19,6 +19,10 @@ static inline char* read_file(const char* path) {
 
     fseek(file, 0, SEEK_END);
     long size = ftell(file);
+    if (size < 0) {
+        fclose(file);
+        return NULL;
+    }
     fseek(file, 0, SEEK_SET);
 
     char*  buffer = xmalloc(size + 1);

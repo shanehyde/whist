@@ -14,83 +14,105 @@ typedef struct {
     int    count;
 } TypeSubstContext;
 
+// RC-managed variable tracking entry
 typedef struct {
-    FILE* out;
+    char* name;
+    char* dec_func; // "__rc_dec" or "__rc_dec_TypeName"
+    Type* type;     // Type* for the RC variable (not owned)
+    int   scope_depth;
+} RcVar;
+
+// Name alias: maps a Whist-side name to a C-side name
+typedef struct {
+    char* whist_name;
+    char* c_name;
+} NameAlias;
+
+// --- CodeGen sub-structures ---
+
+typedef struct {
+    FILE* file;
     int   indent;
     int   temp_count; // For generating temporary variables
-    // Defer support
-    Node**      defer_stack;         // Stack of deferred statements
-    int         defer_count;         // Number of deferred statements
-    int         defer_capacity;      // Capacity of defer stack
-    Node*       current_return_type; // Return type of current function (for __ret variable)
-    const char* current_module;      // Current module name (NULL for "main")
-    // RC variable tracking
-    struct {
-        char* name;
-        char* dec_func; // "__rc_dec" or "__rc_dec_TypeName"
-        Type* type;     // Type* for the RC variable (not owned)
-        int   scope_depth;
-    }*  rc_vars;
-    int rc_var_count;
-    int rc_var_capacity;
-    int rc_scope_depth;
-    int rc_debug;
-    // Type substitution for generic methods
-    TypeSubstContext* subst_ctx;
-    // Current generic struct template (set during generic method body emission)
-    Node* current_generic_template;
-    // Accessible modules for current generic method (not owned)
-    char** accessible_modules;
-    int    accessible_modules_count;
-    // Tuple typedef tracking
-    Type** tuple_types; // Array of unique tuple types
-    int    tuple_type_count;
-    int    tuple_type_capacity;
-    // Generic instances from checker (not owned, do not free)
-    GenericInstance* generic_instances;
-    int              generic_instance_count;
-    // Span instances from checker (not owned, do not free)
-    SpanInstance* span_instances;
-    int           span_instance_count;
-    // Vec instances from checker (not owned, do not free)
-    VecInstance* vec_instances;
-    int          vec_instance_count;
-    // Trait implementations from checker (not owned, do not free)
-    TraitImpl* trait_impls;
-    int        trait_impl_count;
-    // Enum name tracking (for distinguishing enums from structs in type emission)
-    char** enum_names;
-    int    enum_name_count;
-    int    enum_name_capacity;
-    int*   enum_has_rc_fields; // Parallel to enum_names
+} CodeGenOutput;
+
+typedef struct {
+    Node** stack;       // Stack of deferred statements
+    int    count;       // Number of deferred statements
+    int    capacity;    // Capacity of defer stack
+    Node*  return_type; // Return type of current function (for __ret variable)
+} CodeGenDefer;
+
+typedef struct {
+    RcVar* vars;
+    int    count;
+    int    capacity;
+    int    depth;
+    int    debug;
+} CodeGenRc;
+
+typedef struct {
+    TypeSubstContext* subst;
+    Node*             tmpl;    // Current generic struct template
+    char**            modules; // Accessible modules for current generic method (not owned)
+    int               module_count;
+} CodeGenGenerics;
+
+typedef struct {
+    GenericInstance* instances;
+    int              instance_count;
+    SpanInstance*    spans;
+    int              span_count;
+    VecInstance*     vecs;
+    int              vec_count;
+    TraitImpl*       traits;
+    int              trait_count;
+} CodeGenChecker;
+
+typedef struct {
+    char** names;
+    int    count;
+    int    capacity;
+    int*   has_rc_fields; // Parallel to names
+} CodeGenEnums;
+
+typedef struct {
     // Type alias tracking (alias name -> target type node)
-    char** alias_names;
-    Node** alias_targets;
-    int    alias_count;
-    int    alias_capacity;
+    char** types;
+    Node** type_targets;
+    int    type_count;
+    int    type_capacity;
     // Extern function alias tracking (Whist name -> C name)
-    struct {
-        char* whist_name; // Whist-side alias
-        char* c_name;     // Original C function name
-    }*  extern_aliases;
-    int extern_alias_count;
-    int extern_alias_capacity;
-    // Extern function name tracking (all extern functions, for intra-module call prefixing)
+    NameAlias* externs;
+    int        extern_count;
+    int        extern_capacity;
+    // Extern function name tracking (all extern functions)
     char** extern_funcs;
     int    extern_func_count;
     int    extern_func_capacity;
     // Use declaration aliases (unqualified Whist name -> qualified C name)
-    struct {
-        char* whist_name;
-        char* c_name;
-    }*  use_aliases;
-    int use_alias_count;
-    int use_alias_capacity;
+    NameAlias* uses;
+    int        use_count;
+    int        use_capacity;
+} CodeGenAliases;
+
+typedef struct {
+    CodeGenOutput   out;
+    CodeGenDefer    defer;
+    CodeGenRc       rc;
+    CodeGenGenerics generics;
+    CodeGenChecker  checker;
+    CodeGenEnums    enums;
+    CodeGenAliases  aliases;
+    // Tuple typedef tracking
+    Type** tuple_types;
+    int    tuple_type_count;
+    int    tuple_type_capacity;
+    // Current module name (NULL for "main")
+    const char* current_module;
 } CodeGen;
 
-void codegen_init(CodeGen* gen, FILE* out, GenericInstance* generic_instances, int generic_count,
-                  SpanInstance* span_instances, int span_count, VecInstance* vec_instances,
-                  int vec_count, TraitImpl* trait_impls, int trait_impl_count, int rc_debug);
+void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_debug);
 void codegen_emit(CodeGen* gen, Node* ast);
 
 #endif

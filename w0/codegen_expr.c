@@ -19,9 +19,9 @@ static void emit_string_interp(CodeGen* gen, Node* node);
 // In a generic method body, look up the field type node from the struct template.
 // For `self.fieldname`, returns the AST type node of the field, or NULL.
 Node* lookup_generic_template_field_type(CodeGen* gen, const char* field_name) {
-    if (!gen->current_generic_template)
+    if (!gen->generics.tmpl)
         return NULL;
-    Node* tmpl = gen->current_generic_template;
+    Node* tmpl = gen->generics.tmpl;
     for (int i = 0; i < tmpl->as.struct_decl.fields.count; i++) {
         Node* field = tmpl->as.struct_decl.fields.nodes[i];
         if (strcmp(field->as.field.name, field_name) == 0) {
@@ -36,7 +36,7 @@ Node* lookup_generic_template_field_type(CodeGen* gen, const char* field_name) {
 // the mangled name (e.g., "__Vec_HashEntry_i32" or "HashEntry_i32").
 // Returns a malloc'd string, or NULL if unresolvable. Caller must free.
 static char* resolve_generic_method_target(CodeGen* gen, Node* member) {
-    if (!gen->subst_ctx || !gen->current_generic_template)
+    if (!gen->generics.subst || !gen->generics.tmpl)
         return NULL;
     // Only handle `self.field.method()` pattern
     Node* obj = member->as.member.object;
@@ -59,11 +59,11 @@ static char* resolve_generic_method_target(CodeGen* gen, Node* member) {
         if (elem->type == NODE_IDENT) {
             const char* elem_name = elem->as.ident.name;
             // Check substitution
-            if (gen->subst_ctx) {
-                for (int s = 0; s < gen->subst_ctx->count; s++) {
-                    if (strcmp(gen->subst_ctx->type_params[s], elem_name) == 0) {
+            if (gen->generics.subst) {
+                for (int s = 0; s < gen->generics.subst->count; s++) {
+                    if (strcmp(gen->generics.subst->type_params[s], elem_name) == 0) {
                         snprintf(buf, sizeof(buf), "__Vec_%s",
-                                 type_mangle_name(gen->subst_ctx->type_args[s]));
+                                 type_mangle_name(gen->generics.subst->type_args[s]));
                         return xstrdup(buf);
                     }
                 }
@@ -96,11 +96,11 @@ char* resolve_generic_field_dec_func(CodeGen* gen, Node* field_type_node) {
             char  buf[256];
             if (elem->type == NODE_IDENT) {
                 const char* elem_name = elem->as.ident.name;
-                if (gen->subst_ctx) {
-                    for (int s = 0; s < gen->subst_ctx->count; s++) {
-                        if (strcmp(gen->subst_ctx->type_params[s], elem_name) == 0) {
+                if (gen->generics.subst) {
+                    for (int s = 0; s < gen->generics.subst->count; s++) {
+                        if (strcmp(gen->generics.subst->type_params[s], elem_name) == 0) {
                             snprintf(buf, sizeof(buf), "__rc_dec_Vec_%s",
-                                     type_name(gen->subst_ctx->type_args[s]));
+                                     type_name(gen->generics.subst->type_args[s]));
                             return xstrdup(buf);
                         }
                     }
@@ -127,10 +127,10 @@ char* resolve_generic_field_dec_func(CodeGen* gen, Node* field_type_node) {
     if (field_type_node->type == NODE_IDENT) {
         const char* name = field_type_node->as.ident.name;
         // Check if it's a type param that resolves to a struct
-        if (gen->subst_ctx) {
-            for (int s = 0; s < gen->subst_ctx->count; s++) {
-                if (strcmp(gen->subst_ctx->type_params[s], name) == 0) {
-                    Type* resolved = gen->subst_ctx->type_args[s];
+        if (gen->generics.subst) {
+            for (int s = 0; s < gen->generics.subst->count; s++) {
+                if (strcmp(gen->generics.subst->type_params[s], name) == 0) {
+                    Type* resolved = gen->generics.subst->type_args[s];
                     if (resolved->kind == TYPE_STRUCT)
                         return (char*)get_dec_func_for_type(resolved);
                     return NULL;
@@ -289,14 +289,15 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
             emit_expr(gen, node->as.call.args.nodes[i]);
         }
         emit(gen, ")");
-    } else if (func->type == NODE_MEMBER && func->as.member.struct_name == NULL && gen->subst_ctx) {
+    } else if (func->type == NODE_MEMBER && func->as.member.struct_name == NULL &&
+               gen->generics.subst) {
         // In a generic method body — checker didn't annotate struct_name or module_name.
         // First check if this is a module-qualified call (e.g., std.print)
         int is_module_call = 0;
         if (func->as.member.object->type == NODE_IDENT) {
             const char* obj_name = func->as.member.object->as.ident.name;
-            for (int i = 0; i < gen->accessible_modules_count; i++) {
-                if (strcmp(gen->accessible_modules[i], obj_name) == 0) {
+            for (int i = 0; i < gen->generics.module_count; i++) {
+                if (strcmp(gen->generics.modules[i], obj_name) == 0) {
                     is_module_call = 1;
                     break;
                 }
@@ -340,11 +341,11 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
         // Regular function call — check for extern alias
         int alias_found = 0;
         if (func->type == NODE_IDENT) {
-            for (int i = 0; i < gen->extern_alias_count; i++) {
-                if (strncmp(gen->extern_aliases[i].whist_name, func->as.ident.name,
+            for (int i = 0; i < gen->aliases.extern_count; i++) {
+                if (strncmp(gen->aliases.externs[i].whist_name, func->as.ident.name,
                             func->as.ident.length) == 0 &&
-                    gen->extern_aliases[i].whist_name[func->as.ident.length] == '\0') {
-                    emit(gen, "%s(", gen->extern_aliases[i].c_name);
+                    gen->aliases.externs[i].whist_name[func->as.ident.length] == '\0') {
+                    emit(gen, "%s(", gen->aliases.externs[i].c_name);
                     alias_found = 1;
                     break;
                 }
@@ -352,11 +353,11 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
         }
         // Check use aliases (use std.print -> std_print)
         if (!alias_found && func->type == NODE_IDENT) {
-            for (int i = 0; i < gen->use_alias_count; i++) {
-                if (strncmp(gen->use_aliases[i].whist_name, func->as.ident.name,
+            for (int i = 0; i < gen->aliases.use_count; i++) {
+                if (strncmp(gen->aliases.uses[i].whist_name, func->as.ident.name,
                             func->as.ident.length) == 0 &&
-                    gen->use_aliases[i].whist_name[func->as.ident.length] == '\0') {
-                    emit(gen, "%s(", gen->use_aliases[i].c_name);
+                    gen->aliases.uses[i].whist_name[func->as.ident.length] == '\0') {
+                    emit(gen, "%s(", gen->aliases.uses[i].c_name);
                     alias_found = 1;
                     break;
                 }
@@ -366,10 +367,10 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
             // If inside a module, prefix non-extern function calls with module name
             if (gen->current_module && func->type == NODE_IDENT) {
                 int is_extern = 0;
-                for (int i = 0; i < gen->extern_func_count; i++) {
-                    if (strncmp(gen->extern_funcs[i], func->as.ident.name, func->as.ident.length) ==
-                            0 &&
-                        gen->extern_funcs[i][func->as.ident.length] == '\0') {
+                for (int i = 0; i < gen->aliases.extern_func_count; i++) {
+                    if (strncmp(gen->aliases.extern_funcs[i], func->as.ident.name,
+                                func->as.ident.length) == 0 &&
+                        gen->aliases.extern_funcs[i][func->as.ident.length] == '\0') {
                         is_extern = 1;
                         break;
                     }
@@ -560,9 +561,9 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
             if (strcmp(tn->as.generic_type.base_name, "Vec") == 0) {
                 // Look up the Vec instance by mangled name
                 char* mangled = build_mangled_name_from_generic_node(gen, tn);
-                for (int vi = 0; vi < gen->vec_instance_count; vi++) {
-                    if (strcmp(gen->vec_instances[vi].mangled_name, mangled) == 0) {
-                        rtype = gen->vec_instances[vi].type;
+                for (int vi = 0; vi < gen->checker.vec_count; vi++) {
+                    if (strcmp(gen->checker.vecs[vi].mangled_name, mangled) == 0) {
+                        rtype = gen->checker.vecs[vi].type;
                         break;
                     }
                 }
@@ -570,9 +571,9 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
             } else {
                 // Look up the generic struct instance by mangled name
                 char* mangled = build_mangled_name_from_generic_node(gen, tn);
-                for (int gi = 0; gi < gen->generic_instance_count; gi++) {
-                    if (strcmp(gen->generic_instances[gi].mangled_name, mangled) == 0) {
-                        rtype = gen->generic_instances[gi].type;
+                for (int gi = 0; gi < gen->checker.instance_count; gi++) {
+                    if (strcmp(gen->checker.instances[gi].mangled_name, mangled) == 0) {
+                        rtype = gen->checker.instances[gi].type;
                         break;
                     }
                 }
@@ -581,20 +582,26 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
         } else if (tn->type == NODE_IDENT) {
             // Simple type name — check substitution context first
             const char* name = tn->as.ident.name;
-            if (gen->subst_ctx) {
-                for (int si = 0; si < gen->subst_ctx->count; si++) {
-                    if (strcmp(gen->subst_ctx->type_params[si], name) == 0) {
-                        rtype = gen->subst_ctx->type_args[si];
+            if (gen->generics.subst) {
+                for (int si = 0; si < gen->generics.subst->count; si++) {
+                    if (strcmp(gen->generics.subst->type_params[si], name) == 0) {
+                        rtype = gen->generics.subst->type_args[si];
                         break;
                     }
                 }
             }
         }
     }
+    if (!rtype) {
+        fprintf(stderr,
+                "codegen: emit_new_expr: could not resolve type for new expression at line %d\n",
+                node->line);
+        return;
+    }
     if (rtype->kind == TYPE_VEC) {
         // new Vec<T>{elems} as inline expression using GCC statement expression
         const char* elem_tname = type_mangle_name(rtype->as.vec.elem);
-        int         tmp        = gen->temp_count++;
+        int         tmp        = gen->out.temp_count++;
         emit(gen,
              "({ __Vec_%s* __rc_tmp%d = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s)); "
              "__rc_tmp%d->data = NULL; __rc_tmp%d->count = 0; __rc_tmp%d->capacity = 0;",
@@ -613,7 +620,7 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
     } else {
         // new Type { fields } as inline expression using GCC statement expression
         const char* tname = rtype->as.struc.name;
-        int         tmp   = gen->temp_count++;
+        int         tmp   = gen->out.temp_count++;
         emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s)); *__rc_tmp%d = (%s)", tname, tmp,
              tname, tname, tmp, tname);
         emit_struct_init(gen, node->as.new_expr.init);
@@ -979,7 +986,7 @@ void emit_destruct_pattern(CodeGen* gen, DestructPattern* pattern, const char* t
                 Type* elem_type = elem->resolved_type;
                 emit_indent(gen);
                 emit_resolved_type(gen, elem_type);
-                int temp_id = gen->temp_count++;
+                int temp_id = gen->out.temp_count++;
                 emit(gen, " __tuple%d = %s;\n", temp_id, accessor);
 
                 // Then recursively emit the nested pattern

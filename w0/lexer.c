@@ -544,3 +544,81 @@ const char* token_type_name(TokenType type) {
     }
     return "UNKNOWN";
 }
+
+// Return user-facing symbol string for operators (e.g., "+" not "PLUS")
+const char* token_type_symbol(TokenType type) {
+    switch (type) {
+    case TOK_PLUS:
+        return "+";
+    case TOK_MINUS:
+        return "-";
+    case TOK_STAR:
+        return "*";
+    case TOK_SLASH:
+        return "/";
+    case TOK_PERCENT:
+        return "%";
+    case TOK_AMP:
+        return "&";
+    case TOK_PIPE:
+        return "|";
+    case TOK_CARET:
+        return "^";
+    case TOK_TILDE:
+        return "~";
+    case TOK_BANG:
+        return "!";
+    case TOK_EQ:
+        return "=";
+    case TOK_LT:
+        return "<";
+    case TOK_GT:
+        return ">";
+    case TOK_PLUS_EQ:
+        return "+=";
+    case TOK_MINUS_EQ:
+        return "-=";
+    case TOK_STAR_EQ:
+        return "*=";
+    case TOK_SLASH_EQ:
+        return "/=";
+    case TOK_PERCENT_EQ:
+        return "%=";
+    case TOK_AMP_EQ:
+        return "&=";
+    case TOK_PIPE_EQ:
+        return "|=";
+    case TOK_CARET_EQ:
+        return "^=";
+    case TOK_EQ_EQ:
+        return "==";
+    case TOK_BANG_EQ:
+        return "!=";
+    case TOK_LT_EQ:
+        return "<=";
+    case TOK_GT_EQ:
+        return ">=";
+    case TOK_AMP_AMP:
+        return "&&";
+    case TOK_PIPE_PIPE:
+        return "||";
+    case TOK_LT_LT:
+        return "<<";
+    case TOK_GT_GT:
+        return ">>";
+    case TOK_LT_LT_EQ:
+        return "<<=";
+    case TOK_GT_GT_EQ:
+        return ">>=";
+    case TOK_ARROW:
+        return "->";
+    case TOK_FAT_ARROW:
+        return "=>";
+    case TOK_DOT:
+        return ".";
+    case TOK_DOT_DOT:
+        return "..";
+    default:
+        return token_type_name(type);
+    }
+}

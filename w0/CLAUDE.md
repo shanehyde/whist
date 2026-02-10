@@ -140,7 +140,7 @@ func main(): i64 {
 
 ## Compiler Architecture
 
-The compiler pipeline is: **Lexer** (`lexer.c`) -> **Parser** (`parser.c`) -> **AST** -> **Checker** (`checker.c`, `checker_types.c`, `checker_expr.c`) -> **Codegen** (`codegen.c`, `codegen_emit.c`).
+The compiler pipeline is: **Lexer** (`lexer.c`) -> **Parser** (`parser.c`) -> **AST** -> **Checker** (`checker.c`, `checker_types.c`, `checker_expr.c`) -> **Codegen** (`codegen.c`, `codegen_emit.c`, `codegen_expr.c`, `codegen_stmt.c`, `codegen_rc.c`).
 
 ### File Responsibilities
 
@@ -195,10 +195,32 @@ Key checker-set flags that codegen depends on:
 
 **RC (Reference Counting)**: Variables created via `new` are tracked in `codegen_emit.c` with scope-based cleanup. Each RC variable has a decrement function -- either generic `__rc_dec` or type-specific `__rc_dec_TypeName` for types with Drop impls or nested RC fields. See the architectural comment at the top of `codegen_emit.c`.
 
-**`codegen_init` parameters**: The codegen receives generic instances, span/vec instances, trait impls, enum info, and aliases from the checker via 11 positional parameters. The checker must outlive the codegen (borrowed pointers).
+**`codegen_init` parameters**: The codegen receives checker data via a `CodeGenChecker` struct (generic instances, span/vec instances, trait impls) passed by value. The checker must outlive the codegen (borrowed pointers). The `CodeGen` struct uses inline sub-structures: `out` (output), `defer`, `rc`, `generics`, `checker`, `enums`, `aliases`.
 
 ### Test Conventions
 
 - Files in `test/valid/` -- compiled with `--check`, expected to pass (exit 0)
 - Files in `test/errors/` -- compiled with `--check`, must contain `// Expected error:` comments matching stderr
 - Files in `test/rc_runtime/` -- compiled to C, then compiled and run; stdout checked against `// Expected:` comments
+
+### Pitfalls & Gotchas
+
+These are things that are easy to get wrong when modifying the compiler:
+
+**Adding a new checker flag to an AST node**: You must also reset it in `node_clone()` in `ast.c`. Cloned bodies are re-checked for each generic instantiation, so stale flags from a previous instantiation will cause incorrect codegen.
+
+**`check_func_decl` bypasses block scope push** (`checker.c`): The function body is a `NODE_BLOCK`, but we iterate its statements directly instead of calling `check_statement` on the block node, because we already pushed a scope for params. Do NOT simplify this to `check_statement(checker, body)` — it would create a double-scope bug.
+
+**`type_name()` ring buffer has only 4 slots** (`types.c`): Each call rotates through 4 static buffers. Nested type names in a single format string (e.g., `type_name(a), type_name(b)` in one `printf`) can alias if the types are deeply nested generics. Keep format strings to at most 2 `type_name()` calls.
+
+**`token_type_name()` vs `token_type_symbol()`** (`lexer.c`): `token_type_name()` returns enum names like `"PLUS"`, `"LT"` — use only for debugging/AST dumps. For user-facing error messages, use `token_type_symbol()` which returns `"+"`, `"<"`, etc.
+
+**Ownership-transferring functions**: `instantiate_generic_enum` and `instantiate_generic_struct` in `checker_types.c` take ownership of their `mangled` and `resolved_args` parameters (freeing them internally). Do not free these at the call site. Adding an early return inside these functions requires freeing both.
+
+**Shared node ownership in `impl_decl`**: Method `receiver_type_args` share node pointers with `impl_decl.type_args`. In `node_free`, the impl_decl case only frees the array pointer, not the nodes (which are freed by the method's `receiver_type_args`). Do not free these independently.
+
+**RC field detection must include `TYPE_VEC`**: When checking if a struct field or enum variant is RC-managed, the condition must include `TYPE_STRUCT`, `TYPE_VEC`, and `TYPE_ENUM` (if `has_rc_fields`). Missing `TYPE_VEC` will cause memory leaks for fields holding Vec values.
+
+**Parser `>>` token splitting** (`parser.c:237-247`): When parsing `Box<Vec<i64>>`, the lexer produces `>>` as a single token. The parser mutates `parser->current` in-place to split it into `>`. This only works because the modified token is consumed immediately.
+
+**Codegen type substitution pattern**: The pattern of iterating `gen->generics.subst` to find a matching type parameter name appears ~15 times across codegen files. When adding new codegen that needs type parameter substitution, follow the existing pattern in `emit_type` (`codegen_emit.c`).

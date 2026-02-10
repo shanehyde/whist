@@ -17,12 +17,12 @@ void emit_block_contents(CodeGen* gen, Node* block) {
     if (!block || block->type != NODE_BLOCK)
         return;
 
-    gen->rc_scope_depth++;
+    gen->rc.depth++;
     for (int i = 0; i < block->as.block.stmts.count; i++) {
         emit_stmt(gen, block->as.block.stmts.nodes[i]);
     }
-    rc_cleanup_scope(gen, gen->rc_scope_depth);
-    gen->rc_scope_depth--;
+    rc_cleanup_scope(gen, gen->rc.depth);
+    gen->rc.depth--;
 }
 
 // Emit an expression statement (NODE_EXPR_STMT).
@@ -40,7 +40,7 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
         Type*       var_type = rc_get_var_type(gen, var_name);
         if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
             // Enum value reassignment: dec old payload, then assign, then inc if copying
-            int temp_id = gen->temp_count++;
+            int temp_id = gen->out.temp_count++;
             emit_indent(gen);
             emit(gen, "%s __rc_tmp%d = ", var_type->as.enm.name, temp_id);
             emit_expr(gen, expr->as.assign.value);
@@ -61,7 +61,7 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
         }
 
         // Evaluate new value into a temp (in case it references the old value)
-        int temp_id = gen->temp_count++;
+        int temp_id = gen->out.temp_count++;
         emit_indent(gen);
         emit(gen, "void* __rc_tmp%d = (void*)", temp_id);
         emit_expr(gen, expr->as.assign.value);
@@ -93,7 +93,7 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
                 }
             }
             if (field_ty && field_ty->kind == TYPE_ENUM && field_ty->as.enm.has_rc_fields) {
-                int temp_id = gen->temp_count++;
+                int temp_id = gen->out.temp_count++;
                 emit_indent(gen);
                 emit(gen, "%s __rc_tmp%d = ", field_ty->as.enm.name, temp_id);
                 emit_expr(gen, expr->as.assign.value);
@@ -123,7 +123,7 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
                 // Determine the dec function for the field's type
                 char*       member_dec_owned = (char*)get_dec_func_for_type(field_ty);
                 const char* member_dec       = member_dec_owned;
-                int         tmp              = gen->temp_count++;
+                int         tmp              = gen->out.temp_count++;
                 emit_indent(gen);
                 emit(gen, "void* __rc_tmp%d = (void*)", tmp);
                 emit_expr(gen, expr->as.assign.value);
@@ -146,7 +146,7 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
             strcmp(member->as.member.object->as.ident.name, "self") == 0) {
             int   value_is_rc = expr->as.assign.value->type == NODE_NEW_EXPR;
             char* dec_fn      = NULL;
-            if (value_is_rc && gen->current_generic_template) {
+            if (value_is_rc && gen->generics.tmpl) {
                 // Generic method: look up field type from template
                 Node* ftype = lookup_generic_template_field_type(gen, member->as.member.name);
                 dec_fn      = resolve_generic_field_dec_func(gen, ftype);
@@ -385,7 +385,7 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
         Type* tuple_type = pattern->resolved_type;
         emit_indent(gen);
         emit_resolved_type(gen, tuple_type);
-        int temp_id = gen->temp_count++;
+        int temp_id = gen->out.temp_count++;
         emit(gen, " __tuple%d = ", temp_id);
         emit_expr(gen, node->as.var_decl.init);
         emit(gen, ";\n");
@@ -442,15 +442,15 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
     if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_IDENT) {
         // Check if the returned identifier is an RC var
         const char* ret_name = node->as.return_stmt.value->as.ident.name;
-        for (int i = 0; i < gen->rc_var_count; i++) {
-            if (strcmp(gen->rc_vars[i].name, ret_name) == 0) {
+        for (int i = 0; i < gen->rc.count; i++) {
+            if (strcmp(gen->rc.vars[i].name, ret_name) == 0) {
                 skip_name = ret_name;
                 break;
             }
         }
     }
 
-    if (gen->defer_count > 0) {
+    if (gen->defer.count > 0) {
         // With defers: store value in __ret, cleanup RC, goto cleanup
         emit_indent(gen);
         if (node->as.return_stmt.value) {
@@ -458,14 +458,14 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
             emit_expr(gen, node->as.return_stmt.value);
             emit(gen, ";\n");
         }
-        if (gen->rc_var_count > 0) {
+        if (gen->rc.count > 0) {
             rc_cleanup_all(gen, skip_name);
         }
         emit_indent(gen);
         emit(gen, "goto __cleanup;\n");
     } else {
         // No defers: cleanup RC, then return
-        if (gen->rc_var_count > 0) {
+        if (gen->rc.count > 0) {
             if (node->as.return_stmt.value && !skip_name) {
                 // Complex expression: evaluate to temp first
                 emit_indent(gen);
@@ -509,7 +509,7 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
     const char* enum_name = enum_type->as.enm.name;
 
     // Emit temp variable: EnumType __matchN = <expr>;
-    int match_id = gen->temp_count++;
+    int match_id = gen->out.temp_count++;
     emit_indent(gen);
     emit(gen, "%s __match%d = ", enum_name, match_id);
     emit_expr(gen, node->as.match_stmt.expr);
@@ -542,7 +542,7 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
         }
         first = 0;
 
-        gen->indent++;
+        gen->out.indent++;
 
         // Emit binding declarations for data enum variants
         if (!arm->as.match_arm.is_wildcard && is_data && arm->as.match_arm.binding_count > 0) {
@@ -572,7 +572,7 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
             }
         }
 
-        gen->indent--;
+        gen->out.indent--;
         emit_indent(gen);
         emit(gen, "}\n");
     }
@@ -595,14 +595,14 @@ void emit_stmt(CodeGen* gen, Node* node) {
     case NODE_BLOCK:
         emit_indent(gen);
         emit(gen, "{\n");
-        gen->indent++;
-        gen->rc_scope_depth++;
+        gen->out.indent++;
+        gen->rc.depth++;
         for (int i = 0; i < node->as.block.stmts.count; i++) {
             emit_stmt(gen, node->as.block.stmts.nodes[i]);
         }
-        rc_cleanup_scope(gen, gen->rc_scope_depth);
-        gen->rc_scope_depth--;
-        gen->indent--;
+        rc_cleanup_scope(gen, gen->rc.depth);
+        gen->rc.depth--;
+        gen->out.indent--;
         emit_indent(gen);
         emit(gen, "}\n");
         break;
@@ -620,14 +620,14 @@ void emit_stmt(CodeGen* gen, Node* node) {
             emit_expr(gen, node->as.if_stmt.cond);
             emit(gen, ") {\n");
         }
-        gen->indent++;
+        gen->out.indent++;
         // Emit then block contents directly (it's already a block)
         if (node->as.if_stmt.then_block->type == NODE_BLOCK) {
             emit_block_contents(gen, node->as.if_stmt.then_block);
         } else {
             emit_stmt(gen, node->as.if_stmt.then_block);
         }
-        gen->indent--;
+        gen->out.indent--;
         emit_indent(gen);
         emit(gen, "}");
 
@@ -636,18 +636,18 @@ void emit_stmt(CodeGen* gen, Node* node) {
                 // else if
                 emit(gen, " else ");
                 // Remove indent for else if
-                gen->indent--;
+                gen->out.indent--;
                 emit_stmt(gen, node->as.if_stmt.else_block);
-                gen->indent++;
+                gen->out.indent++;
             } else {
                 emit(gen, " else {\n");
-                gen->indent++;
+                gen->out.indent++;
                 if (node->as.if_stmt.else_block->type == NODE_BLOCK) {
                     emit_block_contents(gen, node->as.if_stmt.else_block);
                 } else {
                     emit_stmt(gen, node->as.if_stmt.else_block);
                 }
-                gen->indent--;
+                gen->out.indent--;
                 emit_indent(gen);
                 emit(gen, "}\n");
             }
@@ -670,13 +670,13 @@ void emit_stmt(CodeGen* gen, Node* node) {
             emit_expr(gen, node->as.while_stmt.cond);
             emit(gen, ") {\n");
         }
-        gen->indent++;
+        gen->out.indent++;
         if (node->as.while_stmt.body->type == NODE_BLOCK) {
             emit_block_contents(gen, node->as.while_stmt.body);
         } else {
             emit_stmt(gen, node->as.while_stmt.body);
         }
-        gen->indent--;
+        gen->out.indent--;
         emit_indent(gen);
         emit(gen, "}\n");
         break;
@@ -713,20 +713,20 @@ void emit_stmt(CodeGen* gen, Node* node) {
             emit_expr(gen, node->as.for_stmt.post);
         }
         emit(gen, ") {\n");
-        gen->indent++;
+        gen->out.indent++;
         if (node->as.for_stmt.body->type == NODE_BLOCK) {
             emit_block_contents(gen, node->as.for_stmt.body);
         } else {
             emit_stmt(gen, node->as.for_stmt.body);
         }
-        gen->indent--;
+        gen->out.indent--;
         emit_indent(gen);
         emit(gen, "}\n");
         break;
 
     case NODE_FOREACH:
         if (node->as.foreach_stmt.collection) {
-            int idx_id = gen->temp_count++;
+            int idx_id = gen->out.temp_count++;
             if (node->as.foreach_stmt.is_string) {
                 // String foreach: foreach (const c in str)
                 emit_indent(gen);
@@ -734,7 +734,7 @@ void emit_stmt(CodeGen* gen, Node* node) {
                      idx_id);
                 emit_expr(gen, node->as.foreach_stmt.collection);
                 emit(gen, "); __foreach_%d++) {\n", idx_id);
-                gen->indent++;
+                gen->out.indent++;
                 emit_indent(gen);
                 emit(gen, "char %s = ", node->as.foreach_stmt.var_name);
                 emit_expr(gen, node->as.foreach_stmt.collection);
@@ -747,7 +747,7 @@ void emit_stmt(CodeGen* gen, Node* node) {
                 emit(gen, "for (int64_t __foreach_%d = 0; __foreach_%d < ", idx_id, idx_id);
                 emit_expr(gen, node->as.foreach_stmt.collection);
                 emit(gen, "%scount; __foreach_%d++) {\n", access, idx_id);
-                gen->indent++;
+                gen->out.indent++;
                 // Declare the loop variable from collection data[idx]
                 emit_indent(gen);
                 emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
@@ -762,7 +762,7 @@ void emit_stmt(CodeGen* gen, Node* node) {
             } else {
                 emit_stmt(gen, node->as.foreach_stmt.body);
             }
-            gen->indent--;
+            gen->out.indent--;
             emit_indent(gen);
             emit(gen, "}\n");
         } else {
@@ -779,13 +779,13 @@ void emit_stmt(CodeGen* gen, Node* node) {
             emit(gen, "; %s += ", node->as.foreach_stmt.var_name);
             emit_expr(gen, node->as.foreach_stmt.step);
             emit(gen, ") {\n");
-            gen->indent++;
+            gen->out.indent++;
             if (node->as.foreach_stmt.body->type == NODE_BLOCK) {
                 emit_block_contents(gen, node->as.foreach_stmt.body);
             } else {
                 emit_stmt(gen, node->as.foreach_stmt.body);
             }
-            gen->indent--;
+            gen->out.indent--;
             emit_indent(gen);
             emit(gen, "}\n");
         }
@@ -804,13 +804,13 @@ void emit_stmt(CodeGen* gen, Node* node) {
         break;
 
     case NODE_BREAK:
-        rc_cleanup_scope(gen, gen->rc_scope_depth);
+        rc_cleanup_scope(gen, gen->rc.depth);
         emit_indent(gen);
         emit(gen, "break;\n");
         break;
 
     case NODE_CONTINUE:
-        rc_cleanup_scope(gen, gen->rc_scope_depth);
+        rc_cleanup_scope(gen, gen->rc.depth);
         emit_indent(gen);
         emit(gen, "continue;\n");
         break;

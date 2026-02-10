@@ -225,6 +225,11 @@ void node_free(Node* node) {
         nodelist_free(&node->as.func_decl.params);
         node_free(node->as.func_decl.return_type);
         node_free(node->as.func_decl.body);
+        // Free accessible modules list
+        for (int i = 0; i < node->as.func_decl.accessible_modules_count; i++) {
+            free(node->as.func_decl.accessible_modules[i]);
+        }
+        free(node->as.func_decl.accessible_modules);
         break;
     case NODE_PARAM:
         free(node->as.param.name);
@@ -233,11 +238,13 @@ void node_free(Node* node) {
     case NODE_STRUCT_DECL:
         free(node->as.struct_decl.name);
         nodelist_free(&node->as.struct_decl.fields);
-        // Free type parameters if present
+        // Free type parameters and bounds if present
         for (int i = 0; i < node->as.struct_decl.type_param_count; i++) {
             free(node->as.struct_decl.type_params[i]);
+            free(node->as.struct_decl.type_param_bounds[i]);
         }
         free(node->as.struct_decl.type_params);
+        free(node->as.struct_decl.type_param_bounds);
         break;
     case NODE_FIELD:
         free(node->as.field.name);
@@ -246,11 +253,13 @@ void node_free(Node* node) {
     case NODE_ENUM_DECL:
         free(node->as.enum_decl.name);
         nodelist_free(&node->as.enum_decl.values);
-        // Free type parameters if present
+        // Free type parameters and bounds if present
         for (int i = 0; i < node->as.enum_decl.type_param_count; i++) {
             free(node->as.enum_decl.type_params[i]);
+            free(node->as.enum_decl.type_param_bounds[i]);
         }
         free(node->as.enum_decl.type_params);
+        free(node->as.enum_decl.type_param_bounds);
         break;
     case NODE_TUPLE_TYPE:
         nodelist_free(&node->as.tuple_type.elem_types);
@@ -406,7 +415,7 @@ Node* node_clone(Node* node) {
         c->as.struct_init.fields = nodelist_clone(&node->as.struct_init.fields);
         break;
     case NODE_FIELD_INIT:
-        c->as.field_init.name        = xstrdup(node->as.field_init.name);
+        c->as.field_init.name = node->as.field_init.name ? xstrdup(node->as.field_init.name) : NULL;
         c->as.field_init.name_length = node->as.field_init.name_length;
         c->as.field_init.value       = node_clone(node->as.field_init.value);
         break;
