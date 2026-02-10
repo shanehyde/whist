@@ -155,7 +155,11 @@ The compiler pipeline is: **Lexer** (`lexer.c`) -> **Parser** (`parser.c`) -> **
 | `checker_expr.c` | Expression type checking |
 | `checker_internal.h` | Cross-file checker function declarations |
 | `codegen.c/h` | Codegen orchestration, boilerplate, forward decls, RC runtime |
-| `codegen_emit.c/h` | Per-node emission (expressions, statements, declarations) |
+| `codegen_emit.c/h` | Output helpers, type/enum queries, type emission, declaration emission |
+| `codegen_rc.c` | RC variable tracking (push, cleanup, clear) |
+| `codegen_expr.c` | Expression emission |
+| `codegen_stmt.c` | Statement emission |
+| `codegen_internal.h` | Cross-file codegen function declarations |
 | `util.h` | Shared utilities (`read_file`) |
 | `alloc.h` | Checked allocation wrappers (`xmalloc`, `xstrdup`, etc.) |
 | `vec.h` | Dynamic array growth macro (`VEC_GROW`) |
