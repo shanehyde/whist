@@ -110,6 +110,8 @@ typedef struct {
     int    tuple_type_capacity;
     // Current module name (NULL for "main")
     const char* current_module;
+    // 1 if currently emitting an enum method body
+    int in_enum_method;
 } CodeGen;
 
 void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_debug);

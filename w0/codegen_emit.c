@@ -644,11 +644,19 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
         emit(gen, " __ret;\n");
     }
 
+    // Track if we're inside an enum method body (for match(self) dereference)
+    int was_in_enum_method = gen->in_enum_method;
+    if (is_method && is_enum_type_name(gen, node->as.func_decl.receiver_type)) {
+        gen->in_enum_method = 1;
+    }
+
     if (node->as.func_decl.body) {
         for (int i = 0; i < node->as.func_decl.body->as.block.stmts.count; i++) {
             emit_stmt(gen, node->as.func_decl.body->as.block.stmts.nodes[i]);
         }
     }
+
+    gen->in_enum_method = was_in_enum_method;
 
     // Emit cleanup section if there are defers
     if (gen->defer.count > 0) {

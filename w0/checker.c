@@ -1088,6 +1088,20 @@ static void check_func_decl(Checker* checker, Node* node) {
             st->as.struc.method_types[n]    = func_type;
             st->as.struc.method_is_const[n] = fdn->receiver_is_const;
             st->as.struc.method_count       = n + 1;
+        } else if (struct_sym && struct_sym->kind == SYM_TYPE &&
+                   struct_sym->type->kind == TYPE_ENUM) {
+            Type* et = struct_sym->type;
+            int   n  = et->as.enm.method_count;
+
+            et->as.enm.method_names = xrealloc(et->as.enm.method_names, (n + 1) * sizeof(char*));
+            et->as.enm.method_types = xrealloc(et->as.enm.method_types, (n + 1) * sizeof(Type*));
+            et->as.enm.method_is_const =
+                xrealloc(et->as.enm.method_is_const, (n + 1) * sizeof(int));
+
+            et->as.enm.method_names[n]    = xstrdup(name);
+            et->as.enm.method_types[n]    = func_type;
+            et->as.enm.method_is_const[n] = fdn->receiver_is_const;
+            et->as.enm.method_count       = n + 1;
         } else if (type_builtin_from_name(receiver_type)) {
             // Register method on a primitive type
             VEC_GROW(checker->traits.primitive_methods, checker->traits.primitive_method_count,
@@ -1367,7 +1381,8 @@ static void check_impl_decl(Checker* checker, Node* node) {
     GenericDef* generic_def  = NULL;
     int         is_generic   = 0;
     int         is_primitive = 0;
-    if (!type_sym || type_sym->kind != SYM_TYPE || type_sym->type->kind != TYPE_STRUCT) {
+    if (!type_sym || type_sym->kind != SYM_TYPE ||
+        (type_sym->type->kind != TYPE_STRUCT && type_sym->type->kind != TYPE_ENUM)) {
         // Fallback: check if it's a generic struct template
         generic_def = lookup_generic_def(checker, type_name_str);
         if (generic_def) {
