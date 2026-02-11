@@ -929,6 +929,9 @@ static Type* check_cast_expr(Checker* checker, Node* node) {
     // Allow: integer -> integer (widening/narrowing)
     if (type_is_integer(expr_type) && type_is_integer(target))
         return target;
+    // Allow: simple enum -> integer (for explicit/ordinal value access)
+    if (expr_type->kind == TYPE_ENUM && !expr_type->as.enm.has_data && type_is_integer(target))
+        return target;
     // Allow: struct reference -> voidptr (opaque pointer for interop/hash use cases)
     if (expr_type->kind == TYPE_STRUCT && target->kind == TYPE_VOIDPTR)
         return target;

@@ -1214,9 +1214,26 @@ static void check_struct_decl(Checker* checker, Node* node) {
 // Type-check an enum declaration: resolve variant types or register generic template
 static void check_enum_decl(Checker* checker, Node* node) {
     const char* name = node->as.enum_decl.name;
+    int         value_count = node->as.enum_decl.values.count;
 
     if (checker_lookup(checker, name)) {
         check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+        return;
+    }
+
+    // Data enums (any payload variant) do not support explicit integer assignments.
+    int   has_data_variant   = 0;
+    Node* explicit_variant   = NULL;
+    for (int i = 0; i < value_count; i++) {
+        Node* val = node->as.enum_decl.values.nodes[i];
+        if (val->as.enum_variant.types.count > 0)
+            has_data_variant = 1;
+        if (val->as.enum_variant.has_explicit_value && !explicit_variant)
+            explicit_variant = val;
+    }
+    if (has_data_variant && explicit_variant) {
+        check_error(checker, explicit_variant->line, explicit_variant->column,
+                    "Cannot assign explicit values in enums with data variants");
         return;
     }
 
@@ -1229,7 +1246,6 @@ static void check_enum_decl(Checker* checker, Node* node) {
     }
 
     Type* enum_type   = type_enum(name);
-    int   value_count = node->as.enum_decl.values.count;
 
     enum_type->as.enm.value_count         = value_count;
     enum_type->as.enm.value_names         = xmalloc(value_count * sizeof(char*));

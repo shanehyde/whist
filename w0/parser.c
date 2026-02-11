@@ -1802,7 +1802,6 @@ static Node* parse_enum_decl(Parser* parser, int is_public) {
     }
 
     consume_token(parser, TOK_LBRACE, "Expected '{' after enum name");
-
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
         Token value_name = parser->current;
         consume_token(parser, TOK_IDENT, "Expected enum value name");
@@ -1811,6 +1810,8 @@ static Node* parse_enum_decl(Parser* parser, int is_public) {
         value->as.enum_variant.name        = copy_token_string(&value_name);
         value->as.enum_variant.name_length = value_name.length;
         nodelist_init(&value->as.enum_variant.types);
+        value->as.enum_variant.has_explicit_value = 0;
+        value->as.enum_variant.explicit_value     = 0;
 
         // Check for payload types: VariantName(Type1, Type2, ...)
         if (match_token(parser, TOK_LPAREN)) {
@@ -1824,6 +1825,41 @@ static Node* parse_enum_decl(Parser* parser, int is_public) {
                 }
             }
             consume_token(parser, TOK_RPAREN, "Expected ')' after variant types");
+        }
+        // Optional explicit integer value: VariantName = 43
+        if (match_token(parser, TOK_EQ)) {
+            int is_negative = match_token(parser, TOK_MINUS);
+            Token value_token = parser->current;
+            consume_token(parser, TOK_INT, "Expected integer literal after '=' in enum variant");
+            if (value_token.type != TOK_INT)
+                return NULL;
+
+            const char* start = value_token.start;
+            int         base  = 10;
+            if (value_token.length > 2) {
+                if (start[0] == '0' && (start[1] == 'x' || start[1] == 'X')) {
+                    base = 16;
+                    start += 2;
+                } else if (start[0] == '0' && (start[1] == 'b' || start[1] == 'B')) {
+                    base = 2;
+                    start += 2;
+                } else if (start[0] == '0' && (start[1] == 'o' || start[1] == 'O')) {
+                    base = 8;
+                    start += 2;
+                }
+            }
+
+            errno = 0;
+            char* endptr;
+            long  explicit_value = strtol(start, &endptr, base);
+            if (errno == ERANGE) {
+                parse_error_at(parser, &value_token, "Enum variant value out of range");
+            }
+            if (is_negative) {
+                explicit_value = -explicit_value;
+            }
+            value->as.enum_variant.has_explicit_value = 1;
+            value->as.enum_variant.explicit_value     = explicit_value;
         }
 
         nodelist_push(&node->as.enum_decl.values, value);
