@@ -101,6 +101,9 @@ static void print_enum_decl(Node* node, int depth) {
 
 static void print_enum_variant(Node* node, int depth) {
     printf("EnumVariant: %.*s", node->as.enum_variant.name_length, node->as.enum_variant.name);
+    if (node->as.enum_variant.has_explicit_value) {
+        printf(" = %ld", node->as.enum_variant.explicit_value);
+    }
     if (node->as.enum_variant.types.count > 0) {
         printf("(");
         for (int i = 0; i < node->as.enum_variant.types.count; i++) {

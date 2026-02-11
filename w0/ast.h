@@ -442,6 +442,8 @@ struct Node {
             char*    name;
             int      name_length;
             NodeList types; // payload type nodes (empty for simple variants)
+            int      has_explicit_value;
+            long     explicit_value;
         } enum_variant;
 
         // Trait declaration
