@@ -38,8 +38,8 @@ static int register_tuple_type(CodeGen* gen, Type* type) {
 static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node);
 
 static int return_type_is_void(Node* return_type) {
-    return !return_type || (return_type->type == NODE_IDENT &&
-                            strcmp(return_type->as.ident.name, "void") == 0);
+    return !return_type ||
+           (return_type->type == NODE_IDENT && strcmp(return_type->as.ident.name, "void") == 0);
 }
 
 static void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
