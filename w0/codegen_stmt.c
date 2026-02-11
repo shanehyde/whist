@@ -515,6 +515,17 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
     emit_expr(gen, node->as.match_stmt.expr);
     emit(gen, ";\n");
 
+    // Check if exhaustive (no wildcard arm) — if so, emit last arm as 'else'
+    // to suppress "control reaches end of non-void function" C compiler warnings
+    int has_wildcard = 0;
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
+            has_wildcard = 1;
+            break;
+        }
+    }
+    int last_arm = node->as.match_stmt.arms.count - 1;
+
     int first = 1;
     for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
         Node* arm = node->as.match_stmt.arms.nodes[a];
@@ -526,6 +537,10 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
             } else {
                 emit(gen, "else {\n");
             }
+        } else if (!has_wildcard && a == last_arm && !first) {
+            // Exhaustive match: emit last arm as 'else' so the C compiler
+            // knows one branch always executes
+            emit(gen, "else {\n");
         } else {
             const char* variant = arm->as.match_arm.variant_name;
             if (first) {
