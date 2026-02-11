@@ -99,6 +99,7 @@ typedef enum {
     TOK_DOT,         // .
     TOK_DOT_DOT,     // ..
     TOK_ELLIPSIS,    // ...
+    TOK_QUESTION,    // ?
 
     // Error
     TOK_ERROR

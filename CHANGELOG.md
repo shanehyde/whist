@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- `?` postfix operator for error propagation on Result and Option types (#147)
+  - `expr?` unwraps `Ok(T)`/`Some(T)` to `T`, or returns early with `Err(E)`/`None`
+  - Validates operand is a Result (Ok/Err) or Option (Some/None) enum
+  - Validates function return type compatibility (matching error types for Result)
+  - Emits GCC statement expressions `({ ... })` for use in any expression position
+  - Supports inline RC cleanup and defer-aware early return (`goto __cleanup`)
+
 ### Changed
 
 - Extracted type query functions from `codegen_emit.c` into new `codegen_types.c/h`

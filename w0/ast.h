@@ -57,6 +57,7 @@ typedef enum {
     NODE_NEW_EXPR,
     NODE_STRING_INTERP,
     NODE_CAST,
+    NODE_TRY_EXPR,
 
     // Statements
     NODE_EXPR_STMT,
@@ -284,6 +285,16 @@ struct Node {
             Node* type_node;
             Type* resolved_type; // Set by checker
         } cast_expr;
+
+        // Try expression: expr?
+        struct {
+            Node* expr;
+            Type* resolved_type;  // Set by checker: enum type of operand
+            Type* unwrapped_type; // Set by checker: T from Ok(T)/Some(T)
+            int   is_option;      // Set by checker: 1=Option, 0=Result
+            char* enum_name;      // Set by checker: operand's mangled enum name
+            char* ret_enum_name;  // Set by checker: function return's mangled enum name
+        } try_expr;
 
         // Tuple type: (T1, T2, ...)
         struct {
