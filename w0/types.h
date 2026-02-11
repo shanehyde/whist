@@ -88,6 +88,11 @@ struct Type {
             int     has_rc_fields;       // 1 if any payload carries RC-managed pointers
             Type*** variant_types;       // [variant_idx] -> Type*[] (NULL = no payload)
             int*    variant_type_counts; // [variant_idx] -> field count
+            // Methods
+            char** method_names;
+            Type** method_types;    // Function types for methods
+            int*   method_is_const; // Whether each method is const
+            int    method_count;
         } enm;
 
         // Trait

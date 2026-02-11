@@ -336,12 +336,29 @@ static Type* check_member_expr(Checker* checker, Node* node) {
         return type_error;
     }
 
-    // Handle data enum member access (.tag)
-    if (object->kind == TYPE_ENUM && object->as.enm.has_data) {
+    // Handle enum member access (.tag and methods)
+    if (object->kind == TYPE_ENUM) {
         const char* member_name = node->as.member.name;
-        node->as.member.is_ref  = 0; // Data enums are value types, use . not ->
-        if (strcmp(member_name, "tag") == 0) {
+        node->as.member.is_ref  = 0; // Enums are value types, use . not ->
+        if (object->as.enm.has_data && strcmp(member_name, "tag") == 0) {
             return type_int32;
+        }
+        // Check for methods on the enum
+        for (int i = 0; i < object->as.enm.method_count; i++) {
+            if (strcmp(object->as.enm.method_names[i], member_name) == 0) {
+                if (!object->as.enm.method_is_const[i]) {
+                    const char* const_name =
+                        get_const_binding_name(checker, node->as.member.object);
+                    if (const_name) {
+                        check_error(checker, node->line, node->column,
+                                    "Cannot call mutating method '%s' on const '%s'", member_name,
+                                    const_name);
+                        return type_error;
+                    }
+                }
+                node->as.member.struct_name = xstrdup(object->as.enm.name);
+                return object->as.enm.method_types[i];
+            }
         }
         check_error(checker, node->line, node->column, "Enum '%s' has no member '%s'",
                     object->as.enm.name, member_name);

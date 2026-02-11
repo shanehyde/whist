@@ -104,6 +104,10 @@ Type* type_enum(const char* name) {
     type->as.enm.has_rc_fields       = 0;
     type->as.enm.variant_types       = NULL;
     type->as.enm.variant_type_counts = NULL;
+    type->as.enm.method_names        = NULL;
+    type->as.enm.method_types        = NULL;
+    type->as.enm.method_is_const     = NULL;
+    type->as.enm.method_count        = 0;
     return type;
 }
 
@@ -192,6 +196,12 @@ void type_free(Type* type) {
             free(type->as.enm.variant_types);
         }
         free(type->as.enm.variant_type_counts);
+        for (int i = 0; i < type->as.enm.method_count; i++) {
+            free(type->as.enm.method_names[i]);
+        }
+        free(type->as.enm.method_names);
+        free(type->as.enm.method_types);
+        free(type->as.enm.method_is_const);
         break;
     case TYPE_TRAIT:
         free(type->as.trait.name);

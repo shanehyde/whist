@@ -281,7 +281,11 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
         // With struct references, objects are already pointers
         emit(gen, "%s_%.*s(", func->as.member.struct_name, func->as.member.length,
              func->as.member.name);
-        // Emit the receiver as first argument (already a pointer)
+        // Emit the receiver as first argument
+        // For enums, take address (stack values); for structs, already pointers
+        if (is_enum_type_name(gen, func->as.member.struct_name)) {
+            emit(gen, "&");
+        }
         emit_expr(gen, func->as.member.object);
         // Emit remaining arguments
         for (int i = 0; i < node->as.call.args.count; i++) {
