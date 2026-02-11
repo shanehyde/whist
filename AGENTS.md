@@ -3,8 +3,9 @@
 ## Team Conventions
 
 - "issue #N" means GitHub issue `N` in `shanehyde/whist`.
-- Use a github MCP if available to use.
-- When issue numbers are mentioned, run `gh issue view <N>` first before responding.
+- Prefer GitHub MCP tools over `gh` CLI for all GitHub operations.
+- Only use `gh` if MCP is unavailable or lacks the required operation.
+- When issue numbers are mentioned, fetch issue `N` via GitHub MCP first before responding.
 - If there is ambiguity, prefer GitHub issue context over local docs.
 
 ## Quick Repo Map
