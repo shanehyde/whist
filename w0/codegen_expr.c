@@ -284,9 +284,25 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
         // Emit the receiver as first argument
         // For enums, take address (stack values); for structs, already pointers
         if (is_enum_type_name(gen, func->as.member.struct_name)) {
-            emit(gen, "&");
+            // In enum methods, self is already a pointer — pass it directly.
+            // For other identifiers (lvalues), take address. For non-lvalues
+            // (call results, etc.), materialize into a temporary first.
+            if (gen->in_enum_method && func->as.member.object->type == NODE_IDENT &&
+                func->as.member.object->as.ident.length == 4 &&
+                memcmp(func->as.member.object->as.ident.name, "self", 4) == 0) {
+                emit(gen, "self");
+            } else if (func->as.member.object->type == NODE_IDENT) {
+                emit(gen, "&");
+                emit_expr(gen, func->as.member.object);
+            } else {
+                int tmp = gen->out.temp_count++;
+                emit(gen, "({%s __tmp%d = ", func->as.member.struct_name, tmp);
+                emit_expr(gen, func->as.member.object);
+                emit(gen, "; &__tmp%d;})", tmp);
+            }
+        } else {
+            emit_expr(gen, func->as.member.object);
         }
-        emit_expr(gen, func->as.member.object);
         // Emit remaining arguments
         for (int i = 0; i < node->as.call.args.count; i++) {
             emit(gen, ", ");
@@ -890,7 +906,13 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_IDENT:
-        emit(gen, "%.*s", node->as.ident.length, node->as.ident.name);
+        // In enum methods, self is a pointer but represents a value — dereference it
+        if (gen->in_enum_method && node->as.ident.length == 4 &&
+            memcmp(node->as.ident.name, "self", 4) == 0) {
+            emit(gen, "(*self)");
+        } else {
+            emit(gen, "%.*s", node->as.ident.length, node->as.ident.name);
+        }
         break;
 
     case NODE_ENUM_VALUE:

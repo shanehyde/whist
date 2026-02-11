@@ -512,11 +512,6 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
     int match_id = gen->out.temp_count++;
     emit_indent(gen);
     emit(gen, "%s __match%d = ", enum_name, match_id);
-    // In enum methods, self is a pointer; dereference it for match
-    if (gen->in_enum_method && node->as.match_stmt.expr->type == NODE_IDENT &&
-        strcmp(node->as.match_stmt.expr->as.ident.name, "self") == 0) {
-        emit(gen, "*");
-    }
     emit_expr(gen, node->as.match_stmt.expr);
     emit(gen, ";\n");
 
