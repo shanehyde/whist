@@ -816,6 +816,12 @@ static void emit_try_expr(CodeGen* gen, Node* node) {
         emit(gen, "if (__try%d.tag == %s_Err) { ", try_id, enum_name);
     }
 
+    // For Result: save error payload before RC cleanup to avoid use-after-free
+    // when the source enum is an RC-tracked variable whose Err payload would be freed
+    if (!is_option) {
+        emit(gen, "typeof(__try%d.Err.f0) __try_err%d = __try%d.Err.f0; ", try_id, try_id, try_id);
+    }
+
     // Inline RC cleanup (no newlines, stay inside statement expr)
     for (int i = 0; i < gen->rc.count; i++) {
         emit(gen, "%s(%s); ", gen->rc.vars[i].dec_func, gen->rc.vars[i].name);
@@ -827,7 +833,7 @@ static void emit_try_expr(CodeGen* gen, Node* node) {
         if (is_option) {
             emit(gen, "__ret = (%s){.tag = %s_None}; ", ret_enum_name, ret_enum_name);
         } else {
-            emit(gen, "__ret = (%s){.tag = %s_Err, .Err = {.f0 = __try%d.Err.f0}}; ", ret_enum_name,
+            emit(gen, "__ret = (%s){.tag = %s_Err, .Err = {.f0 = __try_err%d}}; ", ret_enum_name,
                  ret_enum_name, try_id);
         }
         emit(gen, "goto __cleanup; ");
@@ -836,7 +842,7 @@ static void emit_try_expr(CodeGen* gen, Node* node) {
         if (is_option) {
             emit(gen, "return (%s){.tag = %s_None}; ", ret_enum_name, ret_enum_name);
         } else {
-            emit(gen, "return (%s){.tag = %s_Err, .Err = {.f0 = __try%d.Err.f0}}; ", ret_enum_name,
+            emit(gen, "return (%s){.tag = %s_Err, .Err = {.f0 = __try_err%d}}; ", ret_enum_name,
                  ret_enum_name, try_id);
         }
     }

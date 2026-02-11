@@ -1026,6 +1026,10 @@ static Type* check_try_expr(Checker* checker, Node* node) {
     int is_result = (ok_idx >= 0 && err_idx >= 0);
     int is_option = (some_idx >= 0 && none_idx >= 0);
 
+    // Result takes priority if enum has both Ok/Err and Some/None
+    if (is_result)
+        is_option = 0;
+
     if (!is_result && !is_option) {
         check_error(checker, node->line, node->column,
                     "'?' operator requires a Result (Ok/Err) or Option (Some/None) enum, got '%s'",
