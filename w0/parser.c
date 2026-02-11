@@ -1826,6 +1826,19 @@ static Node* parse_enum_decl(Parser* parser, int is_public) {
             consume_token(parser, TOK_RPAREN, "Expected ')' after variant types");
         }
 
+        // Check for explicit integer value: VariantName = 43
+        if (match_token(parser, TOK_EQ)) {
+            int negative = 0;
+            if (match_token(parser, TOK_MINUS))
+                negative = 1;
+            Token int_tok = parser->current;
+            consume_token(parser, TOK_INT, "Expected integer after '='");
+            char* endptr;
+            long  val                            = strtol(int_tok.start, &endptr, 10);
+            value->as.enum_variant.int_value     = negative ? -val : val;
+            value->as.enum_variant.has_int_value = 1;
+        }
+
         nodelist_push(&node->as.enum_decl.values, value);
 
         if (!check_token(parser, TOK_RBRACE)) {

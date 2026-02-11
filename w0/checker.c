@@ -1247,6 +1247,12 @@ static void check_enum_decl(Checker* checker, Node* node) {
         int type_count                           = val->as.enum_variant.types.count;
         enum_type->as.enm.variant_type_counts[i] = type_count;
 
+        if (val->as.enum_variant.has_int_value && type_count > 0) {
+            check_error(checker, val->line, val->column,
+                        "Enum variant with data cannot have explicit integer value");
+            continue;
+        }
+
         if (type_count > 0) {
             enum_type->as.enm.has_data         = 1;
             enum_type->as.enm.variant_types[i] = xmalloc(type_count * sizeof(Type*));

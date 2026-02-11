@@ -452,7 +452,7 @@ static Type* check_member_expr(Checker* checker, Node* node) {
         if (strcmp(object->as.struc.field_names[i], member_name) == 0) {
             int object_is_const = 0;
             if (node->as.member.object->type == NODE_IDENT) {
-                Symbol* sym = checker_lookup(checker, node->as.member.object->as.ident.name);
+                Symbol* sym     = checker_lookup(checker, node->as.member.object->as.ident.name);
                 object_is_const = (sym && sym->is_const);
             } else if (node->as.member.object->type == NODE_MEMBER) {
                 object_is_const = node->as.member.object->as.member.is_const_access;

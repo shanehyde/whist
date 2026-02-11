@@ -932,6 +932,8 @@ void emit_enum_typedefs(CodeGen* gen, Node* ast) {
                     emit_indent(gen);
                     emit(gen, "%s_%.*s", ename, var->as.enum_variant.name_length,
                          var->as.enum_variant.name);
+                    if (var->as.enum_variant.has_int_value)
+                        emit(gen, " = %ld", var->as.enum_variant.int_value);
                     if (v < value_count - 1)
                         emit(gen, ",");
                     emit(gen, "\n");
@@ -948,6 +950,8 @@ void emit_enum_typedefs(CodeGen* gen, Node* ast) {
                     emit_indent(gen);
                     emit(gen, "%s_%.*s", ename, var->as.enum_variant.name_length,
                          var->as.enum_variant.name);
+                    if (var->as.enum_variant.has_int_value)
+                        emit(gen, " = %ld", var->as.enum_variant.int_value);
                     if (v < value_count - 1)
                         emit(gen, ",");
                     emit(gen, "\n");
@@ -1030,6 +1034,8 @@ void emit_generic_enum_typedefs(CodeGen* gen, Node* ast) {
                 emit_indent(gen);
                 emit(gen, "%s_%.*s", ename, var->as.enum_variant.name_length,
                      var->as.enum_variant.name);
+                if (var->as.enum_variant.has_int_value)
+                    emit(gen, " = %ld", var->as.enum_variant.int_value);
                 if (v < value_count - 1)
                     emit(gen, ",");
                 emit(gen, "\n");
@@ -1045,6 +1051,8 @@ void emit_generic_enum_typedefs(CodeGen* gen, Node* ast) {
                 emit_indent(gen);
                 emit(gen, "%s_%.*s", ename, var->as.enum_variant.name_length,
                      var->as.enum_variant.name);
+                if (var->as.enum_variant.has_int_value)
+                    emit(gen, " = %ld", var->as.enum_variant.int_value);
                 if (v < value_count - 1)
                     emit(gen, ",");
                 emit(gen, "\n");
