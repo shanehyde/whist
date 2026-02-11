@@ -498,6 +498,10 @@ void print_ast(Node* node, int depth) {
     case NODE_CAST:
         print_cast_expr(node, depth);
         break;
+    case NODE_TRY_EXPR:
+        printf("TryExpr\n");
+        print_ast(node->as.try_expr.expr, depth + 1);
+        break;
     case NODE_STRING_INTERP:
         printf("StringInterp (%d parts)\n", node->as.string_interp.parts.count);
         print_node_list(NULL, &node->as.string_interp.parts, depth);

@@ -120,6 +120,11 @@ void node_free(Node* node) {
         node_free(node->as.cast_expr.expr);
         node_free(node->as.cast_expr.type_node);
         break;
+    case NODE_TRY_EXPR:
+        node_free(node->as.try_expr.expr);
+        free(node->as.try_expr.enum_name);
+        free(node->as.try_expr.ret_enum_name);
+        break;
     case NODE_BINARY:
         node_free(node->as.binary.left);
         node_free(node->as.binary.right);
@@ -444,6 +449,15 @@ Node* node_clone(Node* node) {
         c->as.cast_expr.expr          = node_clone(node->as.cast_expr.expr);
         c->as.cast_expr.type_node     = node_clone(node->as.cast_expr.type_node);
         c->as.cast_expr.resolved_type = NULL;
+        break;
+    case NODE_TRY_EXPR:
+        c->as.try_expr.expr = node_clone(node->as.try_expr.expr);
+        // Reset checker fields
+        c->as.try_expr.resolved_type  = NULL;
+        c->as.try_expr.unwrapped_type = NULL;
+        c->as.try_expr.is_option      = 0;
+        c->as.try_expr.enum_name      = NULL;
+        c->as.try_expr.ret_enum_name  = NULL;
         break;
     case NODE_TUPLE_TYPE:
         c->as.tuple_type.elem_types = nodelist_clone(&node->as.tuple_type.elem_types);

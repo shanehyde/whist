@@ -790,6 +790,11 @@ static Node* parse_postfix(Parser* parser) {
             member->as.member.length = name.length;
             member->as.member.is_ref = 0; // Set by checker
             expr                     = member;
+        } else if (match_token(parser, TOK_QUESTION)) {
+            // Try expression: expr?
+            Node* try_node             = node_new(NODE_TRY_EXPR, expr->line, expr->column);
+            try_node->as.try_expr.expr = expr;
+            expr                       = try_node;
         } else {
             break;
         }
@@ -1828,7 +1833,7 @@ static Node* parse_enum_decl(Parser* parser, int is_public) {
         }
         // Optional explicit integer value: VariantName = 43
         if (match_token(parser, TOK_EQ)) {
-            int is_negative = match_token(parser, TOK_MINUS);
+            int   is_negative = match_token(parser, TOK_MINUS);
             Token value_token = parser->current;
             consume_token(parser, TOK_INT, "Expected integer literal after '=' in enum variant");
             if (value_token.type != TOK_INT)

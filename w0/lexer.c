@@ -439,6 +439,8 @@ Token lexer_next(Lexer* lexer) {
         return string(lexer);
     case '\'':
         return character(lexer);
+    case '?':
+        return make_token(lexer, TOK_QUESTION);
     case '$':
         if (match(lexer, '"')) {
             return interp_string(lexer);
@@ -535,6 +537,7 @@ static const char* token_names[] = {
     [TOK_DOT]           = "DOT",
     [TOK_DOT_DOT]       = "DOT_DOT",
     [TOK_ELLIPSIS]      = "ELLIPSIS",
+    [TOK_QUESTION]      = "QUESTION",
     [TOK_ERROR]         = "ERROR",
 };
 
@@ -618,6 +621,8 @@ const char* token_type_symbol(TokenType type) {
         return ".";
     case TOK_DOT_DOT:
         return "..";
+    case TOK_QUESTION:
+        return "?";
     default:
         return token_type_name(type);
     }

@@ -793,6 +793,62 @@ static void emit_string_interp(CodeGen* gen, Node* node) {
     emit(gen, ")");
 }
 
+// Emit a try expression (expr?) using GCC statement expression.
+// For Result: ({ EnumType __tryN = expr; if (__tryN.tag == Enum_Err) { rc_cleanup; return/goto; }
+//               __tryN.Ok.f0; })
+// For Option: ({ EnumType __tryN = expr; if (__tryN.tag == Enum_None) { rc_cleanup; return/goto; }
+//               __tryN.Some.f0; })
+static void emit_try_expr(CodeGen* gen, Node* node) {
+    const char* enum_name     = node->as.try_expr.enum_name;
+    const char* ret_enum_name = node->as.try_expr.ret_enum_name;
+    int         is_option     = node->as.try_expr.is_option;
+    int         try_id        = gen->out.temp_count++;
+
+    // Open GCC statement expression
+    emit(gen, "({ %s __try%d = ", enum_name, try_id);
+    emit_expr(gen, node->as.try_expr.expr);
+    emit(gen, "; ");
+
+    // Tag check
+    if (is_option) {
+        emit(gen, "if (__try%d.tag == %s_None) { ", try_id, enum_name);
+    } else {
+        emit(gen, "if (__try%d.tag == %s_Err) { ", try_id, enum_name);
+    }
+
+    // Inline RC cleanup (no newlines, stay inside statement expr)
+    for (int i = 0; i < gen->rc.count; i++) {
+        emit(gen, "%s(%s); ", gen->rc.vars[i].dec_func, gen->rc.vars[i].name);
+    }
+
+    // Early return with error/none value
+    if (gen->defer.count > 0) {
+        // With defers: store in __ret and goto __cleanup
+        if (is_option) {
+            emit(gen, "__ret = (%s){.tag = %s_None}; ", ret_enum_name, ret_enum_name);
+        } else {
+            emit(gen, "__ret = (%s){.tag = %s_Err, .Err = {.f0 = __try%d.Err.f0}}; ", ret_enum_name,
+                 ret_enum_name, try_id);
+        }
+        emit(gen, "goto __cleanup; ");
+    } else {
+        // Direct return
+        if (is_option) {
+            emit(gen, "return (%s){.tag = %s_None}; ", ret_enum_name, ret_enum_name);
+        } else {
+            emit(gen, "return (%s){.tag = %s_Err, .Err = {.f0 = __try%d.Err.f0}}; ", ret_enum_name,
+                 ret_enum_name, try_id);
+        }
+    }
+
+    // Close if, yield unwrapped value
+    if (is_option) {
+        emit(gen, "} __try%d.Some.f0; })", try_id);
+    } else {
+        emit(gen, "} __try%d.Ok.f0; })", try_id);
+    }
+}
+
 // Dispatch expression code generation based on node type
 void emit_expr(CodeGen* gen, Node* node) {
     if (!node)
@@ -932,6 +988,10 @@ void emit_expr(CodeGen* gen, Node* node) {
         emit(gen, ")(");
         emit_expr(gen, node->as.cast_expr.expr);
         emit(gen, "))");
+        break;
+
+    case NODE_TRY_EXPR:
+        emit_try_expr(gen, node);
         break;
 
     default:
