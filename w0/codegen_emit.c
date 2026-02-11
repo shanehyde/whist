@@ -560,6 +560,18 @@ static void emit_extern_module(CodeGen* gen, Node* node) {
     }
 }
 
+static int return_type_is_void(Node* return_type) {
+    return !return_type || (return_type->type == NODE_IDENT &&
+                            strcmp(return_type->as.ident.name, "void") == 0);
+}
+
+static void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
+    if (fdn->return_is_const && !return_type_is_void(fdn->return_type)) {
+        emit(gen, "const ");
+    }
+    emit_type(gen, fdn->return_type);
+}
+
 // Emit a function declaration: signature, body, defer cleanup, and RC cleanup
 static void emit_func_decl(CodeGen* gen, Node* node) {
     int is_method = (node->as.func_decl.receiver_type != NULL);
@@ -570,9 +582,7 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
     }
 
     // Check if function is void
-    int is_void = !node->as.func_decl.return_type ||
-                  (node->as.func_decl.return_type->type == NODE_IDENT &&
-                   strcmp(node->as.func_decl.return_type->as.ident.name, "void") == 0);
+    int is_void = return_type_is_void(node->as.func_decl.return_type);
 
     // Emit static for private functions (except main)
     if (!node->as.func_decl.is_public && strcmp(node->as.func_decl.name, "main") != 0) {
@@ -580,7 +590,7 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
     }
 
     // Return type
-    emit_type(gen, node->as.func_decl.return_type);
+    emit_func_return_type(gen, &node->as.func_decl);
 
     // Function name (mangled for methods and library functions)
     emit_function_name(gen, node->as.func_decl.name,
@@ -1207,7 +1217,7 @@ void emit_function_forward_decls(CodeGen* gen, Node* ast) {
                     emit(gen, "static ");
                 }
 
-                emit_type(gen, fdn->return_type);
+                emit_func_return_type(gen, fdn);
 
                 // Emit function name with appropriate prefix
                 emit_function_name(gen, fdn->name, is_method ? fdn->receiver_type : NULL,
@@ -1292,7 +1302,7 @@ void emit_function_forward_decls(CodeGen* gen, Node* ast) {
             gen->generics.subst   = &subst_ctx;
 
             // Return type (with substitution)
-            emit_type(gen, fdn->return_type);
+            emit_func_return_type(gen, fdn);
 
             // Method name: MangledStruct_methodname(
             emit(gen, " %s_%s(", info->mangled_name, fdn->name);

@@ -37,6 +37,18 @@ static int register_tuple_type(CodeGen* gen, Type* type) {
 // Collect tuple types from a type node
 static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node);
 
+static int return_type_is_void(Node* return_type) {
+    return !return_type || (return_type->type == NODE_IDENT &&
+                            strcmp(return_type->as.ident.name, "void") == 0);
+}
+
+static void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
+    if (fdn->return_is_const && !return_type_is_void(fdn->return_type)) {
+        emit(gen, "const ");
+    }
+    emit_type(gen, fdn->return_type);
+}
+
 // Build a Type* from a tuple literal (for type collection)
 static Type* type_from_tuple_lit(Node* node) {
     int    count = node->as.tuple_lit.elements.count;
@@ -713,12 +725,10 @@ static void emit_generic_method_impls(CodeGen* gen, Node* ast) {
             gen->generics.subst   = &subst_ctx;
 
             // Check if function is void
-            int is_void =
-                !fdn->return_type || (fdn->return_type->type == NODE_IDENT &&
-                                      strcmp(fdn->return_type->as.ident.name, "void") == 0);
+            int is_void = return_type_is_void(fdn->return_type);
 
             // Return type (with substitution)
-            emit_type(gen, fdn->return_type);
+            emit_func_return_type(gen, fdn);
 
             // Method name: MangledStruct_methodname(
             emit(gen, " %s_%s(", info->mangled_name, fdn->name);

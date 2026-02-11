@@ -130,6 +130,7 @@ typedef struct {
     int      extern_name_length;
     NodeList params;
     int      is_varargs;
+    int      return_is_const; // 1 if return type is const-qualified, 0 otherwise
     Node*    return_type;
     Node*    body;
     char*    source_module; // NULL = same module, else external module name

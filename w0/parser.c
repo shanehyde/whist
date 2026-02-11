@@ -1477,6 +1477,7 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     fdn->extern_name        = NULL;
     fdn->extern_name_length = 0;
     fdn->is_varargs         = 0;
+    fdn->return_is_const    = 0;
     nodelist_init(&fdn->params);
 
     consume_token(parser, TOK_LPAREN, "Expected '(' after function name");
@@ -1525,6 +1526,9 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     // Return type
     fdn->return_type = NULL;
     if (match_token(parser, TOK_COLON)) {
+        if (match_token(parser, TOK_CONST)) {
+            fdn->return_is_const = 1;
+        }
         fdn->return_type = parse_type(parser);
     }
 
