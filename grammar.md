@@ -56,7 +56,7 @@ Use statements selectively bring symbols from an imported module into unqualifie
 ### Function Declaration
 
 ```bnf
-<func-decl> ::= 'func' [ <receiver> ] <identifier> '(' [ <param-list> ] ')' [ ':' <type> ]
+<func-decl> ::= 'func' [ <receiver> ] <identifier> '(' [ <param-list> ] ')' [ ':' <return-type> ]
 <func-defn> ::= <func-decl> '{' <block> '}'
 
 <receiver> ::= '(' [ 'const' ] <identifier> [ '<' <type-arg-list> '>' ] ')'
@@ -66,6 +66,8 @@ Use statements selectively bring symbols from an imported module into unqualifie
 
 <param> ::= <identifier> [ ':' <type> ]
 
+<return-type> ::= [ 'const' ] <type>
+
 <extern-func-decl> ::= <func-decl> [ 'as' <identifier> ] ';'
 
 <extern-module> ::= 'extern' <identifier> '{' { <extern-func-decl> } '}'
@@ -74,6 +76,10 @@ Use statements selectively bring symbols from an imported module into unqualifie
 **Generic methods:** Methods can be defined on generic structs using type arguments in the receiver:
 - `func (Box<T>) get(): T` — method on any `Box<T>` instantiation
 - `func (Pair<i32, Box<T>>) set(v: Box<T>): void` — partially specialized method
+
+`const` may also qualify return types (for example, `func args_view(): const Vec<string>`).
+Current limitation: return-type const is signature-level only; type checking treats `T` and `const T`
+as compatible (no deep/shallow immutability distinction yet).
 
 ### Struct Declaration
 
@@ -107,7 +113,7 @@ Generic structs are monomorphized at compile time, generating specialized C code
 ```bnf
 <trait-decl>   ::= 'trait' <identifier> '{' { <trait-method> } '}'
 
-<trait-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <type> ] ';'
+<trait-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <return-type> ] ';'
 ```
 
 Traits define a set of required method signatures that types can implement. Trait methods are declared without a receiver or body — just the function signature followed by a semicolon. Use `const func` to declare methods that require an immutable receiver. Impl blocks must match the const-ness exactly.
@@ -118,7 +124,7 @@ Traits define a set of required method signatures that types can implement. Trai
 <impl-decl>   ::= 'impl' <identifier> 'for' <identifier> [ '<' <type-arg-list> '>' ]
                    '{' { <impl-method> } '}'
 
-<impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <type> ] '{' <block> '}'
+<impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <return-type> ] '{' <block> '}'
 ```
 
 An `impl` block provides concrete method implementations for a trait on a specific type. Methods inside `impl` blocks do not specify a receiver — it is inferred from the `for Type` clause. Use `const func` for immutable-receiver methods. For generic target types, specify the type parameters on the impl header (e.g., `impl Drop for Box<T>`). All trait methods must be implemented.
