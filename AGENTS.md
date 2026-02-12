@@ -23,6 +23,7 @@
 - Start implementation/debugging work in `w0/`.
 - For behavior changes, add/update tests in `w0/test/` first or alongside code.
 - Use `cd w0 && make` to build and `cd w0 && ./scripts/run_tests.sh --valid --errors` to validate.
+- Before final handoff, always run `cd w0 && make format`, then `cd w0 && make`, then `cd w0 && ./scripts/run_tests.sh --valid --errors`.
 
 ## Commit Style
 
