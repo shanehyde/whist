@@ -56,4 +56,8 @@ void module_loader_build_path(ModuleLoader* loader, const char* source_path, cha
 int module_loader_import(ModuleLoader* loader, Parser* parser, Node* program, Node* current_module,
                          const char* module_name, size_t module_length, int is_relative);
 
+// Auto-import the prelude module (if lib_path is set and prelude.w exists)
+void module_loader_import_prelude(ModuleLoader* loader, Parser* parser, Node* program,
+                                  Node* main_module);
+
 #endif // MODULE_LOADER_H

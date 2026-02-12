@@ -1,4 +1,4 @@
-// Test std.Result<T, E> — return Ok and Err, match on both
+// Test Result<T, E> from prelude — return Ok and Err, match on both
 import std;
 
 func parse_number(s: string): Result<i64, string> {

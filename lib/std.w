@@ -1,9 +1,5 @@
 // Standard library for Whist
-
-enum Result<T, E> {
-    Ok(T),
-    Err(E),
-}
+// Note: Result<T, E> is now provided by the prelude (auto-imported).
 
 private extern stdio {
     func printf(fmt: string, ...): i32;
