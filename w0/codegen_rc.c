@@ -424,9 +424,8 @@ void emit_vec_methods(CodeGen* gen) {
         emit_resolved_type(gen, elem_type);
         emit(gen, " value) {\n");
         emit(gen, "    if (index < 0 || index > self->count) {\n");
-        emit(gen,
-             "        fprintf(stderr, \"Panic: Vec insert index %%lld out of bounds "
-             "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
+        emit(gen, "        fprintf(stderr, \"Panic: Vec insert index %%lld out of bounds "
+                  "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
         emit(gen, "        exit(1);\n");
         emit(gen, "    }\n");
         emit(gen, "    if (self->count == self->capacity) {\n");
@@ -478,9 +477,8 @@ void emit_vec_methods(CodeGen* gen) {
         emit_resolved_type(gen, elem_type);
         emit(gen, " __Vec_%s_remove(__Vec_%s* self, int64_t index) {\n", elem_tname, elem_tname);
         emit(gen, "    if (index < 0 || index >= self->count) {\n");
-        emit(gen,
-             "        fprintf(stderr, \"Panic: Vec remove index %%lld out of bounds "
-             "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
+        emit(gen, "        fprintf(stderr, \"Panic: Vec remove index %%lld out of bounds "
+                  "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
         emit(gen, "        exit(1);\n");
         emit(gen, "    }\n");
         emit(gen, "    ");
@@ -502,9 +500,8 @@ void emit_vec_methods(CodeGen* gen) {
         emit(gen, " __Vec_%s_swap_remove(__Vec_%s* self, int64_t index) {\n", elem_tname,
              elem_tname);
         emit(gen, "    if (index < 0 || index >= self->count) {\n");
-        emit(gen,
-             "        fprintf(stderr, \"Panic: Vec swap_remove index %%lld out of bounds "
-             "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
+        emit(gen, "        fprintf(stderr, \"Panic: Vec swap_remove index %%lld out of bounds "
+                  "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
         emit(gen, "        exit(1);\n");
         emit(gen, "    }\n");
         emit(gen, "    ");
