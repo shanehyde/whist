@@ -385,9 +385,9 @@ struct Node {
 
         // Match statement
         struct {
-            Node*    expr;          // Expression being matched
-            NodeList arms;          // List of NODE_MATCH_ARM nodes
-            Type*    resolved_type; // Set by checker: enum type of expr
+            Node*    expr;                // Expression being matched
+            NodeList arms;                // List of NODE_MATCH_ARM nodes
+            Type*    resolved_type;       // Set by checker: enum type of expr
             Type*    resolved_value_type; // Set by checker for match-expr result type
         } match_stmt;
 

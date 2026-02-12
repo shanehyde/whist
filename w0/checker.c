@@ -31,7 +31,7 @@ static void define_destruct_pattern_vars(Checker* checker, DestructPattern* patt
                                          int is_const, int is_public);
 
 // Forward declaration for match checking
-static void check_match_stmt(Checker* checker, Node* node);
+static void  check_match_stmt(Checker* checker, Node* node);
 static Type* check_match(Checker* checker, Node* node, int is_expr_context);
 
 // Forward declarations for check_decl helpers
@@ -770,7 +770,7 @@ static Type* check_match(Checker* checker, Node* node, int is_expr_context) {
     if (expr_type->kind == TYPE_ERROR)
         return type_error;
 
-    node->as.match_stmt.resolved_type = expr_type;
+    node->as.match_stmt.resolved_type       = expr_type;
     node->as.match_stmt.resolved_value_type = NULL;
 
     Type* match_value_type = NULL;

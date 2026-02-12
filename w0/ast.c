@@ -532,9 +532,9 @@ Node* node_clone(Node* node) {
         c->as.defer_stmt.stmt = node_clone(node->as.defer_stmt.stmt);
         break;
     case NODE_MATCH:
-        c->as.match_stmt.expr          = node_clone(node->as.match_stmt.expr);
-        c->as.match_stmt.arms          = nodelist_clone(&node->as.match_stmt.arms);
-        c->as.match_stmt.resolved_type = NULL;
+        c->as.match_stmt.expr                = node_clone(node->as.match_stmt.expr);
+        c->as.match_stmt.arms                = nodelist_clone(&node->as.match_stmt.arms);
+        c->as.match_stmt.resolved_type       = NULL;
         c->as.match_stmt.resolved_value_type = NULL;
         break;
     case NODE_MATCH_ARM:

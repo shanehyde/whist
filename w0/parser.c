@@ -1139,9 +1139,9 @@ static Node* parse_match(Parser* parser, int is_expr) {
     consume_token(parser, TOK_RPAREN, "Expected ')' after match expression");
     consume_token(parser, TOK_LBRACE, "Expected '{' after match expression");
 
-    Node* node                        = node_new(NODE_MATCH, token.line, token.column);
-    node->as.match_stmt.expr          = expr;
-    node->as.match_stmt.resolved_type = NULL;
+    Node* node                              = node_new(NODE_MATCH, token.line, token.column);
+    node->as.match_stmt.expr                = expr;
+    node->as.match_stmt.resolved_type       = NULL;
     node->as.match_stmt.resolved_value_type = NULL;
     nodelist_init(&node->as.match_stmt.arms);
 

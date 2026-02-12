@@ -303,8 +303,8 @@ static Type* check_member_expr(Checker* checker, Node* node) {
             // Built-in: std.format(string, ...) -> string
             if (strcmp(name, "std") == 0 && strcmp(node->as.member.name, "format") == 0) {
                 sem_info_set_member_module_name(checker->sem, node, name);
-                Type** params               = xmalloc(1 * sizeof(Type*));
-                params[0]                   = type_string;
+                Type** params = xmalloc(1 * sizeof(Type*));
+                params[0]     = type_string;
                 return type_func(params, 1, type_string, 1);
             }
             Symbol* sym = checker_lookup_in_module(checker, name, node->as.member.name);
@@ -371,7 +371,7 @@ static Type* check_member_expr(Checker* checker, Node* node) {
     if (object->kind == TYPE_VEC) {
         const char* member_name = node->as.member.name;
         sem_info_set_member_is_ref(checker->sem, node, 1); // Vec is a pointer (RC-managed)
-        Type* elem_type         = object->as.vec.elem;
+        Type* elem_type = object->as.vec.elem;
 
         if (strcmp(member_name, "count") == 0) {
             return type_int64;
@@ -424,8 +424,8 @@ static Type* check_member_expr(Checker* checker, Node* node) {
         if (strcmp(member_name, "contains") == 0 || strcmp(member_name, "starts_with") == 0 ||
             strcmp(member_name, "ends_with") == 0) {
             sem_info_set_member_struct_name(checker->sem, node, "__String");
-            Type** params               = xmalloc(1 * sizeof(Type*));
-            params[0]                   = type_string;
+            Type** params = xmalloc(1 * sizeof(Type*));
+            params[0]     = type_string;
             return type_func(params, 1, type_bool, 0);
         }
         // Fall through to primitive_methods check for trait impls (e.g., Hashable)
@@ -479,8 +479,8 @@ static Type* check_member_expr(Checker* checker, Node* node) {
                     node->as.member.object->as.member.is_const_access);
             }
             sem_info_set_member_struct_name(checker->sem, node, NULL);
-            sem_info_set_member_is_const_access(checker->sem, node,
-                                                object->as.struc.field_is_const[i] || object_is_const);
+            sem_info_set_member_is_const_access(
+                checker->sem, node, object->as.struc.field_is_const[i] || object_is_const);
             return object->as.struc.field_types[i];
         }
     }
@@ -771,8 +771,8 @@ static Type* check_enum_value_expr(Checker* checker, Node* node) {
 
     if (actual_args != expected_args) {
         check_error(checker, node->line, node->column,
-                    "Enum variant '%s::%s' expects %d argument(s), got %d",
-                    enum_type->as.enm.name, node->as.enum_value.value_name, expected_args, actual_args);
+                    "Enum variant '%s::%s' expects %d argument(s), got %d", enum_type->as.enm.name,
+                    node->as.enum_value.value_name, expected_args, actual_args);
         return type_error;
     }
 

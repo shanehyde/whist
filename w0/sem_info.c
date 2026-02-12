@@ -78,7 +78,8 @@ static SemMemberInfo* get_member_info(SemInfo* info, Node* member, int create_if
     return out;
 }
 
-static SemEnumValueInfo* get_enum_value_info(SemInfo* info, Node* enum_value, int create_if_missing) {
+static SemEnumValueInfo* get_enum_value_info(SemInfo* info, Node* enum_value,
+                                             int create_if_missing) {
     if (!info || !enum_value) {
         return NULL;
     }
@@ -180,7 +181,7 @@ void sem_info_set_enum_value_resolved_name(SemInfo* info, Node* enum_value,
 }
 
 const char* sem_info_get_enum_value_resolved_name(SemInfo* info, Node* enum_value,
-                                                   const char* fallback) {
+                                                  const char* fallback) {
     SemEnumValueInfo* e = get_enum_value_info(info, enum_value, 0);
     if (!e || !e->has_resolved_enum_name) {
         return fallback;
