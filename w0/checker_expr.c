@@ -358,8 +358,8 @@ static Type* check_member_enum(Checker* checker, Node* node, Type* object) {
     return type_error;
 }
 
-// Check Vec member access (count, capacity, data, push, pop, insert, remove, swap_remove,
-// clear, reserve, shrink_to_fit)
+// Check Vec member access (count, capacity, data, first, last, push, pop, insert, remove,
+// swap_remove, clear, reserve, shrink_to_fit)
 static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
     const char* member_name = node->as.member.name;
     sem_info_set_member_is_ref(checker->sem, node, 1); // Vec is a pointer (RC-managed)
@@ -375,7 +375,29 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
         check_error(checker, node->line, node->column, "Vec 'data' field is private; use indexing");
         return type_error;
     }
-    // Methods: push, pop, insert, remove, swap_remove, clear, reserve, shrink_to_fit
+    // Non-mutating methods: first, last (return Option<T>)
+    if (strcmp(member_name, "first") == 0 || strcmp(member_name, "last") == 0) {
+        char mangled[256];
+        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
+        sem_info_set_member_struct_name(checker->sem, node, mangled);
+
+        // Look up or instantiate Option<elem_type>
+        GenericDef* option_def          = lookup_generic_def(checker, "Option");
+        Type**      args                = xmalloc(sizeof(Type*));
+        args[0]                         = elem_type;
+        char*            option_mangled = type_mangle_generic("Option", args, 1);
+        GenericInstance* existing       = lookup_generic_instance(checker, option_mangled);
+        Type*            option_type;
+        if (existing) {
+            option_type = existing->type;
+            free(option_mangled);
+            free(args);
+        } else {
+            option_type = instantiate_generic_enum(checker, option_def, option_mangled, args, 1);
+        }
+        return type_func(NULL, 0, option_type, 0);
+    }
+    // Mutating methods: push, pop, insert, remove, swap_remove, clear, reserve, shrink_to_fit
     if (strcmp(member_name, "push") == 0 || strcmp(member_name, "pop") == 0 ||
         strcmp(member_name, "insert") == 0 || strcmp(member_name, "remove") == 0 ||
         strcmp(member_name, "swap_remove") == 0 || strcmp(member_name, "clear") == 0 ||

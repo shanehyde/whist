@@ -394,8 +394,8 @@ void emit_struct_rc_dec_forward_decls(CodeGen* gen, Node* ast) {
     emit(gen, "\n");
 }
 
-// Emit push, pop, insert, remove, swap_remove, clear, reserve, and shrink_to_fit method
-// implementations for each Vec type instance
+// Emit push, pop, insert, remove, swap_remove, clear, reserve, shrink_to_fit, first, and last
+// method implementations for each Vec type instance
 void emit_vec_methods(CodeGen* gen) {
     for (int i = 0; i < gen->checker.vec_count; i++) {
         VecInstance* inst        = &gen->checker.vecs[i];
@@ -548,6 +548,51 @@ void emit_vec_methods(CodeGen* gen) {
         emit(gen, "        self->capacity = self->count;\n");
         emit(gen, "    }\n");
         emit(gen, "}\n\n");
+
+        // First/Last — only emit if Option<elem_type> was instantiated (i.e. first/last used)
+        const char* option_tname = type_mangle_name(elem_type);
+        char        option_mangled[256];
+        snprintf(option_mangled, sizeof(option_mangled), "Option_%s", option_tname);
+        int has_option = 0;
+        for (int gi = 0; gi < gen->checker.instance_count; gi++) {
+            if (strcmp(gen->checker.instances[gi].mangled_name, option_mangled) == 0) {
+                has_option = 1;
+                break;
+            }
+        }
+        if (has_option) {
+            // First — returns Option<T>, Some(v[0]) if non-empty, None if empty
+            emit(gen, "static inline Option_%s __Vec_%s_first(__Vec_%s* self) {\n", option_tname,
+                 elem_tname, elem_tname);
+            emit(gen, "    if (self->count == 0) {\n");
+            emit(gen, "        return (Option_%s){.tag = Option_%s_None};\n", option_tname,
+                 option_tname);
+            emit(gen, "    }\n");
+            if (elem_is_ptr) {
+                emit(gen, "    __rc_inc(self->data[0]);\n");
+            }
+            emit(gen,
+                 "    return (Option_%s){.tag = Option_%s_Some, .Some = {.f0 = "
+                 "self->data[0]}};\n",
+                 option_tname, option_tname);
+            emit(gen, "}\n\n");
+
+            // Last — returns Option<T>, Some(v[count-1]) if non-empty, None if empty
+            emit(gen, "static inline Option_%s __Vec_%s_last(__Vec_%s* self) {\n", option_tname,
+                 elem_tname, elem_tname);
+            emit(gen, "    if (self->count == 0) {\n");
+            emit(gen, "        return (Option_%s){.tag = Option_%s_None};\n", option_tname,
+                 option_tname);
+            emit(gen, "    }\n");
+            if (elem_is_ptr) {
+                emit(gen, "    __rc_inc(self->data[self->count - 1]);\n");
+            }
+            emit(gen,
+                 "    return (Option_%s){.tag = Option_%s_Some, "
+                 ".Some = {.f0 = self->data[self->count - 1]}};\n",
+                 option_tname, option_tname);
+            emit(gen, "}\n\n");
+        }
     }
 }
 
