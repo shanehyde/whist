@@ -311,6 +311,18 @@ Node* find_generic_enum_decl(Node* ast, const char* name) {
     return NULL;
 }
 
+// Look up a type parameter name in the current generic substitution context.
+// Returns the concrete Type* if found, or NULL if no substitution applies.
+Type* subst_lookup(CodeGen* gen, const char* name) {
+    if (!gen->generics.subst)
+        return NULL;
+    for (int i = 0; i < gen->generics.subst->count; i++) {
+        if (strcmp(gen->generics.subst->type_params[i], name) == 0)
+            return gen->generics.subst->type_args[i];
+    }
+    return NULL;
+}
+
 // Build a mangled name from a NODE_GENERIC_TYPE node (with subst_ctx support) into a buffer.
 // Returns a dynamically allocated string that the caller must free.
 char* build_mangled_name_from_generic_node(CodeGen* gen, Node* type_node) {
@@ -321,19 +333,11 @@ char* build_mangled_name_from_generic_node(CodeGen* gen, Node* type_node) {
         pos += snprintf(buf + pos, sizeof(buf) - pos, "_");
         Node* arg = type_node->as.generic_type.type_args.nodes[i];
         if (arg->type == NODE_IDENT) {
-            const char* arg_name    = arg->as.ident.name;
-            int         substituted = 0;
-            if (gen->generics.subst) {
-                for (int s = 0; s < gen->generics.subst->count; s++) {
-                    if (strcmp(gen->generics.subst->type_params[s], arg_name) == 0) {
-                        Type* subst_type = gen->generics.subst->type_args[s];
-                        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", type_name(subst_type));
-                        substituted = 1;
-                        break;
-                    }
-                }
-            }
-            if (!substituted) {
+            const char* arg_name = arg->as.ident.name;
+            Type*       resolved = subst_lookup(gen, arg_name);
+            if (resolved) {
+                pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", type_name(resolved));
+            } else {
                 pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", arg_name);
             }
         } else if (arg->type == NODE_GENERIC_TYPE) {
@@ -343,19 +347,10 @@ char* build_mangled_name_from_generic_node(CodeGen* gen, Node* type_node) {
                 Node* nested = arg->as.generic_type.type_args.nodes[j];
                 if (nested->type == NODE_IDENT) {
                     const char* nested_name = nested->as.ident.name;
-                    int         subst       = 0;
-                    if (gen->generics.subst) {
-                        for (int s = 0; s < gen->generics.subst->count; s++) {
-                            if (strcmp(gen->generics.subst->type_params[s], nested_name) == 0) {
-                                Type* subst_type = gen->generics.subst->type_args[s];
-                                pos += snprintf(buf + pos, sizeof(buf) - pos, "%s",
-                                                type_name(subst_type));
-                                subst = 1;
-                                break;
-                            }
-                        }
-                    }
-                    if (!subst) {
+                    Type*       resolved_n  = subst_lookup(gen, nested_name);
+                    if (resolved_n) {
+                        pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", type_name(resolved_n));
+                    } else {
                         pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", nested_name);
                     }
                 }

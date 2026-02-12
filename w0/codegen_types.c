@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "codegen_internal.h"
 #include "types.h"
 
 // Check if a name is a registered enum type in the codegen context
@@ -98,17 +99,13 @@ int type_node_has_rc(CodeGen* gen, Node* type_node) {
     const char* name = type_node->as.ident.name;
 
     // Handle type parameter substitution
-    if (gen->generics.subst) {
-        for (int i = 0; i < gen->generics.subst->count; i++) {
-            if (strcmp(gen->generics.subst->type_params[i], name) == 0) {
-                Type* resolved = gen->generics.subst->type_args[i];
-                if (resolved->kind == TYPE_ENUM)
-                    return resolved->as.enm.has_rc_fields;
-                if (resolved->kind == TYPE_STRUCT)
-                    return 1; // Structs are always RC (heap-allocated pointers)
-                return 0;     // Primitives, etc.
-            }
-        }
+    Type* resolved = subst_lookup(gen, name);
+    if (resolved) {
+        if (resolved->kind == TYPE_ENUM)
+            return resolved->as.enm.has_rc_fields;
+        if (resolved->kind == TYPE_STRUCT)
+            return 1; // Structs are always RC (heap-allocated pointers)
+        return 0;     // Primitives, etc.
     }
 
     if (type_is_builtin_name(name))
@@ -140,17 +137,12 @@ const char* resolve_enum_name(CodeGen* gen, Node* type_node) {
         return NULL;
     }
     if (type_node->type == NODE_IDENT) {
-        const char* name = type_node->as.ident.name;
-        // Check substitution context
-        if (gen->generics.subst) {
-            for (int i = 0; i < gen->generics.subst->count; i++) {
-                if (strcmp(gen->generics.subst->type_params[i], name) == 0) {
-                    Type* resolved = gen->generics.subst->type_args[i];
-                    if (resolved->kind == TYPE_ENUM)
-                        return resolved->as.enm.name;
-                    return NULL;
-                }
-            }
+        const char* name     = type_node->as.ident.name;
+        Type*       resolved = subst_lookup(gen, name);
+        if (resolved) {
+            if (resolved->kind == TYPE_ENUM)
+                return resolved->as.enm.name;
+            return NULL;
         }
         if (is_enum_type_name(gen, name))
             return name;
