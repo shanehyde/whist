@@ -5,6 +5,7 @@
 
 #include "alloc.h"
 #include "checker_internal.h"
+#include "sem_info.h"
 #include "vec.h"
 
 #define SCOPE_SIZE 64
@@ -123,6 +124,7 @@ void checker_init(Checker* checker) {
     checker->traits.primitive_method_capacity = 0;
     checker->alias_depth                      = 0;
     checker->enum_target_hint                 = NULL;
+    checker->sem                              = sem_info_new();
     types_init();
 }
 
@@ -210,6 +212,8 @@ void checker_free(Checker* checker) {
         free(checker->traits.primitive_methods[i].method_name);
     }
     free(checker->traits.primitive_methods);
+    sem_info_free(checker->sem);
+    checker->sem = NULL;
     types_cleanup();
 }
 

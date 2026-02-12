@@ -67,6 +67,7 @@ typedef struct {
     int              vec_count;
     TraitImpl*       traits;
     int              trait_count;
+    SemInfo*         sem;
 } CodeGenChecker;
 
 typedef struct {
