@@ -394,8 +394,8 @@ void emit_struct_rc_dec_forward_decls(CodeGen* gen, Node* ast) {
     emit(gen, "\n");
 }
 
-// Emit push, pop, clear, reserve, and shrink_to_fit method implementations for each Vec type
-// instance
+// Emit push, pop, insert, remove, swap_remove, clear, reserve, and shrink_to_fit method
+// implementations for each Vec type instance
 void emit_vec_methods(CodeGen* gen) {
     for (int i = 0; i < gen->checker.vec_count; i++) {
         VecInstance* inst        = &gen->checker.vecs[i];
@@ -415,6 +415,34 @@ void emit_vec_methods(CodeGen* gen) {
         emit(gen, "        self->capacity = new_cap;\n");
         emit(gen, "    }\n");
         emit(gen, "    self->data[self->count] = value;\n");
+        emit(gen, "    self->count++;\n");
+        emit(gen, "}\n\n");
+
+        // Insert
+        emit(gen, "static inline void __Vec_%s_insert(__Vec_%s* self, int64_t index, ", elem_tname,
+             elem_tname);
+        emit_resolved_type(gen, elem_type);
+        emit(gen, " value) {\n");
+        emit(gen, "    if (index < 0 || index > self->count) {\n");
+        emit(gen,
+             "        fprintf(stderr, \"Panic: Vec insert index %%lld out of bounds "
+             "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
+        emit(gen, "        exit(1);\n");
+        emit(gen, "    }\n");
+        emit(gen, "    if (self->count == self->capacity) {\n");
+        emit(gen, "        int64_t new_cap = self->capacity == 0 ? 4 : self->capacity * 2;\n");
+        emit(gen, "        self->data = realloc(self->data, new_cap * sizeof(");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, "));\n");
+        emit(gen, "        self->capacity = new_cap;\n");
+        emit(gen, "    }\n");
+        emit(gen, "    if (index < self->count) {\n");
+        emit(gen, "        memmove(&self->data[index + 1], &self->data[index], "
+                  "(size_t)(self->count - index) * sizeof(");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, "));\n");
+        emit(gen, "    }\n");
+        emit(gen, "    self->data[index] = value;\n");
         emit(gen, "    self->count++;\n");
         emit(gen, "}\n\n");
 
@@ -443,6 +471,50 @@ void emit_vec_methods(CodeGen* gen) {
         emit(gen, "    }\n");
         emit(gen, "    self->count--;\n");
         emit(gen, "    return self->data[self->count];\n");
+        emit(gen, "}\n\n");
+
+        // Remove
+        emit(gen, "static inline ");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, " __Vec_%s_remove(__Vec_%s* self, int64_t index) {\n", elem_tname, elem_tname);
+        emit(gen, "    if (index < 0 || index >= self->count) {\n");
+        emit(gen,
+             "        fprintf(stderr, \"Panic: Vec remove index %%lld out of bounds "
+             "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
+        emit(gen, "        exit(1);\n");
+        emit(gen, "    }\n");
+        emit(gen, "    ");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, " removed = self->data[index];\n");
+        emit(gen, "    if (index < self->count - 1) {\n");
+        emit(gen, "        memmove(&self->data[index], &self->data[index + 1], "
+                  "(size_t)(self->count - index - 1) * sizeof(");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, "));\n");
+        emit(gen, "    }\n");
+        emit(gen, "    self->count--;\n");
+        emit(gen, "    return removed;\n");
+        emit(gen, "}\n\n");
+
+        // Swap remove
+        emit(gen, "static inline ");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, " __Vec_%s_swap_remove(__Vec_%s* self, int64_t index) {\n", elem_tname,
+             elem_tname);
+        emit(gen, "    if (index < 0 || index >= self->count) {\n");
+        emit(gen,
+             "        fprintf(stderr, \"Panic: Vec swap_remove index %%lld out of bounds "
+             "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
+        emit(gen, "        exit(1);\n");
+        emit(gen, "    }\n");
+        emit(gen, "    ");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, " removed = self->data[index];\n");
+        emit(gen, "    self->count--;\n");
+        emit(gen, "    if (index < self->count) {\n");
+        emit(gen, "        self->data[index] = self->data[self->count];\n");
+        emit(gen, "    }\n");
+        emit(gen, "    return removed;\n");
         emit(gen, "}\n\n");
 
         // Clear
