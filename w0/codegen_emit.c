@@ -145,14 +145,10 @@ void emit_type(CodeGen* gen, Node* type_node) {
         const char* name = type_node->as.ident.name;
 
         // Check for type parameter substitution (for generic methods)
-        if (gen->generics.subst) {
-            for (int i = 0; i < gen->generics.subst->count; i++) {
-                if (strcmp(gen->generics.subst->type_params[i], name) == 0) {
-                    // Substitute with concrete type
-                    emit_resolved_type(gen, gen->generics.subst->type_args[i]);
-                    return;
-                }
-            }
+        Type* resolved = subst_lookup(gen, name);
+        if (resolved) {
+            emit_resolved_type(gen, resolved);
+            return;
         }
 
         const char* c_type = type_c_name(name);
@@ -229,19 +225,11 @@ void emit_type(CodeGen* gen, Node* type_node) {
             emit(gen, "%s", is_vec ? "__Vec_" : "__Span_");
             Node* arg = type_node->as.generic_type.type_args.nodes[0];
             if (arg->type == NODE_IDENT) {
-                const char* arg_name    = arg->as.ident.name;
-                int         substituted = 0;
-                if (gen->generics.subst) {
-                    for (int s = 0; s < gen->generics.subst->count; s++) {
-                        if (strcmp(gen->generics.subst->type_params[s], arg_name) == 0) {
-                            Type* subst_type = gen->generics.subst->type_args[s];
-                            emit(gen, "%s", type_mangle_name(subst_type));
-                            substituted = 1;
-                            break;
-                        }
-                    }
-                }
-                if (!substituted) {
+                const char* arg_name = arg->as.ident.name;
+                Type*       resolved = subst_lookup(gen, arg_name);
+                if (resolved) {
+                    emit(gen, "%s", type_mangle_name(resolved));
+                } else {
                     emit(gen, "%s", arg_name);
                 }
             } else if (arg->type == NODE_GENERIC_TYPE) {
@@ -259,25 +247,13 @@ void emit_type(CodeGen* gen, Node* type_node) {
         emit(gen, "%s", base);
         for (int i = 0; i < type_node->as.generic_type.type_args.count; i++) {
             emit(gen, "_");
-            // Get simple type name for mangling
             Node* arg = type_node->as.generic_type.type_args.nodes[i];
             if (arg->type == NODE_IDENT) {
                 const char* arg_name = arg->as.ident.name;
-                // Check for type parameter substitution
-                int substituted = 0;
-                if (gen->generics.subst) {
-                    for (int s = 0; s < gen->generics.subst->count; s++) {
-                        if (strcmp(gen->generics.subst->type_params[s], arg_name) == 0) {
-                            // Emit the substituted type's name for mangling
-                            Type*       subst_type  = gen->generics.subst->type_args[s];
-                            const char* mangle_name = type_name(subst_type);
-                            emit(gen, "%s", mangle_name);
-                            substituted = 1;
-                            break;
-                        }
-                    }
-                }
-                if (!substituted) {
+                Type*       resolved = subst_lookup(gen, arg_name);
+                if (resolved) {
+                    emit(gen, "%s", type_name(resolved));
+                } else {
                     emit(gen, "%s", arg_name);
                 }
             } else if (arg->type == NODE_GENERIC_TYPE) {
@@ -288,19 +264,10 @@ void emit_type(CodeGen* gen, Node* type_node) {
                     Node* nested = arg->as.generic_type.type_args.nodes[j];
                     if (nested->type == NODE_IDENT) {
                         const char* nested_name = nested->as.ident.name;
-                        // Check for type parameter substitution
-                        int subst = 0;
-                        if (gen->generics.subst) {
-                            for (int s = 0; s < gen->generics.subst->count; s++) {
-                                if (strcmp(gen->generics.subst->type_params[s], nested_name) == 0) {
-                                    Type* subst_type = gen->generics.subst->type_args[s];
-                                    emit(gen, "%s", type_name(subst_type));
-                                    subst = 1;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!subst) {
+                        Type*       resolved_n  = subst_lookup(gen, nested_name);
+                        if (resolved_n) {
+                            emit(gen, "%s", type_name(resolved_n));
+                        } else {
                             emit(gen, "%s", nested_name);
                         }
                     }

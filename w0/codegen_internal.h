@@ -4,6 +4,9 @@
 #include "codegen_emit.h"
 #include "codegen_types.h"
 
+// --- From codegen.c: generic substitution ---
+Type* subst_lookup(CodeGen* gen, const char* name);
+
 // --- From codegen_emit.c: shared helpers ---
 void        defer_push(CodeGen* gen, Node* node);
 const char* binary_op_str(TokenType op);

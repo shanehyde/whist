@@ -325,8 +325,7 @@ Type* instantiate_generic_enum(Checker* checker, GenericDef* def, char* mangled,
             for (int j = 0; j < type_count; j++) {
                 Type* resolved = resolve_type(checker, val->as.enum_variant.types.nodes[j]);
                 enum_type->as.enm.variant_types[i][j] = resolved;
-                if (resolved && (resolved->kind == TYPE_STRUCT || resolved->kind == TYPE_VEC ||
-                                 (resolved->kind == TYPE_ENUM && resolved->as.enm.has_rc_fields))) {
+                if (type_is_rc_managed(resolved)) {
                     enum_type->as.enm.has_rc_fields = 1;
                 }
             }
@@ -499,8 +498,7 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
     // Check if any field is an RC-managed type (struct, Vec, or enum with RC fields)
     for (int i = 0; i < field_count; i++) {
         Type* ftype = struct_type->as.struc.field_types[i];
-        if (ftype && (ftype->kind == TYPE_STRUCT || ftype->kind == TYPE_VEC ||
-                      (ftype->kind == TYPE_ENUM && ftype->as.enm.has_rc_fields))) {
+        if (type_is_rc_managed(ftype)) {
             struct_type->as.struc.has_rc_fields = 1;
             break;
         }

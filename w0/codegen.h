@@ -121,5 +121,6 @@ typedef struct {
 // - codegen_emit consumes AST + semantic annotations to emit C; it does not own AST/checker data.
 void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_debug);
 void codegen_emit(CodeGen* gen, Node* ast);
+void codegen_free(CodeGen* gen);
 
 #endif

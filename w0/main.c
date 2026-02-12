@@ -61,6 +61,7 @@ static int compile_to_c(const char* source, const char* source_path, const char*
                  },
                  rc_debug);
     codegen_emit(&gen, ast);
+    codegen_free(&gen);
 
     checker_free(&checker);
     node_free(ast);
@@ -396,6 +397,7 @@ int main(int argc, char** argv) {
                              },
                              rc_debug);
                 codegen_emit(&gen, ast);
+                codegen_free(&gen);
                 checker_free(&checker);
 
                 if (output_file) {

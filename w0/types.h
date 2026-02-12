@@ -167,6 +167,7 @@ void        type_free(Type* type);
 int         type_equals(Type* a, Type* b);
 int         type_assignable(Type* target, Type* value); // Can value be assigned to target?
 int         type_is_integer(Type* type);                // Is this any integer type?
+int         type_is_rc_managed(Type* type);             // Is this an RC-managed type as a field?
 int         type_is_signed_integer(Type* type);         // Is this a signed integer type?
 int         type_is_unsigned_integer(Type* type);       // Is this an unsigned integer type?
 const char* type_name(Type* type);

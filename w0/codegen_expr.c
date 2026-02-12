@@ -84,17 +84,12 @@ static char* resolve_generic_method_target(CodeGen* gen, Node* member) {
         char  buf[256];
         if (elem->type == NODE_IDENT) {
             const char* elem_name = elem->as.ident.name;
-            // Check substitution
-            if (gen->generics.subst) {
-                for (int s = 0; s < gen->generics.subst->count; s++) {
-                    if (strcmp(gen->generics.subst->type_params[s], elem_name) == 0) {
-                        snprintf(buf, sizeof(buf), "__Vec_%s",
-                                 type_mangle_name(gen->generics.subst->type_args[s]));
-                        return xstrdup(buf);
-                    }
-                }
+            Type*       resolved  = subst_lookup(gen, elem_name);
+            if (resolved) {
+                snprintf(buf, sizeof(buf), "__Vec_%s", type_mangle_name(resolved));
+            } else {
+                snprintf(buf, sizeof(buf), "__Vec_%s", elem_name);
             }
-            snprintf(buf, sizeof(buf), "__Vec_%s", elem_name);
             return xstrdup(buf);
         } else if (elem->type == NODE_GENERIC_TYPE) {
             char* mangled = build_mangled_name_from_generic_node(gen, elem);
@@ -122,16 +117,12 @@ char* resolve_generic_field_dec_func(CodeGen* gen, Node* field_type_node) {
             char  buf[256];
             if (elem->type == NODE_IDENT) {
                 const char* elem_name = elem->as.ident.name;
-                if (gen->generics.subst) {
-                    for (int s = 0; s < gen->generics.subst->count; s++) {
-                        if (strcmp(gen->generics.subst->type_params[s], elem_name) == 0) {
-                            snprintf(buf, sizeof(buf), "__rc_dec_Vec_%s",
-                                     type_name(gen->generics.subst->type_args[s]));
-                            return xstrdup(buf);
-                        }
-                    }
+                Type*       resolved  = subst_lookup(gen, elem_name);
+                if (resolved) {
+                    snprintf(buf, sizeof(buf), "__rc_dec_Vec_%s", type_name(resolved));
+                } else {
+                    snprintf(buf, sizeof(buf), "__rc_dec_Vec_%s", elem_name);
                 }
-                snprintf(buf, sizeof(buf), "__rc_dec_Vec_%s", elem_name);
                 return xstrdup(buf);
             } else if (elem->type == NODE_GENERIC_TYPE) {
                 char* mangled = build_mangled_name_from_generic_node(gen, elem);
@@ -151,17 +142,12 @@ char* resolve_generic_field_dec_func(CodeGen* gen, Node* field_type_node) {
         return xstrdup(buf);
     }
     if (field_type_node->type == NODE_IDENT) {
-        const char* name = field_type_node->as.ident.name;
-        // Check if it's a type param that resolves to a struct
-        if (gen->generics.subst) {
-            for (int s = 0; s < gen->generics.subst->count; s++) {
-                if (strcmp(gen->generics.subst->type_params[s], name) == 0) {
-                    Type* resolved = gen->generics.subst->type_args[s];
-                    if (resolved->kind == TYPE_STRUCT)
-                        return (char*)get_dec_func_for_type(resolved);
-                    return NULL;
-                }
-            }
+        const char* name     = field_type_node->as.ident.name;
+        Type*       resolved = subst_lookup(gen, name);
+        if (resolved) {
+            if (resolved->kind == TYPE_STRUCT)
+                return (char*)get_dec_func_for_type(resolved);
+            return NULL;
         }
         // Non-generic struct field
         if (!type_is_builtin_name(name) && !is_enum_type_name(gen, name)) {
@@ -642,15 +628,9 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
             }
         } else if (tn->type == NODE_IDENT) {
             // Simple type name — check substitution context first
-            const char* name = tn->as.ident.name;
-            if (gen->generics.subst) {
-                for (int si = 0; si < gen->generics.subst->count; si++) {
-                    if (strcmp(gen->generics.subst->type_params[si], name) == 0) {
-                        rtype = gen->generics.subst->type_args[si];
-                        break;
-                    }
-                }
-            }
+            Type* resolved = subst_lookup(gen, tn->as.ident.name);
+            if (resolved)
+                rtype = resolved;
         }
     }
     if (!rtype) {

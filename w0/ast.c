@@ -334,9 +334,82 @@ static NodeList nodelist_clone(NodeList* list) {
     return result;
 }
 
+// Reset all checker-set flags on a node to their initial state.
+// Called after cloning to ensure each generic instantiation starts with clean metadata.
+//
+// MAINTENANCE: When adding a new "// Set by checker" field to ast.h, add the
+// corresponding reset here. This is the ONLY place checker flags are cleared for clones.
+// All fields listed here correspond to "Set by checker" comments in ast.h.
+static void node_reset_checker_flags(Node* node) {
+    switch (node->type) {
+    case NODE_BINARY:
+        node->as.binary.is_string_op = 0;
+        break;
+    case NODE_INDEX:
+        node->as.index.is_tuple_index = 0;
+        node->as.index.is_span_index  = 0;
+        node->as.index.is_vec_index   = 0;
+        break;
+    case NODE_SLICE:
+        node->as.slice.resolved_type = NULL;
+        node->as.slice.is_array      = 0;
+        node->as.slice.is_vec        = 0;
+        node->as.slice.is_string     = 0;
+        break;
+    case NODE_MEMBER:
+        node->as.member.is_ref          = 0;
+        node->as.member.is_const_access = 0;
+        node->as.member.struct_name     = NULL;
+        node->as.member.module_name     = NULL;
+        break;
+    case NODE_ENUM_VALUE:
+        node->as.enum_value.is_data_enum = 0;
+        break;
+    case NODE_NEW_EXPR:
+        node->as.new_expr.resolved_type = NULL;
+        break;
+    case NODE_STRING_INTERP:
+        node->as.string_interp.part_types = NULL;
+        break;
+    case NODE_CAST:
+        node->as.cast_expr.resolved_type = NULL;
+        break;
+    case NODE_TRY_EXPR:
+        node->as.try_expr.resolved_type  = NULL;
+        node->as.try_expr.unwrapped_type = NULL;
+        node->as.try_expr.is_option      = 0;
+        node->as.try_expr.enum_name      = NULL;
+        node->as.try_expr.ret_enum_name  = NULL;
+        break;
+    case NODE_ARRAY_LIT:
+        node->as.array_lit.resolved_type = NULL;
+        break;
+    case NODE_VAR_DECL:
+        node->as.var_decl.is_rc            = 0;
+        node->as.var_decl.resolved_type    = NULL;
+        node->as.var_decl.destruct_pattern = NULL;
+        break;
+    case NODE_FOREACH:
+        node->as.foreach_stmt.resolved_type = NULL;
+        node->as.foreach_stmt.is_span       = 0;
+        node->as.foreach_stmt.is_string     = 0;
+        break;
+    case NODE_MATCH:
+        node->as.match_stmt.resolved_type       = NULL;
+        node->as.match_stmt.resolved_value_type = NULL;
+        break;
+    default:
+        break; // Node types without checker flags need no reset
+    }
+}
+
 // Deep clone an AST node and all its children.
 // Used to give each generic instantiation its own copy of method bodies,
 // preventing checker-set flags from one instantiation affecting another.
+//
+// Checker-set flags are NOT copied here — they are zeroed by xcalloc and then
+// explicitly reset by node_reset_checker_flags() after the structural copy.
+// The checker will re-populate them when it checks the cloned body.
 Node* node_clone(Node* node) {
     if (!node)
         return NULL;
@@ -370,10 +443,9 @@ Node* node_clone(Node* node) {
         c->as.ident.length = node->as.ident.length;
         break;
     case NODE_BINARY:
-        c->as.binary.op           = node->as.binary.op;
-        c->as.binary.left         = node_clone(node->as.binary.left);
-        c->as.binary.right        = node_clone(node->as.binary.right);
-        c->as.binary.is_string_op = 0; // Reset checker flag
+        c->as.binary.op    = node->as.binary.op;
+        c->as.binary.left  = node_clone(node->as.binary.left);
+        c->as.binary.right = node_clone(node->as.binary.right);
         break;
     case NODE_UNARY:
         c->as.unary.op      = node->as.unary.op;
@@ -386,30 +458,16 @@ Node* node_clone(Node* node) {
     case NODE_INDEX:
         c->as.index.object = node_clone(node->as.index.object);
         c->as.index.index  = node_clone(node->as.index.index);
-        // Reset checker flags
-        c->as.index.is_tuple_index = 0;
-        c->as.index.is_span_index  = 0;
-        c->as.index.is_vec_index   = 0;
         break;
     case NODE_SLICE:
         c->as.slice.object = node_clone(node->as.slice.object);
         c->as.slice.start  = node_clone(node->as.slice.start);
         c->as.slice.end    = node_clone(node->as.slice.end);
-        // Reset checker flags
-        c->as.slice.resolved_type = NULL;
-        c->as.slice.is_array      = 0;
-        c->as.slice.is_vec        = 0;
-        c->as.slice.is_string     = 0;
         break;
     case NODE_MEMBER:
         c->as.member.object = node_clone(node->as.member.object);
         c->as.member.name   = xstrdup(node->as.member.name);
         c->as.member.length = node->as.member.length;
-        // Reset checker flags
-        c->as.member.is_ref          = 0;
-        c->as.member.is_const_access = 0;
-        c->as.member.struct_name     = NULL;
-        c->as.member.module_name     = NULL;
         break;
     case NODE_ASSIGN:
         c->as.assign.op     = node->as.assign.op;
@@ -430,32 +488,21 @@ Node* node_clone(Node* node) {
         c->as.enum_value.value_name        = xstrdup(node->as.enum_value.value_name);
         c->as.enum_value.value_name_length = node->as.enum_value.value_name_length;
         c->as.enum_value.args              = nodelist_clone(&node->as.enum_value.args);
-        // Reset checker flags
-        c->as.enum_value.is_data_enum = 0;
         break;
     case NODE_NEW_EXPR:
-        c->as.new_expr.type_node     = node_clone(node->as.new_expr.type_node);
-        c->as.new_expr.init          = node_clone(node->as.new_expr.init);
-        c->as.new_expr.resolved_type = NULL;
+        c->as.new_expr.type_node = node_clone(node->as.new_expr.type_node);
+        c->as.new_expr.init      = node_clone(node->as.new_expr.init);
         break;
     case NODE_STRING_INTERP:
         c->as.string_interp.parts      = nodelist_clone(&node->as.string_interp.parts);
-        c->as.string_interp.part_types = NULL;
         c->as.string_interp.part_count = node->as.string_interp.part_count;
         break;
     case NODE_CAST:
-        c->as.cast_expr.expr          = node_clone(node->as.cast_expr.expr);
-        c->as.cast_expr.type_node     = node_clone(node->as.cast_expr.type_node);
-        c->as.cast_expr.resolved_type = NULL;
+        c->as.cast_expr.expr      = node_clone(node->as.cast_expr.expr);
+        c->as.cast_expr.type_node = node_clone(node->as.cast_expr.type_node);
         break;
     case NODE_TRY_EXPR:
         c->as.try_expr.expr = node_clone(node->as.try_expr.expr);
-        // Reset checker fields
-        c->as.try_expr.resolved_type  = NULL;
-        c->as.try_expr.unwrapped_type = NULL;
-        c->as.try_expr.is_option      = 0;
-        c->as.try_expr.enum_name      = NULL;
-        c->as.try_expr.ret_enum_name  = NULL;
         break;
     case NODE_TUPLE_TYPE:
         c->as.tuple_type.elem_types = nodelist_clone(&node->as.tuple_type.elem_types);
@@ -464,8 +511,7 @@ Node* node_clone(Node* node) {
         c->as.tuple_lit.elements = nodelist_clone(&node->as.tuple_lit.elements);
         break;
     case NODE_ARRAY_LIT:
-        c->as.array_lit.elements      = nodelist_clone(&node->as.array_lit.elements);
-        c->as.array_lit.resolved_type = NULL;
+        c->as.array_lit.elements = nodelist_clone(&node->as.array_lit.elements);
         break;
     case NODE_ARRAY_TYPE:
         c->as.array_type.elem_type = node_clone(node->as.array_type.elem_type);
@@ -485,11 +531,6 @@ Node* node_clone(Node* node) {
         c->as.var_decl.type        = node_clone(node->as.var_decl.type);
         c->as.var_decl.init        = node_clone(node->as.var_decl.init);
         c->as.var_decl.is_const    = node->as.var_decl.is_const;
-        // Reset checker flags
-        c->as.var_decl.is_rc         = 0;
-        c->as.var_decl.resolved_type = NULL;
-        c->as.var_decl.destruct_pattern =
-            NULL; // Not cloning patterns (not needed in method bodies)
         break;
     case NODE_BLOCK:
         c->as.block.stmts = nodelist_clone(&node->as.block.stmts);
@@ -517,10 +558,6 @@ Node* node_clone(Node* node) {
         c->as.foreach_stmt.step            = node_clone(node->as.foreach_stmt.step);
         c->as.foreach_stmt.body            = node_clone(node->as.foreach_stmt.body);
         c->as.foreach_stmt.collection      = node_clone(node->as.foreach_stmt.collection);
-        // Reset checker flags
-        c->as.foreach_stmt.resolved_type = NULL;
-        c->as.foreach_stmt.is_span       = 0;
-        c->as.foreach_stmt.is_string     = 0;
         break;
     case NODE_RETURN:
         c->as.return_stmt.value = node_clone(node->as.return_stmt.value);
@@ -532,10 +569,8 @@ Node* node_clone(Node* node) {
         c->as.defer_stmt.stmt = node_clone(node->as.defer_stmt.stmt);
         break;
     case NODE_MATCH:
-        c->as.match_stmt.expr                = node_clone(node->as.match_stmt.expr);
-        c->as.match_stmt.arms                = nodelist_clone(&node->as.match_stmt.arms);
-        c->as.match_stmt.resolved_type       = NULL;
-        c->as.match_stmt.resolved_value_type = NULL;
+        c->as.match_stmt.expr = node_clone(node->as.match_stmt.expr);
+        c->as.match_stmt.arms = nodelist_clone(&node->as.match_stmt.arms);
         break;
     case NODE_MATCH_ARM:
         c->as.match_arm.enum_name =
@@ -570,5 +605,7 @@ Node* node_clone(Node* node) {
         fprintf(stderr, "node_clone: unhandled node type %d\n", node->type);
         abort();
     }
+
+    node_reset_checker_flags(c);
     return c;
 }

@@ -300,6 +300,19 @@ int type_is_unsigned_integer(Type* type) {
            type->kind == TYPE_UINT32;
 }
 
+// Is this type RC-managed when held as a struct field or enum variant payload?
+// Structs and Vecs are always heap-allocated (RC pointers). Enums are RC-managed
+// only if they carry RC-managed payloads themselves.
+int type_is_rc_managed(Type* type) {
+    if (!type)
+        return 0;
+    if (type->kind == TYPE_STRUCT || type->kind == TYPE_VEC)
+        return 1;
+    if (type->kind == TYPE_ENUM && type->as.enm.has_rc_fields)
+        return 1;
+    return 0;
+}
+
 int type_assignable(Type* target, Type* value) {
     if (type_equals(target, value))
         return 1;
@@ -339,7 +352,7 @@ int type_assignable(Type* target, Type* value) {
 
 // Ring buffer for type_name() results. Multiple concurrent calls (e.g. in the same
 // printf argument list) each get their own buffer slot, avoiding aliasing bugs.
-#define TYPE_NAME_BUFS 4
+#define TYPE_NAME_BUFS 8
 static char type_name_bufs[TYPE_NAME_BUFS][256];
 static int  type_name_idx = 0;
 
@@ -485,7 +498,7 @@ int type_is_builtin_name(const char* name) {
 }
 
 // Buffer for mangled span names
-#define TYPE_MANGLE_BUFS 4
+#define TYPE_MANGLE_BUFS 8
 static char type_mangle_bufs[TYPE_MANGLE_BUFS][256];
 static int  type_mangle_idx = 0;
 
