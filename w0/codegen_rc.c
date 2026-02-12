@@ -147,8 +147,47 @@ void emit_rc_runtime(CodeGen* gen) {
     (void)gen;
 }
 
+// Emit one __rc_inc_E or __rc_dec_E function body for an enum with RC-managed variant fields.
+// `is_inc` selects between inc/dec; `ename` is the (possibly mangled) enum name;
+// `enum_decl` supplies the variant list. The caller must set gen->generics.subst for generics.
+static void emit_enum_rc_func(CodeGen* gen, const char* ename, Node* enum_decl, int is_inc) {
+    const char* op = is_inc ? "inc" : "dec";
+    emit(gen, "static inline void __rc_%s_%s(%s v) {\n", op, ename, ename);
+    emit(gen, "    switch (v.tag) {\n");
+    for (int vi = 0; vi < enum_decl->as.enum_decl.values.count; vi++) {
+        Node* var = enum_decl->as.enum_decl.values.nodes[vi];
+        if (var->as.enum_variant.types.count == 0)
+            continue;
+        emit(gen, "    case %s_%.*s:\n", ename, var->as.enum_variant.name_length,
+             var->as.enum_variant.name);
+        for (int t = 0; t < var->as.enum_variant.types.count; t++) {
+            Node* tnode = var->as.enum_variant.types.nodes[t];
+            if (!type_node_has_rc(gen, tnode))
+                continue;
+            // Determine if the field's type is itself an enum requiring type-specific RC
+            const char* enum_nm = resolve_enum_name(gen, tnode);
+            if (!enum_nm && tnode->type == NODE_IDENT &&
+                is_enum_type_name(gen, tnode->as.ident.name)) {
+                enum_nm = tnode->as.ident.name;
+            }
+            if (enum_nm) {
+                emit(gen, "        __rc_%s_%s(v.%.*s.f%d);\n", op, enum_nm,
+                     var->as.enum_variant.name_length, var->as.enum_variant.name, t);
+            } else {
+                emit(gen, "        __rc_%s(v.%.*s.f%d);\n", op, var->as.enum_variant.name_length,
+                     var->as.enum_variant.name, t);
+            }
+        }
+        emit(gen, "        break;\n");
+    }
+    emit(gen, "    default: break;\n");
+    emit(gen, "    }\n");
+    emit(gen, "}\n\n");
+}
+
 // Emit __rc_inc_EnumName/__rc_dec_EnumName helpers for enums with RC-managed fields
 void emit_enum_rc_helpers(CodeGen* gen, Node* ast) {
+    // Forward declarations for non-generic enums
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
@@ -181,6 +220,7 @@ void emit_enum_rc_helpers(CodeGen* gen, Node* ast) {
     if (gen->enums.count > 0)
         emit(gen, "\n");
 
+    // Definitions for non-generic enums
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
@@ -190,66 +230,16 @@ void emit_enum_rc_helpers(CodeGen* gen, Node* ast) {
             if (decl->type != NODE_ENUM_DECL)
                 continue;
             if (decl->as.enum_decl.type_param_count > 0)
-                continue; // Skip generic templates
+                continue;
             const char* ename = decl->as.enum_decl.name;
             if (!enum_has_rc_fields(gen, ename))
                 continue;
-
-            emit(gen, "static inline void __rc_inc_%s(%s v) {\n", ename, ename);
-            emit(gen, "    switch (v.tag) {\n");
-            for (int v = 0; v < decl->as.enum_decl.values.count; v++) {
-                Node* var = decl->as.enum_decl.values.nodes[v];
-                if (var->as.enum_variant.types.count == 0)
-                    continue;
-                emit(gen, "    case %s_%.*s:\n", ename, var->as.enum_variant.name_length,
-                     var->as.enum_variant.name);
-                for (int t = 0; t < var->as.enum_variant.types.count; t++) {
-                    Node* tnode = var->as.enum_variant.types.nodes[t];
-                    if (!type_node_has_rc(gen, tnode))
-                        continue;
-                    if (tnode->type == NODE_IDENT && is_enum_type_name(gen, tnode->as.ident.name)) {
-                        emit(gen, "        __rc_inc_%s(v.%.*s.f%d);\n", tnode->as.ident.name,
-                             var->as.enum_variant.name_length, var->as.enum_variant.name, t);
-                    } else {
-                        emit(gen, "        __rc_inc(v.%.*s.f%d);\n",
-                             var->as.enum_variant.name_length, var->as.enum_variant.name, t);
-                    }
-                }
-                emit(gen, "        break;\n");
-            }
-            emit(gen, "    default: break;\n");
-            emit(gen, "    }\n");
-            emit(gen, "}\n\n");
-
-            emit(gen, "static inline void __rc_dec_%s(%s v) {\n", ename, ename);
-            emit(gen, "    switch (v.tag) {\n");
-            for (int v = 0; v < decl->as.enum_decl.values.count; v++) {
-                Node* var = decl->as.enum_decl.values.nodes[v];
-                if (var->as.enum_variant.types.count == 0)
-                    continue;
-                emit(gen, "    case %s_%.*s:\n", ename, var->as.enum_variant.name_length,
-                     var->as.enum_variant.name);
-                for (int t = 0; t < var->as.enum_variant.types.count; t++) {
-                    Node* tnode = var->as.enum_variant.types.nodes[t];
-                    if (!type_node_has_rc(gen, tnode))
-                        continue;
-                    if (tnode->type == NODE_IDENT && is_enum_type_name(gen, tnode->as.ident.name)) {
-                        emit(gen, "        __rc_dec_%s(v.%.*s.f%d);\n", tnode->as.ident.name,
-                             var->as.enum_variant.name_length, var->as.enum_variant.name, t);
-                    } else {
-                        emit(gen, "        __rc_dec(v.%.*s.f%d);\n",
-                             var->as.enum_variant.name_length, var->as.enum_variant.name, t);
-                    }
-                }
-                emit(gen, "        break;\n");
-            }
-            emit(gen, "    default: break;\n");
-            emit(gen, "    }\n");
-            emit(gen, "}\n\n");
+            emit_enum_rc_func(gen, ename, decl, 1); // __rc_inc
+            emit_enum_rc_func(gen, ename, decl, 0); // __rc_dec
         }
     }
 
-    // Emit RC helpers for generic enum instances
+    // Definitions for generic enum instances
     for (int gi = 0; gi < gen->checker.instance_count; gi++) {
         GenericInstance* info = &gen->checker.instances[gi];
         if (info->type->kind != TYPE_ENUM)
@@ -260,73 +250,17 @@ void emit_enum_rc_helpers(CodeGen* gen, Node* ast) {
         if (!tmpl)
             continue;
 
-        const char* ename = info->mangled_name;
-
-        // Set up substitution context
-        int              param_count = tmpl->as.enum_decl.type_param_count;
+        // Set up substitution context for generic type resolution
         TypeSubstContext subst;
         subst.type_params = tmpl->as.enum_decl.type_params;
         subst.type_args   = info->type_args;
-        subst.count       = param_count;
+        subst.count       = tmpl->as.enum_decl.type_param_count;
 
         TypeSubstContext* old_subst = gen->generics.subst;
         gen->generics.subst         = &subst;
 
-        // __rc_inc
-        emit(gen, "static inline void __rc_inc_%s(%s v) {\n", ename, ename);
-        emit(gen, "    switch (v.tag) {\n");
-        for (int v = 0; v < tmpl->as.enum_decl.values.count; v++) {
-            Node* var = tmpl->as.enum_decl.values.nodes[v];
-            if (var->as.enum_variant.types.count == 0)
-                continue;
-            emit(gen, "    case %s_%.*s:\n", ename, var->as.enum_variant.name_length,
-                 var->as.enum_variant.name);
-            for (int t = 0; t < var->as.enum_variant.types.count; t++) {
-                Node* tnode = var->as.enum_variant.types.nodes[t];
-                if (!type_node_has_rc(gen, tnode))
-                    continue;
-                const char* enum_nm = resolve_enum_name(gen, tnode);
-                if (enum_nm) {
-                    emit(gen, "        __rc_inc_%s(v.%.*s.f%d);\n", enum_nm,
-                         var->as.enum_variant.name_length, var->as.enum_variant.name, t);
-                } else {
-                    emit(gen, "        __rc_inc(v.%.*s.f%d);\n", var->as.enum_variant.name_length,
-                         var->as.enum_variant.name, t);
-                }
-            }
-            emit(gen, "        break;\n");
-        }
-        emit(gen, "    default: break;\n");
-        emit(gen, "    }\n");
-        emit(gen, "}\n\n");
-
-        // __rc_dec
-        emit(gen, "static inline void __rc_dec_%s(%s v) {\n", ename, ename);
-        emit(gen, "    switch (v.tag) {\n");
-        for (int v = 0; v < tmpl->as.enum_decl.values.count; v++) {
-            Node* var = tmpl->as.enum_decl.values.nodes[v];
-            if (var->as.enum_variant.types.count == 0)
-                continue;
-            emit(gen, "    case %s_%.*s:\n", ename, var->as.enum_variant.name_length,
-                 var->as.enum_variant.name);
-            for (int t = 0; t < var->as.enum_variant.types.count; t++) {
-                Node* tnode = var->as.enum_variant.types.nodes[t];
-                if (!type_node_has_rc(gen, tnode))
-                    continue;
-                const char* enum_nm = resolve_enum_name(gen, tnode);
-                if (enum_nm) {
-                    emit(gen, "        __rc_dec_%s(v.%.*s.f%d);\n", enum_nm,
-                         var->as.enum_variant.name_length, var->as.enum_variant.name, t);
-                } else {
-                    emit(gen, "        __rc_dec(v.%.*s.f%d);\n", var->as.enum_variant.name_length,
-                         var->as.enum_variant.name, t);
-                }
-            }
-            emit(gen, "        break;\n");
-        }
-        emit(gen, "    default: break;\n");
-        emit(gen, "    }\n");
-        emit(gen, "}\n\n");
+        emit_enum_rc_func(gen, info->mangled_name, tmpl, 1); // __rc_inc
+        emit_enum_rc_func(gen, info->mangled_name, tmpl, 0); // __rc_dec
 
         gen->generics.subst = old_subst;
     }
