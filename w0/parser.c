@@ -1143,7 +1143,6 @@ static Node* parse_match(Parser* parser, int is_expr) {
     node->as.match_stmt.expr          = expr;
     node->as.match_stmt.resolved_type = NULL;
     node->as.match_stmt.resolved_value_type = NULL;
-    node->as.match_stmt.is_expr            = is_expr;
     nodelist_init(&node->as.match_stmt.arms);
 
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {

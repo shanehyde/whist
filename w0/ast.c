@@ -538,7 +538,6 @@ Node* node_clone(Node* node) {
         c->as.match_stmt.arms          = nodelist_clone(&node->as.match_stmt.arms);
         c->as.match_stmt.resolved_type = NULL;
         c->as.match_stmt.resolved_value_type = NULL;
-        c->as.match_stmt.is_expr            = node->as.match_stmt.is_expr;
         break;
     case NODE_MATCH_ARM:
         c->as.match_arm.enum_name =

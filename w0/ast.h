@@ -390,7 +390,6 @@ struct Node {
             NodeList arms;          // List of NODE_MATCH_ARM nodes
             Type*    resolved_type; // Set by checker: enum type of expr
             Type*    resolved_value_type; // Set by checker for match-expr result type
-            int      is_expr;       // 1 when parsed/used as expression, 0 for statement
         } match_stmt;
 
         // Match arm
