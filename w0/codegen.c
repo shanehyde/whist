@@ -515,6 +515,30 @@ void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_d
     gen->current_module      = NULL;
 }
 
+void codegen_free(CodeGen* gen) {
+    free(gen->defer.stack);
+    for (int i = 0; i < gen->rc.count; i++) {
+        free(gen->rc.vars[i].name);
+        free(gen->rc.vars[i].dec_func);
+    }
+    free(gen->rc.vars);
+    for (int i = 0; i < gen->enums.count; i++) {
+        free(gen->enums.names[i]);
+    }
+    free(gen->enums.names);
+    free(gen->enums.has_rc_fields);
+    free(gen->aliases.types);
+    free(gen->aliases.type_targets);
+    free(gen->aliases.externs);
+    free(gen->aliases.extern_funcs);
+    for (int i = 0; i < gen->aliases.use_count; i++) {
+        free(gen->aliases.uses[i].whist_name);
+        free(gen->aliases.uses[i].c_name);
+    }
+    free(gen->aliases.uses);
+    free(gen->tuple_types);
+}
+
 // Collect tuple types from all declarations and register non-generic type aliases
 static void collect_types_and_aliases(CodeGen* gen, Node* ast) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
