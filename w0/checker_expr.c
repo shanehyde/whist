@@ -294,175 +294,166 @@ static Type* check_slice_expr(Checker* checker, Node* node) {
     return result_type;
 }
 
-// Type-check a member access: module-qualified, span/enum/vec/struct fields, and methods
-static Type* check_member_expr(Checker* checker, Node* node) {
-    // Check for module-qualified access first (e.g., std.print)
-    if (node->as.member.object->type == NODE_IDENT) {
-        const char* name = node->as.member.object->as.ident.name;
-        if (is_imported_module(checker, name)) {
-            // Built-in: std.format(string, ...) -> string
-            if (strcmp(name, "std") == 0 && strcmp(node->as.member.name, "format") == 0) {
-                sem_info_set_member_module_name(checker->sem, node, name);
-                Type** params = xmalloc(1 * sizeof(Type*));
-                params[0]     = type_string;
-                return type_func(params, 1, type_string, 1);
-            }
-            Symbol* sym = checker_lookup_in_module(checker, name, node->as.member.name);
-            if (!sym) {
-                check_error(checker, node->line, node->column,
-                            "Module '%s' has no public symbol '%s'", name, node->as.member.name);
-                return type_error;
-            }
-            sem_info_set_member_module_name(checker->sem, node, name);
-            return sym->type;
-        }
+// --- Member access helpers (dispatched from check_member_expr) ---
+
+// Check module-qualified member access (e.g., std.print, fs.open)
+static Type* check_member_module(Checker* checker, Node* node, const char* module_name) {
+    // Built-in: std.format(string, ...) -> string
+    if (strcmp(module_name, "std") == 0 && strcmp(node->as.member.name, "format") == 0) {
+        sem_info_set_member_module_name(checker->sem, node, module_name);
+        Type** params = xmalloc(1 * sizeof(Type*));
+        params[0]     = type_string;
+        return type_func(params, 1, type_string, 1);
     }
-
-    Type* object = check_expression(checker, node->as.member.object);
-    if (object->kind == TYPE_ERROR)
-        return type_error;
-
-    // Handle span member access
-    if (object->kind == TYPE_SPAN) {
-        const char* member_name = node->as.member.name;
-        sem_info_set_member_is_ref(checker->sem, node, 0); // Spans are value types, use . not ->
-        if (strcmp(member_name, "count") == 0) {
-            return type_uint64;
-        }
-        if (strcmp(member_name, "data") == 0) {
-            check_error(checker, node->line, node->column,
-                        "Span 'data' field is private; use indexing");
-            return type_error;
-        }
-        check_error(checker, node->line, node->column, "Span has no member '%s'", member_name);
+    Symbol* sym = checker_lookup_in_module(checker, module_name, node->as.member.name);
+    if (!sym) {
+        check_error(checker, node->line, node->column, "Module '%s' has no public symbol '%s'",
+                    module_name, node->as.member.name);
         return type_error;
     }
+    sem_info_set_member_module_name(checker->sem, node, module_name);
+    return sym->type;
+}
 
-    // Handle enum member access (.tag and methods)
-    if (object->kind == TYPE_ENUM) {
-        const char* member_name = node->as.member.name;
-        sem_info_set_member_is_ref(checker->sem, node, 0); // Enums are value types, use . not ->
-        if (object->as.enm.has_data && strcmp(member_name, "tag") == 0) {
-            return type_int32;
-        }
-        // Check for methods on the enum
-        for (int i = 0; i < object->as.enm.method_count; i++) {
-            if (strcmp(object->as.enm.method_names[i], member_name) == 0) {
-                if (!object->as.enm.method_is_const[i]) {
-                    const char* const_name =
-                        get_const_binding_name(checker, node->as.member.object);
-                    if (const_name) {
-                        check_error(checker, node->line, node->column,
-                                    "Cannot call mutating method '%s' on const '%s'", member_name,
-                                    const_name);
-                        return type_error;
-                    }
+// Check span member access (count, data)
+static Type* check_member_span(Checker* checker, Node* node) {
+    const char* member_name = node->as.member.name;
+    sem_info_set_member_is_ref(checker->sem, node, 0); // Spans are value types, use . not ->
+    if (strcmp(member_name, "count") == 0) {
+        return type_uint64;
+    }
+    if (strcmp(member_name, "data") == 0) {
+        check_error(checker, node->line, node->column,
+                    "Span 'data' field is private; use indexing");
+        return type_error;
+    }
+    check_error(checker, node->line, node->column, "Span has no member '%s'", member_name);
+    return type_error;
+}
+
+// Check enum member access (.tag and methods)
+static Type* check_member_enum(Checker* checker, Node* node, Type* object) {
+    const char* member_name = node->as.member.name;
+    sem_info_set_member_is_ref(checker->sem, node, 0); // Enums are value types, use . not ->
+    if (object->as.enm.has_data && strcmp(member_name, "tag") == 0) {
+        return type_int32;
+    }
+    for (int i = 0; i < object->as.enm.method_count; i++) {
+        if (strcmp(object->as.enm.method_names[i], member_name) == 0) {
+            if (!object->as.enm.method_is_const[i]) {
+                const char* const_name = get_const_binding_name(checker, node->as.member.object);
+                if (const_name) {
+                    check_error(checker, node->line, node->column,
+                                "Cannot call mutating method '%s' on const '%s'", member_name,
+                                const_name);
+                    return type_error;
                 }
-                sem_info_set_member_struct_name(checker->sem, node, object->as.enm.name);
-                return object->as.enm.method_types[i];
             }
+            sem_info_set_member_struct_name(checker->sem, node, object->as.enm.name);
+            return object->as.enm.method_types[i];
         }
-        check_error(checker, node->line, node->column, "Enum '%s' has no member '%s'",
-                    object->as.enm.name, member_name);
+    }
+    check_error(checker, node->line, node->column, "Enum '%s' has no member '%s'",
+                object->as.enm.name, member_name);
+    return type_error;
+}
+
+// Check Vec member access (count, capacity, data, push, pop, clear)
+static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
+    const char* member_name = node->as.member.name;
+    sem_info_set_member_is_ref(checker->sem, node, 1); // Vec is a pointer (RC-managed)
+    Type* elem_type = object->as.vec.elem;
+
+    if (strcmp(member_name, "count") == 0) {
+        return type_int64;
+    }
+    if (strcmp(member_name, "capacity") == 0) {
+        return type_int64;
+    }
+    if (strcmp(member_name, "data") == 0) {
+        check_error(checker, node->line, node->column, "Vec 'data' field is private; use indexing");
         return type_error;
     }
-
-    // Handle Vec member access
-    if (object->kind == TYPE_VEC) {
-        const char* member_name = node->as.member.name;
-        sem_info_set_member_is_ref(checker->sem, node, 1); // Vec is a pointer (RC-managed)
-        Type* elem_type = object->as.vec.elem;
-
-        if (strcmp(member_name, "count") == 0) {
-            return type_int64;
-        }
-        if (strcmp(member_name, "capacity") == 0) {
-            return type_int64;
-        }
-        if (strcmp(member_name, "data") == 0) {
+    // Methods: push, pop, clear
+    if (strcmp(member_name, "push") == 0 || strcmp(member_name, "pop") == 0 ||
+        strcmp(member_name, "clear") == 0) {
+        const char* const_name = get_const_binding_name(checker, node->as.member.object);
+        if (const_name) {
             check_error(checker, node->line, node->column,
-                        "Vec 'data' field is private; use indexing");
+                        "Cannot call mutating method '%s' on const '%s'", member_name, const_name);
             return type_error;
         }
-        // Methods: push, pop, clear
-        if (strcmp(member_name, "push") == 0 || strcmp(member_name, "pop") == 0 ||
-            strcmp(member_name, "clear") == 0) {
-            const char* const_name = get_const_binding_name(checker, node->as.member.object);
-            if (const_name) {
-                check_error(checker, node->line, node->column,
-                            "Cannot call mutating method '%s' on const '%s'", member_name,
-                            const_name);
-                return type_error;
-            }
-            // Build mangled vec name for method dispatch
-            char mangled[256];
-            snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
-            sem_info_set_member_struct_name(checker->sem, node, mangled);
+        // Build mangled vec name for method dispatch
+        char mangled[256];
+        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
+        sem_info_set_member_struct_name(checker->sem, node, mangled);
 
-            if (strcmp(member_name, "push") == 0) {
-                Type** params = xmalloc(1 * sizeof(Type*));
-                params[0]     = elem_type;
-                return type_func(params, 1, type_void, 0);
-            }
-            if (strcmp(member_name, "pop") == 0) {
-                return type_func(NULL, 0, elem_type, 0);
-            }
-            // clear
-            return type_func(NULL, 0, type_void, 0);
-        }
-        check_error(checker, node->line, node->column, "Vec has no member '%s'", member_name);
-        return type_error;
-    }
-
-    if (object->kind == TYPE_STRING) {
-        const char* member_name = node->as.member.name;
-        sem_info_set_member_is_ref(checker->sem, node, 0);
-        if (strcmp(member_name, "length") == 0) {
-            sem_info_set_member_struct_name(checker->sem, node, "__String");
-            return type_func(NULL, 0, type_int64, 0);
-        }
-        if (strcmp(member_name, "contains") == 0 || strcmp(member_name, "starts_with") == 0 ||
-            strcmp(member_name, "ends_with") == 0) {
-            sem_info_set_member_struct_name(checker->sem, node, "__String");
+        if (strcmp(member_name, "push") == 0) {
             Type** params = xmalloc(1 * sizeof(Type*));
-            params[0]     = type_string;
-            return type_func(params, 1, type_bool, 0);
+            params[0]     = elem_type;
+            return type_func(params, 1, type_void, 0);
         }
-        // Fall through to primitive_methods check for trait impls (e.g., Hashable)
+        if (strcmp(member_name, "pop") == 0) {
+            return type_func(NULL, 0, elem_type, 0);
+        }
+        // clear
+        return type_func(NULL, 0, type_void, 0);
     }
+    check_error(checker, node->line, node->column, "Vec has no member '%s'", member_name);
+    return type_error;
+}
 
-    // Check for methods on primitive types (from trait impls)
-    if (object->kind != TYPE_STRUCT) {
-        const char* prim_name   = type_name(object);
-        const char* member_name = node->as.member.name;
-        for (int i = 0; i < checker->traits.primitive_method_count; i++) {
-            if (strcmp(checker->traits.primitive_methods[i].type_name, prim_name) == 0 &&
-                strcmp(checker->traits.primitive_methods[i].method_name, member_name) == 0) {
-                if (!checker->traits.primitive_methods[i].is_const) {
-                    const char* const_name =
-                        get_const_binding_name(checker, node->as.member.object);
-                    if (const_name) {
-                        check_error(checker, node->line, node->column,
-                                    "Cannot call mutating method '%s' on const '%s'", member_name,
-                                    const_name);
-                        return type_error;
-                    }
+// Check string member access (length, contains, starts_with, ends_with)
+// Returns NULL if member_name is not a built-in string method (falls through to primitive methods)
+static Type* check_member_string(Checker* checker, Node* node) {
+    const char* member_name = node->as.member.name;
+    sem_info_set_member_is_ref(checker->sem, node, 0);
+    if (strcmp(member_name, "length") == 0) {
+        sem_info_set_member_struct_name(checker->sem, node, "__String");
+        return type_func(NULL, 0, type_int64, 0);
+    }
+    if (strcmp(member_name, "contains") == 0 || strcmp(member_name, "starts_with") == 0 ||
+        strcmp(member_name, "ends_with") == 0) {
+        sem_info_set_member_struct_name(checker->sem, node, "__String");
+        Type** params = xmalloc(1 * sizeof(Type*));
+        params[0]     = type_string;
+        return type_func(params, 1, type_bool, 0);
+    }
+    return NULL; // Not a built-in string method; fall through to primitive methods
+}
+
+// Check methods on primitive types (from trait impls, e.g., Hashable)
+static Type* check_member_primitive(Checker* checker, Node* node, Type* object) {
+    const char* prim_name   = type_name(object);
+    const char* member_name = node->as.member.name;
+    for (int i = 0; i < checker->traits.primitive_method_count; i++) {
+        if (strcmp(checker->traits.primitive_methods[i].type_name, prim_name) == 0 &&
+            strcmp(checker->traits.primitive_methods[i].method_name, member_name) == 0) {
+            if (!checker->traits.primitive_methods[i].is_const) {
+                const char* const_name = get_const_binding_name(checker, node->as.member.object);
+                if (const_name) {
+                    check_error(checker, node->line, node->column,
+                                "Cannot call mutating method '%s' on const '%s'", member_name,
+                                const_name);
+                    return type_error;
                 }
-                sem_info_set_member_is_ref(checker->sem, node, 0);
-                sem_info_set_member_struct_name(checker->sem, node, prim_name);
-                return checker->traits.primitive_methods[i].method_type;
             }
+            sem_info_set_member_is_ref(checker->sem, node, 0);
+            sem_info_set_member_struct_name(checker->sem, node, prim_name);
+            return checker->traits.primitive_methods[i].method_type;
         }
-        if (object->kind == TYPE_STRING) {
-            check_error(checker, node->line, node->column, "String has no member '%s'",
-                        member_name);
-        } else {
-            check_error(checker, node->line, node->column,
-                        "Member access requires struct type, got '%s'", type_name(object));
-        }
-        return type_error;
     }
+    if (object->kind == TYPE_STRING) {
+        check_error(checker, node->line, node->column, "String has no member '%s'", member_name);
+    } else {
+        check_error(checker, node->line, node->column,
+                    "Member access requires struct type, got '%s'", type_name(object));
+    }
+    return type_error;
+}
 
+// Check struct field and method access
+static Type* check_member_struct(Checker* checker, Node* node, Type* object) {
     sem_info_set_member_is_ref(checker->sem, node, 1);
     const char* member_name = node->as.member.name;
 
@@ -505,6 +496,40 @@ static Type* check_member_expr(Checker* checker, Node* node) {
     check_error(checker, node->line, node->column, "Struct '%s' has no field or method '%s'",
                 object->as.struc.name, member_name);
     return type_error;
+}
+
+// Type-check a member access: dispatch to type-specific helpers
+static Type* check_member_expr(Checker* checker, Node* node) {
+    // Check for module-qualified access first (e.g., std.print)
+    if (node->as.member.object->type == NODE_IDENT) {
+        const char* name = node->as.member.object->as.ident.name;
+        if (is_imported_module(checker, name))
+            return check_member_module(checker, node, name);
+    }
+
+    Type* object = check_expression(checker, node->as.member.object);
+    if (object->kind == TYPE_ERROR)
+        return type_error;
+
+    switch (object->kind) {
+    case TYPE_SPAN:
+        return check_member_span(checker, node);
+    case TYPE_ENUM:
+        return check_member_enum(checker, node, object);
+    case TYPE_VEC:
+        return check_member_vec(checker, node, object);
+    case TYPE_STRING: {
+        Type* result = check_member_string(checker, node);
+        if (result)
+            return result;
+        // Fall through to primitive methods for trait impls (e.g., Hashable)
+        return check_member_primitive(checker, node, object);
+    }
+    case TYPE_STRUCT:
+        return check_member_struct(checker, node, object);
+    default:
+        return check_member_primitive(checker, node, object);
+    }
 }
 
 // Check if a node is a valid assignment target (identifier, member, or index)
