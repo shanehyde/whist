@@ -362,6 +362,10 @@ char* build_mangled_name_from_generic_node(CodeGen* gen, Node* type_node) {
             }
         }
     }
+    if (pos >= (int)sizeof(buf)) {
+        fprintf(stderr, "fatal: mangled generic name exceeds %d bytes\n", (int)sizeof(buf));
+        exit(1);
+    }
     return xstrdup(buf);
 }
 
