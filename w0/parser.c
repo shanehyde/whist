@@ -143,6 +143,7 @@ static Node*            parse_expression(Parser* parser);
 static Node*            parse_type(Parser* parser);
 static Node*            parse_block(Parser* parser);
 static Node*            parse_statement(Parser* parser);
+static Node*            parse_match(Parser* parser, int is_expr);
 static Node*            parse_var_decl(Parser* parser, int is_const, int is_public);
 static DestructPattern* parse_destruct_pattern(Parser* parser);
 
@@ -567,6 +568,10 @@ static Node* parse_primary_expression(Parser* parser) {
     if (match_token(parser, TOK_NULL)) {
         Node* node = node_new(NODE_NULL_LIT, token.line, token.column);
         return node;
+    }
+
+    if (match_token(parser, TOK_MATCH)) {
+        return parse_match(parser, 1);
     }
 
     if (match_token(parser, TOK_IDENT)) {
@@ -1127,7 +1132,7 @@ static Node* parse_defer_stmt(Parser* parser) {
 // Match Statement Parsing
 // ============================================================================
 
-static Node* parse_match_stmt(Parser* parser) {
+static Node* parse_match(Parser* parser, int is_expr) {
     Token token = parser->previous; // TOK_MATCH already consumed
     consume_token(parser, TOK_LPAREN, "Expected '(' after 'match'");
     Node* expr = parse_expression(parser);
@@ -1137,6 +1142,8 @@ static Node* parse_match_stmt(Parser* parser) {
     Node* node                        = node_new(NODE_MATCH, token.line, token.column);
     node->as.match_stmt.expr          = expr;
     node->as.match_stmt.resolved_type = NULL;
+    node->as.match_stmt.resolved_value_type = NULL;
+    node->as.match_stmt.is_expr            = is_expr;
     nodelist_init(&node->as.match_stmt.arms);
 
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
@@ -1208,12 +1215,27 @@ static Node* parse_match_stmt(Parser* parser) {
         // Expect =>
         consume_token(parser, TOK_FAT_ARROW, "Expected '=>' after match pattern");
 
-        // Parse arm body: block or single statement
-        if (check_token(parser, TOK_LBRACE)) {
-            advance_token(parser);
-            arm->as.match_arm.body = parse_block(parser);
+        if (is_expr) {
+            if (check_token(parser, TOK_LBRACE)) {
+                parse_error(parser, "Match expression arms must be expressions (no block body)");
+                node_free(arm);
+                node_free(node);
+                return NULL;
+            }
+            arm->as.match_arm.body = parse_expression(parser);
+            if (!arm->as.match_arm.body) {
+                node_free(arm);
+                node_free(node);
+                return NULL;
+            }
         } else {
-            arm->as.match_arm.body = parse_statement(parser);
+            // Parse arm body: block or single statement
+            if (check_token(parser, TOK_LBRACE)) {
+                advance_token(parser);
+                arm->as.match_arm.body = parse_block(parser);
+            } else {
+                arm->as.match_arm.body = parse_statement(parser);
+            }
         }
 
         nodelist_push(&node->as.match_stmt.arms, arm);
@@ -1224,6 +1246,10 @@ static Node* parse_match_stmt(Parser* parser) {
 
     consume_token(parser, TOK_RBRACE, "Expected '}' after match arms");
     return node;
+}
+
+static Node* parse_match_stmt(Parser* parser) {
+    return parse_match(parser, 0);
 }
 
 // ============================================================================

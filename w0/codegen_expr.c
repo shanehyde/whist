@@ -15,6 +15,7 @@ static void emit_slice_expr(CodeGen* gen, Node* node);
 static void emit_member_expr(CodeGen* gen, Node* node);
 static void emit_new_expr(CodeGen* gen, Node* node);
 static void emit_string_interp(CodeGen* gen, Node* node);
+static void emit_match_expr(CodeGen* gen, Node* node);
 
 // In a generic method body, look up the field type node from the struct template.
 // For `self.fieldname`, returns the AST type node of the field, or NULL.
@@ -875,6 +876,89 @@ static void emit_try_expr(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit match-as-expression via GCC statement expression:
+// ({ Enum __matchN = <expr>; Result __matchvN; if (...) { __matchvN = ...; } ... __matchvN; })
+static void emit_match_expr(CodeGen* gen, Node* node) {
+    Type* enum_type  = node->as.match_stmt.resolved_type;
+    Type* value_type = node->as.match_stmt.resolved_value_type;
+    if (!enum_type || enum_type->kind != TYPE_ENUM || !value_type || value_type->kind == TYPE_ERROR) {
+        emit(gen, "/* invalid match expr */");
+        return;
+    }
+
+    int         is_data   = enum_type->as.enm.has_data;
+    const char* enum_name = enum_type->as.enm.name;
+    int         match_id  = gen->out.temp_count++;
+
+    emit(gen, "({ %s __match%d = ", enum_name, match_id);
+    emit_expr(gen, node->as.match_stmt.expr);
+    emit(gen, "; ");
+    emit_resolved_type(gen, value_type);
+    emit(gen, " __matchv%d; ", match_id);
+
+    int has_wildcard = 0;
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
+            has_wildcard = 1;
+            break;
+        }
+    }
+    int last_arm = node->as.match_stmt.arms.count - 1;
+
+    int first = 1;
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        Node* arm = node->as.match_stmt.arms.nodes[a];
+
+        if (arm->as.match_arm.is_wildcard) {
+            if (first) {
+                emit(gen, "{ ");
+            } else {
+                emit(gen, "else { ");
+            }
+        } else if (!has_wildcard && a == last_arm && !first) {
+            emit(gen, "else { ");
+        } else {
+            const char* variant = arm->as.match_arm.variant_name;
+            if (first) {
+                emit(gen, "if (");
+            } else {
+                emit(gen, "else if (");
+            }
+            if (is_data) {
+                emit(gen, "__match%d.tag == %s_%s", match_id, enum_name, variant);
+            } else {
+                emit(gen, "__match%d == %s_%s", match_id, enum_name, variant);
+            }
+            emit(gen, ") { ");
+        }
+        first = 0;
+
+        if (!arm->as.match_arm.is_wildcard && is_data && arm->as.match_arm.binding_count > 0) {
+            const char* variant = arm->as.match_arm.variant_name;
+            int         variant_idx = -1;
+            for (int i = 0; i < enum_type->as.enm.value_count; i++) {
+                if (strcmp(enum_type->as.enm.value_names[i], variant) == 0) {
+                    variant_idx = i;
+                    break;
+                }
+            }
+            if (variant_idx >= 0) {
+                for (int j = 0; j < arm->as.match_arm.binding_count; j++) {
+                    emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);
+                    emit(gen, " %s = __match%d.%s.f%d; ", arm->as.match_arm.bindings[j], match_id,
+                         variant, j);
+                }
+            }
+        }
+
+        emit(gen, "__matchv%d = ", match_id);
+        emit_expr(gen, arm->as.match_arm.body);
+        emit(gen, "; } ");
+    }
+
+    emit(gen, "__matchv%d; })", match_id);
+}
+
 // Dispatch expression code generation based on node type
 void emit_expr(CodeGen* gen, Node* node) {
     if (!node)
@@ -1024,6 +1108,10 @@ void emit_expr(CodeGen* gen, Node* node) {
 
     case NODE_TRY_EXPR:
         emit_try_expr(gen, node);
+        break;
+
+    case NODE_MATCH:
+        emit_match_expr(gen, node);
         break;
 
     default:
