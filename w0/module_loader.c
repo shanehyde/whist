@@ -193,16 +193,22 @@ int module_loader_import(ModuleLoader* loader, Parser* parser, Node* program, No
 
     // Track file-level and root-level imports
     if (!is_relative) {
-        add_file_import(loader, module_name, module_length);
         if (loader->import_depth == 0) {
             module_loader_add_direct_import(loader, module_name, module_length);
         }
     }
 
     // Parse the imported file with the shared loader.
-    // Save/restore file_imports so each file sees only its own imports.
-    int saved_file_imports_count = loader->file_imports_count;
-    loader->file_imports_count   = 0;
+    // Save/restore the entire file_imports array so each file sees only its own
+    // imports. Saving just the count is insufficient because sub-parses overwrite
+    // array entries at the same indices.
+    char** saved_file_imports          = loader->file_imports;
+    int    saved_file_imports_count    = loader->file_imports_count;
+    int    saved_file_imports_capacity = loader->file_imports_capacity;
+
+    loader->file_imports          = NULL;
+    loader->file_imports_count    = 0;
+    loader->file_imports_capacity = 0;
 
     Parser import_parser;
     parser_init_with_loader(&import_parser, source, path, loader);
@@ -211,11 +217,20 @@ int module_loader_import(ModuleLoader* loader, Parser* parser, Node* program, No
     Node* import_ast = parser_parse(&import_parser);
     loader->import_depth--;
 
-    // Free sub-file's file_imports entries and restore
+    // Free sub-file's file_imports and restore parent's
     for (int i = 0; i < loader->file_imports_count; i++) {
         free(loader->file_imports[i]);
     }
-    loader->file_imports_count = saved_file_imports_count;
+    free(loader->file_imports);
+
+    loader->file_imports          = saved_file_imports;
+    loader->file_imports_count    = saved_file_imports_count;
+    loader->file_imports_capacity = saved_file_imports_capacity;
+
+    // Add this module to the current file's imports
+    if (!is_relative) {
+        add_file_import(loader, module_name, module_length);
+    }
 
     if (import_parser.had_error) {
         fprintf(stderr, "Failed to parse imported file: %s\n", path);
@@ -264,4 +279,19 @@ int module_loader_import(ModuleLoader* loader, Parser* parser, Node* program, No
 
     node_free(import_ast);
     return 1;
+}
+
+void module_loader_import_prelude(ModuleLoader* loader, Parser* parser, Node* program,
+                                  Node* main_module) {
+    if (!loader || !loader->lib_path) {
+        return;
+    }
+
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/prelude.w", loader->lib_path);
+    if (!module_loader_file_exists(path)) {
+        return;
+    }
+
+    module_loader_import(loader, parser, program, main_module, "prelude", 7, 0);
 }

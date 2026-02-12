@@ -2166,6 +2166,13 @@ Node* parser_parse(Parser* parser) {
     main_module->as.module.name        = xstrdup("main");
     main_module->as.module.name_length = 4;
     nodelist_init(&main_module->as.module.decls);
+
+    // Auto-import prelude before adding main module, so prelude types
+    // are defined first in the checker (main module can then shadow them)
+    if (parser->loader) {
+        module_loader_import_prelude(parser->loader, parser, program, main_module);
+    }
+
     nodelist_push(&program->as.program.modules, main_module);
 
     while (!check_token(parser, TOK_EOF)) {

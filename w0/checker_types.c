@@ -10,11 +10,10 @@
 // Generic struct helpers
 // =============================================================================
 
-// Register a generic struct definition
-void register_generic_def(Checker* checker, const char* name, char** type_params,
-                          char** type_param_bounds, int type_param_count, Node* decl) {
-    VEC_GROW(checker->generics.defs, checker->generics.def_count, checker->generics.def_capacity);
-    GenericDef* def        = &checker->generics.defs[checker->generics.def_count++];
+// Initialize a GenericDef entry with the given parameters
+static void init_generic_def(GenericDef* def, const char* name, char** type_params,
+                             char** type_param_bounds, int type_param_count, Node* decl,
+                             const char* source_module) {
     def->name              = xstrdup(name);
     def->type_params       = xmalloc(type_param_count * sizeof(char*));
     def->type_param_bounds = xmalloc(type_param_count * sizeof(char*));
@@ -26,9 +25,49 @@ void register_generic_def(Checker* checker, const char* name, char** type_params
     def->type_param_count = type_param_count;
     def->decl             = decl;
     def->is_type_alias    = 0;
+    def->source_module    = source_module ? xstrdup(source_module) : NULL;
     def->methods          = NULL;
     def->method_count     = 0;
     def->method_capacity  = 0;
+}
+
+// Free the owned fields of a GenericDef (but not the struct itself)
+static void free_generic_def_fields(GenericDef* def) {
+    free(def->name);
+    for (int j = 0; j < def->type_param_count; j++) {
+        free(def->type_params[j]);
+        free(def->type_param_bounds[j]);
+    }
+    free(def->type_params);
+    free(def->type_param_bounds);
+    free((void*)def->source_module);
+    free(def->methods);
+}
+
+// Register a generic struct definition
+void register_generic_def(Checker* checker, const char* name, char** type_params,
+                          char** type_param_bounds, int type_param_count, Node* decl) {
+    const char* source_module = checker->modules.current_module;
+
+    // Check if a prelude entry with the same name exists and replace it
+    for (int i = 0; i < checker->generics.def_count; i++) {
+        if (strcmp(checker->generics.defs[i].name, name) == 0) {
+            if (checker->generics.defs[i].source_module &&
+                strcmp(checker->generics.defs[i].source_module, "prelude") == 0) {
+                // Replace prelude definition with user's
+                free_generic_def_fields(&checker->generics.defs[i]);
+                init_generic_def(&checker->generics.defs[i], name, type_params, type_param_bounds,
+                                 type_param_count, decl, source_module);
+                return;
+            }
+            return; // Already registered (non-prelude), skip
+        }
+    }
+
+    VEC_GROW(checker->generics.defs, checker->generics.def_count, checker->generics.def_capacity);
+    GenericDef* def = &checker->generics.defs[checker->generics.def_count++];
+    init_generic_def(def, name, type_params, type_param_bounds, type_param_count, decl,
+                     source_module);
 }
 
 // Register a method on a generic struct definition

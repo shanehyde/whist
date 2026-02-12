@@ -49,12 +49,13 @@ typedef struct {
 
 // Generic struct definition (template)
 typedef struct {
-    char*  name;              // "Box", "Pair"
-    char** type_params;       // ["T"] or ["K", "V"]
-    char** type_param_bounds; // Trait bounds (NULL entries = unbounded)
-    int    type_param_count;
-    Node*  decl;          // Original AST node for field type resolution
-    int    is_type_alias; // 1 if this is a generic type alias, 0 for struct/enum
+    char*       name;              // "Box", "Pair"
+    char**      type_params;       // ["T"] or ["K", "V"]
+    char**      type_param_bounds; // Trait bounds (NULL entries = unbounded)
+    int         type_param_count;
+    Node*       decl;          // Original AST node for field type resolution
+    int         is_type_alias; // 1 if this is a generic type alias, 0 for struct/enum
+    const char* source_module; // "prelude" or NULL — for shadowing support
     // Methods on the generic struct
     Node** methods; // Array of NODE_FUNC_DECL
     int    method_count;

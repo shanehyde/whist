@@ -179,6 +179,7 @@ void checker_free(Checker* checker) {
         }
         free(checker->generics.defs[i].type_params);
         free(checker->generics.defs[i].type_param_bounds);
+        free((void*)checker->generics.defs[i].source_module);
         // Note: methods array contains pointers to AST nodes, don't free them
         free(checker->generics.defs[i].methods);
     }
@@ -230,6 +231,10 @@ Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type
     // Check for redefinition in current scope
     for (Symbol* sym = scope->symbols[index]; sym; sym = sym->next) {
         if (strcmp(sym->name, name) == 0) {
+            // Allow shadowing prelude symbols
+            if (sym->source_module && strcmp(sym->source_module, "prelude") == 0) {
+                continue;
+            }
             return NULL; // Already defined
         }
     }
@@ -250,6 +255,11 @@ Symbol* checker_define(Checker* checker, const char* name, SymbolKind kind, Type
 static int is_module_accessible(Checker* checker, const char* source_module) {
     // NULL source_module means same module - always accessible
     if (!source_module) {
+        return 1;
+    }
+
+    // Prelude symbols are always accessible from any context
+    if (strcmp(source_module, "prelude") == 0) {
         return 1;
     }
 
@@ -280,6 +290,11 @@ static int is_module_accessible(Checker* checker, const char* source_module) {
 
 // Check if a name is a directly imported library module
 int is_imported_module(Checker* checker, const char* name) {
+    // Prelude is always considered imported
+    if (strcmp(name, "prelude") == 0) {
+        return 1;
+    }
+
     // Use current function's accessible modules if set, otherwise use global direct_imports
     char** modules = checker->modules.current_accessible_modules;
     int    count   = checker->modules.current_accessible_modules_count;
@@ -326,13 +341,15 @@ Symbol* checker_lookup(Checker* checker, const char* name) {
                 if (!is_module_accessible(checker, sym->source_module)) {
                     continue; // Symbol exists but not accessible from this module
                 }
+                // Prelude symbols are accessible without module qualification
+                int is_prelude = sym->source_module && strcmp(sym->source_module, "prelude") == 0;
                 // Symbols from library imports require module qualification
                 // Skip them here - they must be accessed via module.symbol syntax
                 int same_module =
                     (sym->source_module == NULL && checker->modules.current_module == NULL) ||
                     (sym->source_module && checker->modules.current_module &&
                      strcmp(sym->source_module, checker->modules.current_module) == 0);
-                if (sym->source_module && !same_module) {
+                if (sym->source_module && !same_module && !is_prelude) {
                     continue; // Library symbol - require module qualification
                 }
                 return sym;
@@ -1235,11 +1252,16 @@ static void check_func_decl(Checker* checker, Node* node) {
 }
 
 // Type-check a struct declaration: resolve fields, detect RC fields, or register generic template
+static int is_prelude_symbol(Symbol* sym) {
+    return sym && sym->source_module && strcmp(sym->source_module, "prelude") == 0;
+}
+
 static void check_struct_decl(Checker* checker, Node* node) {
     const char* name = node->as.struct_decl.name;
 
-    // Check for redefinition
-    if (checker_lookup(checker, name)) {
+    // Check for redefinition (allow shadowing prelude symbols)
+    Symbol* existing = checker_lookup(checker, name);
+    if (existing && !is_prelude_symbol(existing)) {
         check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
         return;
     }
@@ -1287,7 +1309,9 @@ static void check_enum_decl(Checker* checker, Node* node) {
     const char* name        = node->as.enum_decl.name;
     int         value_count = node->as.enum_decl.values.count;
 
-    if (checker_lookup(checker, name)) {
+    // Check for redefinition (allow shadowing prelude symbols)
+    Symbol* existing = checker_lookup(checker, name);
+    if (existing && !is_prelude_symbol(existing)) {
         check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
         return;
     }
@@ -1354,8 +1378,9 @@ static void check_enum_decl(Checker* checker, Node* node) {
 static void check_trait_decl(Checker* checker, Node* node) {
     const char* name = node->as.trait_decl.name;
 
-    // Check for redefinition
-    if (checker_lookup(checker, name)) {
+    // Check for redefinition (allow shadowing prelude symbols)
+    Symbol* existing = checker_lookup(checker, name);
+    if (existing && !is_prelude_symbol(existing)) {
         check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
         return;
     }
