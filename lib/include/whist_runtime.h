@@ -110,6 +110,12 @@ static inline void __w0_vec_check(int64_t count, int64_t idx, int line, int col)
     }
 }
 
+/* --- Panic --- */
+static inline void __whist_panic(const char* msg) {
+    fprintf(stderr, "Panic: %s\n", msg);
+    exit(1);
+}
+
 /* --- String helpers --- */
 static inline int64_t __String_length(const char* s) {
     return (int64_t)strlen(s);

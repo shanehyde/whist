@@ -43,6 +43,7 @@ static void check_trait_decl(Checker* checker, Node* node);
 static void check_type_alias_decl(Checker* checker, Node* node);
 static void check_impl_decl(Checker* checker, Node* node);
 static void check_use_decl(Checker* checker, Node* node);
+static int  is_prelude_symbol(Symbol* sym);
 
 // =============================================================================
 // Utility functions
@@ -1132,8 +1133,9 @@ static void check_func_decl(Checker* checker, Node* node) {
         }
     }
 
-    // Check for redefinition
-    if (checker_lookup(checker, mangled_name)) {
+    // Check for redefinition (allow shadowing prelude symbols)
+    Symbol* existing = checker_lookup(checker, mangled_name);
+    if (existing && !is_prelude_symbol(existing)) {
         check_error(checker, node->line, node->column, "Redefinition of '%s'", mangled_name);
         free(mangled_name);
         return;
