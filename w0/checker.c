@@ -1670,6 +1670,17 @@ typedef enum {
     CHECKER_PASS_CHECK_MAIN_DECLS,
 } CheckerPass;
 
+typedef enum {
+    CHECKER_MODULE_ALL,
+    CHECKER_MODULE_LIBRARY_ONLY,
+    CHECKER_MODULE_MAIN_ONLY,
+} CheckerModuleFilter;
+
+typedef struct {
+    CheckerModuleFilter module_filter;
+    int (*decl_filter)(Node* decl);
+} CheckerPassSpec;
+
 static int is_main_module(Node* mod) {
     return mod && mod->type == NODE_MODULE && strcmp(mod->as.module.name, "main") == 0;
 }
@@ -1686,7 +1697,8 @@ static int is_generic_method_decl(Node* decl) {
     if (!decl || decl->type != NODE_FUNC_DECL) {
         return 0;
     }
-    return decl->as.func_decl.receiver_type != NULL && decl->as.func_decl.receiver_type_args.count > 0;
+    return decl->as.func_decl.receiver_type != NULL &&
+           decl->as.func_decl.receiver_type_args.count > 0;
 }
 
 static int is_generic_impl_decl(Node* decl) {
@@ -1697,51 +1709,64 @@ static int decl_processed_in_early_passes(Node* decl) {
     return is_type_decl(decl) || is_generic_method_decl(decl) || is_generic_impl_decl(decl);
 }
 
-static int module_matches_pass(Node* mod, CheckerPass pass) {
-    switch (pass) {
-    case CHECKER_PASS_CHECK_LIBRARY_DECLS:
+static int is_generic_registration_decl(Node* decl) {
+    return is_generic_method_decl(decl) || is_generic_impl_decl(decl);
+}
+
+static int is_regular_decl(Node* decl) {
+    return !decl_processed_in_early_passes(decl);
+}
+
+static int module_matches_filter(Node* mod, CheckerModuleFilter filter) {
+    switch (filter) {
+    case CHECKER_MODULE_LIBRARY_ONLY:
         return !is_main_module(mod);
-    case CHECKER_PASS_CHECK_MAIN_DECLS:
+    case CHECKER_MODULE_MAIN_ONLY:
         return is_main_module(mod);
-    case CHECKER_PASS_DECLARE_TYPES:
-    case CHECKER_PASS_REGISTER_GENERIC_DECLS:
+    case CHECKER_MODULE_ALL:
         return 1;
     }
     return 0;
 }
 
-static int decl_matches_pass(Node* decl, CheckerPass pass) {
-    switch (pass) {
-    case CHECKER_PASS_DECLARE_TYPES:
-        return is_type_decl(decl);
-    case CHECKER_PASS_REGISTER_GENERIC_DECLS:
-        return is_generic_method_decl(decl) || is_generic_impl_decl(decl);
-    case CHECKER_PASS_CHECK_LIBRARY_DECLS:
-    case CHECKER_PASS_CHECK_MAIN_DECLS:
-        return !decl_processed_in_early_passes(decl);
-    }
-    return 0;
-}
-
-static void run_checker_pass(Checker* checker, Node* ast, CheckerPass pass) {
+static void run_checker_pass(Checker* checker, Node* ast, const CheckerPassSpec* pass) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE) {
             continue;
         }
-        if (!module_matches_pass(mod, pass)) {
+        if (!module_matches_filter(mod, pass->module_filter)) {
             continue;
         }
 
         checker->modules.current_module = is_main_module(mod) ? NULL : mod->as.module.name;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            if (decl_matches_pass(decl, pass)) {
+            if (pass->decl_filter(decl)) {
                 check_decl(checker, decl);
             }
         }
     }
 }
+
+static const CheckerPassSpec k_checker_pass_specs[] = {
+    {
+        .module_filter = CHECKER_MODULE_ALL,
+        .decl_filter   = is_type_decl,
+    },
+    {
+        .module_filter = CHECKER_MODULE_ALL,
+        .decl_filter   = is_generic_registration_decl,
+    },
+    {
+        .module_filter = CHECKER_MODULE_LIBRARY_ONLY,
+        .decl_filter   = is_regular_decl,
+    },
+    {
+        .module_filter = CHECKER_MODULE_MAIN_ONLY,
+        .decl_filter   = is_regular_decl,
+    },
+};
 
 // Type-check an entire program AST using four sequential passes.
 //
@@ -1774,21 +1799,9 @@ int checker_check(Checker* checker, Node* ast) {
 
     checker_push_scope(checker); // Global scope
 
-    // First pass: declare all types (structs, enums, traits) for forward references
-    run_checker_pass(checker, ast, CHECKER_PASS_DECLARE_TYPES);
-
-    // Second pass: register generic methods and trait impls on GenericDefs.
-    // This must happen before type aliases, which may trigger generic instantiation.
-    run_checker_pass(checker, ast, CHECKER_PASS_REGISTER_GENERIC_DECLS);
-
-    // Third pass: check everything else in library modules (including type aliases)
-    // Process library modules (non-main) first, then main module last
-    // This ensures library functions are declared before main uses them
-    run_checker_pass(checker, ast, CHECKER_PASS_CHECK_LIBRARY_DECLS);
-
-    // Fourth pass: check main module (including type aliases)
-    // Type aliases that trigger generic instantiation now have access to all library symbols
-    run_checker_pass(checker, ast, CHECKER_PASS_CHECK_MAIN_DECLS);
+    for (size_t i = 0; i < sizeof(k_checker_pass_specs) / sizeof(k_checker_pass_specs[0]); i++) {
+        run_checker_pass(checker, ast, &k_checker_pass_specs[i]);
+    }
 
     checker->modules.current_module = NULL;
     checker_pop_scope(checker);
