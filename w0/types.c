@@ -352,7 +352,7 @@ int type_assignable(Type* target, Type* value) {
 
 // Ring buffer for type_name() results. Multiple concurrent calls (e.g. in the same
 // printf argument list) each get their own buffer slot, avoiding aliasing bugs.
-#define TYPE_NAME_BUFS 4
+#define TYPE_NAME_BUFS 8
 static char type_name_bufs[TYPE_NAME_BUFS][256];
 static int  type_name_idx = 0;
 
@@ -498,7 +498,7 @@ int type_is_builtin_name(const char* name) {
 }
 
 // Buffer for mangled span names
-#define TYPE_MANGLE_BUFS 4
+#define TYPE_MANGLE_BUFS 8
 static char type_mangle_bufs[TYPE_MANGLE_BUFS][256];
 static int  type_mangle_idx = 0;
 
