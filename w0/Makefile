@@ -8,7 +8,7 @@ DEPS = $(SRC:.c=.d)
 BIN = bin
 TARGET = $(BIN)/w0
 
-.PHONY: all clean test test-verbose test-valid test-errors format metrics
+.PHONY: all clean test test-verbose test-valid test-errors format metrics complexity
 
 all: $(TARGET)
 
@@ -42,5 +42,8 @@ format:
 
 metrics:
 	@lizard *.c --sort nloc
+
+complexity:
+	@./scripts/complexity_report.sh
 
 -include $(DEPS)

@@ -2,7 +2,7 @@
 
 The bootstrap compiler for the Whist programming language, written in C. Generates C code that can be compiled with any standard C compiler.
 
-The w0 compiler is approximately 9,200 lines of C and implements the full compilation pipeline: lexer → parser → type checker → C code generator.
+The w0 compiler implements the full compilation pipeline: lexer -> parser -> type checker -> C code generator.
 
 ## Build & Run
 
@@ -41,9 +41,17 @@ bin/w0 --lib-path ../lib program.w | cc -x c -I../lib/include -o program - && ./
 | `ast.c/h`       | AST node definitions         |
 | `print_ast.c/h` | AST pretty-printing          |
 
-## Test Suite
+Detailed phase contracts and ownership rules are documented in `ARCHITECTURE.md`.
 
-The test suite contains 54 test cases (35 valid programs, 19 error cases) with a color-coded test runner.
+## Complexity Baseline
+
+Generate a complexity baseline report (NLOC + cyclomatic complexity):
+
+```bash
+./scripts/complexity_report.sh
+```
+
+## Test Suite
 
 ```bash
 make test          # Run all tests

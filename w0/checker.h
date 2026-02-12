@@ -146,6 +146,11 @@ struct Checker {
     Type* enum_target_hint;
 };
 
+// Checker lifecycle:
+// - checker_init/checker_free own checker-internal allocations and Type arena cleanup.
+// - checker_check performs semantic analysis over an existing AST and may attach semantic
+//   annotations used by codegen.
+// - AST syntax identity (token spelling/shape) should be treated as parser-owned.
 void checker_init(Checker* checker);
 void checker_set_direct_imports(Checker* checker, char** direct_imports, int count);
 void checker_free(Checker* checker);
