@@ -39,7 +39,7 @@ bin/w0 --rc-debug <file.w>        # Emit RC debug tracing in generated code
 Compile and run:
 
 ```bash
-bin/w0 program.w | cc -x c -o program -
+bin/w0 --lib-path ../lib program.w | cc -x c -Ilib/include -o program - lib/whist_runtime.c
 ```
 
 The `--rc-debug` flag adds `fprintf(stderr, ...)` calls to the generated `__rc_alloc`, `__rc_inc`, and `__rc_dec` functions, producing a trace like:
@@ -100,7 +100,7 @@ func main(): i32 {
 The Whist standard library lives in the top-level `lib/` directory and is loaded via `--lib-path`:
 
 ```bash
-bin/w0 --lib-path ../lib program.w | cc -x c -Ilib/include -o program -
+bin/w0 --lib-path ../lib program.w | cc -x c -Ilib/include -o program - lib/whist_runtime.c
 ```
 
 **`std.w`** — Core utilities (imported as `import std;`):
