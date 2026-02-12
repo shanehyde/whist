@@ -128,7 +128,8 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
     // Compile with cc
     char cmd[1024];
     if (lib_path) {
-        snprintf(cmd, sizeof(cmd), "cc -o %s %s -I%s/include", exe_path, c_path, lib_path);
+        snprintf(cmd, sizeof(cmd), "cc -o %s %s -I%s/include %s/whist_runtime.c", exe_path, c_path,
+                 lib_path, lib_path);
     } else {
         snprintf(cmd, sizeof(cmd), "cc -o %s %s", exe_path, c_path);
     }

@@ -141,51 +141,10 @@ int rc_is_tracked(CodeGen* gen, const char* name) {
 // RC Emission — Runtime, Enum/Struct/Vec RC helpers
 // =============================================================================
 
-// Emit the reference counting runtime: __RcHeader, __rc_alloc, __rc_inc, __rc_dec
+// RC runtime (__RcHeader, __rc_alloc, __rc_inc, __rc_dec) is now provided
+// by whist_runtime.h — this function is intentionally empty.
 void emit_rc_runtime(CodeGen* gen) {
-    emit(gen, "typedef struct { size_t refcount; } __RcHeader;\n\n");
-    if (gen->rc.debug) {
-        emit(gen, "static inline void* __rc_alloc(size_t size) {\n");
-        emit(gen, "    __RcHeader* h = (__RcHeader*)malloc(sizeof(__RcHeader) + size);\n");
-        emit(gen, "    if (!h) { fprintf(stderr, \"Panic: out of memory\\n\"); exit(1); }\n");
-        emit(gen, "    h->refcount = 1;\n");
-        emit(gen, "    void* ptr = (void*)(h + 1);\n");
-        emit(gen, "    fprintf(stderr, \"RC_ALLOC: %%p (size=%%zu, rc=1)\\n\", ptr, size);\n");
-        emit(gen, "    return ptr;\n");
-        emit(gen, "}\n\n");
-        emit(gen, "static inline void __rc_inc(void* ptr) {\n");
-        emit(gen, "    if (!ptr) return;\n");
-        emit(gen, "    __RcHeader* h = ((__RcHeader*)ptr - 1);\n");
-        emit(gen, "    h->refcount++;\n");
-        emit(gen, "    fprintf(stderr, \"RC_INC: %%p (rc=%%zu)\\n\", ptr, h->refcount);\n");
-        emit(gen, "}\n\n");
-        emit(gen, "static inline void __rc_dec(void* ptr) {\n");
-        emit(gen, "    if (!ptr) return;\n");
-        emit(gen, "    __RcHeader* h = (__RcHeader*)ptr - 1;\n");
-        emit(gen, "    if (--h->refcount == 0) {\n");
-        emit(gen, "        fprintf(stderr, \"RC_FREE: %%p\\n\", ptr);\n");
-        emit(gen, "        free(h);\n");
-        emit(gen, "    } else {\n");
-        emit(gen, "        fprintf(stderr, \"RC_DEC: %%p (rc=%%zu)\\n\", ptr, h->refcount);\n");
-        emit(gen, "    }\n");
-        emit(gen, "}\n\n");
-    } else {
-        emit(gen, "static inline void* __rc_alloc(size_t size) {\n");
-        emit(gen, "    __RcHeader* h = (__RcHeader*)malloc(sizeof(__RcHeader) + size);\n");
-        emit(gen, "    if (!h) { fprintf(stderr, \"Panic: out of memory\\n\"); exit(1); }\n");
-        emit(gen, "    h->refcount = 1;\n");
-        emit(gen, "    return (void*)(h + 1);\n");
-        emit(gen, "}\n\n");
-        emit(gen, "static inline void __rc_inc(void* ptr) {\n");
-        emit(gen, "    if (!ptr) return;\n");
-        emit(gen, "    ((__RcHeader*)ptr - 1)->refcount++;\n");
-        emit(gen, "}\n\n");
-        emit(gen, "static inline void __rc_dec(void* ptr) {\n");
-        emit(gen, "    if (!ptr) return;\n");
-        emit(gen, "    __RcHeader* h = (__RcHeader*)ptr - 1;\n");
-        emit(gen, "    if (--h->refcount == 0) free(h);\n");
-        emit(gen, "}\n\n");
-    }
+    (void)gen;
 }
 
 // Emit __rc_inc_EnumName/__rc_dec_EnumName helpers for enums with RC-managed fields

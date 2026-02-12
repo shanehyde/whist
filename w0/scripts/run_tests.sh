@@ -155,7 +155,7 @@ run_rc_runtime_test() {
     local tmp
     tmp=$(mktemp /tmp/w0_rc_test_XXXXXX)
     local compile_output
-    compile_output=$(("$W0" --lib-path "$LIB_PATH" --rc-debug "$file" | cc -x c -I"$LIB_PATH/include" -o "$tmp" -) 2>&1)
+    compile_output=$(("$W0" --lib-path "$LIB_PATH" --rc-debug "$file" | cc -x c -I"$LIB_PATH/include" -o "$tmp" - "$LIB_PATH/whist_runtime.c") 2>&1)
     if [ $? -ne 0 ]; then
         if $verbose; then
             echo -e "${RED}✗ FAIL (compile)${RESET}"

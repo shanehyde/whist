@@ -772,72 +772,14 @@ void emit_decl(CodeGen* gen, Node* node) {
 // Typedef Emission — bounds checks, string helpers, typedefs, forward decls
 // =============================================================================
 
-// Emit bounds-checking helper functions for span and vec indexing
+// Bounds-checking helpers are now provided by whist_runtime.h.
 void emit_bounds_checks(CodeGen* gen) {
-    if (gen->checker.span_count > 0) {
-        emit(gen, "static inline void __w0_span_check(uint64_t count, int64_t idx, int line, int "
-                  "col) {\n");
-        emit(gen, "    if (idx < 0 || (uint64_t)idx >= count) {\n");
-        emit(gen, "        fprintf(stderr, \"Panic: span index %%lld out of bounds (count=%%llu) "
-                  "at %%d:%%d\\n\",\n");
-        emit(gen, "                (long long)idx, (unsigned long long)count, line, col);\n");
-        emit(gen, "        exit(1);\n");
-        emit(gen, "    }\n");
-        emit(gen, "}\n\n");
-    }
-
-    if (gen->checker.vec_count > 0) {
-        emit(gen, "static inline void __w0_vec_check(int64_t count, int64_t idx, int line, int "
-                  "col) {\n");
-        emit(gen, "    if (idx < 0 || idx >= count) {\n");
-        emit(gen, "        fprintf(stderr, \"Panic: Vec index %%lld out of bounds (count=%%lld) "
-                  "at %%d:%%d\\n\",\n");
-        emit(gen, "                (long long)idx, (long long)count, line, col);\n");
-        emit(gen, "        exit(1);\n");
-        emit(gen, "    }\n");
-        emit(gen, "}\n\n");
-    }
+    (void)gen;
 }
 
-// Emit string method helpers
+// String method helpers are now provided by whist_runtime.h.
 void emit_string_helpers(CodeGen* gen) {
-    emit(gen, "static inline int64_t __String_length(const char* s) { return (int64_t)strlen(s); "
-              "}\n");
-    emit(gen, "static inline const char* __String_concat(const char* a, const char* b) {\n");
-    emit(gen, "    size_t la = strlen(a), lb = strlen(b);\n");
-    emit(gen, "    char* r = (char*)malloc(la + lb + 1);\n");
-    emit(gen, "    memcpy(r, a, la); memcpy(r + la, b, lb + 1);\n");
-    emit(gen, "    return r;\n");
-    emit(gen, "}\n");
-    emit(gen, "static inline const char* __String_substr(const char* s, int64_t start, int64_t "
-              "end) {\n");
-    emit(gen, "    int64_t len = end - start;\n");
-    emit(gen, "    if (len < 0) len = 0;\n");
-    emit(gen, "    char* r = (char*)malloc(len + 1);\n");
-    emit(gen, "    memcpy(r, s + start, len);\n");
-    emit(gen, "    r[len] = '\\0';\n");
-    emit(gen, "    return r;\n");
-    emit(gen, "}\n");
-    emit(gen, "static inline bool __String_contains(const char* s, const char* sub) {\n");
-    emit(gen, "    return strstr(s, sub) != NULL;\n");
-    emit(gen, "}\n");
-    emit(gen, "static inline bool __String_starts_with(const char* s, const char* prefix) {\n");
-    emit(gen, "    return strncmp(s, prefix, strlen(prefix)) == 0;\n");
-    emit(gen, "}\n");
-    emit(gen, "static inline bool __String_ends_with(const char* s, const char* suffix) {\n");
-    emit(gen, "    size_t ls = strlen(s), lsuf = strlen(suffix);\n");
-    emit(gen, "    return ls >= lsuf && strcmp(s + ls - lsuf, suffix) == 0;\n");
-    emit(gen, "}\n");
-    emit(gen, "static inline const char* __std_format(const char* fmt, ...) {\n");
-    emit(gen, "    va_list args1, args2;\n");
-    emit(gen, "    va_start(args1, fmt); va_copy(args2, args1);\n");
-    emit(gen, "    int n = vsnprintf(NULL, 0, fmt, args1);\n");
-    emit(gen, "    va_end(args1);\n");
-    emit(gen, "    char* buf = (char*)malloc(n + 1);\n");
-    emit(gen, "    vsnprintf(buf, n + 1, fmt, args2);\n");
-    emit(gen, "    va_end(args2);\n");
-    emit(gen, "    return buf;\n");
-    emit(gen, "}\n\n");
+    (void)gen;
 }
 
 // Emit C struct typedefs for each collected tuple type (__tuple_tN)
