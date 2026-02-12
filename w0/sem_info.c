@@ -12,12 +12,15 @@ typedef struct {
     int   is_ref;
     int   has_is_const_access;
     int   is_const_access;
+    int   has_struct_name;
     char* struct_name;
+    int   has_module_name;
     char* module_name;
 } SemMemberInfo;
 
 typedef struct {
     Node* node;
+    int   has_resolved_enum_name;
     char* resolved_enum_name;
     int   has_is_data_enum;
     int   is_data_enum;
@@ -134,14 +137,15 @@ void sem_info_set_member_struct_name(SemInfo* info, Node* member, const char* st
     if (!m) {
         return;
     }
+    m->has_struct_name = 1;
     free(m->struct_name);
     m->struct_name = struct_name ? xstrdup(struct_name) : NULL;
 }
 
-const char* sem_info_get_member_struct_name(SemInfo* info, Node* member) {
+const char* sem_info_get_member_struct_name(SemInfo* info, Node* member, const char* fallback) {
     SemMemberInfo* m = get_member_info(info, member, 0);
-    if (!m) {
-        return NULL;
+    if (!m || !m->has_struct_name) {
+        return fallback;
     }
     return m->struct_name;
 }
@@ -151,14 +155,15 @@ void sem_info_set_member_module_name(SemInfo* info, Node* member, const char* mo
     if (!m) {
         return;
     }
+    m->has_module_name = 1;
     free(m->module_name);
     m->module_name = module_name ? xstrdup(module_name) : NULL;
 }
 
-const char* sem_info_get_member_module_name(SemInfo* info, Node* member) {
+const char* sem_info_get_member_module_name(SemInfo* info, Node* member, const char* fallback) {
     SemMemberInfo* m = get_member_info(info, member, 0);
-    if (!m) {
-        return NULL;
+    if (!m || !m->has_module_name) {
+        return fallback;
     }
     return m->module_name;
 }
@@ -169,14 +174,16 @@ void sem_info_set_enum_value_resolved_name(SemInfo* info, Node* enum_value,
     if (!e) {
         return;
     }
+    e->has_resolved_enum_name = 1;
     free(e->resolved_enum_name);
     e->resolved_enum_name = resolved_enum_name ? xstrdup(resolved_enum_name) : NULL;
 }
 
-const char* sem_info_get_enum_value_resolved_name(SemInfo* info, Node* enum_value) {
+const char* sem_info_get_enum_value_resolved_name(SemInfo* info, Node* enum_value,
+                                                   const char* fallback) {
     SemEnumValueInfo* e = get_enum_value_info(info, enum_value, 0);
-    if (!e) {
-        return NULL;
+    if (!e || !e->has_resolved_enum_name) {
+        return fallback;
     }
     return e->resolved_enum_name;
 }

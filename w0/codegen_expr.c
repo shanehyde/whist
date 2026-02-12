@@ -19,13 +19,11 @@ static void emit_string_interp(CodeGen* gen, Node* node);
 static void emit_match_expr(CodeGen* gen, Node* node);
 
 static const char* member_struct_name(CodeGen* gen, Node* member) {
-    const char* name = sem_info_get_member_struct_name(gen->checker.sem, member);
-    return name ? name : member->as.member.struct_name;
+    return sem_info_get_member_struct_name(gen->checker.sem, member, member->as.member.struct_name);
 }
 
 static const char* member_module_name(CodeGen* gen, Node* member) {
-    const char* name = sem_info_get_member_module_name(gen->checker.sem, member);
-    return name ? name : member->as.member.module_name;
+    return sem_info_get_member_module_name(gen->checker.sem, member, member->as.member.module_name);
 }
 
 static int member_is_ref(CodeGen* gen, Node* member) {
@@ -33,22 +31,15 @@ static int member_is_ref(CodeGen* gen, Node* member) {
 }
 
 static const char* enum_value_resolved_name(CodeGen* gen, Node* enum_value) {
-    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value);
-    if (name) {
-        return name;
-    }
-    if (enum_value->as.enum_value.enum_name) {
-        return enum_value->as.enum_value.enum_name;
-    }
-    return "";
+    const char* name = sem_info_get_enum_value_resolved_name(
+        gen->checker.sem, enum_value, enum_value->as.enum_value.enum_name);
+    return name ? name : "";
 }
 
 static int enum_value_resolved_name_length(CodeGen* gen, Node* enum_value) {
-    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value);
-    if (name) {
-        return (int)strlen(name);
-    }
-    return enum_value->as.enum_value.enum_name ? enum_value->as.enum_value.enum_name_length : 0;
+    const char* name = sem_info_get_enum_value_resolved_name(
+        gen->checker.sem, enum_value, enum_value->as.enum_value.enum_name);
+    return name ? (int)strlen(name) : 0;
 }
 
 // In a generic method body, look up the field type node from the struct template.
