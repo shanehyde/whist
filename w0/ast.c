@@ -100,7 +100,6 @@ void node_free(Node* node) {
         break;
     case NODE_ENUM_VALUE:
         free(node->as.enum_value.enum_name);
-        free(node->as.enum_value.original_enum_name);
         free(node->as.enum_value.value_name);
         nodelist_free(&node->as.enum_value.args);
         break;
@@ -432,8 +431,7 @@ Node* node_clone(Node* node) {
         c->as.enum_value.value_name_length = node->as.enum_value.value_name_length;
         c->as.enum_value.args              = nodelist_clone(&node->as.enum_value.args);
         // Reset checker flags
-        c->as.enum_value.is_data_enum       = 0;
-        c->as.enum_value.original_enum_name = NULL;
+        c->as.enum_value.is_data_enum = 0;
         break;
     case NODE_NEW_EXPR:
         c->as.new_expr.type_node     = node_clone(node->as.new_expr.type_node);
@@ -534,9 +532,9 @@ Node* node_clone(Node* node) {
         c->as.defer_stmt.stmt = node_clone(node->as.defer_stmt.stmt);
         break;
     case NODE_MATCH:
-        c->as.match_stmt.expr          = node_clone(node->as.match_stmt.expr);
-        c->as.match_stmt.arms          = nodelist_clone(&node->as.match_stmt.arms);
-        c->as.match_stmt.resolved_type = NULL;
+        c->as.match_stmt.expr                = node_clone(node->as.match_stmt.expr);
+        c->as.match_stmt.arms                = nodelist_clone(&node->as.match_stmt.arms);
+        c->as.match_stmt.resolved_type       = NULL;
         c->as.match_stmt.resolved_value_type = NULL;
         break;
     case NODE_MATCH_ARM:

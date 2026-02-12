@@ -3,6 +3,7 @@
 
 #include "alloc.h"
 #include "codegen_internal.h"
+#include "sem_info.h"
 #include "types.h"
 #include "vec.h"
 
@@ -11,6 +12,18 @@ static void emit_expr_stmt(CodeGen* gen, Node* node);
 static void emit_var_decl_stmt(CodeGen* gen, Node* node);
 static void emit_return_stmt(CodeGen* gen, Node* node);
 static void emit_match_stmt(CodeGen* gen, Node* node);
+
+static const char* enum_value_resolved_name(CodeGen* gen, Node* enum_value) {
+    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
+                                                             enum_value->as.enum_value.enum_name);
+    return name ? name : "";
+}
+
+static int enum_value_resolved_name_length(CodeGen* gen, Node* enum_value) {
+    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
+                                                             enum_value->as.enum_value.enum_name);
+    return name ? (int)strlen(name) : 0;
+}
 
 // Emit statements within a block without emitting braces, but with RC scope handling
 void emit_block_contents(CodeGen* gen, Node* block) {
@@ -362,8 +375,8 @@ static void emit_var_decl_inferred_type(CodeGen* gen, Node* node) {
         break;
     }
     case NODE_ENUM_VALUE:
-        emit(gen, "%.*s %s", node->as.var_decl.init->as.enum_value.enum_name_length,
-             node->as.var_decl.init->as.enum_value.enum_name, node->as.var_decl.name);
+        emit(gen, "%.*s %s", enum_value_resolved_name_length(gen, node->as.var_decl.init),
+             enum_value_resolved_name(gen, node->as.var_decl.init), node->as.var_decl.name);
         break;
     default:
         if (node->as.var_decl.resolved_type) {

@@ -3,6 +3,7 @@
 
 #include "alloc.h"
 #include "codegen_internal.h"
+#include "sem_info.h"
 #include "types.h"
 
 // Forward declarations for static helpers
@@ -16,6 +17,30 @@ static void emit_member_expr(CodeGen* gen, Node* node);
 static void emit_new_expr(CodeGen* gen, Node* node);
 static void emit_string_interp(CodeGen* gen, Node* node);
 static void emit_match_expr(CodeGen* gen, Node* node);
+
+static const char* member_struct_name(CodeGen* gen, Node* member) {
+    return sem_info_get_member_struct_name(gen->checker.sem, member, member->as.member.struct_name);
+}
+
+static const char* member_module_name(CodeGen* gen, Node* member) {
+    return sem_info_get_member_module_name(gen->checker.sem, member, member->as.member.module_name);
+}
+
+static int member_is_ref(CodeGen* gen, Node* member) {
+    return sem_info_get_member_is_ref(gen->checker.sem, member, member->as.member.is_ref);
+}
+
+static const char* enum_value_resolved_name(CodeGen* gen, Node* enum_value) {
+    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
+                                                             enum_value->as.enum_value.enum_name);
+    return name ? name : "";
+}
+
+static int enum_value_resolved_name_length(CodeGen* gen, Node* enum_value) {
+    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
+                                                             enum_value->as.enum_value.enum_name);
+    return name ? (int)strlen(name) : 0;
+}
 
 // In a generic method body, look up the field type node from the struct template.
 // For `self.fieldname`, returns the AST type node of the field, or NULL.
@@ -197,16 +222,19 @@ static void emit_char_lit(CodeGen* gen, Node* node) {
 
 // Emit an enum variant: simple tag, bare data enum, or data enum with constructor args
 static void emit_enum_value(CodeGen* gen, Node* node) {
-    if (!node->as.enum_value.is_data_enum) {
+    const char* enum_name    = enum_value_resolved_name(gen, node);
+    int         enum_len     = enum_value_resolved_name_length(gen, node);
+    int         is_data_enum = sem_info_get_enum_value_is_data_enum(gen->checker.sem, node,
+                                                                    node->as.enum_value.is_data_enum);
+
+    if (!is_data_enum) {
         // Simple enum: emit qualified value name (EnumName_ValueName)
-        emit(gen, "%.*s_%.*s", node->as.enum_value.enum_name_length, node->as.enum_value.enum_name,
-             node->as.enum_value.value_name_length, node->as.enum_value.value_name);
+        emit(gen, "%.*s_%.*s", enum_len, enum_name, node->as.enum_value.value_name_length,
+             node->as.enum_value.value_name);
     } else if (node->as.enum_value.args.count == 0) {
         // Data enum, bare tag: (EnumName){.tag = EnumName_ValueName}
-        emit(gen, "(%.*s){.tag = %.*s_%.*s}", node->as.enum_value.enum_name_length,
-             node->as.enum_value.enum_name, node->as.enum_value.enum_name_length,
-             node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
-             node->as.enum_value.value_name);
+        emit(gen, "(%.*s){.tag = %.*s_%.*s}", enum_len, enum_name, enum_len, enum_name,
+             node->as.enum_value.value_name_length, node->as.enum_value.value_name);
     } else {
         // Data enum with args: (EnumName){.tag = EnumName_ValueName, .ValueName = {.f0 = ..}}
         int needs_rc_inc = 0;
@@ -231,11 +259,9 @@ static void emit_enum_value(CodeGen* gen, Node* node) {
             }
         }
 
-        emit(gen, "(%.*s){.tag = %.*s_%.*s, .%.*s = {", node->as.enum_value.enum_name_length,
-             node->as.enum_value.enum_name, node->as.enum_value.enum_name_length,
-             node->as.enum_value.enum_name, node->as.enum_value.value_name_length,
-             node->as.enum_value.value_name, node->as.enum_value.value_name_length,
-             node->as.enum_value.value_name);
+        emit(gen, "(%.*s){.tag = %.*s_%.*s, .%.*s = {", enum_len, enum_name, enum_len, enum_name,
+             node->as.enum_value.value_name_length, node->as.enum_value.value_name,
+             node->as.enum_value.value_name_length, node->as.enum_value.value_name);
         for (int i = 0; i < node->as.enum_value.args.count; i++) {
             if (i > 0)
                 emit(gen, ", ");
@@ -252,11 +278,18 @@ static void emit_enum_value(CodeGen* gen, Node* node) {
 
 // Emit a function call: module-qualified, method, generic method, or regular call
 static void emit_call_expr(CodeGen* gen, Node* node) {
-    Node* func = node->as.call.func;
+    Node*       func               = node->as.call.func;
+    const char* callee_module_name = NULL;
+    const char* callee_struct_name = NULL;
+    if (func->type == NODE_MEMBER) {
+        callee_module_name = member_module_name(gen, func);
+        callee_struct_name = member_struct_name(gen, func);
+    }
+
     // Check if this is a module-qualified call (e.g., std.print())
-    if (func->type == NODE_MEMBER && func->as.member.module_name != NULL) {
+    if (func->type == NODE_MEMBER && callee_module_name != NULL) {
         // Built-in: std.format -> __std_format
-        if (strcmp(func->as.member.module_name, "std") == 0 &&
+        if (strcmp(callee_module_name, "std") == 0 &&
             strncmp(func->as.member.name, "format", func->as.member.length) == 0 &&
             func->as.member.length == 6) {
             emit(gen, "__std_format(");
@@ -269,22 +302,20 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
             return;
         }
         // Module-qualified call: emit module_func(args...)
-        emit(gen, "%s_%.*s(", func->as.member.module_name, func->as.member.length,
-             func->as.member.name);
+        emit(gen, "%s_%.*s(", callee_module_name, func->as.member.length, func->as.member.name);
         for (int i = 0; i < node->as.call.args.count; i++) {
             if (i > 0)
                 emit(gen, ", ");
             emit_expr(gen, node->as.call.args.nodes[i]);
         }
         emit(gen, ")");
-    } else if (func->type == NODE_MEMBER && func->as.member.struct_name != NULL) {
+    } else if (func->type == NODE_MEMBER && callee_struct_name != NULL) {
         // Method call: emit StructName_method(obj, args...)
         // With struct references, objects are already pointers
-        emit(gen, "%s_%.*s(", func->as.member.struct_name, func->as.member.length,
-             func->as.member.name);
+        emit(gen, "%s_%.*s(", callee_struct_name, func->as.member.length, func->as.member.name);
         // Emit the receiver as first argument
         // For enums, take address (stack values); for structs, already pointers
-        if (is_enum_type_name(gen, func->as.member.struct_name)) {
+        if (is_enum_type_name(gen, callee_struct_name)) {
             // In enum methods, self is already a pointer — pass it directly.
             // For other identifiers (lvalues), take address. For non-lvalues
             // (call results, etc.), materialize into a temporary first.
@@ -297,7 +328,7 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
                 emit_expr(gen, func->as.member.object);
             } else {
                 int tmp = gen->out.temp_count++;
-                emit(gen, "({%s __tmp%d = ", func->as.member.struct_name, tmp);
+                emit(gen, "({%s __tmp%d = ", callee_struct_name, tmp);
                 emit_expr(gen, func->as.member.object);
                 emit(gen, "; &__tmp%d;})", tmp);
             }
@@ -310,8 +341,7 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
             emit_expr(gen, node->as.call.args.nodes[i]);
         }
         emit(gen, ")");
-    } else if (func->type == NODE_MEMBER && func->as.member.struct_name == NULL &&
-               gen->generics.subst) {
+    } else if (func->type == NODE_MEMBER && callee_struct_name == NULL && gen->generics.subst) {
         // In a generic method body — checker didn't annotate struct_name or module_name.
         // First check if this is a module-qualified call (e.g., std.print)
         int is_module_call = 0;
@@ -554,14 +584,18 @@ static void emit_slice_expr(CodeGen* gen, Node* node) {
 
 // Emit a member access expression using -> for struct pointers or . for value types
 static void emit_member_expr(CodeGen* gen, Node* node) {
+    const char* resolved_struct_name = member_struct_name(gen, node);
+    const char* resolved_module_name = member_module_name(gen, node);
+    int         resolved_is_ref      = member_is_ref(gen, node);
+
     // Check if this is module-qualified access (already handled struct_name case)
-    if (node->as.member.struct_name == NULL && node->as.member.module_name == NULL) {
+    if (resolved_struct_name == NULL && resolved_module_name == NULL) {
         // Check if object is 'self' - always a pointer in methods
         // This handles generic methods where is_ref isn't set because body isn't type-checked
         int is_self = (node->as.member.object->type == NODE_IDENT &&
                        strcmp(node->as.member.object->as.ident.name, "self") == 0);
 
-        if (node->as.member.is_ref || is_self) {
+        if (resolved_is_ref || is_self) {
             // Struct reference or self - use ->
             emit_expr(gen, node->as.member.object);
             emit(gen, "->%.*s", node->as.member.length, node->as.member.name);
@@ -881,7 +915,8 @@ static void emit_try_expr(CodeGen* gen, Node* node) {
 static void emit_match_expr(CodeGen* gen, Node* node) {
     Type* enum_type  = node->as.match_stmt.resolved_type;
     Type* value_type = node->as.match_stmt.resolved_value_type;
-    if (!enum_type || enum_type->kind != TYPE_ENUM || !value_type || value_type->kind == TYPE_ERROR) {
+    if (!enum_type || enum_type->kind != TYPE_ENUM || !value_type ||
+        value_type->kind == TYPE_ERROR) {
         emit(gen, "/* invalid match expr */");
         return;
     }
@@ -934,7 +969,7 @@ static void emit_match_expr(CodeGen* gen, Node* node) {
         first = 0;
 
         if (!arm->as.match_arm.is_wildcard && is_data && arm->as.match_arm.binding_count > 0) {
-            const char* variant = arm->as.match_arm.variant_name;
+            const char* variant     = arm->as.match_arm.variant_name;
             int         variant_idx = -1;
             for (int i = 0; i < enum_type->as.enm.value_count; i++) {
                 if (strcmp(enum_type->as.enm.value_names[i], variant) == 0) {

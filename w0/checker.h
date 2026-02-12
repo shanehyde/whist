@@ -7,6 +7,7 @@
 typedef struct Symbol  Symbol;
 typedef struct Scope   Scope;
 typedef struct Checker Checker;
+typedef struct SemInfo SemInfo;
 
 typedef enum {
     SYM_VAR,
@@ -144,6 +145,9 @@ struct Checker {
 
     // Hint for generic enum type inference (set by var_decl when declared type is known)
     Type* enum_target_hint;
+
+    // Sidecar semantic metadata used by checker/codegen; owned by checker.
+    SemInfo* sem;
 };
 
 // Checker lifecycle:

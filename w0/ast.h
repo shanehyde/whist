@@ -261,9 +261,8 @@ struct Node {
             int      enum_name_length;
             char*    value_name;
             int      value_name_length;
-            NodeList args;               // constructor arg expressions (count==0 for bare tag)
-            int      is_data_enum;       // set by checker: 1 if parent enum has data variants
-            char*    original_enum_name; // set by checker: base name before mangling
+            NodeList args;         // constructor arg expressions (count==0 for bare tag)
+            int      is_data_enum; // set by checker: 1 if parent enum has data variants
         } enum_value;
 
         // New expression: new Type { fields }
@@ -386,9 +385,9 @@ struct Node {
 
         // Match statement
         struct {
-            Node*    expr;          // Expression being matched
-            NodeList arms;          // List of NODE_MATCH_ARM nodes
-            Type*    resolved_type; // Set by checker: enum type of expr
+            Node*    expr;                // Expression being matched
+            NodeList arms;                // List of NODE_MATCH_ARM nodes
+            Type*    resolved_type;       // Set by checker: enum type of expr
             Type*    resolved_value_type; // Set by checker for match-expr result type
         } match_stmt;
 

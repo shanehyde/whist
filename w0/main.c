@@ -57,6 +57,7 @@ static int compile_to_c(const char* source, const char* source_path, const char*
                      .vec_count      = checker.containers.vec_count,
                      .traits         = checker.traits.impls,
                      .trait_count    = checker.traits.impl_count,
+                     .sem            = checker.sem,
                  },
                  rc_debug);
     codegen_emit(&gen, ast);
@@ -391,6 +392,7 @@ int main(int argc, char** argv) {
                                  .vec_count      = checker.containers.vec_count,
                                  .traits         = checker.traits.impls,
                                  .trait_count    = checker.traits.impl_count,
+                                 .sem            = checker.sem,
                              },
                              rc_debug);
                 codegen_emit(&gen, ast);
