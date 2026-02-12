@@ -1204,6 +1204,9 @@ Type* check_expression(Checker* checker, Node* node) {
     case NODE_TRY_EXPR:
         return check_try_expr(checker, node);
 
+    case NODE_MATCH:
+        return check_match_expr(checker, node);
+
     case NODE_STRUCT_INIT:
         check_error(checker, node->line, node->column,
                     "Struct initializer requires a contextual struct type");

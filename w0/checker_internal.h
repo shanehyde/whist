@@ -27,4 +27,7 @@ GenericInstance* lookup_generic_instance(Checker* checker, const char* mangled_n
 // --- From checker_expr.c: expression checking ---
 Type* check_expression(Checker* checker, Node* node);
 
+// --- From checker.c: shared match-expression checking ---
+Type* check_match_expr(Checker* checker, Node* node);
+
 #endif

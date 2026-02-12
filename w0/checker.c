@@ -31,6 +31,7 @@ static void define_destruct_pattern_vars(Checker* checker, DestructPattern* patt
 
 // Forward declaration for match checking
 static void check_match_stmt(Checker* checker, Node* node);
+static Type* check_match(Checker* checker, Node* node, int is_expr_context);
 
 // Forward declarations for check_decl helpers
 static void check_extern_module_decl(Checker* checker, Node* node);
@@ -753,26 +754,46 @@ static void check_return_stmt(Checker* checker, Node* node) {
 // Match statement checking
 // =============================================================================
 
-static void check_match_stmt(Checker* checker, Node* node) {
+static Type* check_match(Checker* checker, Node* node, int is_expr_context) {
     Type* expr_type = check_expression(checker, node->as.match_stmt.expr);
 
     if (expr_type->kind != TYPE_ENUM && expr_type->kind != TYPE_ERROR) {
         check_error(checker, node->line, node->column,
                     "Match expression must be an enum type, got '%s'", type_name(expr_type));
-        return;
+        return type_error;
     }
 
     if (expr_type->kind == TYPE_ERROR)
-        return;
+        return type_error;
 
     node->as.match_stmt.resolved_type = expr_type;
+    node->as.match_stmt.resolved_value_type = NULL;
+
+    Type* match_value_type = NULL;
+    int   had_expr_error   = 0;
 
     for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
         Node* arm = node->as.match_stmt.arms.nodes[a];
 
         if (arm->as.match_arm.is_wildcard) {
-            // Wildcard: just check body
-            check_statement(checker, arm->as.match_arm.body);
+            if (is_expr_context) {
+                Type* arm_type = check_expression(checker, arm->as.match_arm.body);
+                if (arm_type->kind == TYPE_ERROR) {
+                    had_expr_error = 1;
+                    continue;
+                }
+                if (!match_value_type) {
+                    match_value_type = arm_type;
+                } else if (!type_assignable(match_value_type, arm_type) ||
+                           !type_assignable(arm_type, match_value_type)) {
+                    check_error_type(checker, arm->line, arm->column, "Match arm type mismatch",
+                                     match_value_type, arm_type);
+                    had_expr_error = 1;
+                }
+            } else {
+                // Wildcard: just check body
+                check_statement(checker, arm->as.match_arm.body);
+            }
             continue;
         }
 
@@ -819,7 +840,21 @@ static void check_match_stmt(Checker* checker, Node* node) {
             checker_define(checker, arm->as.match_arm.bindings[j], SYM_VAR, binding_type, 0, 0,
                            NULL);
         }
-        check_statement(checker, arm->as.match_arm.body);
+        if (is_expr_context) {
+            Type* arm_type = check_expression(checker, arm->as.match_arm.body);
+            if (arm_type->kind == TYPE_ERROR) {
+                had_expr_error = 1;
+            } else if (!match_value_type) {
+                match_value_type = arm_type;
+            } else if (!type_assignable(match_value_type, arm_type) ||
+                       !type_assignable(arm_type, match_value_type)) {
+                check_error_type(checker, arm->line, arm->column, "Match arm type mismatch",
+                                 match_value_type, arm_type);
+                had_expr_error = 1;
+            }
+        } else {
+            check_statement(checker, arm->as.match_arm.body);
+        }
         checker_pop_scope(checker);
     }
 
@@ -850,6 +885,25 @@ static void check_match_stmt(Checker* checker, Node* node) {
             }
         }
     }
+
+    if (is_expr_context) {
+        if (!match_value_type || had_expr_error) {
+            node->as.match_stmt.resolved_value_type = type_error;
+            return type_error;
+        }
+        node->as.match_stmt.resolved_value_type = match_value_type;
+        return match_value_type;
+    }
+
+    return type_void;
+}
+
+Type* check_match_expr(Checker* checker, Node* node) {
+    return check_match(checker, node, 1);
+}
+
+static void check_match_stmt(Checker* checker, Node* node) {
+    (void)check_match(checker, node, 0);
 }
 
 // =============================================================================
