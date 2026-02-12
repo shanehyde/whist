@@ -394,7 +394,8 @@ void emit_struct_rc_dec_forward_decls(CodeGen* gen, Node* ast) {
     emit(gen, "\n");
 }
 
-// Emit push, pop, and clear method implementations for each Vec type instance
+// Emit push, pop, clear, reserve, and shrink_to_fit method implementations for each Vec type
+// instance
 void emit_vec_methods(CodeGen* gen) {
     for (int i = 0; i < gen->checker.vec_count; i++) {
         VecInstance* inst        = &gen->checker.vecs[i];
@@ -415,6 +416,21 @@ void emit_vec_methods(CodeGen* gen) {
         emit(gen, "    }\n");
         emit(gen, "    self->data[self->count] = value;\n");
         emit(gen, "    self->count++;\n");
+        emit(gen, "}\n\n");
+
+        // Reserve
+        emit(gen, "static inline void __Vec_%s_reserve(__Vec_%s* self, int64_t additional) {\n",
+             elem_tname, elem_tname);
+        emit(gen, "    if (additional <= 0) {\n");
+        emit(gen, "        return;\n");
+        emit(gen, "    }\n");
+        emit(gen, "    int64_t required = self->count + additional;\n");
+        emit(gen, "    if (required > self->capacity) {\n");
+        emit(gen, "        self->data = realloc(self->data, required * sizeof(");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, "));\n");
+        emit(gen, "        self->capacity = required;\n");
+        emit(gen, "    }\n");
         emit(gen, "}\n\n");
 
         // Pop
@@ -445,6 +461,23 @@ void emit_vec_methods(CodeGen* gen) {
             emit(gen, "    }\n");
         }
         emit(gen, "    self->count = 0;\n");
+        emit(gen, "}\n\n");
+
+        // Shrink to fit
+        emit(gen, "static inline void __Vec_%s_shrink_to_fit(__Vec_%s* self) {\n", elem_tname,
+             elem_tname);
+        emit(gen, "    if (self->capacity > self->count) {\n");
+        emit(gen, "        if (self->count == 0) {\n");
+        emit(gen, "            free(self->data);\n");
+        emit(gen, "            self->data = NULL;\n");
+        emit(gen, "            self->capacity = 0;\n");
+        emit(gen, "            return;\n");
+        emit(gen, "        }\n");
+        emit(gen, "        self->data = realloc(self->data, self->count * sizeof(");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, "));\n");
+        emit(gen, "        self->capacity = self->count;\n");
+        emit(gen, "    }\n");
         emit(gen, "}\n\n");
     }
 }

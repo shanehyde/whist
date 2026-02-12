@@ -358,7 +358,7 @@ static Type* check_member_enum(Checker* checker, Node* node, Type* object) {
     return type_error;
 }
 
-// Check Vec member access (count, capacity, data, push, pop, clear)
+// Check Vec member access (count, capacity, data, push, pop, clear, reserve, shrink_to_fit)
 static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
     const char* member_name = node->as.member.name;
     sem_info_set_member_is_ref(checker->sem, node, 1); // Vec is a pointer (RC-managed)
@@ -374,9 +374,10 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
         check_error(checker, node->line, node->column, "Vec 'data' field is private; use indexing");
         return type_error;
     }
-    // Methods: push, pop, clear
+    // Methods: push, pop, clear, reserve, shrink_to_fit
     if (strcmp(member_name, "push") == 0 || strcmp(member_name, "pop") == 0 ||
-        strcmp(member_name, "clear") == 0) {
+        strcmp(member_name, "clear") == 0 || strcmp(member_name, "reserve") == 0 ||
+        strcmp(member_name, "shrink_to_fit") == 0) {
         const char* const_name = get_const_binding_name(checker, node->as.member.object);
         if (const_name) {
             check_error(checker, node->line, node->column,
@@ -395,6 +396,11 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
         }
         if (strcmp(member_name, "pop") == 0) {
             return type_func(NULL, 0, elem_type, 0);
+        }
+        if (strcmp(member_name, "reserve") == 0) {
+            Type** params = xmalloc(1 * sizeof(Type*));
+            params[0]     = type_int64;
+            return type_func(params, 1, type_void, 0);
         }
         // clear
         return type_func(NULL, 0, type_void, 0);
