@@ -1167,12 +1167,23 @@ void emit_function_forward_decls(CodeGen* gen, Node* ast) {
     for (int i = 0; i < gen->checker.instance_count; i++) {
         GenericInstance* info = &gen->checker.instances[i];
 
-        // Find the generic struct template to get type params
-        Node* template = find_generic_struct_decl(ast, info->base_name);
+        // Find the generic type template to get type params
+        Node* template    = find_generic_struct_decl(ast, info->base_name);
+        int   is_struct   = 0;
+        int   param_count = 0;
+        if (template) {
+            is_struct   = 1;
+            param_count = template->as.struct_decl.type_param_count;
+        } else {
+            template = find_generic_enum_decl(ast, info->base_name);
+            if (template) {
+                param_count = template->as.enum_decl.type_param_count;
+            }
+        }
         if (!template)
             continue;
 
-        // Find all methods for this generic struct
+        // Find all methods for this generic type
         Node** methods      = NULL;
         int    method_count = 0;
         collect_generic_methods(ast, info->base_name, &methods, &method_count);
@@ -1191,17 +1202,21 @@ void emit_function_forward_decls(CodeGen* gen, Node* ast) {
                                             &method_bind_count);
 
             // Build combined substitution context
-            int    combined_count  = template->as.struct_decl.type_param_count + method_bind_count;
+            int    combined_count  = param_count + method_bind_count;
             char** combined_params = xmalloc(combined_count * sizeof(char*));
             Type** combined_args   = xmalloc(combined_count * sizeof(Type*));
 
-            for (int k = 0; k < template->as.struct_decl.type_param_count; k++) {
-                combined_params[k] = template->as.struct_decl.type_params[k];
-                combined_args[k]   = info->type_args[k];
+            for (int k = 0; k < param_count; k++) {
+                if (is_struct) {
+                    combined_params[k] = template->as.struct_decl.type_params[k];
+                } else {
+                    combined_params[k] = template->as.enum_decl.type_params[k];
+                }
+                combined_args[k] = info->type_args[k];
             }
             for (int k = 0; k < method_bind_count; k++) {
-                combined_params[template->as.struct_decl.type_param_count + k] = method_params[k];
-                combined_args[template->as.struct_decl.type_param_count + k]   = method_args[k];
+                combined_params[param_count + k] = method_params[k];
+                combined_args[param_count + k]   = method_args[k];
             }
 
             TypeSubstContext subst_ctx;
