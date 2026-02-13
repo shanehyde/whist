@@ -358,8 +358,8 @@ static Type* check_member_enum(Checker* checker, Node* node, Type* object) {
     return type_error;
 }
 
-// Check Vec member access (count, capacity, data, first, last, push, pop, insert, remove,
-// swap_remove, clear, reserve, shrink_to_fit)
+// Check Vec member access (count, capacity, data, contains, first, last, push, pop, insert,
+// remove, swap_remove, clear, reserve, shrink_to_fit, sort)
 static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
     const char* member_name = node->as.member.name;
     sem_info_set_member_is_ref(checker->sem, node, 1); // Vec is a pointer (RC-managed)
@@ -375,7 +375,25 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
         check_error(checker, node->line, node->column, "Vec 'data' field is private; use indexing");
         return type_error;
     }
-    // Non-mutating methods: first, last (return Option<T>)
+    // Non-mutating methods: contains, first, last
+    if (strcmp(member_name, "contains") == 0) {
+        if (!type_supports_vec_contains(elem_type)) {
+            check_error(checker, node->line, node->column,
+                        "Vec.contains requires element type supporting ==, got '%s'",
+                        type_name(elem_type));
+            return type_error;
+        }
+
+        char mangled[256];
+        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
+        sem_info_set_member_struct_name(checker->sem, node, mangled);
+
+        Type** params = xmalloc(1 * sizeof(Type*));
+        params[0]     = elem_type;
+        return type_func(params, 1, type_bool, 0);
+    }
+
+    // first/last return Option<T>
     if (strcmp(member_name, "first") == 0 || strcmp(member_name, "last") == 0) {
         char mangled[256];
         snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
@@ -397,15 +415,22 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
         }
         return type_func(NULL, 0, option_type, 0);
     }
-    // Mutating methods: push, pop, insert, remove, swap_remove, clear, reserve, shrink_to_fit
+    // Mutating methods: push, pop, insert, remove, swap_remove, clear, reserve, shrink_to_fit, sort
     if (strcmp(member_name, "push") == 0 || strcmp(member_name, "pop") == 0 ||
         strcmp(member_name, "insert") == 0 || strcmp(member_name, "remove") == 0 ||
         strcmp(member_name, "swap_remove") == 0 || strcmp(member_name, "clear") == 0 ||
-        strcmp(member_name, "reserve") == 0 || strcmp(member_name, "shrink_to_fit") == 0) {
+        strcmp(member_name, "reserve") == 0 || strcmp(member_name, "shrink_to_fit") == 0 ||
+        strcmp(member_name, "sort") == 0) {
         const char* const_name = get_const_binding_name(checker, node->as.member.object);
         if (const_name) {
             check_error(checker, node->line, node->column,
                         "Cannot call mutating method '%s' on const '%s'", member_name, const_name);
+            return type_error;
+        }
+        if (strcmp(member_name, "sort") == 0 && !type_supports_vec_sort(elem_type)) {
+            check_error(checker, node->line, node->column,
+                        "Vec.sort requires orderable primitive element type, got '%s'",
+                        type_name(elem_type));
             return type_error;
         }
         // Build mangled vec name for method dispatch
@@ -436,6 +461,9 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
             Type** params = xmalloc(1 * sizeof(Type*));
             params[0]     = type_int64;
             return type_func(params, 1, type_void, 0);
+        }
+        if (strcmp(member_name, "sort") == 0) {
+            return type_func(NULL, 0, type_void, 0);
         }
         // clear
         return type_func(NULL, 0, type_void, 0);
