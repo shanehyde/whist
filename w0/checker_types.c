@@ -1016,6 +1016,25 @@ Type* resolve_type(Checker* checker, Node* type_node) {
         }
         return type_tuple(elems, count);
     }
+    case NODE_FUNC_TYPE: {
+        int    count  = type_node->as.func_type.param_types.count;
+        Type** params = count > 0 ? xmalloc(count * sizeof(Type*)) : NULL;
+        for (int i = 0; i < count; i++) {
+            params[i] = resolve_type(checker, type_node->as.func_type.param_types.nodes[i]);
+            if (params[i] == type_error) {
+                free(params);
+                return type_error;
+            }
+        }
+        Type* ret = type_node->as.func_type.return_type
+                        ? resolve_type(checker, type_node->as.func_type.return_type)
+                        : type_void;
+        if (ret == type_error) {
+            free(params);
+            return type_error;
+        }
+        return type_func(params, count, ret, 0);
+    }
     default:
         break;
     }

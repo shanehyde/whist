@@ -405,6 +405,11 @@ int type_assignable(Type* target, Type* value) {
         return 1;
     }
 
+    // null can be assigned to function pointers
+    if (target->kind == TYPE_FUNC && value->kind == TYPE_NULL) {
+        return 1;
+    }
+
     return 0;
 }
 
@@ -488,7 +493,16 @@ const char* type_name(Type* type) {
         return type->as.trait.name;
     case TYPE_FUNC: {
         char* buf = next_type_name_buf();
-        snprintf(buf, 256, "func(...): %s", type_name(type->as.func.return_type));
+        int   n   = snprintf(buf, 256, "func(");
+        for (int i = 0; i < type->as.func.param_count && n < 255; i++) {
+            if (i > 0)
+                n += snprintf(buf + n, 256 - n, ", ");
+            n += snprintf(buf + n, 256 - n, "%s", type_name(type->as.func.param_types[i]));
+        }
+        n += snprintf(buf + n, 256 - n, ")");
+        if (type->as.func.return_type && type->as.func.return_type->kind != TYPE_VOID) {
+            snprintf(buf + n, 256 - n, ": %s", type_name(type->as.func.return_type));
+        }
         return buf;
     }
     case TYPE_TUPLE: {

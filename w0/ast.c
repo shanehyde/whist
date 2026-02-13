@@ -278,6 +278,10 @@ void node_free(Node* node) {
         free(node->as.generic_type.base_name);
         nodelist_free(&node->as.generic_type.type_args);
         break;
+    case NODE_FUNC_TYPE:
+        nodelist_free(&node->as.func_type.param_types);
+        node_free(node->as.func_type.return_type);
+        break;
     case NODE_PROGRAM:
         nodelist_free(&node->as.program.modules);
         break;
@@ -361,6 +365,7 @@ static void node_reset_checker_flags(Node* node) {
         node->as.member.is_const_access = 0;
         node->as.member.struct_name     = NULL;
         node->as.member.module_name     = NULL;
+        node->as.member.is_method_ref   = 0;
         break;
     case NODE_ENUM_VALUE:
         node->as.enum_value.is_data_enum = 0;
@@ -521,6 +526,10 @@ Node* node_clone(Node* node) {
         c->as.generic_type.base_name        = xstrdup(node->as.generic_type.base_name);
         c->as.generic_type.base_name_length = node->as.generic_type.base_name_length;
         c->as.generic_type.type_args        = nodelist_clone(&node->as.generic_type.type_args);
+        break;
+    case NODE_FUNC_TYPE:
+        c->as.func_type.param_types = nodelist_clone(&node->as.func_type.param_types);
+        c->as.func_type.return_type = node_clone(node->as.func_type.return_type);
         break;
     case NODE_EXPR_STMT:
         c->as.expr_stmt.expr = node_clone(node->as.expr_stmt.expr);

@@ -541,6 +541,17 @@ void print_ast(Node* node, int depth) {
         printf("TupleType\n");
         print_node_list(NULL, &node->as.tuple_type.elem_types, depth);
         break;
+    case NODE_FUNC_TYPE:
+        printf("FuncType\n");
+        if (node->as.func_type.param_types.count > 0) {
+            print_node_list("Params", &node->as.func_type.param_types, depth + 1);
+        }
+        if (node->as.func_type.return_type) {
+            print_indent(depth + 1);
+            printf("ReturnType:\n");
+            print_ast(node->as.func_type.return_type, depth + 2);
+        }
+        break;
     case NODE_TUPLE_LIT:
         printf("TupleLit\n");
         print_node_list(NULL, &node->as.tuple_lit.elements, depth);

@@ -619,6 +619,51 @@ static Type* check_member_stringbuilder(Checker* checker, Node* node) {
     return type_error;
 }
 
+// Check for Type.method unbound method reference (e.g., Point.move)
+static Type* check_member_type_ref(Checker* checker, Node* node, Type* type_val) {
+    const char* member_name = node->as.member.name;
+    Type*       method_type = NULL;
+    const char* sname       = NULL;
+
+    if (type_val->kind == TYPE_STRUCT) {
+        for (int i = 0; i < type_val->as.struc.method_count; i++) {
+            if (strcmp(type_val->as.struc.method_names[i], member_name) == 0) {
+                method_type = type_val->as.struc.method_types[i];
+                sname       = type_val->as.struc.name;
+                break;
+            }
+        }
+    } else if (type_val->kind == TYPE_ENUM) {
+        for (int i = 0; i < type_val->as.enm.method_count; i++) {
+            if (strcmp(type_val->as.enm.method_names[i], member_name) == 0) {
+                method_type = type_val->as.enm.method_types[i];
+                sname       = type_val->as.enm.name;
+                break;
+            }
+        }
+    }
+
+    if (!method_type || method_type->kind != TYPE_FUNC) {
+        check_error(checker, node->line, node->column, "Type '%s' has no method '%s'",
+                    type_name(type_val), member_name);
+        return type_error;
+    }
+
+    // Build new TYPE_FUNC with receiver prepended as first parameter
+    int    old_count = method_type->as.func.param_count;
+    int    new_count = old_count + 1;
+    Type** params    = xmalloc(new_count * sizeof(Type*));
+    params[0]        = type_val;
+    for (int i = 0; i < old_count; i++) {
+        params[i + 1] = method_type->as.func.param_types[i];
+    }
+
+    sem_info_set_member_struct_name(checker->sem, node, sname);
+    node->as.member.is_method_ref = 1;
+
+    return type_func(params, new_count, method_type->as.func.return_type, 0);
+}
+
 // Type-check a member access: dispatch to type-specific helpers
 static Type* check_member_expr(Checker* checker, Node* node) {
     // Check for module-qualified access first (e.g., std.print)
@@ -626,6 +671,15 @@ static Type* check_member_expr(Checker* checker, Node* node) {
         const char* name = node->as.member.object->as.ident.name;
         if (is_imported_module(checker, name))
             return check_member_module(checker, node, name);
+    }
+
+    // Check for Type.method unbound method reference (e.g., Point.move)
+    if (node->as.member.object->type == NODE_IDENT) {
+        const char* name = node->as.member.object->as.ident.name;
+        Symbol*     sym  = checker_lookup(checker, name);
+        if (sym && sym->kind == SYM_TYPE) {
+            return check_member_type_ref(checker, node, sym->type);
+        }
     }
 
     Type* object = check_expression(checker, node->as.member.object);
