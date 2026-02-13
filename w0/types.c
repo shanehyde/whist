@@ -319,8 +319,6 @@ int type_supports_vec_contains(Type* type) {
     case TYPE_CHAR:
     case TYPE_STRING:
     case TYPE_VOIDPTR:
-    case TYPE_STRUCT:
-    case TYPE_VEC:
         return 1;
     case TYPE_ENUM:
         return !type->as.enm.has_data;
