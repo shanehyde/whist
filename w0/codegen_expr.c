@@ -262,6 +262,159 @@ static void emit_enum_value(CodeGen* gen, Node* node) {
     }
 }
 
+static int call_ident_matches(Node* ident, const char* name) {
+    int len = (int)strlen(name);
+    return ident && ident->type == NODE_IDENT && ident->as.ident.length == len &&
+           strncmp(ident->as.ident.name, name, ident->as.ident.length) == 0;
+}
+
+static void emit_call_args(CodeGen* gen, Node* call, int leading_comma) {
+    for (int i = 0; i < call->as.call.args.count; i++) {
+        if (leading_comma || i > 0) {
+            emit(gen, ", ");
+        }
+        emit_expr(gen, call->as.call.args.nodes[i]);
+    }
+}
+
+static int is_std_format_member_call(const char* module_name, Node* func) {
+    return module_name && strcmp(module_name, "std") == 0 && func->type == NODE_MEMBER &&
+           func->as.member.length == 6 &&
+           strncmp(func->as.member.name, "format", func->as.member.length) == 0;
+}
+
+static void emit_module_member_call(CodeGen* gen, Node* call, Node* func, const char* module_name) {
+    emit(gen, "%s_%.*s(", module_name, func->as.member.length, func->as.member.name);
+    emit_call_args(gen, call, 0);
+    emit(gen, ")");
+}
+
+static void emit_method_receiver(CodeGen* gen, Node* func, const char* callee_struct_name) {
+    if (!is_enum_type_name(gen, callee_struct_name)) {
+        emit_expr(gen, func->as.member.object);
+        return;
+    }
+
+    if (gen->in_enum_method && call_ident_matches(func->as.member.object, "self")) {
+        emit(gen, "self");
+    } else if (func->as.member.object->type == NODE_IDENT) {
+        emit(gen, "&");
+        emit_expr(gen, func->as.member.object);
+    } else {
+        int tmp = gen->out.temp_count++;
+        emit(gen, "({%s __tmp%d = ", callee_struct_name, tmp);
+        emit_expr(gen, func->as.member.object);
+        emit(gen, "; &__tmp%d;})", tmp);
+    }
+}
+
+static void emit_struct_method_call(CodeGen* gen, Node* call, Node* func,
+                                    const char* callee_struct_name) {
+    emit(gen, "%s_%.*s(", callee_struct_name, func->as.member.length, func->as.member.name);
+    emit_method_receiver(gen, func, callee_struct_name);
+    emit_call_args(gen, call, 1);
+    emit(gen, ")");
+}
+
+static int is_generic_module_call(CodeGen* gen, Node* func) {
+    if (func->as.member.object->type != NODE_IDENT) {
+        return 0;
+    }
+
+    const char* obj_name = func->as.member.object->as.ident.name;
+    for (int i = 0; i < gen->generics.module_count; i++) {
+        if (strcmp(gen->generics.modules[i], obj_name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void emit_generic_member_call(CodeGen* gen, Node* call, Node* func) {
+    if (is_generic_module_call(gen, func)) {
+        emit(gen, "%s_%.*s(", func->as.member.object->as.ident.name, func->as.member.length,
+             func->as.member.name);
+        emit_call_args(gen, call, 0);
+        emit(gen, ")");
+        return;
+    }
+
+    char* resolved_name = resolve_generic_method_target(gen, func);
+    if (resolved_name) {
+        emit(gen, "%s_%.*s(", resolved_name, func->as.member.length, func->as.member.name);
+        emit_expr(gen, func->as.member.object);
+        emit_call_args(gen, call, 1);
+        emit(gen, ")");
+        free(resolved_name);
+        return;
+    }
+
+    emit_expr(gen, func);
+    emit(gen, "(");
+    emit_call_args(gen, call, 0);
+    emit(gen, ")");
+}
+
+static const char* find_name_alias(NameAlias* aliases, int count, Node* func) {
+    if (func->type != NODE_IDENT) {
+        return NULL;
+    }
+
+    for (int i = 0; i < count; i++) {
+        if (strncmp(aliases[i].whist_name, func->as.ident.name, func->as.ident.length) == 0 &&
+            aliases[i].whist_name[func->as.ident.length] == '\0') {
+            return aliases[i].c_name;
+        }
+    }
+    return NULL;
+}
+
+static const char* find_call_alias(CodeGen* gen, Node* func) {
+    const char* alias = find_name_alias(gen->aliases.externs, gen->aliases.extern_count, func);
+    if (alias) {
+        return alias;
+    }
+    return find_name_alias(gen->aliases.uses, gen->aliases.use_count, func);
+}
+
+static int is_extern_call(CodeGen* gen, Node* func) {
+    if (func->type != NODE_IDENT) {
+        return 0;
+    }
+
+    for (int i = 0; i < gen->aliases.extern_func_count; i++) {
+        if (strncmp(gen->aliases.extern_funcs[i], func->as.ident.name, func->as.ident.length) ==
+                0 &&
+            gen->aliases.extern_funcs[i][func->as.ident.length] == '\0') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void emit_regular_call(CodeGen* gen, Node* call, Node* func) {
+    const char* alias_name = find_call_alias(gen, func);
+    if (alias_name) {
+        emit(gen, "%s(", alias_name);
+        emit_call_args(gen, call, 0);
+        emit(gen, ")");
+        return;
+    }
+
+    if (gen->current_module && func->type == NODE_IDENT && !is_extern_call(gen, func)) {
+        emit(gen, "%s_", gen->current_module);
+    }
+
+    if (gen->current_module == NULL && call_ident_matches(func, "main")) {
+        emit(gen, "__w0_user_main(");
+    } else {
+        emit_expr(gen, func);
+        emit(gen, "(");
+    }
+    emit_call_args(gen, call, 0);
+    emit(gen, ")");
+}
+
 // Emit a function call: module-qualified, method, generic method, or regular call
 static void emit_call_expr(CodeGen* gen, Node* node) {
     Node*       func               = node->as.call.func;
@@ -272,166 +425,28 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
         callee_struct_name = member_struct_name(gen, func);
     }
 
-    // Check if this is a module-qualified call (e.g., std.print())
     if (func->type == NODE_MEMBER && callee_module_name != NULL) {
-        // Built-in: std.format -> __std_format
-        if (strcmp(callee_module_name, "std") == 0 &&
-            strncmp(func->as.member.name, "format", func->as.member.length) == 0 &&
-            func->as.member.length == 6) {
+        if (is_std_format_member_call(callee_module_name, func)) {
             emit(gen, "__std_format(");
-            for (int i = 0; i < node->as.call.args.count; i++) {
-                if (i > 0)
-                    emit(gen, ", ");
-                emit_expr(gen, node->as.call.args.nodes[i]);
-            }
-            emit(gen, ")");
-            return;
-        }
-        // Module-qualified call: emit module_func(args...)
-        emit(gen, "%s_%.*s(", callee_module_name, func->as.member.length, func->as.member.name);
-        for (int i = 0; i < node->as.call.args.count; i++) {
-            if (i > 0)
-                emit(gen, ", ");
-            emit_expr(gen, node->as.call.args.nodes[i]);
-        }
-        emit(gen, ")");
-    } else if (func->type == NODE_MEMBER && callee_struct_name != NULL) {
-        // Method call: emit StructName_method(obj, args...)
-        // With struct references, objects are already pointers
-        emit(gen, "%s_%.*s(", callee_struct_name, func->as.member.length, func->as.member.name);
-        // Emit the receiver as first argument
-        // For enums, take address (stack values); for structs, already pointers
-        if (is_enum_type_name(gen, callee_struct_name)) {
-            // In enum methods, self is already a pointer — pass it directly.
-            // For other identifiers (lvalues), take address. For non-lvalues
-            // (call results, etc.), materialize into a temporary first.
-            if (gen->in_enum_method && func->as.member.object->type == NODE_IDENT &&
-                func->as.member.object->as.ident.length == 4 &&
-                memcmp(func->as.member.object->as.ident.name, "self", 4) == 0) {
-                emit(gen, "self");
-            } else if (func->as.member.object->type == NODE_IDENT) {
-                emit(gen, "&");
-                emit_expr(gen, func->as.member.object);
-            } else {
-                int tmp = gen->out.temp_count++;
-                emit(gen, "({%s __tmp%d = ", callee_struct_name, tmp);
-                emit_expr(gen, func->as.member.object);
-                emit(gen, "; &__tmp%d;})", tmp);
-            }
-        } else {
-            emit_expr(gen, func->as.member.object);
-        }
-        // Emit remaining arguments
-        for (int i = 0; i < node->as.call.args.count; i++) {
-            emit(gen, ", ");
-            emit_expr(gen, node->as.call.args.nodes[i]);
-        }
-        emit(gen, ")");
-    } else if (func->type == NODE_MEMBER && callee_struct_name == NULL && gen->generics.subst) {
-        // In a generic method body — checker didn't annotate struct_name or module_name.
-        // First check if this is a module-qualified call (e.g., std.print)
-        int is_module_call = 0;
-        if (func->as.member.object->type == NODE_IDENT) {
-            const char* obj_name = func->as.member.object->as.ident.name;
-            for (int i = 0; i < gen->generics.module_count; i++) {
-                if (strcmp(gen->generics.modules[i], obj_name) == 0) {
-                    is_module_call = 1;
-                    break;
-                }
-            }
-        }
-        if (is_module_call) {
-            // Module-qualified call: emit module_func(args...)
-            emit(gen, "%s_%.*s(", func->as.member.object->as.ident.name, func->as.member.length,
-                 func->as.member.name);
-            for (int i = 0; i < node->as.call.args.count; i++) {
-                if (i > 0)
-                    emit(gen, ", ");
-                emit_expr(gen, node->as.call.args.nodes[i]);
-            }
+            emit_call_args(gen, node, 0);
             emit(gen, ")");
         } else {
-            // Try to resolve the target type from the struct template field types.
-            char* resolved_name = resolve_generic_method_target(gen, func);
-            if (resolved_name) {
-                emit(gen, "%s_%.*s(", resolved_name, func->as.member.length, func->as.member.name);
-                emit_expr(gen, func->as.member.object);
-                for (int i = 0; i < node->as.call.args.count; i++) {
-                    emit(gen, ", ");
-                    emit_expr(gen, node->as.call.args.nodes[i]);
-                }
-                emit(gen, ")");
-                free(resolved_name);
-            } else {
-                // Fallback: regular function call
-                emit_expr(gen, func);
-                emit(gen, "(");
-                for (int i = 0; i < node->as.call.args.count; i++) {
-                    if (i > 0)
-                        emit(gen, ", ");
-                    emit_expr(gen, node->as.call.args.nodes[i]);
-                }
-                emit(gen, ")");
-            }
+            emit_module_member_call(gen, node, func, callee_module_name);
         }
-    } else {
-        // Regular function call — check for extern alias
-        int alias_found = 0;
-        if (func->type == NODE_IDENT) {
-            for (int i = 0; i < gen->aliases.extern_count; i++) {
-                if (strncmp(gen->aliases.externs[i].whist_name, func->as.ident.name,
-                            func->as.ident.length) == 0 &&
-                    gen->aliases.externs[i].whist_name[func->as.ident.length] == '\0') {
-                    emit(gen, "%s(", gen->aliases.externs[i].c_name);
-                    alias_found = 1;
-                    break;
-                }
-            }
-        }
-        // Check use aliases (use std.print -> std_print)
-        if (!alias_found && func->type == NODE_IDENT) {
-            for (int i = 0; i < gen->aliases.use_count; i++) {
-                if (strncmp(gen->aliases.uses[i].whist_name, func->as.ident.name,
-                            func->as.ident.length) == 0 &&
-                    gen->aliases.uses[i].whist_name[func->as.ident.length] == '\0') {
-                    emit(gen, "%s(", gen->aliases.uses[i].c_name);
-                    alias_found = 1;
-                    break;
-                }
-            }
-        }
-        if (!alias_found) {
-            // If inside a module, prefix non-extern function calls with module name
-            if (gen->current_module && func->type == NODE_IDENT) {
-                int is_extern = 0;
-                for (int i = 0; i < gen->aliases.extern_func_count; i++) {
-                    if (strncmp(gen->aliases.extern_funcs[i], func->as.ident.name,
-                                func->as.ident.length) == 0 &&
-                        gen->aliases.extern_funcs[i][func->as.ident.length] == '\0') {
-                        is_extern = 1;
-                        break;
-                    }
-                }
-                if (!is_extern) {
-                    emit(gen, "%s_", gen->current_module);
-                }
-            }
-            if (func->type == NODE_IDENT && gen->current_module == NULL &&
-                strncmp(func->as.ident.name, "main", func->as.ident.length) == 0 &&
-                func->as.ident.length == 4) {
-                emit(gen, "__w0_user_main(");
-            } else {
-                emit_expr(gen, func);
-                emit(gen, "(");
-            }
-        }
-        for (int i = 0; i < node->as.call.args.count; i++) {
-            if (i > 0)
-                emit(gen, ", ");
-            emit_expr(gen, node->as.call.args.nodes[i]);
-        }
-        emit(gen, ")");
+        return;
     }
+
+    if (func->type == NODE_MEMBER && callee_struct_name != NULL) {
+        emit_struct_method_call(gen, node, func, callee_struct_name);
+        return;
+    }
+
+    if (func->type == NODE_MEMBER && callee_struct_name == NULL && gen->generics.subst) {
+        emit_generic_member_call(gen, node, func);
+        return;
+    }
+
+    emit_regular_call(gen, node, func);
 }
 
 // Emit an index expression: bounds-checked vec/span, tuple field, or array access
