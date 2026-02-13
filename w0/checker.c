@@ -125,6 +125,7 @@ void checker_init(Checker* checker) {
     checker->traits.primitive_method_capacity = 0;
     checker->alias_depth                      = 0;
     checker->enum_target_hint                 = NULL;
+    checker->self_type                        = NULL;
     checker->sem                              = sem_info_new();
     types_init();
 }
@@ -1396,12 +1397,18 @@ static void check_trait_decl(Checker* checker, Node* node) {
     trait_type->as.trait.method_types    = xmalloc(method_count * sizeof(Type*));
     trait_type->as.trait.method_is_const = xmalloc(method_count * sizeof(int));
 
+    // Set Self to a generic param placeholder so trait method types store
+    // TYPE_GENERIC_PARAM("Self")
+    checker->self_type = type_generic_param("Self");
+
     for (int i = 0; i < method_count; i++) {
         Node* method                            = node->as.trait_decl.methods.nodes[i];
         trait_type->as.trait.method_names[i]    = xstrdup(method->as.func_decl.name);
         trait_type->as.trait.method_types[i]    = get_function_type(checker, method);
         trait_type->as.trait.method_is_const[i] = method->as.func_decl.receiver_is_const;
     }
+
+    checker->self_type = NULL;
 
     checker_define(checker, name, SYM_TYPE, trait_type, 0, node->as.trait_decl.is_public,
                    checker->modules.current_module);
@@ -1446,6 +1453,13 @@ static void check_type_alias_decl(Checker* checker, Node* node) {
                    checker->modules.current_module);
 }
 
+// Substitute TYPE_GENERIC_PARAM("Self") with the concrete implementing type
+static Type* substitute_self(Type* type, Type* concrete) {
+    if (type->kind == TYPE_GENERIC_PARAM && strcmp(type->as.generic_param.name, "Self") == 0)
+        return concrete;
+    return type;
+}
+
 // Type-check an impl block: verify methods match trait signatures and register trait impl
 static void check_impl_decl(Checker* checker, Node* node) {
     const char* trait_name    = node->as.impl_decl.trait_name;
@@ -1478,6 +1492,12 @@ static void check_impl_decl(Checker* checker, Node* node) {
             return;
         }
     }
+
+    // Set Self to the concrete implementing type for method body checking
+    if (is_primitive)
+        checker->self_type = type_builtin_from_name(type_name_str);
+    else if (!is_generic)
+        checker->self_type = type_sym->type;
 
     // Process each method in the impl block
     for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
@@ -1523,13 +1543,13 @@ static void check_impl_decl(Checker* checker, Node* node) {
             Type* impl_func_type  = get_function_type(checker, method);
             Type* trait_func_type = trait_type->as.trait.method_types[trait_method_idx];
 
-            // Check return type
-            if (!type_equals(impl_func_type->as.func.return_type,
-                             trait_func_type->as.func.return_type)) {
+            // Check return type (substitute Self in trait signature with concrete type)
+            Type* trait_ret =
+                substitute_self(trait_func_type->as.func.return_type, checker->self_type);
+            if (!type_equals(impl_func_type->as.func.return_type, trait_ret)) {
                 check_error(checker, method->line, method->column,
                             "Method '%s' return type mismatch: trait '%s' expects '%s', got '%s'",
-                            method_name, trait_name,
-                            type_name(trait_func_type->as.func.return_type),
+                            method_name, trait_name, type_name(trait_ret),
                             type_name(impl_func_type->as.func.return_type));
                 continue;
             }
@@ -1544,14 +1564,14 @@ static void check_impl_decl(Checker* checker, Node* node) {
             }
 
             for (int p = 0; p < trait_func_type->as.func.param_count; p++) {
-                if (!type_equals(impl_func_type->as.func.param_types[p],
-                                 trait_func_type->as.func.param_types[p])) {
+                Type* trait_param =
+                    substitute_self(trait_func_type->as.func.param_types[p], checker->self_type);
+                if (!type_equals(impl_func_type->as.func.param_types[p], trait_param)) {
                     check_error(
                         checker, method->line, method->column,
                         "Method '%s' parameter %d type mismatch: trait '%s' expects '%s', got "
                         "'%s'",
-                        method_name, p + 1, trait_name,
-                        type_name(trait_func_type->as.func.param_types[p]),
+                        method_name, p + 1, trait_name, type_name(trait_param),
                         type_name(impl_func_type->as.func.param_types[p]));
                 }
             }
@@ -1588,6 +1608,8 @@ static void check_impl_decl(Checker* checker, Node* node) {
     if (strcmp(trait_name, "Drop") == 0 && !is_generic && !is_primitive) {
         type_sym->type->as.struc.has_drop = 1;
     }
+
+    checker->self_type = NULL;
 }
 
 // Check a use declaration: validate module, look up each symbol, and register unqualified alias

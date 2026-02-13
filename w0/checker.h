@@ -147,6 +147,10 @@ struct Checker {
     // Hint for generic enum type inference (set by var_decl when declared type is known)
     Type* enum_target_hint;
 
+    // Self type: set to TYPE_GENERIC_PARAM("Self") in trait decls,
+    // concrete implementing type in impl blocks; NULL otherwise.
+    Type* self_type;
+
     // Sidecar semantic metadata used by checker/codegen; owned by checker.
     SemInfo* sem;
 };
