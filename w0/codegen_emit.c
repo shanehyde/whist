@@ -360,6 +360,9 @@ void emit_resolved_type(CodeGen* gen, Type* type) {
     case TYPE_VEC:
         emit(gen, "__Vec_%s*", type_mangle_name(type->as.vec.elem));
         break;
+    case TYPE_STRINGBUILDER:
+        emit(gen, "__StringBuilder*");
+        break;
     case TYPE_ENUM:
         emit(gen, "%s", type->as.enm.name);
         break;

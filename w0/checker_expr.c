@@ -567,6 +567,58 @@ static Type* check_member_struct(Checker* checker, Node* node, Type* object) {
     return type_error;
 }
 
+// Check StringBuilder member access (append, append_char, append_line, len, capacity, clear,
+// to_string)
+static Type* check_member_stringbuilder(Checker* checker, Node* node) {
+    const char* member_name = node->as.member.name;
+    sem_info_set_member_is_ref(checker->sem, node, 1); // StringBuilder is RC-managed pointer
+    sem_info_set_member_struct_name(checker->sem, node, "__StringBuilder");
+
+    // Mutating methods
+    if (strcmp(member_name, "append") == 0 || strcmp(member_name, "append_line") == 0) {
+        const char* const_name = get_const_binding_name(checker, node->as.member.object);
+        if (const_name) {
+            check_error(checker, node->line, node->column,
+                        "Cannot call mutating method '%s' on const '%s'", member_name, const_name);
+            return type_error;
+        }
+        Type** params = xmalloc(1 * sizeof(Type*));
+        params[0]     = type_string;
+        return type_func(params, 1, type_void, 0);
+    }
+    if (strcmp(member_name, "append_char") == 0) {
+        const char* const_name = get_const_binding_name(checker, node->as.member.object);
+        if (const_name) {
+            check_error(checker, node->line, node->column,
+                        "Cannot call mutating method '%s' on const '%s'", member_name, const_name);
+            return type_error;
+        }
+        Type** params = xmalloc(1 * sizeof(Type*));
+        params[0]     = type_char;
+        return type_func(params, 1, type_void, 0);
+    }
+    if (strcmp(member_name, "clear") == 0) {
+        const char* const_name = get_const_binding_name(checker, node->as.member.object);
+        if (const_name) {
+            check_error(checker, node->line, node->column,
+                        "Cannot call mutating method '%s' on const '%s'", member_name, const_name);
+            return type_error;
+        }
+        return type_func(NULL, 0, type_void, 0);
+    }
+
+    // Non-mutating methods
+    if (strcmp(member_name, "len") == 0 || strcmp(member_name, "capacity") == 0) {
+        return type_func(NULL, 0, type_int64, 0);
+    }
+    if (strcmp(member_name, "to_string") == 0) {
+        return type_func(NULL, 0, type_string, 0);
+    }
+
+    check_error(checker, node->line, node->column, "StringBuilder has no member '%s'", member_name);
+    return type_error;
+}
+
 // Type-check a member access: dispatch to type-specific helpers
 static Type* check_member_expr(Checker* checker, Node* node) {
     // Check for module-qualified access first (e.g., std.print)
@@ -587,6 +639,8 @@ static Type* check_member_expr(Checker* checker, Node* node) {
         return check_member_enum(checker, node, object);
     case TYPE_VEC:
         return check_member_vec(checker, node, object);
+    case TYPE_STRINGBUILDER:
+        return check_member_stringbuilder(checker, node);
     case TYPE_STRING: {
         Type* result = check_member_string(checker, node);
         if (result)
@@ -954,6 +1008,17 @@ static Type* check_new_expr(Checker* checker, Node* node) {
                 check_error_type(checker, field->line, field->column, "Vec element", elem_type,
                                  val_type);
             }
+        }
+        node->as.new_expr.resolved_type = resolved;
+        return resolved;
+    }
+    if (resolved->kind == TYPE_STRINGBUILDER) {
+        // new StringBuilder{} — no field inits allowed
+        Node* init = node->as.new_expr.init;
+        if (init->as.struct_init.fields.count > 0) {
+            check_error(checker, node->line, node->column,
+                        "StringBuilder does not accept field initializers");
+            return type_error;
         }
         node->as.new_expr.resolved_type = resolved;
         return resolved;

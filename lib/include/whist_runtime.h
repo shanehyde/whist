@@ -164,4 +164,76 @@ static inline const char* __std_format(const char* fmt, ...) {
     return buf;
 }
 
+/* --- StringBuilder --- */
+typedef struct {
+    char*   data;
+    int64_t count;
+    int64_t capacity;
+} __StringBuilder;
+
+static inline void __StringBuilder_append(__StringBuilder* self, const char* s) {
+    int64_t len = (int64_t)strlen(s);
+    if (self->count + len > self->capacity) {
+        int64_t new_cap = self->capacity == 0 ? 64 : self->capacity;
+        while (new_cap < self->count + len)
+            new_cap *= 2;
+        self->data     = (char*)realloc(self->data, new_cap + 1);
+        self->capacity = new_cap;
+    }
+    memcpy(self->data + self->count, s, len);
+    self->count += len;
+    self->data[self->count] = '\0';
+}
+
+static inline void __StringBuilder_append_char(__StringBuilder* self, char c) {
+    if (self->count + 1 > self->capacity) {
+        int64_t new_cap = self->capacity == 0 ? 64 : self->capacity * 2;
+        self->data      = (char*)realloc(self->data, new_cap + 1);
+        self->capacity  = new_cap;
+    }
+    self->data[self->count] = c;
+    self->count++;
+    self->data[self->count] = '\0';
+}
+
+static inline void __StringBuilder_append_line(__StringBuilder* self, const char* s) {
+    __StringBuilder_append(self, s);
+    __StringBuilder_append_char(self, '\n');
+}
+
+static inline int64_t __StringBuilder_len(__StringBuilder* self) {
+    return self->count;
+}
+
+static inline int64_t __StringBuilder_capacity(__StringBuilder* self) {
+    return self->capacity;
+}
+
+static inline void __StringBuilder_clear(__StringBuilder* self) {
+    self->count = 0;
+    if (self->data)
+        self->data[0] = '\0';
+}
+
+static inline const char* __StringBuilder_to_string(__StringBuilder* self) {
+    if (!self->data || self->count == 0) {
+        char* e = (char*)malloc(1);
+        e[0]    = '\0';
+        return e;
+    }
+    char* r = (char*)malloc(self->count + 1);
+    memcpy(r, self->data, self->count + 1);
+    return r;
+}
+
+static inline void __rc_dec_StringBuilder(__StringBuilder* ptr) {
+    if (!ptr)
+        return;
+    __RcHeader* h = (__RcHeader*)ptr - 1;
+    if (--h->refcount == 0) {
+        free(ptr->data);
+        free(h);
+    }
+}
+
 #endif /* WHIST_RUNTIME_H */

@@ -229,6 +229,18 @@ static void emit_var_decl_rc_new_vec(CodeGen* gen, Node* node) {
     rc_push_var(gen, node->as.var_decl.name, dec_buf, rtype);
 }
 
+// Emit an RC-managed StringBuilder declaration: var sb = new StringBuilder{}
+static void emit_var_decl_rc_new_stringbuilder(CodeGen* gen, Node* node) {
+    emit_indent(gen);
+    emit(gen, "__StringBuilder* %s = (__StringBuilder*)__rc_alloc(sizeof(__StringBuilder));\n",
+         node->as.var_decl.name);
+    emit_indent(gen);
+    emit(gen, "%s->data = NULL; %s->count = 0; %s->capacity = 0;\n", node->as.var_decl.name,
+         node->as.var_decl.name, node->as.var_decl.name);
+    Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
+    rc_push_var(gen, node->as.var_decl.name, "__rc_dec_StringBuilder", rtype);
+}
+
 // Emit an RC-managed struct declaration: var p = new Point { x: 1, y: 2 }
 static void emit_var_decl_rc_new_struct(CodeGen* gen, Node* node) {
     Type*       rtype = node->as.var_decl.init->as.new_expr.resolved_type;
@@ -414,6 +426,8 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
             Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
             if (rtype && rtype->kind == TYPE_VEC) {
                 emit_var_decl_rc_new_vec(gen, node);
+            } else if (rtype && rtype->kind == TYPE_STRINGBUILDER) {
+                emit_var_decl_rc_new_stringbuilder(gen, node);
             } else {
                 emit_var_decl_rc_new_struct(gen, node);
             }
