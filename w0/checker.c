@@ -1674,7 +1674,17 @@ static void check_decl(Checker* checker, Node* node) {
         break;
 
     case NODE_VAR_DECL:
-        // Global variable
+        // Global variable — only const allowed at top level
+        if (!node->as.var_decl.is_const) {
+            check_error(checker, node->line, node->column,
+                        "Top-level variables must use 'const', not 'var'");
+            break;
+        }
+        if (!node->as.var_decl.init) {
+            check_error(checker, node->line, node->column,
+                        "Top-level 'const' requires an initializer");
+            break;
+        }
         check_statement(checker, node);
         break;
 

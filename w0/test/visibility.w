@@ -24,11 +24,11 @@ enum Status {
     Done,
 }
 
-// Public global variable
-public var counter: i64 = 0;
+// Public global constant
+public const COUNTER: i64 = 0;
 
-// Private global variable (static in C)
-var local_counter: i64 = 0;
+// Private global constant (static in C)
+const LOCAL_COUNTER: i64 = 42;
 
 // Public function - external linkage
 public func add(a: i64, b: i64): i64 {
@@ -36,8 +36,8 @@ public func add(a: i64, b: i64): i64 {
 }
 
 // Private function - file-local (static in C)
-private func helper(): void {
-    local_counter = local_counter + 1;
+private func helper(): i64 {
+    return LOCAL_COUNTER;
 }
 
 // Public method on public struct
@@ -54,8 +54,8 @@ func main(): i32 {
     var c: Color = Color::Red;
     var s: Status = Status::Done;
 
-    helper();
-    counter = add(1, 2);
+    var h = helper();
+    var sum = add(1, 2);
 
     return 0;
 }
