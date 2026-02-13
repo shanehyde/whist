@@ -486,237 +486,260 @@ static Node* parse_interp_string(Parser* parser) {
 // Primary Expression Parsing
 // ============================================================================
 
-static Node* parse_primary_expression(Parser* parser) {
-    Token token = parser->current;
+static Node* parse_int_lit(Parser* parser, Token token) {
+    Node*       node  = node_new(NODE_INT_LIT, token.line, token.column);
+    const char* start = token.start;
+    int         base  = 10;
 
-    if (match_token(parser, TOK_INT)) {
-        Node* node = node_new(NODE_INT_LIT, token.line, token.column);
-        // Parse integer (handle hex, binary, octal)
-        const char* start = token.start;
-        int         base  = 10;
-        if (token.length > 2) {
-            if (start[0] == '0' && (start[1] == 'x' || start[1] == 'X')) {
-                base = 16;
-                start += 2;
-            } else if (start[0] == '0' && (start[1] == 'b' || start[1] == 'B')) {
-                base = 2;
-                start += 2;
-            } else if (start[0] == '0' && (start[1] == 'o' || start[1] == 'O')) {
-                base = 8;
-                start += 2;
-            }
+    if (token.length > 2) {
+        if (start[0] == '0' && (start[1] == 'x' || start[1] == 'X')) {
+            base = 16;
+            start += 2;
+        } else if (start[0] == '0' && (start[1] == 'b' || start[1] == 'B')) {
+            base = 2;
+            start += 2;
+        } else if (start[0] == '0' && (start[1] == 'o' || start[1] == 'O')) {
+            base = 8;
+            start += 2;
         }
-        errno = 0;
-        char* endptr;
-        long  value = strtol(start, &endptr, base);
-        if (errno == ERANGE) {
-            parse_error(parser, "Integer literal out of range");
-        }
-        node->as.int_lit.value = value;
-        return node;
     }
 
-    if (match_token(parser, TOK_FLOAT)) {
-        Node* node               = node_new(NODE_FLOAT_LIT, token.line, token.column);
-        node->as.float_lit.value = strtod(token.start, NULL);
-        return node;
+    errno = 0;
+    char* endptr;
+    long  value = strtol(start, &endptr, base);
+    if (errno == ERANGE) {
+        parse_error(parser, "Integer literal out of range");
     }
+    node->as.int_lit.value = value;
+    return node;
+}
 
-    if (match_token(parser, TOK_INTERP_STRING)) {
-        return parse_interp_string(parser);
-    }
+static Node* parse_float_lit(Token token) {
+    Node* node               = node_new(NODE_FLOAT_LIT, token.line, token.column);
+    node->as.float_lit.value = strtod(token.start, NULL);
+    return node;
+}
 
-    if (match_token(parser, TOK_STRING)) {
-        Node* node = node_new(NODE_STRING_LIT, token.line, token.column);
-        // Allocate max possible size (actual size may be smaller due to escapes)
-        size_t max_len            = token.length - 2; // Skip quotes
-        node->as.string_lit.value = xmalloc(max_len + 1);
-        // Process escape sequences
-        const char* src = token.start + 1;
-        const char* end = token.start + token.length - 1;
-        char*       dst = node->as.string_lit.value;
-        while (src < end) {
-            if (*src == '\\' && src + 1 < end) {
-                src++;
-                *dst++ = decode_escape(*src++);
-            } else {
-                *dst++ = *src++;
-            }
-        }
-        *dst                       = '\0';
-        node->as.string_lit.length = dst - node->as.string_lit.value;
-        return node;
-    }
+static Node* parse_string_lit(Token token) {
+    Node*  node               = node_new(NODE_STRING_LIT, token.line, token.column);
+    size_t max_len            = token.length - 2; // Skip quotes
+    node->as.string_lit.value = xmalloc(max_len + 1);
 
-    if (match_token(parser, TOK_CHAR)) {
-        Node* node = node_new(NODE_CHAR_LIT, token.line, token.column);
-        // Handle escape sequences
-        if (token.start[1] == '\\') {
-            node->as.char_lit.value = decode_escape(token.start[2]);
+    const char* src = token.start + 1;
+    const char* end = token.start + token.length - 1;
+    char*       dst = node->as.string_lit.value;
+    while (src < end) {
+        if (*src == '\\' && src + 1 < end) {
+            src++;
+            *dst++ = decode_escape(*src++);
         } else {
-            node->as.char_lit.value = token.start[1];
+            *dst++ = *src++;
         }
-        return node;
     }
+    *dst                       = '\0';
+    node->as.string_lit.length = dst - node->as.string_lit.value;
+    return node;
+}
 
-    if (match_token(parser, TOK_TRUE) || match_token(parser, TOK_FALSE)) {
-        Node* node              = node_new(NODE_BOOL_LIT, token.line, token.column);
-        node->as.bool_lit.value = (token.type == TOK_TRUE);
-        return node;
+static Node* parse_char_lit(Token token) {
+    Node* node = node_new(NODE_CHAR_LIT, token.line, token.column);
+    if (token.start[1] == '\\') {
+        node->as.char_lit.value = decode_escape(token.start[2]);
+    } else {
+        node->as.char_lit.value = token.start[1];
     }
+    return node;
+}
 
-    if (match_token(parser, TOK_NULL)) {
-        Node* node = node_new(NODE_NULL_LIT, token.line, token.column);
-        return node;
-    }
+static Node* parse_bool_lit(Token token) {
+    Node* node              = node_new(NODE_BOOL_LIT, token.line, token.column);
+    node->as.bool_lit.value = (token.type == TOK_TRUE);
+    return node;
+}
 
-    if (match_token(parser, TOK_MATCH)) {
-        return parse_match(parser, 1);
-    }
+static Node* parse_null_lit(Token token) {
+    return node_new(NODE_NULL_LIT, token.line, token.column);
+}
 
-    if (match_token(parser, TOK_IDENT)) {
-        // Check for qualified enum value: EnumName::ValueName
-        if (check_token(parser, TOK_COLON_COLON)) {
-            Token enum_name = token;
-            advance_token(parser); // consume ::
-            Token value_name = parser->current;
-            consume_token(parser, TOK_IDENT, "Expected enum value name after '::'");
+static Node* parse_ident_lit(Token token) {
+    Node* node            = node_new(NODE_IDENT, token.line, token.column);
+    node->as.ident.name   = copy_token_string(&token);
+    node->as.ident.length = token.length;
+    return node;
+}
 
-            Node* node = node_new(NODE_ENUM_VALUE, enum_name.line, enum_name.column);
-            node->as.enum_value.enum_name         = copy_token_string(&enum_name);
-            node->as.enum_value.enum_name_length  = enum_name.length;
-            node->as.enum_value.value_name        = copy_token_string(&value_name);
-            node->as.enum_value.value_name_length = value_name.length;
-            nodelist_init(&node->as.enum_value.args);
+static Node* parse_enum_value(Parser* parser, Token enum_name) {
+    advance_token(parser); // consume ::
+    Token value_name = parser->current;
+    consume_token(parser, TOK_IDENT, "Expected enum value name after '::'");
 
-            // Check for constructor args: EnumName::ValueName(expr, ...)
-            if (match_token(parser, TOK_LPAREN)) {
-                while (!check_token(parser, TOK_RPAREN) && !check_token(parser, TOK_EOF)) {
-                    Node* arg = parse_expression(parser);
-                    if (!arg)
-                        return NULL;
-                    nodelist_push(&node->as.enum_value.args, arg);
-                    if (!check_token(parser, TOK_RPAREN)) {
-                        consume_token(parser, TOK_COMMA,
-                                      "Expected ',' or ')' after enum constructor arg");
-                    }
-                }
-                consume_token(parser, TOK_RPAREN, "Expected ')' after enum constructor args");
-            }
-            return node;
-        }
-
-        Node* node            = node_new(NODE_IDENT, token.line, token.column);
-        node->as.ident.name   = copy_token_string(&token);
-        node->as.ident.length = token.length;
-        return node;
-    }
-
-    // Handle 'self' keyword as an identifier
-    if (match_token(parser, TOK_SELF)) {
-        Node* node            = node_new(NODE_IDENT, token.line, token.column);
-        node->as.ident.name   = xstrdup("self");
-        node->as.ident.length = 4;
-        return node;
-    }
+    Node* node                    = node_new(NODE_ENUM_VALUE, enum_name.line, enum_name.column);
+    node->as.enum_value.enum_name = copy_token_string(&enum_name);
+    node->as.enum_value.enum_name_length  = enum_name.length;
+    node->as.enum_value.value_name        = copy_token_string(&value_name);
+    node->as.enum_value.value_name_length = value_name.length;
+    nodelist_init(&node->as.enum_value.args);
 
     if (match_token(parser, TOK_LPAREN)) {
-        Node* first = parse_expression(parser);
-        if (!first) {
+        while (!check_token(parser, TOK_RPAREN) && !check_token(parser, TOK_EOF)) {
+            Node* arg = parse_expression(parser);
+            if (!arg)
+                return NULL;
+            nodelist_push(&node->as.enum_value.args, arg);
+            if (!check_token(parser, TOK_RPAREN)) {
+                consume_token(parser, TOK_COMMA, "Expected ',' or ')' after enum constructor arg");
+            }
+        }
+        consume_token(parser, TOK_RPAREN, "Expected ')' after enum constructor args");
+    }
+    return node;
+}
+
+static Node* parse_ident_or_enum_value(Parser* parser, Token token) {
+    if (check_token(parser, TOK_COLON_COLON)) {
+        return parse_enum_value(parser, token);
+    }
+    return parse_ident_lit(token);
+}
+
+static Node* parse_self_ident(Token token) {
+    Node* node            = node_new(NODE_IDENT, token.line, token.column);
+    node->as.ident.name   = xstrdup("self");
+    node->as.ident.length = 4;
+    return node;
+}
+
+static Node* parse_group_or_tuple(Parser* parser, Token token) {
+    Node* first = parse_expression(parser);
+    if (!first) {
+        return NULL;
+    }
+
+    if (match_token(parser, TOK_COMMA)) {
+        Node* node = node_new(NODE_TUPLE_LIT, token.line, token.column);
+        nodelist_init(&node->as.tuple_lit.elements);
+        nodelist_push(&node->as.tuple_lit.elements, first);
+
+        Node* elem = parse_expression(parser);
+        if (!elem) {
+            node_free(node);
             return NULL;
         }
+        nodelist_push(&node->as.tuple_lit.elements, elem);
 
-        // Check for comma - if present, this is a tuple literal
-        if (match_token(parser, TOK_COMMA)) {
-            // Tuple literal: (e1, e2, ...)
-            Node* node = node_new(NODE_TUPLE_LIT, token.line, token.column);
-            nodelist_init(&node->as.tuple_lit.elements);
-            nodelist_push(&node->as.tuple_lit.elements, first);
-
-            // Parse second element (required after comma)
-            Node* elem = parse_expression(parser);
+        while (match_token(parser, TOK_COMMA)) {
+            elem = parse_expression(parser);
             if (!elem) {
                 node_free(node);
                 return NULL;
             }
             nodelist_push(&node->as.tuple_lit.elements, elem);
-
-            // Parse remaining elements
-            while (match_token(parser, TOK_COMMA)) {
-                elem = parse_expression(parser);
-                if (!elem) {
-                    node_free(node);
-                    return NULL;
-                }
-                nodelist_push(&node->as.tuple_lit.elements, elem);
-            }
-
-            consume_token(parser, TOK_RPAREN, "Expected ')' after tuple elements");
-            return node;
         }
 
-        // Regular parenthesized expression
-        consume_token(parser, TOK_RPAREN, "Expected ')' after expression");
-        return first;
-    }
-
-    // New expression: new Type { fields }
-    if (match_token(parser, TOK_NEW)) {
-        Token new_token = parser->previous;
-        Node* type_node = parse_type(parser);
-        if (!type_node) {
-            return NULL;
-        }
-        consume_token(parser, TOK_LBRACE, "Expected '{' after type in new expression");
-        Node* init = parse_struct_init(parser);
-        if (!init) {
-            node_free(type_node);
-            return NULL;
-        }
-        Node* node                      = node_new(NODE_NEW_EXPR, new_token.line, new_token.column);
-        node->as.new_expr.type_node     = type_node;
-        node->as.new_expr.init          = init;
-        node->as.new_expr.resolved_type = NULL;
+        consume_token(parser, TOK_RPAREN, "Expected ')' after tuple elements");
         return node;
     }
 
-    // Array literal: [e1, e2, ...]
-    if (match_token(parser, TOK_LBRACKET)) {
-        Node* node = node_new(NODE_ARRAY_LIT, token.line, token.column);
-        nodelist_init(&node->as.array_lit.elements);
-        node->as.array_lit.resolved_type = NULL;
+    consume_token(parser, TOK_RPAREN, "Expected ')' after expression");
+    return first;
+}
 
-        // Check for empty array literal []
-        if (!check_token(parser, TOK_RBRACKET)) {
-            // Parse first element
-            Node* elem = parse_expression(parser);
+static Node* parse_new_expr(Parser* parser, Token new_token) {
+    Node* type_node = parse_type(parser);
+    if (!type_node) {
+        return NULL;
+    }
+    consume_token(parser, TOK_LBRACE, "Expected '{' after type in new expression");
+    Node* init = parse_struct_init(parser);
+    if (!init) {
+        node_free(type_node);
+        return NULL;
+    }
+    Node* node                      = node_new(NODE_NEW_EXPR, new_token.line, new_token.column);
+    node->as.new_expr.type_node     = type_node;
+    node->as.new_expr.init          = init;
+    node->as.new_expr.resolved_type = NULL;
+    return node;
+}
+
+static Node* parse_array_lit(Parser* parser, Token token) {
+    Node* node = node_new(NODE_ARRAY_LIT, token.line, token.column);
+    nodelist_init(&node->as.array_lit.elements);
+    node->as.array_lit.resolved_type = NULL;
+
+    if (!check_token(parser, TOK_RBRACKET)) {
+        Node* elem = parse_expression(parser);
+        if (!elem) {
+            node_free(node);
+            return NULL;
+        }
+        nodelist_push(&node->as.array_lit.elements, elem);
+
+        while (match_token(parser, TOK_COMMA)) {
+            if (check_token(parser, TOK_RBRACKET)) {
+                break;
+            }
+            elem = parse_expression(parser);
             if (!elem) {
                 node_free(node);
                 return NULL;
             }
             nodelist_push(&node->as.array_lit.elements, elem);
-
-            // Parse remaining elements
-            while (match_token(parser, TOK_COMMA)) {
-                // Allow trailing comma
-                if (check_token(parser, TOK_RBRACKET)) {
-                    break;
-                }
-                elem = parse_expression(parser);
-                if (!elem) {
-                    node_free(node);
-                    return NULL;
-                }
-                nodelist_push(&node->as.array_lit.elements, elem);
-            }
         }
-
-        consume_token(parser, TOK_RBRACKET, "Expected ']' after array elements");
-        return node;
     }
 
-    parse_error(parser, "Expected expression");
-    return NULL;
+    consume_token(parser, TOK_RBRACKET, "Expected ']' after array elements");
+    return node;
+}
+
+static Node* parse_primary_expression(Parser* parser) {
+    Token token = parser->current;
+
+    switch (token.type) {
+    case TOK_INT:
+        advance_token(parser);
+        return parse_int_lit(parser, token);
+    case TOK_FLOAT:
+        advance_token(parser);
+        return parse_float_lit(token);
+    case TOK_INTERP_STRING:
+        advance_token(parser);
+        return parse_interp_string(parser);
+    case TOK_STRING:
+        advance_token(parser);
+        return parse_string_lit(token);
+    case TOK_CHAR:
+        advance_token(parser);
+        return parse_char_lit(token);
+    case TOK_TRUE:
+    case TOK_FALSE:
+        advance_token(parser);
+        return parse_bool_lit(token);
+    case TOK_NULL:
+        advance_token(parser);
+        return parse_null_lit(token);
+    case TOK_MATCH:
+        advance_token(parser);
+        return parse_match(parser, 1);
+    case TOK_IDENT:
+        advance_token(parser);
+        return parse_ident_or_enum_value(parser, token);
+    case TOK_SELF:
+        advance_token(parser);
+        return parse_self_ident(token);
+    case TOK_LPAREN:
+        advance_token(parser);
+        return parse_group_or_tuple(parser, token);
+    case TOK_NEW:
+        advance_token(parser);
+        return parse_new_expr(parser, token);
+    case TOK_LBRACKET:
+        advance_token(parser);
+        return parse_array_lit(parser, token);
+    default:
+        parse_error(parser, "Expected expression");
+        return NULL;
+    }
 }
 
 // ============================================================================
