@@ -870,6 +870,15 @@ Type* resolve_type(Checker* checker, Node* type_node) {
         if (builtin)
             return builtin;
 
+        // Check for Self type (in trait definitions and impl blocks)
+        if (strcmp(name, "Self") == 0) {
+            if (checker->self_type)
+                return checker->self_type;
+            check_error(checker, type_node->line, type_node->column,
+                        "'Self' can only be used inside trait definitions and impl blocks");
+            return type_error;
+        }
+
         // Check for type parameter substitution (when instantiating generics)
         if (checker->generics.current_type_params) {
             for (int i = 0; i < checker->generics.current_type_param_count; i++) {
