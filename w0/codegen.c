@@ -489,6 +489,7 @@ void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_d
     gen->enums.count         = 0;
     gen->enums.capacity      = 0;
     gen->enums.has_rc_fields = NULL;
+    gen->enums.has_eq        = NULL;
 
     gen->aliases.types                = NULL;
     gen->aliases.type_targets         = NULL;
