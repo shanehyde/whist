@@ -300,6 +300,57 @@ int type_is_unsigned_integer(Type* type) {
            type->kind == TYPE_UINT32;
 }
 
+int type_supports_vec_contains(Type* type) {
+    if (!type)
+        return 0;
+
+    switch (type->kind) {
+    case TYPE_BOOL:
+    case TYPE_INT64:
+    case TYPE_INT8:
+    case TYPE_INT16:
+    case TYPE_INT32:
+    case TYPE_UINT64:
+    case TYPE_UINT8:
+    case TYPE_UINT16:
+    case TYPE_UINT32:
+    case TYPE_F32:
+    case TYPE_F64:
+    case TYPE_CHAR:
+    case TYPE_STRING:
+    case TYPE_VOIDPTR:
+        return 1;
+    case TYPE_ENUM:
+        return !type->as.enm.has_data;
+    default:
+        return 0;
+    }
+}
+
+int type_supports_vec_sort(Type* type) {
+    if (!type)
+        return 0;
+
+    switch (type->kind) {
+    case TYPE_BOOL:
+    case TYPE_INT64:
+    case TYPE_INT8:
+    case TYPE_INT16:
+    case TYPE_INT32:
+    case TYPE_UINT64:
+    case TYPE_UINT8:
+    case TYPE_UINT16:
+    case TYPE_UINT32:
+    case TYPE_F32:
+    case TYPE_F64:
+    case TYPE_CHAR:
+    case TYPE_STRING:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 // Is this type RC-managed when held as a struct field or enum variant payload?
 // Structs and Vecs are always heap-allocated (RC pointers). Enums are RC-managed
 // only if they carry RC-managed payloads themselves.

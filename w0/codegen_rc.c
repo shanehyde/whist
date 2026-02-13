@@ -394,8 +394,8 @@ void emit_struct_rc_dec_forward_decls(CodeGen* gen, Node* ast) {
     emit(gen, "\n");
 }
 
-// Emit push, pop, insert, remove, swap_remove, clear, reserve, shrink_to_fit, first, and last
-// method implementations for each Vec type instance
+// Emit push, pop, insert, remove, swap_remove, clear, reserve, shrink_to_fit, contains, sort,
+// first, and last method implementations for each Vec type instance
 void emit_vec_methods(CodeGen* gen) {
     for (int i = 0; i < gen->checker.vec_count; i++) {
         VecInstance* inst        = &gen->checker.vecs[i];
@@ -459,6 +459,76 @@ void emit_vec_methods(CodeGen* gen) {
         emit(gen, "        self->capacity = required;\n");
         emit(gen, "    }\n");
         emit(gen, "}\n\n");
+
+        // Contains
+        if (type_supports_vec_contains(elem_type)) {
+            emit(gen, "static inline bool __Vec_%s_contains(__Vec_%s* self, ", elem_tname,
+                 elem_tname);
+            emit_resolved_type(gen, elem_type);
+            emit(gen, " value) {\n");
+            emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
+            if (elem_type->kind == TYPE_STRING) {
+                emit(gen, "        const char* item = self->data[i];\n");
+                emit(gen, "        if ((item == NULL && value == NULL) ||\n");
+                emit(gen, "            (item != NULL && value != NULL && strcmp(item, value) == "
+                          "0)) {\n");
+                emit(gen, "            return true;\n");
+                emit(gen, "        }\n");
+            } else {
+                emit(gen, "        if (self->data[i] == value) {\n");
+                emit(gen, "            return true;\n");
+                emit(gen, "        }\n");
+            }
+            emit(gen, "    }\n");
+            emit(gen, "    return false;\n");
+            emit(gen, "}\n\n");
+        }
+
+        // Sort (ascending)
+        if (type_supports_vec_sort(elem_type)) {
+            emit(gen, "static int __Vec_%s_sort_cmp(const void* a, const void* b) {\n", elem_tname);
+            emit(gen, "    const ");
+            emit_resolved_type(gen, elem_type);
+            emit(gen, "* lhs = (const ");
+            emit_resolved_type(gen, elem_type);
+            emit(gen, "*)a;\n");
+            emit(gen, "    const ");
+            emit_resolved_type(gen, elem_type);
+            emit(gen, "* rhs = (const ");
+            emit_resolved_type(gen, elem_type);
+            emit(gen, "*)b;\n");
+            if (elem_type->kind == TYPE_STRING) {
+                emit(gen, "    if (*lhs == NULL && *rhs == NULL) {\n");
+                emit(gen, "        return 0;\n");
+                emit(gen, "    }\n");
+                emit(gen, "    if (*lhs == NULL) {\n");
+                emit(gen, "        return -1;\n");
+                emit(gen, "    }\n");
+                emit(gen, "    if (*rhs == NULL) {\n");
+                emit(gen, "        return 1;\n");
+                emit(gen, "    }\n");
+                emit(gen, "    return strcmp(*lhs, *rhs);\n");
+            } else {
+                emit(gen, "    if (*lhs < *rhs) {\n");
+                emit(gen, "        return -1;\n");
+                emit(gen, "    }\n");
+                emit(gen, "    if (*lhs > *rhs) {\n");
+                emit(gen, "        return 1;\n");
+                emit(gen, "    }\n");
+                emit(gen, "    return 0;\n");
+            }
+            emit(gen, "}\n\n");
+
+            emit(gen, "static inline void __Vec_%s_sort(__Vec_%s* self) {\n", elem_tname,
+                 elem_tname);
+            emit(gen, "    if (self->count <= 1) {\n");
+            emit(gen, "        return;\n");
+            emit(gen, "    }\n");
+            emit(gen, "    qsort(self->data, (size_t)self->count, sizeof(");
+            emit_resolved_type(gen, elem_type);
+            emit(gen, "), __Vec_%s_sort_cmp);\n", elem_tname);
+            emit(gen, "}\n\n");
+        }
 
         // Pop
         emit(gen, "static inline ");
