@@ -436,7 +436,7 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
         return;
     }
 
-    if (func->type == NODE_MEMBER && callee_struct_name != NULL) {
+    if (func->type == NODE_MEMBER && callee_struct_name != NULL && !func->as.member.is_method_ref) {
         emit_struct_method_call(gen, node, func, callee_struct_name);
         return;
     }
@@ -585,6 +585,13 @@ static void emit_slice_expr(CodeGen* gen, Node* node) {
 
 // Emit a member access expression using -> for struct pointers or . for value types
 static void emit_member_expr(CodeGen* gen, Node* node) {
+    // Unbound method reference: Type.method -> StructName_method
+    if (node->as.member.is_method_ref) {
+        const char* sname = member_struct_name(gen, node);
+        emit(gen, "%s_%.*s", sname, node->as.member.length, node->as.member.name);
+        return;
+    }
+
     const char* resolved_struct_name = member_struct_name(gen, node);
     const char* resolved_module_name = member_module_name(gen, node);
     int         resolved_is_ref      = member_is_ref(gen, node);

@@ -209,6 +209,37 @@ static Node* parse_type(Parser* parser) {
         return node;
     }
 
+    // Function type: func(T1, T2): ReturnType
+    if (match_token(parser, TOK_FUNC)) {
+        Node* node = node_new(NODE_FUNC_TYPE, token.line, token.column);
+        nodelist_init(&node->as.func_type.param_types);
+        node->as.func_type.return_type = NULL;
+
+        consume_token(parser, TOK_LPAREN, "Expected '(' after 'func' in type");
+
+        if (!check_token(parser, TOK_RPAREN)) {
+            do {
+                Node* pt = parse_type(parser);
+                if (!pt) {
+                    node_free(node);
+                    return NULL;
+                }
+                nodelist_push(&node->as.func_type.param_types, pt);
+            } while (match_token(parser, TOK_COMMA));
+        }
+
+        consume_token(parser, TOK_RPAREN, "Expected ')' in function type");
+
+        if (match_token(parser, TOK_COLON)) {
+            node->as.func_type.return_type = parse_type(parser);
+            if (!node->as.func_type.return_type) {
+                node_free(node);
+                return NULL;
+            }
+        }
+        return node;
+    }
+
     // Named type (possibly generic)
     if (match_token(parser, TOK_IDENT)) {
         // Check for generic type instantiation: Name<T1, T2, ...>

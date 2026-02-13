@@ -619,6 +619,11 @@ static void check_var_decl_stmt(Checker* checker, Node* node) {
         node->as.var_decl.resolved_type = init_type;
     }
 
+    // Store resolved type for function pointer inference (var fp = some_func)
+    if (!node->as.var_decl.type && init_type && init_type->kind == TYPE_FUNC) {
+        node->as.var_decl.resolved_type = init_type;
+    }
+
     // Propagate RC tracking
     if (sym && node->as.var_decl.init) {
         if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {

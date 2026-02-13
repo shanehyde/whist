@@ -100,6 +100,9 @@ typedef enum {
     // Generic types
     NODE_GENERIC_TYPE, // Box<i64>, Pair<K, V>
 
+    // Function type
+    NODE_FUNC_TYPE, // func(T1, T2): ReturnType
+
     // Other
     NODE_PARAM,
     NODE_FIELD,
@@ -234,6 +237,7 @@ struct Node {
             int   is_const_access; // Set by checker: 1 if accessing a const field
             char* struct_name;     // Set by checker if this is a method access (NULL otherwise)
             char* module_name;     // Set by checker for module-qualified access (e.g., "std")
+            int   is_method_ref;   // Set by checker: 1 if Type.method unbound reference
         } member;
 
         // Assignment
@@ -324,6 +328,12 @@ struct Node {
             int      base_name_length;
             NodeList type_args; // list of type nodes
         } generic_type;
+
+        // Function type: func(T1, T2): ReturnType
+        struct {
+            NodeList param_types; // Parameter type nodes
+            Node*    return_type; // Return type node (NULL for void)
+        } func_type;
 
         // Expression statement
         struct {

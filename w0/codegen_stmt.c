@@ -392,8 +392,23 @@ static void emit_var_decl_inferred_type(CodeGen* gen, Node* node) {
         break;
     default:
         if (node->as.var_decl.resolved_type) {
-            emit_resolved_type(gen, node->as.var_decl.resolved_type);
-            emit(gen, " %s", node->as.var_decl.name);
+            Type* rt = node->as.var_decl.resolved_type;
+            if (rt->kind == TYPE_FUNC) {
+                // Function pointer: name goes inside the type
+                emit_resolved_type(gen, rt->as.func.return_type);
+                emit(gen, " (*%s)(", node->as.var_decl.name);
+                for (int i = 0; i < rt->as.func.param_count; i++) {
+                    if (i > 0)
+                        emit(gen, ", ");
+                    emit_resolved_type(gen, rt->as.func.param_types[i]);
+                }
+                if (rt->as.func.param_count == 0)
+                    emit(gen, "void");
+                emit(gen, ")");
+            } else {
+                emit_resolved_type(gen, rt);
+                emit(gen, " %s", node->as.var_decl.name);
+            }
         } else {
             emit(gen, "int64_t %s", node->as.var_decl.name);
         }
