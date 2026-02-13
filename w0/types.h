@@ -78,6 +78,7 @@ struct Type {
             int    method_count;
             int    has_drop;      // 1 if type implements Drop trait
             int    has_rc_fields; // 1 if any field is TYPE_STRUCT (RC pointer)
+            int    has_eq;        // 1 if type implements Eq trait
         } struc;
 
         // Enum

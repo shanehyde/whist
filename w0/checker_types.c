@@ -698,6 +698,15 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
         }
     }
 
+    // Check if the base generic has an Eq trait impl and propagate to instantiation
+    for (int ti = 0; ti < checker->traits.impl_count; ti++) {
+        if (strcmp(checker->traits.impls[ti].trait_name, "Eq") == 0 &&
+            strcmp(checker->traits.impls[ti].type_name, base_name) == 0) {
+            struct_type->as.struc.has_eq = 1;
+            break;
+        }
+    }
+
     // Allocate per-instantiation method body storage
     GenericInstance* inst = lookup_generic_instance(checker, mangled);
     if (inst && def->method_count > 0) {
