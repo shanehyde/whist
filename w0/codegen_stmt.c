@@ -620,246 +620,240 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+static int stmt_cond_has_outer_parens(Node* cond) {
+    return cond && (cond->type == NODE_BINARY || cond->type == NODE_UNARY);
+}
+
+static void emit_stmt_body(CodeGen* gen, Node* body) {
+    if (!body)
+        return;
+    if (body->type == NODE_BLOCK) {
+        emit_block_contents(gen, body);
+    } else {
+        emit_stmt(gen, body);
+    }
+}
+
+static void emit_block_stmt(CodeGen* gen, Node* node) {
+    emit_indent(gen);
+    emit(gen, "{\n");
+    gen->out.indent++;
+    gen->rc.depth++;
+    for (int i = 0; i < node->as.block.stmts.count; i++) {
+        emit_stmt(gen, node->as.block.stmts.nodes[i]);
+    }
+    rc_cleanup_scope(gen, gen->rc.depth);
+    gen->rc.depth--;
+    gen->out.indent--;
+    emit_indent(gen);
+    emit(gen, "}\n");
+}
+
+static void emit_if_stmt(CodeGen* gen, Node* node) {
+    emit_indent(gen);
+    if (stmt_cond_has_outer_parens(node->as.if_stmt.cond)) {
+        emit(gen, "if ");
+        emit_expr(gen, node->as.if_stmt.cond);
+        emit(gen, " {\n");
+    } else {
+        emit(gen, "if (");
+        emit_expr(gen, node->as.if_stmt.cond);
+        emit(gen, ") {\n");
+    }
+
+    gen->out.indent++;
+    emit_stmt_body(gen, node->as.if_stmt.then_block);
+    gen->out.indent--;
+
+    emit_indent(gen);
+    emit(gen, "}");
+
+    if (node->as.if_stmt.else_block) {
+        if (node->as.if_stmt.else_block->type == NODE_IF) {
+            emit(gen, " else ");
+            gen->out.indent--;
+            emit_stmt(gen, node->as.if_stmt.else_block);
+            gen->out.indent++;
+            return;
+        }
+        emit(gen, " else {\n");
+        gen->out.indent++;
+        emit_stmt_body(gen, node->as.if_stmt.else_block);
+        gen->out.indent--;
+        emit_indent(gen);
+        emit(gen, "}\n");
+        return;
+    }
+
+    emit(gen, "\n");
+}
+
+static void emit_while_stmt(CodeGen* gen, Node* node) {
+    emit_indent(gen);
+    if (stmt_cond_has_outer_parens(node->as.while_stmt.cond)) {
+        emit(gen, "while ");
+        emit_expr(gen, node->as.while_stmt.cond);
+        emit(gen, " {\n");
+    } else {
+        emit(gen, "while (");
+        emit_expr(gen, node->as.while_stmt.cond);
+        emit(gen, ") {\n");
+    }
+
+    gen->out.indent++;
+    emit_stmt_body(gen, node->as.while_stmt.body);
+    gen->out.indent--;
+    emit_indent(gen);
+    emit(gen, "}\n");
+}
+
+static void emit_for_stmt(CodeGen* gen, Node* node) {
+    emit_indent(gen);
+    emit(gen, "for (");
+
+    if (node->as.for_stmt.init) {
+        if (node->as.for_stmt.init->type == NODE_VAR_DECL) {
+            Node* v = node->as.for_stmt.init;
+            if (v->as.var_decl.type) {
+                emit_type_with_name(gen, v->as.var_decl.type, v->as.var_decl.name);
+            } else {
+                emit(gen, "int64_t %s", v->as.var_decl.name);
+            }
+            if (v->as.var_decl.init) {
+                emit(gen, " = ");
+                emit_expr(gen, v->as.var_decl.init);
+            }
+        } else {
+            emit_expr(gen, node->as.for_stmt.init);
+        }
+    }
+
+    emit(gen, "; ");
+    if (node->as.for_stmt.cond) {
+        emit_expr(gen, node->as.for_stmt.cond);
+    }
+    emit(gen, "; ");
+    if (node->as.for_stmt.post) {
+        emit_expr(gen, node->as.for_stmt.post);
+    }
+    emit(gen, ") {\n");
+
+    gen->out.indent++;
+    emit_stmt_body(gen, node->as.for_stmt.body);
+    gen->out.indent--;
+    emit_indent(gen);
+    emit(gen, "}\n");
+}
+
+static void emit_foreach_collection_stmt(CodeGen* gen, Node* node) {
+    int idx_id = gen->out.temp_count++;
+    if (node->as.foreach_stmt.is_string) {
+        emit_indent(gen);
+        emit(gen, "for (int64_t __foreach_%d = 0; __foreach_%d < (int64_t)strlen(", idx_id, idx_id);
+        emit_expr(gen, node->as.foreach_stmt.collection);
+        emit(gen, "); __foreach_%d++) {\n", idx_id);
+        gen->out.indent++;
+        emit_indent(gen);
+        emit(gen, "char %s = ", node->as.foreach_stmt.var_name);
+        emit_expr(gen, node->as.foreach_stmt.collection);
+        emit(gen, "[__foreach_%d];\n", idx_id);
+    } else {
+        const char* access = node->as.foreach_stmt.is_span ? "." : "->";
+        emit_indent(gen);
+        emit(gen, "for (int64_t __foreach_%d = 0; __foreach_%d < ", idx_id, idx_id);
+        emit_expr(gen, node->as.foreach_stmt.collection);
+        emit(gen, "%scount; __foreach_%d++) {\n", access, idx_id);
+        gen->out.indent++;
+        emit_indent(gen);
+        emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
+                                    ? node->as.foreach_stmt.resolved_type
+                                    : type_int64);
+        emit(gen, " %s = ", node->as.foreach_stmt.var_name);
+        emit_expr(gen, node->as.foreach_stmt.collection);
+        emit(gen, "%sdata[__foreach_%d];\n", access, idx_id);
+    }
+
+    emit_stmt_body(gen, node->as.foreach_stmt.body);
+    gen->out.indent--;
+    emit_indent(gen);
+    emit(gen, "}\n");
+}
+
+static void emit_foreach_range_stmt(CodeGen* gen, Node* node) {
+    emit_indent(gen);
+    emit(gen, "for (");
+    emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
+                                ? node->as.foreach_stmt.resolved_type
+                                : type_int64);
+    emit(gen, " %s = ", node->as.foreach_stmt.var_name);
+    emit_expr(gen, node->as.foreach_stmt.start);
+    emit(gen, "; %s < ", node->as.foreach_stmt.var_name);
+    emit_expr(gen, node->as.foreach_stmt.end);
+    emit(gen, "; %s += ", node->as.foreach_stmt.var_name);
+    emit_expr(gen, node->as.foreach_stmt.step);
+    emit(gen, ") {\n");
+    gen->out.indent++;
+    emit_stmt_body(gen, node->as.foreach_stmt.body);
+    gen->out.indent--;
+    emit_indent(gen);
+    emit(gen, "}\n");
+}
+
+static void emit_foreach_stmt(CodeGen* gen, Node* node) {
+    if (node->as.foreach_stmt.collection) {
+        emit_foreach_collection_stmt(gen, node);
+    } else {
+        emit_foreach_range_stmt(gen, node);
+    }
+}
+
+static void emit_defer_stmt(CodeGen* gen, Node* node) {
+    defer_push(gen, node->as.defer_stmt.stmt);
+}
+
+static void emit_break_stmt(CodeGen* gen, Node* node) {
+    (void)node;
+    rc_cleanup_scope(gen, gen->rc.depth);
+    emit_indent(gen);
+    emit(gen, "break;\n");
+}
+
+static void emit_continue_stmt(CodeGen* gen, Node* node) {
+    (void)node;
+    rc_cleanup_scope(gen, gen->rc.depth);
+    emit_indent(gen);
+    emit(gen, "continue;\n");
+}
+
+static void emit_unknown_stmt(CodeGen* gen, Node* node) {
+    emit_indent(gen);
+    emit(gen, "/* unknown stmt %d */;\n", node ? node->type : -1);
+}
+
+typedef void (*StmtEmitter)(CodeGen* gen, Node* node);
+
+static const StmtEmitter stmt_emitters[NODE_PROGRAM + 1] = {
+    [NODE_EXPR_STMT] = emit_expr_stmt,  [NODE_VAR_DECL] = emit_var_decl_stmt,
+    [NODE_BLOCK] = emit_block_stmt,     [NODE_IF] = emit_if_stmt,
+    [NODE_WHILE] = emit_while_stmt,     [NODE_FOR] = emit_for_stmt,
+    [NODE_FOREACH] = emit_foreach_stmt, [NODE_RETURN] = emit_return_stmt,
+    [NODE_BREAK] = emit_break_stmt,     [NODE_CONTINUE] = emit_continue_stmt,
+    [NODE_DEFER] = emit_defer_stmt,     [NODE_MATCH] = emit_match_stmt,
+};
+
 // Dispatch statement code generation based on node type
 void emit_stmt(CodeGen* gen, Node* node) {
-    if (!node)
+    if (!node) {
         return;
-
-    switch (node->type) {
-    case NODE_EXPR_STMT:
-        emit_expr_stmt(gen, node);
-        break;
-
-    case NODE_VAR_DECL:
-        emit_var_decl_stmt(gen, node);
-        break;
-
-    case NODE_BLOCK:
-        emit_indent(gen);
-        emit(gen, "{\n");
-        gen->out.indent++;
-        gen->rc.depth++;
-        for (int i = 0; i < node->as.block.stmts.count; i++) {
-            emit_stmt(gen, node->as.block.stmts.nodes[i]);
-        }
-        rc_cleanup_scope(gen, gen->rc.depth);
-        gen->rc.depth--;
-        gen->out.indent--;
-        emit_indent(gen);
-        emit(gen, "}\n");
-        break;
-
-    case NODE_IF: {
-        emit_indent(gen);
-        int cond_has_parens = (node->as.if_stmt.cond->type == NODE_BINARY ||
-                               node->as.if_stmt.cond->type == NODE_UNARY);
-        if (cond_has_parens) {
-            emit(gen, "if ");
-            emit_expr(gen, node->as.if_stmt.cond);
-            emit(gen, " {\n");
-        } else {
-            emit(gen, "if (");
-            emit_expr(gen, node->as.if_stmt.cond);
-            emit(gen, ") {\n");
-        }
-        gen->out.indent++;
-        // Emit then block contents directly (it's already a block)
-        if (node->as.if_stmt.then_block->type == NODE_BLOCK) {
-            emit_block_contents(gen, node->as.if_stmt.then_block);
-        } else {
-            emit_stmt(gen, node->as.if_stmt.then_block);
-        }
-        gen->out.indent--;
-        emit_indent(gen);
-        emit(gen, "}");
-
-        if (node->as.if_stmt.else_block) {
-            if (node->as.if_stmt.else_block->type == NODE_IF) {
-                // else if
-                emit(gen, " else ");
-                // Remove indent for else if
-                gen->out.indent--;
-                emit_stmt(gen, node->as.if_stmt.else_block);
-                gen->out.indent++;
-            } else {
-                emit(gen, " else {\n");
-                gen->out.indent++;
-                if (node->as.if_stmt.else_block->type == NODE_BLOCK) {
-                    emit_block_contents(gen, node->as.if_stmt.else_block);
-                } else {
-                    emit_stmt(gen, node->as.if_stmt.else_block);
-                }
-                gen->out.indent--;
-                emit_indent(gen);
-                emit(gen, "}\n");
-            }
-        } else {
-            emit(gen, "\n");
-        }
-        break;
     }
 
-    case NODE_WHILE: {
-        emit_indent(gen);
-        int wcond_has_parens = (node->as.while_stmt.cond->type == NODE_BINARY ||
-                                node->as.while_stmt.cond->type == NODE_UNARY);
-        if (wcond_has_parens) {
-            emit(gen, "while ");
-            emit_expr(gen, node->as.while_stmt.cond);
-            emit(gen, " {\n");
-        } else {
-            emit(gen, "while (");
-            emit_expr(gen, node->as.while_stmt.cond);
-            emit(gen, ") {\n");
+    if ((unsigned)node->type < (sizeof(stmt_emitters) / sizeof(stmt_emitters[0]))) {
+        StmtEmitter emit_fn = stmt_emitters[node->type];
+        if (emit_fn) {
+            emit_fn(gen, node);
+            return;
         }
-        gen->out.indent++;
-        if (node->as.while_stmt.body->type == NODE_BLOCK) {
-            emit_block_contents(gen, node->as.while_stmt.body);
-        } else {
-            emit_stmt(gen, node->as.while_stmt.body);
-        }
-        gen->out.indent--;
-        emit_indent(gen);
-        emit(gen, "}\n");
-        break;
     }
 
-    case NODE_FOR:
-        emit_indent(gen);
-        emit(gen, "for (");
-        // Init
-        if (node->as.for_stmt.init) {
-            if (node->as.for_stmt.init->type == NODE_VAR_DECL) {
-                Node* v = node->as.for_stmt.init;
-                if (v->as.var_decl.type) {
-                    emit_type_with_name(gen, v->as.var_decl.type, v->as.var_decl.name);
-                } else {
-                    emit(gen, "int64_t %s", v->as.var_decl.name);
-                }
-                if (v->as.var_decl.init) {
-                    emit(gen, " = ");
-                    emit_expr(gen, v->as.var_decl.init);
-                }
-            } else {
-                emit_expr(gen, node->as.for_stmt.init);
-            }
-        }
-        emit(gen, "; ");
-        // Cond
-        if (node->as.for_stmt.cond) {
-            emit_expr(gen, node->as.for_stmt.cond);
-        }
-        emit(gen, "; ");
-        // Post
-        if (node->as.for_stmt.post) {
-            emit_expr(gen, node->as.for_stmt.post);
-        }
-        emit(gen, ") {\n");
-        gen->out.indent++;
-        if (node->as.for_stmt.body->type == NODE_BLOCK) {
-            emit_block_contents(gen, node->as.for_stmt.body);
-        } else {
-            emit_stmt(gen, node->as.for_stmt.body);
-        }
-        gen->out.indent--;
-        emit_indent(gen);
-        emit(gen, "}\n");
-        break;
-
-    case NODE_FOREACH:
-        if (node->as.foreach_stmt.collection) {
-            int idx_id = gen->out.temp_count++;
-            if (node->as.foreach_stmt.is_string) {
-                // String foreach: foreach (const c in str)
-                emit_indent(gen);
-                emit(gen, "for (int64_t __foreach_%d = 0; __foreach_%d < (int64_t)strlen(", idx_id,
-                     idx_id);
-                emit_expr(gen, node->as.foreach_stmt.collection);
-                emit(gen, "); __foreach_%d++) {\n", idx_id);
-                gen->out.indent++;
-                emit_indent(gen);
-                emit(gen, "char %s = ", node->as.foreach_stmt.var_name);
-                emit_expr(gen, node->as.foreach_stmt.collection);
-                emit(gen, "[__foreach_%d];\n", idx_id);
-            } else {
-                // Collection foreach: foreach (const item in collection)
-                // Vec uses -> (pointer), Span uses . (value type)
-                const char* access = node->as.foreach_stmt.is_span ? "." : "->";
-                emit_indent(gen);
-                emit(gen, "for (int64_t __foreach_%d = 0; __foreach_%d < ", idx_id, idx_id);
-                emit_expr(gen, node->as.foreach_stmt.collection);
-                emit(gen, "%scount; __foreach_%d++) {\n", access, idx_id);
-                gen->out.indent++;
-                // Declare the loop variable from collection data[idx]
-                emit_indent(gen);
-                emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
-                                            ? node->as.foreach_stmt.resolved_type
-                                            : type_int64);
-                emit(gen, " %s = ", node->as.foreach_stmt.var_name);
-                emit_expr(gen, node->as.foreach_stmt.collection);
-                emit(gen, "%sdata[__foreach_%d];\n", access, idx_id);
-            }
-            if (node->as.foreach_stmt.body->type == NODE_BLOCK) {
-                emit_block_contents(gen, node->as.foreach_stmt.body);
-            } else {
-                emit_stmt(gen, node->as.foreach_stmt.body);
-            }
-            gen->out.indent--;
-            emit_indent(gen);
-            emit(gen, "}\n");
-        } else {
-            // Range foreach: for (<type> var = start; var < end; var += step)
-            emit_indent(gen);
-            emit(gen, "for (");
-            emit_resolved_type(gen, node->as.foreach_stmt.resolved_type
-                                        ? node->as.foreach_stmt.resolved_type
-                                        : type_int64);
-            emit(gen, " %s = ", node->as.foreach_stmt.var_name);
-            emit_expr(gen, node->as.foreach_stmt.start);
-            emit(gen, "; %s < ", node->as.foreach_stmt.var_name);
-            emit_expr(gen, node->as.foreach_stmt.end);
-            emit(gen, "; %s += ", node->as.foreach_stmt.var_name);
-            emit_expr(gen, node->as.foreach_stmt.step);
-            emit(gen, ") {\n");
-            gen->out.indent++;
-            if (node->as.foreach_stmt.body->type == NODE_BLOCK) {
-                emit_block_contents(gen, node->as.foreach_stmt.body);
-            } else {
-                emit_stmt(gen, node->as.foreach_stmt.body);
-            }
-            gen->out.indent--;
-            emit_indent(gen);
-            emit(gen, "}\n");
-        }
-        break;
-    case NODE_RETURN:
-        emit_return_stmt(gen, node);
-        break;
-
-    case NODE_DEFER:
-        // Don't emit anything here - just push to defer stack
-        defer_push(gen, node->as.defer_stmt.stmt);
-        break;
-
-    case NODE_MATCH:
-        emit_match_stmt(gen, node);
-        break;
-
-    case NODE_BREAK:
-        rc_cleanup_scope(gen, gen->rc.depth);
-        emit_indent(gen);
-        emit(gen, "break;\n");
-        break;
-
-    case NODE_CONTINUE:
-        rc_cleanup_scope(gen, gen->rc.depth);
-        emit_indent(gen);
-        emit(gen, "continue;\n");
-        break;
-
-    default:
-        emit_indent(gen);
-        emit(gen, "/* unknown stmt %d */;\n", node->type);
-        break;
-    }
+    emit_unknown_stmt(gen, node);
 }
