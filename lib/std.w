@@ -15,12 +15,25 @@ private extern std_args {
     func std__argv(i: i64): string;
 }
 
+private extern std_io {
+    func std__eprint(s: string): void;
+    func std__eprintln(s: string): void;
+}
+
 func print(s: string): void {
     printf("%s", s);
 }
 
 func println(s: string): void {
     printf("%s\n", s);
+}
+
+func eprint(s: string): void {
+    std__eprint(s);
+}
+
+func eprintln(s: string): void {
+    std__eprintln(s);
 }
 
 func exit(status: i32): void {
