@@ -7,6 +7,7 @@
 int         is_enum_type_name(CodeGen* gen, const char* name);
 int         enum_index(CodeGen* gen, const char* name);
 int         enum_has_rc_fields(CodeGen* gen, const char* name);
+int         enum_has_eq(CodeGen* gen, const char* name);
 Node*       resolve_alias(CodeGen* gen, Node* type_node);
 int         is_struct_type(CodeGen* gen, Node* type_node);
 int         type_node_has_rc(CodeGen* gen, Node* type_node);

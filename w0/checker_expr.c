@@ -39,8 +39,47 @@ static Type* check_comparison_op(Checker* checker, Node* node, Type* left, Type*
         check_error(checker, node->line, node->column, "Strings only support == and != comparison");
         return type_error;
     }
-    if (type_equals(left, right))
+    if (type_equals(left, right)) {
+        // Struct == requires Eq trait impl
+        if (left->kind == TYPE_STRUCT && (op == TOK_EQ_EQ || op == TOK_BANG_EQ)) {
+            if (!left->as.struc.has_eq) {
+                check_error(checker, node->line, node->column,
+                            "Cannot compare struct '%s' with == (no Eq impl)", left->as.struc.name);
+                return type_error;
+            }
+            node->as.binary.is_eq_op     = 1;
+            node->as.binary.eq_type_name = left->as.struc.name;
+            return type_bool;
+        }
+        // Struct < > <= >= still disallowed
+        if (left->kind == TYPE_STRUCT) {
+            check_error(checker, node->line, node->column, "Cannot compare struct '%s' with '%s'",
+                        left->as.struc.name, token_type_symbol(op));
+            return type_error;
+        }
+        // Data enum == requires struct variants to have Eq
+        if (left->kind == TYPE_ENUM && left->as.enm.has_data &&
+            (op == TOK_EQ_EQ || op == TOK_BANG_EQ)) {
+            for (int v = 0; v < left->as.enm.value_count; v++) {
+                for (int f = 0; f < left->as.enm.variant_type_counts[v]; f++) {
+                    Type* ft = left->as.enm.variant_types[v][f];
+                    if (ft->kind == TYPE_STRUCT && !ft->as.struc.has_eq) {
+                        check_error(checker, node->line, node->column,
+                                    "Cannot compare enum '%s': variant '%s' contains struct '%s' "
+                                    "without Eq impl",
+                                    left->as.enm.name, left->as.enm.value_names[v],
+                                    ft->as.struc.name);
+                        return type_error;
+                    }
+                }
+            }
+            node->as.binary.is_eq_op     = 1;
+            node->as.binary.is_enum_eq   = 1;
+            node->as.binary.eq_type_name = left->as.enm.name;
+            return type_bool;
+        }
         return type_bool;
+    }
     // voidptr/struct == null and null == voidptr/struct (only for == and !=)
     if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
         if ((left->kind == TYPE_VOIDPTR && right->kind == TYPE_NULL) ||
@@ -996,6 +1035,30 @@ static Type* check_enum_value_expr(Checker* checker, Node* node) {
 
 // Type-check a function call: validate callee, argument count, and argument types
 static Type* check_call_expr(Checker* checker, Node* node) {
+    // Handle sameref(a, b) builtin
+    Node* callee = node->as.call.func;
+    if (callee->type == NODE_IDENT && callee->as.ident.length == 7 &&
+        strncmp(callee->as.ident.name, "sameref", 7) == 0) {
+        if (node->as.call.args.count != 2) {
+            check_error(checker, node->line, node->column,
+                        "sameref() requires exactly 2 arguments");
+            return type_error;
+        }
+        Type* a = check_expression(checker, node->as.call.args.nodes[0]);
+        Type* b = check_expression(checker, node->as.call.args.nodes[1]);
+        if (a->kind != TYPE_STRUCT) {
+            check_error(checker, node->line, node->column,
+                        "sameref() requires struct arguments, got '%s'", type_name(a));
+            return type_error;
+        }
+        if (!type_equals(a, b)) {
+            check_error(checker, node->line, node->column,
+                        "sameref() arguments must be the same type");
+            return type_error;
+        }
+        return type_bool;
+    }
+
     Type* func_type = check_expression(checker, node->as.call.func);
 
     if (func_type->kind == TYPE_ERROR)

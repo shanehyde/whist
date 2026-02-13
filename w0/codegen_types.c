@@ -32,6 +32,14 @@ int enum_has_rc_fields(CodeGen* gen, const char* name) {
     return gen->enums.has_rc_fields[idx];
 }
 
+// Check if a named data enum supports equality comparison
+int enum_has_eq(CodeGen* gen, const char* name) {
+    int idx = enum_index(gen, name);
+    if (idx < 0 || !gen->enums.has_eq)
+        return 0;
+    return gen->enums.has_eq[idx];
+}
+
 // Resolve a type node through aliases. If the node is a NODE_IDENT
 // that names a type alias, return the alias target node instead.
 Node* resolve_alias(CodeGen* gen, Node* type_node) {

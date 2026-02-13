@@ -76,6 +76,7 @@ typedef struct {
     int    count;
     int    capacity;
     int*   has_rc_fields; // Parallel to names
+    int*   has_eq;        // Parallel to names: 1 if data enum supports ==
 } CodeGenEnums;
 
 typedef struct {

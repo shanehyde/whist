@@ -348,6 +348,9 @@ static void node_reset_checker_flags(Node* node) {
     switch (node->type) {
     case NODE_BINARY:
         node->as.binary.is_string_op = 0;
+        node->as.binary.is_eq_op     = 0;
+        node->as.binary.is_enum_eq   = 0;
+        node->as.binary.eq_type_name = NULL;
         break;
     case NODE_INDEX:
         node->as.index.is_tuple_index = 0;

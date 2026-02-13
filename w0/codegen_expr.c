@@ -417,7 +417,19 @@ static void emit_regular_call(CodeGen* gen, Node* call, Node* func) {
 
 // Emit a function call: module-qualified, method, generic method, or regular call
 static void emit_call_expr(CodeGen* gen, Node* node) {
-    Node*       func               = node->as.call.func;
+    Node* func = node->as.call.func;
+
+    // sameref(a, b) -> (a == b) pointer comparison
+    if (func->type == NODE_IDENT && func->as.ident.length == 7 &&
+        strncmp(func->as.ident.name, "sameref", 7) == 0) {
+        emit(gen, "(");
+        emit_expr(gen, node->as.call.args.nodes[0]);
+        emit(gen, " == ");
+        emit_expr(gen, node->as.call.args.nodes[1]);
+        emit(gen, ")");
+        return;
+    }
+
     const char* callee_module_name = NULL;
     const char* callee_struct_name = NULL;
     if (func->type == NODE_MEMBER) {
@@ -1052,7 +1064,20 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_BINARY:
-        if (node->as.binary.is_string_op) {
+        if (node->as.binary.is_eq_op) {
+            const char* tname = node->as.binary.eq_type_name;
+            emit(gen, "(");
+            if (node->as.binary.op == TOK_BANG_EQ)
+                emit(gen, "!");
+            if (node->as.binary.is_enum_eq)
+                emit(gen, "__%s_eq(", tname);
+            else
+                emit(gen, "%s_eq(", tname);
+            emit_expr(gen, node->as.binary.left);
+            emit(gen, ", ");
+            emit_expr(gen, node->as.binary.right);
+            emit(gen, "))");
+        } else if (node->as.binary.is_string_op) {
             TokenType op = node->as.binary.op;
             if (op == TOK_EQ_EQ) {
                 emit(gen, "(strcmp(");

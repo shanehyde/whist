@@ -1071,6 +1071,132 @@ void emit_generic_enum_typedefs(CodeGen* gen, Node* ast) {
     }
 }
 
+// Emit a field comparison expression for enum eq helpers.
+// Resolves type substitution, then emits: StructName_eq for structs, strcmp for strings, == else.
+static void emit_enum_field_eq(CodeGen* gen, Node* tnode, const char* vname, int vname_len,
+                               int field_idx) {
+    Node* resolved = resolve_alias(gen, tnode);
+
+    // Check type parameter substitution first (for generic enums)
+    if (resolved->type == NODE_IDENT) {
+        Type* sub = subst_lookup(gen, resolved->as.ident.name);
+        if (sub) {
+            if (sub->kind == TYPE_STRUCT) {
+                emit(gen, "%s_eq(a.%.*s.f%d, b.%.*s.f%d)", sub->as.struc.name, vname_len, vname,
+                     field_idx, vname_len, vname, field_idx);
+                return;
+            }
+            if (sub->kind == TYPE_STRING) {
+                emit(gen, "(strcmp(a.%.*s.f%d, b.%.*s.f%d) == 0)", vname_len, vname, field_idx,
+                     vname_len, vname, field_idx);
+                return;
+            }
+            // Primitive or other — use ==
+            emit(gen, "(a.%.*s.f%d == b.%.*s.f%d)", vname_len, vname, field_idx, vname_len, vname,
+                 field_idx);
+            return;
+        }
+    }
+
+    // Non-substituted types
+    if (is_struct_type(gen, tnode)) {
+        const char* sname     = NULL;
+        int         need_free = 0;
+        if (resolved->type == NODE_IDENT) {
+            sname = resolved->as.ident.name;
+        } else if (resolved->type == NODE_GENERIC_TYPE) {
+            sname     = build_mangled_name_from_generic_node(gen, resolved);
+            need_free = 1;
+        }
+        if (sname) {
+            emit(gen, "%s_eq(a.%.*s.f%d, b.%.*s.f%d)", sname, vname_len, vname, field_idx,
+                 vname_len, vname, field_idx);
+        }
+        if (need_free)
+            free((char*)sname);
+    } else if (resolved->type == NODE_IDENT && strcmp(resolved->as.ident.name, "string") == 0) {
+        emit(gen, "(strcmp(a.%.*s.f%d, b.%.*s.f%d) == 0)", vname_len, vname, field_idx, vname_len,
+             vname, field_idx);
+    } else {
+        emit(gen, "(a.%.*s.f%d == b.%.*s.f%d)", vname_len, vname, field_idx, vname_len, vname,
+             field_idx);
+    }
+}
+
+// Emit a single __EnumName_eq function for a data enum
+static void emit_single_enum_eq(CodeGen* gen, const char* ename, Node* enum_decl) {
+    emit(gen, "static inline bool __%s_eq(%s a, %s b) {\n", ename, ename, ename);
+    emit(gen, "    if (a.tag != b.tag) return false;\n");
+    emit(gen, "    switch (a.tag) {\n");
+    for (int v = 0; v < enum_decl->as.enum_decl.values.count; v++) {
+        Node*       var       = enum_decl->as.enum_decl.values.nodes[v];
+        int         tc        = var->as.enum_variant.types.count;
+        const char* vname     = var->as.enum_variant.name;
+        int         vname_len = var->as.enum_variant.name_length;
+
+        emit(gen, "    case %s_%.*s:", ename, vname_len, vname);
+        if (tc == 0) {
+            emit(gen, " return true;\n");
+        } else {
+            emit(gen, " return ");
+            for (int t = 0; t < tc; t++) {
+                if (t > 0)
+                    emit(gen, " && ");
+                emit_enum_field_eq(gen, var->as.enum_variant.types.nodes[t], vname, vname_len, t);
+            }
+            emit(gen, ";\n");
+        }
+    }
+    emit(gen, "    default: return false;\n");
+    emit(gen, "    }\n");
+    emit(gen, "}\n\n");
+}
+
+// Emit __EnumName_eq helpers for data enums that support equality comparison
+void emit_enum_eq_helpers(CodeGen* gen, Node* ast) {
+    // Non-generic data enums
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type != NODE_ENUM_DECL)
+                continue;
+            if (decl->as.enum_decl.type_param_count > 0)
+                continue;
+            const char* ename = decl->as.enum_decl.name;
+            if (!enum_has_eq(gen, ename))
+                continue;
+            emit_single_enum_eq(gen, ename, decl);
+        }
+    }
+
+    // Generic data enum instances
+    for (int gi = 0; gi < gen->checker.instance_count; gi++) {
+        GenericInstance* info = &gen->checker.instances[gi];
+        if (info->type->kind != TYPE_ENUM)
+            continue;
+        if (!enum_has_eq(gen, info->mangled_name))
+            continue;
+        Node* tmpl = find_generic_enum_decl(ast, info->base_name);
+        if (!tmpl)
+            continue;
+
+        TypeSubstContext subst;
+        subst.type_params = tmpl->as.enum_decl.type_params;
+        subst.type_args   = info->type_args;
+        subst.count       = tmpl->as.enum_decl.type_param_count;
+
+        TypeSubstContext* old_subst = gen->generics.subst;
+        gen->generics.subst         = &subst;
+
+        emit_single_enum_eq(gen, info->mangled_name, tmpl);
+
+        gen->generics.subst = old_subst;
+    }
+}
+
 // Emit struct body typedefs (field definitions) for non-generic and generic structs
 void emit_struct_body_typedefs(CodeGen* gen, Node* ast) {
     // Emit body typedefs for non-generic structs (must come before __rc_dec_TypeName)

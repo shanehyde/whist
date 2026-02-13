@@ -35,6 +35,7 @@ void emit_enum_typedefs(CodeGen* gen, Node* ast);
 void emit_generic_enum_typedefs(CodeGen* gen, Node* ast);
 void emit_struct_body_typedefs(CodeGen* gen, Node* ast);
 void emit_function_forward_decls(CodeGen* gen, Node* ast);
+void emit_enum_eq_helpers(CodeGen* gen, Node* ast);
 
 // RC emission (defined in codegen_rc.c)
 void emit_rc_runtime(CodeGen* gen);

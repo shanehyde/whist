@@ -1614,6 +1614,22 @@ static void check_impl_decl(Checker* checker, Node* node) {
         type_sym->type->as.struc.has_drop = 1;
     }
 
+    // If implementing Eq, set the flag and validate field transitivity
+    if (strcmp(trait_name, "Eq") == 0 && !is_generic && !is_primitive) {
+        type_sym->type->as.struc.has_eq = 1;
+        // All struct-typed fields must also implement Eq
+        Type* stype = type_sym->type;
+        for (int i = 0; i < stype->as.struc.field_count; i++) {
+            Type* ft = stype->as.struc.field_types[i];
+            if (ft->kind == TYPE_STRUCT && !ft->as.struc.has_eq) {
+                check_error(
+                    checker, node->line, node->column,
+                    "Cannot implement Eq for '%s': field '%s' of type '%s' does not implement Eq",
+                    type_name_str, stype->as.struc.field_names[i], ft->as.struc.name);
+            }
+        }
+    }
+
     checker->self_type = NULL;
 }
 

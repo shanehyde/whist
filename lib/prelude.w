@@ -105,3 +105,7 @@ func (const Result<T, E>) error(): E {
 trait Drop {
     func drop(): void;
 }
+
+trait Eq {
+    func eq(other: Self): bool;
+}
