@@ -7,41 +7,43 @@
 #include "vec.h"
 
 // Built-in type singletons
-static Type builtin_void    = {TYPE_VOID, {{NULL}}};
-static Type builtin_bool    = {TYPE_BOOL, {{NULL}}};
-static Type builtin_int64   = {TYPE_INT64, {{NULL}}};
-static Type builtin_int8    = {TYPE_INT8, {{NULL}}};
-static Type builtin_int16   = {TYPE_INT16, {{NULL}}};
-static Type builtin_int32   = {TYPE_INT32, {{NULL}}};
-static Type builtin_uint64  = {TYPE_UINT64, {{NULL}}};
-static Type builtin_uint8   = {TYPE_UINT8, {{NULL}}};
-static Type builtin_uint16  = {TYPE_UINT16, {{NULL}}};
-static Type builtin_uint32  = {TYPE_UINT32, {{NULL}}};
-static Type builtin_f32     = {TYPE_F32, {{NULL}}};
-static Type builtin_f64     = {TYPE_F64, {{NULL}}};
-static Type builtin_char    = {TYPE_CHAR, {{NULL}}};
-static Type builtin_string  = {TYPE_STRING, {{NULL}}};
-static Type builtin_voidptr = {TYPE_VOIDPTR, {{NULL}}};
-static Type builtin_error   = {TYPE_ERROR, {{NULL}}};
-static Type builtin_null    = {TYPE_NULL, {{NULL}}};
+static Type builtin_void          = {TYPE_VOID, {{NULL}}};
+static Type builtin_bool          = {TYPE_BOOL, {{NULL}}};
+static Type builtin_int64         = {TYPE_INT64, {{NULL}}};
+static Type builtin_int8          = {TYPE_INT8, {{NULL}}};
+static Type builtin_int16         = {TYPE_INT16, {{NULL}}};
+static Type builtin_int32         = {TYPE_INT32, {{NULL}}};
+static Type builtin_uint64        = {TYPE_UINT64, {{NULL}}};
+static Type builtin_uint8         = {TYPE_UINT8, {{NULL}}};
+static Type builtin_uint16        = {TYPE_UINT16, {{NULL}}};
+static Type builtin_uint32        = {TYPE_UINT32, {{NULL}}};
+static Type builtin_f32           = {TYPE_F32, {{NULL}}};
+static Type builtin_f64           = {TYPE_F64, {{NULL}}};
+static Type builtin_char          = {TYPE_CHAR, {{NULL}}};
+static Type builtin_string        = {TYPE_STRING, {{NULL}}};
+static Type builtin_voidptr       = {TYPE_VOIDPTR, {{NULL}}};
+static Type builtin_stringbuilder = {TYPE_STRINGBUILDER, {{NULL}}};
+static Type builtin_error         = {TYPE_ERROR, {{NULL}}};
+static Type builtin_null          = {TYPE_NULL, {{NULL}}};
 
-Type* type_void    = &builtin_void;
-Type* type_bool    = &builtin_bool;
-Type* type_int64   = &builtin_int64;
-Type* type_int8    = &builtin_int8;
-Type* type_int16   = &builtin_int16;
-Type* type_int32   = &builtin_int32;
-Type* type_uint64  = &builtin_uint64;
-Type* type_uint8   = &builtin_uint8;
-Type* type_uint16  = &builtin_uint16;
-Type* type_uint32  = &builtin_uint32;
-Type* type_f32     = &builtin_f32;
-Type* type_f64     = &builtin_f64;
-Type* type_char    = &builtin_char;
-Type* type_string  = &builtin_string;
-Type* type_voidptr = &builtin_voidptr;
-Type* type_error   = &builtin_error;
-Type* type_null    = &builtin_null;
+Type* type_void          = &builtin_void;
+Type* type_bool          = &builtin_bool;
+Type* type_int64         = &builtin_int64;
+Type* type_int8          = &builtin_int8;
+Type* type_int16         = &builtin_int16;
+Type* type_int32         = &builtin_int32;
+Type* type_uint64        = &builtin_uint64;
+Type* type_uint8         = &builtin_uint8;
+Type* type_uint16        = &builtin_uint16;
+Type* type_uint32        = &builtin_uint32;
+Type* type_f32           = &builtin_f32;
+Type* type_f64           = &builtin_f64;
+Type* type_char          = &builtin_char;
+Type* type_string        = &builtin_string;
+Type* type_voidptr       = &builtin_voidptr;
+Type* type_stringbuilder = &builtin_stringbuilder;
+Type* type_error         = &builtin_error;
+Type* type_null          = &builtin_null;
 
 // Track allocated types for cleanup
 static Type** allocated_types    = NULL;
@@ -162,8 +164,8 @@ void type_free(Type* type) {
     if (type == type_void || type == type_bool || type == type_int64 || type == type_int8 ||
         type == type_int16 || type == type_int32 || type == type_uint64 || type == type_uint8 ||
         type == type_uint16 || type == type_uint32 || type == type_f32 || type == type_f64 ||
-        type == type_char || type == type_string || type == type_voidptr || type == type_error ||
-        type == type_null) {
+        type == type_char || type == type_string || type == type_voidptr ||
+        type == type_stringbuilder || type == type_error || type == type_null) {
         return;
     }
 
@@ -357,7 +359,7 @@ int type_supports_vec_sort(Type* type) {
 int type_is_rc_managed(Type* type) {
     if (!type)
         return 0;
-    if (type->kind == TYPE_STRUCT || type->kind == TYPE_VEC)
+    if (type->kind == TYPE_STRUCT || type->kind == TYPE_VEC || type->kind == TYPE_STRINGBUILDER)
         return 1;
     if (type->kind == TYPE_ENUM && type->as.enm.has_rc_fields)
         return 1;
@@ -390,6 +392,11 @@ int type_assignable(Type* target, Type* value) {
 
     // null can be assigned to vec references
     if (target->kind == TYPE_VEC && value->kind == TYPE_NULL) {
+        return 1;
+    }
+
+    // null can be assigned to StringBuilder references
+    if (target->kind == TYPE_STRINGBUILDER && value->kind == TYPE_NULL) {
         return 1;
     }
 
@@ -448,6 +455,8 @@ const char* type_name(Type* type) {
         return "string";
     case TYPE_VOIDPTR:
         return "voidptr";
+    case TYPE_STRINGBUILDER:
+        return "StringBuilder";
     case TYPE_ERROR:
         return "<error>";
     case TYPE_NULL:
@@ -516,14 +525,23 @@ static struct {
     Type**      type_ptr;
     const char* c_name;
 } builtin_types[] = {
-    {"void", &type_void, "void"},        {"bool", &type_bool, "bool"},
-    {"i64", &type_int64, "int64_t"},     {"i8", &type_int8, "int8_t"},
-    {"i16", &type_int16, "int16_t"},     {"i32", &type_int32, "int32_t"},
-    {"u64", &type_uint64, "uint64_t"},   {"u8", &type_uint8, "uint8_t"},
-    {"u16", &type_uint16, "uint16_t"},   {"u32", &type_uint32, "uint32_t"},
-    {"f32", &type_f32, "float"},         {"f64", &type_f64, "double"},
-    {"char", &type_char, "char"},        {"string", &type_string, "const char*"},
-    {"voidptr", &type_voidptr, "void*"}, {NULL, NULL, NULL},
+    {"void", &type_void, "void"},
+    {"bool", &type_bool, "bool"},
+    {"i64", &type_int64, "int64_t"},
+    {"i8", &type_int8, "int8_t"},
+    {"i16", &type_int16, "int16_t"},
+    {"i32", &type_int32, "int32_t"},
+    {"u64", &type_uint64, "uint64_t"},
+    {"u8", &type_uint8, "uint8_t"},
+    {"u16", &type_uint16, "uint16_t"},
+    {"u32", &type_uint32, "uint32_t"},
+    {"f32", &type_f32, "float"},
+    {"f64", &type_f64, "double"},
+    {"char", &type_char, "char"},
+    {"string", &type_string, "const char*"},
+    {"voidptr", &type_voidptr, "void*"},
+    {"StringBuilder", &type_stringbuilder, "__StringBuilder*"},
+    {NULL, NULL, NULL},
 };
 
 Type* type_builtin_from_name(const char* name) {
@@ -595,6 +613,8 @@ const char* type_mangle_name(Type* type) {
         return "string";
     case TYPE_VOIDPTR:
         return "voidptr";
+    case TYPE_STRINGBUILDER:
+        return "StringBuilder";
     case TYPE_SPAN: {
         char* buf = next_type_mangle_buf();
         snprintf(buf, 256, "Span_%s", type_mangle_name(type->as.span.elem));

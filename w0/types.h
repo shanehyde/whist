@@ -22,6 +22,7 @@ typedef enum {
     TYPE_ARRAY,
     TYPE_SPAN,
     TYPE_VEC,
+    TYPE_STRINGBUILDER,
     TYPE_STRUCT,
     TYPE_ENUM,
     TYPE_TRAIT,
@@ -141,6 +142,7 @@ extern Type* type_f64;
 extern Type* type_char;
 extern Type* type_string;
 extern Type* type_voidptr;
+extern Type* type_stringbuilder;
 extern Type* type_error;
 extern Type* type_null;
 

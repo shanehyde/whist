@@ -42,6 +42,9 @@ const char* get_dec_func_for_type(Type* t) {
         snprintf(buf, len, "__rc_dec_%s", t->as.enm.name);
         return buf;
     }
+    if (t && t->kind == TYPE_STRINGBUILDER) {
+        return xstrdup("__rc_dec_StringBuilder");
+    }
     if (t && t->kind == TYPE_VEC) {
         const char* elem_tname = type_mangle_name(t->as.vec.elem);
         size_t      len        = strlen("__rc_dec_Vec_") + strlen(elem_tname) + 1;

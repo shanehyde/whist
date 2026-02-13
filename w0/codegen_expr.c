@@ -639,6 +639,17 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
                 node->line);
         return;
     }
+    if (rtype->kind == TYPE_STRINGBUILDER) {
+        // new StringBuilder{} as inline expression using GCC statement expression
+        int tmp = gen->out.temp_count++;
+        emit(gen,
+             "({ __StringBuilder* __rc_tmp%d = (__StringBuilder*)__rc_alloc("
+             "sizeof(__StringBuilder)); "
+             "__rc_tmp%d->data = NULL; __rc_tmp%d->count = 0; __rc_tmp%d->capacity = 0; "
+             "__rc_tmp%d; })",
+             tmp, tmp, tmp, tmp, tmp);
+        return;
+    }
     if (rtype->kind == TYPE_VEC) {
         // new Vec<T>{elems} as inline expression using GCC statement expression
         const char* elem_tname = type_mangle_name(rtype->as.vec.elem);
