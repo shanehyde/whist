@@ -46,12 +46,12 @@ usage() {
 
 file_has_main() {
     local file="$1"
-    rg -q '^\s*func\s+main\s*\(' "$file"
+    grep -Eq '^[[:space:]]*func[[:space:]]+main[[:space:]]*\(' "$file"
 }
 
 file_has_test_blocks() {
     local file="$1"
-    rg -q '^\s*test\s+"' "$file"
+    grep -Eq '^[[:space:]]*test[[:space:]]+"' "$file"
 }
 
 print_test_header() {
@@ -82,7 +82,7 @@ check_expected_lines() {
 
     while IFS= read -r expected; do
         [ -z "$expected" ] && continue
-        if ! rg -Fq -- "$expected" "$actual_file"; then
+        if ! grep -Fq -- "$expected" "$actual_file"; then
             return 1
         fi
     done <<< "$expected_lines"
@@ -262,7 +262,7 @@ run_w0_test_file() {
     if [ -n "$expected_lines" ]; then
         while IFS= read -r expected; do
             [ -z "$expected" ] && continue
-            if ! echo "$output" | rg -Fq -- "$expected"; then
+            if ! printf '%s\n' "$output" | grep -Fq -- "$expected"; then
                 if $verbose; then
                     echo -e "${RED}✗ FAIL (missing expected output: $expected)${RESET}"
                     echo "$output"
@@ -308,7 +308,7 @@ run_error_test() {
         return
     fi
 
-    if ! echo "$output" | rg -q 'Error:'; then
+    if ! printf '%s\n' "$output" | grep -q 'Error:'; then
         if $verbose; then
             echo -e "${RED}✗ FAIL (no error message)${RESET}"
             echo "$output"
@@ -320,8 +320,8 @@ run_error_test() {
         return
     fi
 
-    actual=$(echo "$output" | rg 'Error:' | head -1 | sed 's|.*Error: *||')
-    if echo "$actual" | rg -Fq -- "$expected"; then
+    actual=$(printf '%s\n' "$output" | grep 'Error:' | head -1 | sed 's|.*Error: *||')
+    if printf '%s\n' "$actual" | grep -Fq -- "$expected"; then
         if $verbose; then
             echo "$output"
             echo -e "${GREEN}✓ PASS (correct error)${RESET}"
