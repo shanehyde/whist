@@ -20,6 +20,8 @@ error_passed=0
 error_failed=0
 rc_runtime_passed=0
 rc_runtime_failed=0
+w0_test_passed=0
+w0_test_failed=0
 
 # Options
 run_valid=false
@@ -233,6 +235,47 @@ run_rc_runtime_test() {
     ((rc_runtime_passed++))
 }
 
+run_w0_test() {
+    local file="$1"
+    local name=$(basename "$file")
+
+    if $verbose; then
+        echo -e "${YELLOW}--- W0 Test $file ---${RESET}"
+    else
+        printf "${BOLD}%-35s${RESET}" "$name:"
+    fi
+
+    local run_output
+    run_output=$("$W0" --lib-path "$LIB_PATH" test "$file" 2>&1)
+
+    # Check expected output lines (exit code is not checked — tests may intentionally fail)
+    local expected_lines
+    expected_lines=$(grep "^// Expected:" "$file" | sed 's|^// Expected: *||')
+    if [ -n "$expected_lines" ]; then
+        while IFS= read -r expected; do
+            if ! echo "$run_output" | grep -qF "$expected"; then
+                if $verbose; then
+                    echo -e "${RED}✗ FAIL (missing expected output: $expected)${RESET}"
+                    echo "$run_output"
+                    echo ""
+                else
+                    echo -e " ${RED}✗ FAIL (output)${RESET}"
+                fi
+                ((w0_test_failed++))
+                return
+            fi
+        done <<< "$expected_lines"
+    fi
+
+    if $verbose; then
+        echo -e "${GREEN}✓ PASS${RESET}"
+        echo ""
+    else
+        echo -e " ${GREEN}✓ PASS${RESET}"
+    fi
+    ((w0_test_passed++))
+}
+
 print_summary() {
     echo ""
     echo -e "${BLUE}=== Test Summary ===${RESET}"
@@ -252,10 +295,14 @@ print_summary() {
         if [ $rc_total -gt 0 ]; then
             echo -e "${GREEN}RC Runtime:     $rc_runtime_passed/$rc_total passed${RESET}"
         fi
+        local w0t_total=$((w0_test_passed + w0_test_failed))
+        if [ $w0t_total -gt 0 ]; then
+            echo -e "${GREEN}W0 Test:        $w0_test_passed/$w0t_total passed${RESET}"
+        fi
     fi
 
-    local total_passed=$((valid_passed + error_passed + rc_runtime_passed))
-    local total_failed=$((valid_failed + error_failed + rc_runtime_failed))
+    local total_passed=$((valid_passed + error_passed + rc_runtime_passed + w0_test_passed))
+    local total_failed=$((valid_failed + error_failed + rc_runtime_failed + w0_test_failed))
     local total=$((total_passed + total_failed))
 
     if $run_valid && $run_errors; then
@@ -313,6 +360,15 @@ if $run_valid; then
         for f in test/rc_runtime/*.w; do
             [ -e "$f" ] || continue
             run_rc_runtime_test "$f"
+        done
+        echo ""
+    fi
+
+    if ls test/w0_test/*.w >/dev/null 2>&1; then
+        echo -e "${CYAN}=== W0 Test Programs (w0 test) ===${RESET}"
+        for f in test/w0_test/*.w; do
+            [ -e "$f" ] || continue
+            run_w0_test "$f"
         done
         echo ""
     fi

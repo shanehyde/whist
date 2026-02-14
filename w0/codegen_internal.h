@@ -6,6 +6,7 @@
 
 // --- From codegen.c: generic substitution ---
 Type* subst_lookup(CodeGen* gen, const char* name);
+char* stringify_expr(Node* node);
 
 // --- From codegen_emit.c: shared helpers ---
 void        defer_push(CodeGen* gen, Node* node);

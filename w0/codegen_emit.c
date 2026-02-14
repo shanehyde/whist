@@ -590,6 +590,11 @@ static void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
 static void emit_func_decl(CodeGen* gen, Node* node) {
     int is_method = (node->as.func_decl.receiver_type != NULL);
 
+    // In test mode, skip user's main function
+    if (gen->test_mode && !is_method && strcmp(node->as.func_decl.name, "main") == 0) {
+        return;
+    }
+
     // Skip generic method templates - they get instantiated separately
     if (is_method && node->as.func_decl.receiver_type_args.count > 0) {
         return;
@@ -761,6 +766,18 @@ void emit_decl(CodeGen* gen, Node* node) {
         for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
             emit_decl(gen, node->as.impl_decl.methods.nodes[i]);
         }
+        break;
+
+    case NODE_TEST_DECL:
+        if (gen->test_mode) {
+            emit(gen, "static void __test_%d(void) {\n", gen->test_index++);
+            gen->out.indent++;
+            emit_block_contents(gen, node->as.test_decl.body);
+            gen->out.indent--;
+            emit(gen, "}\n\n");
+            rc_clear_all(gen);
+        }
+        // In normal mode: skip entirely
         break;
 
     case NODE_FUNC_DECL:
@@ -1291,6 +1308,11 @@ void emit_function_forward_decls(CodeGen* gen, Node* ast) {
 
                 // Skip generic method templates (they get instantiated separately)
                 if (is_method && fdn->receiver_type_args.count > 0) {
+                    continue;
+                }
+
+                // In test mode, skip user's main function
+                if (gen->test_mode && !is_method && strcmp(fdn->name, "main") == 0) {
                     continue;
                 }
 

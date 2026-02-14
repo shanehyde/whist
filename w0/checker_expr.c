@@ -1059,6 +1059,22 @@ static Type* check_call_expr(Checker* checker, Node* node) {
         return type_bool;
     }
 
+    // Handle assert(expr) builtin — only if no user-defined assert function in scope
+    if (callee->type == NODE_IDENT && callee->as.ident.length == 6 &&
+        strncmp(callee->as.ident.name, "assert", 6) == 0 && !checker_lookup(checker, "assert")) {
+        if (node->as.call.args.count != 1) {
+            check_error(checker, node->line, node->column, "assert() requires exactly 1 argument");
+            return type_error;
+        }
+        Type* arg_type = check_expression(checker, node->as.call.args.nodes[0]);
+        if (arg_type->kind != TYPE_ERROR && !type_equals(arg_type, type_bool)) {
+            check_error(checker, node->line, node->column,
+                        "assert() argument must be bool, got '%s'", type_name(arg_type));
+            return type_error;
+        }
+        return type_void;
+    }
+
     Type* func_type = check_expression(checker, node->as.call.func);
 
     if (func_type->kind == TYPE_ERROR)

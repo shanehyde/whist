@@ -16,7 +16,7 @@
 // Compile source to C code, writing to the given output file.
 // Returns 0 on success, 1 on error.
 static int compile_to_c(const char* source, const char* source_path, const char* lib_path,
-                        int rc_debug, FILE* out) {
+                        int rc_debug, int test_mode, FILE* out) {
     ModuleLoader loader;
     module_loader_init(&loader, lib_path);
 
@@ -59,7 +59,7 @@ static int compile_to_c(const char* source, const char* source_path, const char*
                      .trait_count    = checker.traits.impl_count,
                      .sem            = checker.sem,
                  },
-                 rc_debug);
+                 rc_debug, test_mode, source_path);
     codegen_emit(&gen, ast);
     codegen_free(&gen);
 
@@ -117,7 +117,7 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
         return 1;
     }
 
-    int result = compile_to_c(source, source_path, lib_path, rc_debug, c_file);
+    int result = compile_to_c(source, source_path, lib_path, rc_debug, 0, c_file);
     fclose(c_file);
     free(source);
 
@@ -161,6 +161,93 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
     // Run the executable
     int run_result = system(run_cmd);
     free(run_cmd);
+
+    // Cleanup
+    unlink(exe_path);
+
+    // Extract exit code from system() return value
+    if (WIFEXITED(run_result)) {
+        return WEXITSTATUS(run_result);
+    }
+    return run_result != 0 ? 1 : 0;
+}
+
+static int compile_and_test(const char* source_path, const char* lib_path, int rc_debug) {
+    char* source = read_file(source_path);
+    if (!source) {
+        fprintf(stderr, "Could not open file: %s\n", source_path);
+        return 1;
+    }
+
+    // Create temp files
+    char c_base[]   = "/tmp/w0_XXXXXX";
+    char exe_path[] = "/tmp/w0_XXXXXX";
+
+    int c_fd = mkstemp(c_base);
+    if (c_fd < 0) {
+        fprintf(stderr, "Could not create temp file\n");
+        free(source);
+        return 1;
+    }
+
+    char c_path[256];
+    snprintf(c_path, sizeof(c_path), "%s.c", c_base);
+    close(c_fd);
+    if (rename(c_base, c_path) != 0) {
+        fprintf(stderr, "Could not rename temp file\n");
+        unlink(c_base);
+        free(source);
+        return 1;
+    }
+
+    int exe_fd = mkstemp(exe_path);
+    if (exe_fd < 0) {
+        fprintf(stderr, "Could not create temp file\n");
+        unlink(c_path);
+        free(source);
+        return 1;
+    }
+    close(exe_fd);
+
+    FILE* c_file = fopen(c_path, "w");
+    if (!c_file) {
+        fprintf(stderr, "Could not open temp file for writing\n");
+        unlink(c_path);
+        unlink(exe_path);
+        free(source);
+        return 1;
+    }
+
+    int result = compile_to_c(source, source_path, lib_path, rc_debug, 1, c_file);
+    fclose(c_file);
+    free(source);
+
+    if (result != 0) {
+        unlink(c_path);
+        unlink(exe_path);
+        return 1;
+    }
+
+    // Compile with cc
+    char cmd[1024];
+    if (lib_path) {
+        snprintf(cmd, sizeof(cmd), "cc -o %s %s -I%s/include %s/whist_runtime.c", exe_path, c_path,
+                 lib_path, lib_path);
+    } else {
+        snprintf(cmd, sizeof(cmd), "cc -o %s %s", exe_path, c_path);
+    }
+
+    int cc_result = system(cmd);
+    unlink(c_path);
+
+    if (cc_result != 0) {
+        fprintf(stderr, "C compilation failed\n");
+        unlink(exe_path);
+        return 1;
+    }
+
+    // Run the test executable
+    int run_result = system(exe_path);
 
     // Cleanup
     unlink(exe_path);
@@ -227,6 +314,36 @@ int main(int argc, char** argv) {
                                rc_debug);
     }
 
+    // Check for 'test' subcommand (same pattern as 'run')
+    int test_idx = -1;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "test") == 0) {
+            test_idx = i;
+            break;
+        }
+        if ((strcmp(argv[i], "--lib-path") == 0 || strcmp(argv[i], "-o") == 0) && i + 1 < argc) {
+            i++;
+        }
+    }
+    if (test_idx >= 0) {
+        const char* test_source = NULL;
+        for (int i = test_idx + 1; i < argc; i++) {
+            if (strcmp(argv[i], "--lib-path") == 0 && i + 1 < argc) {
+                i++;
+            } else if (strcmp(argv[i], "--rc-debug") == 0) {
+                // skip flag
+            } else {
+                test_source = argv[i];
+                break;
+            }
+        }
+        if (!test_source) {
+            fprintf(stderr, "Usage: %s test [options] <source-file>\n", argv[0]);
+            return 1;
+        }
+        return compile_and_test(test_source, lib_path, rc_debug);
+    }
+
     // Parse args
     int arg_idx = 1;
     while (arg_idx < argc && argv[arg_idx][0] == '-') {
@@ -262,6 +379,7 @@ int main(int argc, char** argv) {
     } else {
         fprintf(stderr, "Usage: %s [options] <source-file>\n", argv[0]);
         fprintf(stderr, "       %s run <source-file> [args...]\n", argv[0]);
+        fprintf(stderr, "       %s test <source-file>\n", argv[0]);
         fprintf(stderr, "Options:\n");
         fprintf(stderr, "  --lex     Lex only (print tokens)\n");
         fprintf(stderr, "  --parse   Parse only (no type checking)\n");
@@ -274,6 +392,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "  -o <file> Output file\n");
         fprintf(stderr, "Commands:\n");
         fprintf(stderr, "  run       Compile and run the program\n");
+        fprintf(stderr, "  test      Compile and run tests\n");
         return 1;
     }
 
@@ -311,7 +430,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        int result = compile_to_c(source, source_file, lib_path, rc_debug, out);
+        int result = compile_to_c(source, source_file, lib_path, rc_debug, 0, out);
 
         if (output_file) {
             fclose(out);
@@ -395,7 +514,7 @@ int main(int argc, char** argv) {
                                  .trait_count    = checker.traits.impl_count,
                                  .sem            = checker.sem,
                              },
-                             rc_debug);
+                             rc_debug, 0, source_file);
                 codegen_emit(&gen, ast);
                 codegen_free(&gen);
                 checker_free(&checker);
