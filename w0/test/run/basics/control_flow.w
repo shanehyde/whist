@@ -1,4 +1,5 @@
 // Test control flow statements
+// Expected exit: 45
 
 func main(): i32 {
     var x = 0;

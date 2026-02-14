@@ -1,4 +1,5 @@
 // Test tuple types and operations
+// Expected exit: 89
 
 func main(): i32 {
     // Basic tuple literal with type annotation

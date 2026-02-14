@@ -1,4 +1,5 @@
 // Test character escape sequences
+// Expected exit: 1
 
 func main(): i32 {
     // Simple escapes

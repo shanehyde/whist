@@ -1,6 +1,7 @@
 trait HasValue {
     func value(): i64;
 }
+// Expected exit: 42
 
 struct Wrapper {
     v: i64,

@@ -1,4 +1,5 @@
 // Test basic generic enum (Option<T>)
+// Expected exit: 1
 
 enum Option<T> {
     None,

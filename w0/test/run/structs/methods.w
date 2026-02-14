@@ -2,6 +2,7 @@ struct Point {
     x: i64,
     y: i64,
 }
+// Expected exit: 42
 
 // Mutable method
 func (Point) move(dx: i64, dy: i64): void {

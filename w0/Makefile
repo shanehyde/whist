@@ -8,7 +8,7 @@ DEPS = $(SRC:.c=.d)
 BIN = bin
 TARGET = $(BIN)/w0
 
-.PHONY: all clean test test-verbose test-valid test-errors format metrics complexity
+.PHONY: all clean test test-verbose test-valid test-run test-errors format metrics complexity
 
 all: $(TARGET)
 
@@ -31,8 +31,11 @@ test: $(TARGET)
 test-verbose: $(TARGET)
 	@./scripts/run_tests.sh --verbose
 
+test-run: $(TARGET)
+	@./scripts/run_tests.sh --run
+
 test-valid: $(TARGET)
-	@./scripts/run_tests.sh --valid
+	@./scripts/run_tests.sh --run
 
 test-errors: $(TARGET)
 	@./scripts/run_tests.sh --errors

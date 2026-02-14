@@ -1,4 +1,5 @@
 // Test struct definitions and member access
+// Expected exit: 40
 
 struct Point {
     x: i32,
