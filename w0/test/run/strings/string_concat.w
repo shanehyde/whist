@@ -1,9 +1,9 @@
-func main(): i32 {
+// Expected: PASS: string_concat
+test "string_concat" {
     var s = "hello" + " " + "world";
-    if (s != "hello world") { return 1; }
+    assert(s == "hello world");
     var a = "foo";
     var b = "bar";
-    if (a + b != "foobar") { return 2; }
-    if ("" + "x" != "x") { return 3; }
-    return 0;
+    assert(a + b == "foobar");
+    assert("" + "x" == "x");
 }

@@ -1,3 +1,4 @@
+// Expected: PASS: generics_pair
 // Generic struct with multiple type parameters
 
 struct Pair<K, V> {
@@ -5,13 +6,8 @@ struct Pair<K, V> {
     second: V,
 }
 
-func main(): i32 {
+test "generics_pair" {
     var p = new Pair<i64, i32> {first: 100, second: 42};
-    if (p.first != 100) {
-        return 1;
-    }
-    if (p.second != 42) {
-        return 2;
-    }
-    return 0;
+    assert(p.first == 100);
+    assert(p.second == 42);
 }

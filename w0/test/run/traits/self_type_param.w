@@ -1,3 +1,5 @@
+// Expected: PASS: self_type_param
+
 trait Combinable {
     func combine(other: Self): Self;
 }
@@ -10,9 +12,8 @@ impl Combinable for Counter {
     }
 }
 
-func main(): i32 {
+test "self_type_param" {
     var a = new Counter { value: 3 };
     var b = new Counter { value: 7 };
     var c = a.combine(b);
-    return 0;
 }

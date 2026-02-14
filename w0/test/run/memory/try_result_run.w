@@ -1,6 +1,5 @@
+// Expected: PASS: try_result_run
 // RC RUNTIME TEST: ? operator propagates errors and unwraps values
-
-import std;
 
 enum Result<T, E> {
     Ok(T),
@@ -25,24 +24,22 @@ func propagate_err(): Result<i64, string> {
     return Result::Ok(x + 1);
 }
 
-func main(): i32 {
+test "try_result_run" {
     var ok_result = unwrap_ok();
     // Should be Ok(43)
     match (ok_result) {
         Ok(val) => {
-            if (val != 43) { return 2; }
+            assert(val == 43);
         },
-        Err(e) => { return 1; },
+        Err(e) => { assert(false); },
     }
 
     var err_result = propagate_err();
     // Should be Err("bad") - error was propagated
     match (err_result) {
-        Ok(val) => { return 3; },
+        Ok(val) => { assert(false); },
         Err(e) => {
             // Error was propagated correctly
         },
     }
-
-    return 0;
 }

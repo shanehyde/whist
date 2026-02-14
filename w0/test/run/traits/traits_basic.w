@@ -1,4 +1,4 @@
-import std;
+// Expected: PASS: traits_basic
 
 trait Greetable {
     func greet(): string;
@@ -18,9 +18,7 @@ impl Greetable for Dog {
     }
 }
 
-func main(): i32 {
+test "traits_basic" {
     var d: Dog = new Dog{name: "Rex\n"};
     var s: string = d.greet();
-    std.print(s);
-    return 0;
 }

@@ -1,7 +1,7 @@
+// Expected: PASS: variables
 // Test variable declarations and types
-// Expected exit: 142
 
-func main(): i32 {
+test "variables" {
     // Type inference
     var a = 42;
     var b = 3.14;
@@ -25,5 +25,5 @@ func main(): i32 {
     var octal = 0o755;
     var scientific = 1.5e10;
 
-    return a + x;
+    assert(a + x == 142);
 }

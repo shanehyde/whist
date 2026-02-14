@@ -1,3 +1,4 @@
+// Expected: PASS: duck_type_mixed
 // Mixed impl block: some methods with bodies, some signature-only
 
 trait Animal {
@@ -23,6 +24,5 @@ func (Cat) speak(): string {
     return self.name;
 }
 
-func main(): i32 {
-    return 0;
+test "duck_type_mixed" {
 }

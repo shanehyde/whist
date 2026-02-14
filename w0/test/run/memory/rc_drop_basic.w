@@ -1,6 +1,5 @@
+// Expected: PASS: rc_drop_basic
 // RC RUNTIME TEST: Drop method is called when refcount reaches 0
-
-import std;
 
 trait Drop {
     func drop(): void;
@@ -16,7 +15,6 @@ impl Drop for Resource {
     }
 }
 
-func main(): i32 {
+test "rc_drop_basic" {
     var r = new Resource { id: 1 };
-    return 0;
 }

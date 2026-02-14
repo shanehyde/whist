@@ -1,10 +1,11 @@
+// Expected: PASS: rc_vec_first_last
 // RC RUNTIME TEST: first/last on Vec of structs — no double-free or leaks
 
 struct Item {
     value: i64,
 }
 
-func main(): i32 {
+test "rc_vec_first_last" {
     var items = new Vec<Item>{};
     items.push(new Item { value: 10 });
     items.push(new Item { value: 20 });
@@ -14,32 +15,30 @@ func main(): i32 {
     var f = items.first();
     match (f) {
         Some(item) => {
-            if (item.value != 10) { return 1; }
+            assert(item.value == 10);
         },
-        None => { return 2; },
+        None => { assert(false); },
     }
 
     // last() returns a copy with incremented RC
     var l = items.last();
     match (l) {
         Some(item) => {
-            if (item.value != 30) { return 3; }
+            assert(item.value == 30);
         },
-        None => { return 4; },
+        None => { assert(false); },
     }
 
     // Vec still intact after first/last
-    if (items.count != 3) { return 5; }
-    if (items[0].value != 10) { return 6; }
-    if (items[2].value != 30) { return 7; }
+    assert(items.count == 3);
+    assert(items[0].value == 10);
+    assert(items[2].value == 30);
 
     // Empty vec of structs
     var empty = new Vec<Item>{};
     var ef = empty.first();
     match (ef) {
-        Some(item) => { return 8; },
+        Some(item) => { assert(false); },
         None => {},
     }
-
-    return 0;
 }

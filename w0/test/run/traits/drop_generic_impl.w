@@ -1,4 +1,6 @@
+// Expected: PASS: drop_generic_impl
 // Test: impl Drop for a generic struct type-checks
+
 trait Drop {
     func drop(): void;
 }
@@ -13,7 +15,6 @@ impl Drop for Box<T> {
     }
 }
 
-func main(): i32 {
+test "drop_generic_impl" {
     var b = new Box<i64> { item: 42 };
-    return 0;
 }

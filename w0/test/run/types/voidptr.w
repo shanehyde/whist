@@ -1,3 +1,4 @@
+// Expected: PASS: voidptr
 // Test voidptr type
 
 func identity(p: voidptr): voidptr {
@@ -8,28 +9,19 @@ func get_null(): voidptr {
     return null;
 }
 
-func main(): i32 {
+test "voidptr" {
     // Declaration with null
     var p: voidptr = null;
 
     // Null comparison
-    if (p == null) {
-        var x = 1;
-    }
-    if (p != null) {
-        var x = 2;
-    }
+    assert(p == null);
 
     // null == voidptr (reversed operands)
-    if (null == p) {
-        var x = 3;
-    }
+    assert(null == p);
 
     // voidptr equality
     var q: voidptr = null;
-    if (p == q) {
-        var x = 4;
-    }
+    assert(p == q);
 
     // Pass to and return from functions
     var r = identity(p);
@@ -38,6 +30,4 @@ func main(): i32 {
     // Assign null
     var t: voidptr = null;
     t = null;
-
-    return 0;
 }

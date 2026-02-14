@@ -1,3 +1,4 @@
+// Expected: PASS: prelude_basic
 // Test that prelude types are available without import or local definition
 
 func maybe_parse(s: string): Option<i64> {
@@ -14,30 +15,24 @@ func try_parse(s: string): Result<i64, string> {
     return Result::Err("bad");
 }
 
-func main(): i32 {
+test "prelude_basic" {
     var opt = maybe_parse("42");
     match (opt) {
         Some(val) => {
-            if (val != 42) {
-                return 1;
-            }
+            assert(val == 42);
         },
         None => {
-            return 2;
+            assert(false);
         },
     }
 
     var res = try_parse("abc");
     match (res) {
         Ok(val) => {
-            return 3;
+            assert(false);
         },
         Err(msg) => {
-            if (msg != "bad") {
-                return 4;
-            }
+            assert(msg == "bad");
         },
     }
-
-    return 0;
 }

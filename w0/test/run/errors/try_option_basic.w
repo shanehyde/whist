@@ -1,3 +1,4 @@
+// Expected: PASS: try_option_basic
 // Test ? operator on Option type
 
 enum Option<T> {
@@ -17,6 +18,5 @@ func process(): Option<bool> {
     return Option::Some(val > 0);
 }
 
-func main(): i32 {
-    return 0;
+test "try_option_basic" {
 }

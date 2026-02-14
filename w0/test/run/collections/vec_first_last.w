@@ -1,24 +1,25 @@
+// Expected: PASS: vec_first_last
 // Test Vec first() and last() returning Option<T>
 
-func main(): i32 {
+test "vec_first_last" {
     var nums = new Vec<i64>{10, 20, 30};
 
     // first() on non-empty vec
     var f = nums.first();
     match (f) {
         Some(val) => {
-            if (val != 10) { return 1; }
+            assert(val == 10);
         },
-        None => { return 2; },
+        None => { assert(false); },
     }
 
     // last() on non-empty vec
     var l = nums.last();
     match (l) {
         Some(val) => {
-            if (val != 30) { return 3; }
+            assert(val == 30);
         },
-        None => { return 4; },
+        None => { assert(false); },
     }
 
     // Empty vec
@@ -26,13 +27,13 @@ func main(): i32 {
 
     var ef = empty.first();
     match (ef) {
-        Some(val) => { return 5; },
+        Some(val) => { assert(false); },
         None => {},
     }
 
     var el = empty.last();
     match (el) {
-        Some(val) => { return 6; },
+        Some(val) => { assert(false); },
         None => {},
     }
 
@@ -42,16 +43,14 @@ func main(): i32 {
     var ol = one.last();
     match (of) {
         Some(val) => {
-            if (val != 42) { return 7; }
+            assert(val == 42);
         },
-        None => { return 8; },
+        None => { assert(false); },
     }
     match (ol) {
         Some(val) => {
-            if (val != 42) { return 9; }
+            assert(val == 42);
         },
-        None => { return 10; },
+        None => { assert(false); },
     }
-
-    return 0;
 }

@@ -1,3 +1,4 @@
+// Expected: PASS: rc_method
 // Test calling methods on RC-allocated structs
 
 struct Point {
@@ -14,11 +15,8 @@ func (Point) move(dx: i64, dy: i64): void {
     self.y = self.y + dy;
 }
 
-func main(): i32 {
+test "rc_method" {
     var p = new Point { x: 10, y: 20 };
     p.move(5, 7);
-    if (p.sum() != 42) {
-        return 1;
-    }
-    return 0;
+    assert(p.sum() == 42);
 }

@@ -1,10 +1,11 @@
+// Expected: PASS: rc_vec_pop
 // RC RUNTIME TEST: pop on Vec of structs — ownership transfer, no double-free
 
 struct Item {
     value: i64,
 }
 
-func main(): i32 {
+test "rc_vec_pop" {
     var items = new Vec<Item>{};
     items.push(new Item { value: 10 });
     items.push(new Item { value: 20 });
@@ -14,37 +15,35 @@ func main(): i32 {
     var p = items.pop();
     match (p) {
         Some(item) => {
-            if (item.value != 30) { return 1; }
+            assert(item.value == 30);
         },
-        None => { return 2; },
+        None => { assert(false); },
     }
 
     // Vec now has 2 elements
-    if (items.count != 2) { return 3; }
+    assert(items.count == 2);
 
     // Pop remaining elements
     var p2 = items.pop();
     match (p2) {
         Some(item) => {
-            if (item.value != 20) { return 4; }
+            assert(item.value == 20);
         },
-        None => { return 5; },
+        None => { assert(false); },
     }
 
     var p3 = items.pop();
     match (p3) {
         Some(item) => {
-            if (item.value != 10) { return 6; }
+            assert(item.value == 10);
         },
-        None => { return 7; },
+        None => { assert(false); },
     }
 
     // Empty vec pop returns None
     var p4 = items.pop();
     match (p4) {
-        Some(item) => { return 8; },
+        Some(item) => { assert(false); },
         None => {},
     }
-
-    return 0;
 }

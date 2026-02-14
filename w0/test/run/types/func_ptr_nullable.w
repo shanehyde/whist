@@ -1,9 +1,10 @@
+// Expected: PASS: func_ptr_nullable
+
 func noop(): void {
     return;
 }
 
-func main(): i32 {
+test "func_ptr_nullable" {
     var fp: func(): void = null;
     fp = noop;
-    return 0;
 }

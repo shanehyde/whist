@@ -1,7 +1,6 @@
-// Basic hello world style program
-import std;
+// Expected: PASS: hello
 
-func main(): i32 {
-    std.print("Hello, world!\n");
-    return 0;
+test "hello" {
+    var x = 42;
+    assert(x == 42);
 }

@@ -1,10 +1,8 @@
+// Expected: PASS: cast_voidptr_to_u64
 // Test voidptr -> u64 cast
 
-func main(): i32 {
+test "cast_voidptr_to_u64" {
     var p: voidptr = null;
     var addr: u64 = p as u64;
-    if (addr != 0) {
-        return 1;
-    }
-    return 0;
+    assert(addr == 0);
 }

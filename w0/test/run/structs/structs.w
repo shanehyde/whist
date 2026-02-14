@@ -1,5 +1,5 @@
+// Expected: PASS: structs
 // Test struct definitions and member access
-// Expected exit: 40
 
 struct Point {
     x: i32,
@@ -10,7 +10,7 @@ func distance(p: Point): i32 {
     return p.x + p.y;
 }
 
-func main(): i32 {
+test "structs" {
     var p = new Point {x: 10, y: 30};
-    return distance(p);
+    assert(distance(p) == 40);
 }

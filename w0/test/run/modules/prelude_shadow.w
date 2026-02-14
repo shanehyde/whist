@@ -1,3 +1,4 @@
+// Expected: PASS: prelude_shadow
 // Test that local definitions shadow prelude types
 
 enum Option<T> {
@@ -14,8 +15,7 @@ trait Drop {
     func drop(): void;
 }
 
-func main(): i32 {
+test "prelude_shadow" {
     var x: Option<i64> = Option::Some(42);
     var y: Result<i64, string> = Result::Ok(1);
-    return 0;
 }

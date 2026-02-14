@@ -1,3 +1,4 @@
+// Expected: PASS: generics_methods
 // Generic struct with methods
 
 struct Box<T> {
@@ -22,20 +23,14 @@ func (Pair<i32, Box<T>>) set(k: i32, v: Box<T>): void {
     self.value = v;
 }
 
-func main(): i32 {
+test "generics_methods" {
     var b = new Box<i64> {value: 10};
     var p = new Pair<i32, Box<i64>> {key: 1, value: b};
 
     // Test get method
-    if (b.get() != 10) {
-        return 1;
-    }
+    assert(b.get() == 10);
 
     // Test set method
     b.set(42);
-    if (b.get() != 42) {
-        return 2;
-    }
-
-    return 0;
+    assert(b.get() == 42);
 }

@@ -1,8 +1,8 @@
-func main(): i32 {
+// Expected: PASS: string_equality
+test "string_equality" {
     var s = "foo";
-    if (s != "foo") { return 1; }
-    if (s == "bar") { return 2; }
-    if ("hello" != "hello") { return 3; }
-    if ("hello" == "world") { return 4; }
-    return 0;
+    assert(s == "foo");
+    assert(s != "bar");
+    assert("hello" == "hello");
+    assert("hello" != "world");
 }

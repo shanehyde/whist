@@ -1,15 +1,15 @@
+// Expected: PASS: generic_func_basic
+
 func identity<T>(x: T): T {
     return x;
 }
 
-func main(): i32 {
+test "generic_func_basic" {
     var a = identity(42);
     var b = identity("hello");
     var c = identity(true);
 
-    if (a != 42) { return 1; }
-    if (b != "hello") { return 2; }
-    if (c != true) { return 3; }
-
-    return 0;
+    assert(a == 42);
+    assert(b == "hello");
+    assert(c == true);
 }

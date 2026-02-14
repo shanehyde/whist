@@ -1,5 +1,5 @@
-import std;
-use std.println;
+// Expected: PASS: enum_methods
+// Test enum methods
 
 enum Mobile {
     Player(string),
@@ -13,8 +13,7 @@ func (Mobile) describe(): string {
     }
 }
 
-func main() : i32 {
+test "enum_methods" {
     var m = Mobile::Player("Alice");
-    println($"{m.describe()}");
-    return 0;
+    assert(m.describe() == "Player: Alice");
 }

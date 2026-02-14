@@ -23,12 +23,6 @@ func hello<T: Greetable>(x: T): string {
     return x.greet();
 }
 
-func main(): i32 {
-    var d = new Dog { name: "hello from Dog\n" };
-    std.print(hello(d));
-    return 0;
-}
-
 test "duck_type_basic" {
     var d = new Dog { name: "hello from Dog" };
     assert("hello from Dog" == hello(d));

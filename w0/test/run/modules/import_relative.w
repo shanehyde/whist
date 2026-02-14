@@ -1,17 +1,11 @@
+// Expected: PASS: import_relative
 // Test relative imports
 
-import std;
 import "./util/math.w";
 
-func main(): i32 {
+test "import_relative" {
     var a = twice(5);
     var b = triple(4);
-
-    if (a != 10 || b != 12) {
-        std.print("FAIL: import_relative.w\n");
-        return 1;
-    }
-
-    std.print("PASS: import_relative.w\n");
-    return 0;
+    assert(a == 10);
+    assert(b == 12);
 }

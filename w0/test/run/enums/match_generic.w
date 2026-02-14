@@ -1,3 +1,4 @@
+// Expected: PASS: match_generic
 // Test match on generic enum (Option<i64>)
 
 enum Option<T> {
@@ -5,7 +6,7 @@ enum Option<T> {
     None,
 }
 
-func main(): i32 {
+test "match_generic" {
     var opt: Option<i64> = Option::Some(42);
 
     var result: i64 = 0;
@@ -18,9 +19,7 @@ func main(): i32 {
         },
     }
 
-    if (result != 42) {
-        return 1;
-    }
+    assert(result == 42);
 
     // Test None case
     var empty: Option<i64> = Option::None;
@@ -29,9 +28,5 @@ func main(): i32 {
         None => { result = -1; },
     }
 
-    if (result != -1) {
-        return 2;
-    }
-
-    return 0;
+    assert(result == -1);
 }

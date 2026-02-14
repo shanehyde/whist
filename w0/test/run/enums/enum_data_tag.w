@@ -1,3 +1,4 @@
+// Expected: PASS: enum_data_tag
 // Test .tag member access on data enums
 
 enum Shape {
@@ -6,8 +7,7 @@ enum Shape {
     None,
 }
 
-func main(): i32 {
+test "enum_data_tag" {
     var s = Shape::Circle(3.14);
     var tag: i32 = s.tag;
-    return 0;
 }

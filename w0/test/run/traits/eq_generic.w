@@ -1,3 +1,5 @@
+// Expected: PASS: eq_generic
+
 struct Box<T> {
     value: T,
 }
@@ -12,11 +14,9 @@ impl Eq for Box<T> {
     }
 }
 
-func main(): i32 {
+test "eq_generic" {
     var a = new Box<i64> { value: 42 };
     var b = new Box<i64> { value: 42 };
 
-    if (a == b) {}
-
-    return 0;
+    assert(a == b);
 }

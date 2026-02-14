@@ -1,3 +1,4 @@
+// Expected: PASS: try_chain
 // Test multiple ? operators in one function and chained with calls
 
 enum Result<T, E> {
@@ -24,6 +25,5 @@ func run_all(): Result<bool, string> {
     return Result::Ok(c);
 }
 
-func main(): i32 {
-    return 0;
+test "try_chain" {
 }

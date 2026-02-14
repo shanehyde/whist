@@ -1,7 +1,7 @@
+// Expected: PASS: control_flow
 // Test control flow statements
-// Expected exit: 45
 
-func main(): i32 {
+test "control_flow" {
     var x = 0;
 
     // If-else
@@ -32,5 +32,5 @@ func main(): i32 {
         x = x + 1;
     }
 
-    return x;
+    assert(x == 45);
 }

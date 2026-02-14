@@ -1,7 +1,7 @@
+// Expected: PASS: operators
 // Test operators
-// Expected exit: 19
 
-func main(): i32 {
+test "operators" {
     var a = 10;
     var b = 3;
 
@@ -39,5 +39,5 @@ func main(): i32 {
     a *= 3;
     a /= 2;
 
-    return a;
+    assert(a == 19);
 }

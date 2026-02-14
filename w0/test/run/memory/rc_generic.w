@@ -1,3 +1,4 @@
+// Expected: PASS: rc_generic
 // Test new with generic structs
 
 struct Box<T> {
@@ -8,10 +9,7 @@ func (Box<T>) get(): T {
     return self.value;
 }
 
-func main(): i32 {
+test "rc_generic" {
     var b = new Box<i64> { value: 42 };
-    if (b.get() != 42) {
-        return 1;
-    }
-    return 0;
+    assert(b.get() == 42);
 }

@@ -1,3 +1,4 @@
+// Expected: PASS: enums
 // Test enum definitions
 
 enum Color {
@@ -6,8 +7,7 @@ enum Color {
     Blue,
 }
 
-func main(): i32 {
+test "enums" {
     var c: Color;
     c = Color::Red;
-    return 0;
 }

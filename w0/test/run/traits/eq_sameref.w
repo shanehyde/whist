@@ -1,14 +1,14 @@
+// Expected: PASS: eq_sameref
+
 struct Obj {
     val: i64,
 }
 
-func main(): i32 {
+test "eq_sameref" {
     var a = new Obj { val: 1 };
     var b = a;
     var c = new Obj { val: 1 };
 
-    if (sameref(a, b)) {}
-    if (!sameref(a, c)) {}
-
-    return 0;
+    assert(sameref(a, b));
+    assert(!sameref(a, c));
 }

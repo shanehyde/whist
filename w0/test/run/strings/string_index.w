@@ -1,8 +1,8 @@
-func main(): i32 {
+// Expected: PASS: string_index
+test "string_index" {
     var s = "abc";
     var c = s[1];
-    if (c != 'b') { return 1; }
-    if ("hello"[0] != 'h') { return 2; }
-    if ("hello"[4] != 'o') { return 3; }
-    return 0;
+    assert(c == 'b');
+    assert("hello"[0] == 'h');
+    assert("hello"[4] == 'o');
 }

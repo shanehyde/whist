@@ -1,6 +1,7 @@
+// Expected: PASS: foreach_vec
 // Test foreach over Vec<i64>
 
-func main(): i32 {
+test "foreach_vec" {
     var nums = new Vec<i64>{};
 
     nums.push(10);
@@ -12,9 +13,5 @@ func main(): i32 {
         total = total + n;
     }
 
-    if (total != 60) {
-        return 1;
-    }
-
-    return 0;
+    assert(total == 60);
 }

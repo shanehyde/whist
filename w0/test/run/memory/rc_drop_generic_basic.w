@@ -1,3 +1,4 @@
+// Expected: PASS: rc_drop_generic_basic
 // RC RUNTIME TEST: Drop on generic struct is called when refcount reaches 0
 
 trait Drop {
@@ -14,7 +15,6 @@ impl Drop for Box<T> {
     }
 }
 
-func main(): i32 {
+test "rc_drop_generic_basic" {
     var b = new Box<i64> { item: 42 };
-    return 0;
 }

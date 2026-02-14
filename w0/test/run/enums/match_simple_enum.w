@@ -1,3 +1,4 @@
+// Expected: PASS: match_simple_enum
 // Test match on simple (non-data) enum
 
 enum Direction {
@@ -7,7 +8,7 @@ enum Direction {
     West,
 }
 
-func main(): i32 {
+test "match_simple_enum" {
     var d: Direction = Direction::East;
 
     var result: i64 = 0;
@@ -18,9 +19,7 @@ func main(): i32 {
         West => { result = 4; },
     }
 
-    if (result != 3) {
-        return 1;
-    }
+    assert(result == 3);
 
     // Test qualified variant names
     var d2: Direction = Direction::West;
@@ -31,9 +30,5 @@ func main(): i32 {
         Direction::West => { result = 4; },
     }
 
-    if (result != 4) {
-        return 2;
-    }
-
-    return 0;
+    assert(result == 4);
 }

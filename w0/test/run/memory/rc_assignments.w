@@ -1,5 +1,7 @@
-import std;
+// Expected: PASS: rc_assignments
 // Test RC copy semantics (shared reference)
+
+import std;
 
 struct Point {
     x: i64,
@@ -27,7 +29,7 @@ impl Drop for Point {
     }
 }
 
-func main(): i32 {
+test "rc_assignments" {
     var p = new Point { x: 10, y: 20 };
     var q = new Point { x: 30, y: 40 };
     var z = new Point { x: 50, y: 60 };
@@ -35,6 +37,4 @@ func main(): i32 {
     var line1 = new Line { start: p, end: q };
 
     line1.start = z;
-
-    return 0;
 }

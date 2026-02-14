@@ -1,8 +1,9 @@
+// Expected: PASS: methods
+
 struct Point {
     x: i64,
     y: i64,
 }
-// Expected exit: 42
 
 // Mutable method
 func (Point) move(dx: i64, dy: i64): void {
@@ -20,9 +21,9 @@ func move_ref(p: Point): void {
     p.move(1, 1);
 }
 
-func main(): i32 {
+test "methods" {
     var p = new Point {x: 10, y: 20};
     p.move(5, 5);
     move_ref(p);     // Calls p.move(1, 1)
-    return p.sum();  // Should return 42
+    assert(p.sum() == 42);
 }

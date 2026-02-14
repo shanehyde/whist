@@ -1,3 +1,5 @@
+// Expected: PASS: eq_nested
+
 struct Inner {
     val: i64,
 }
@@ -23,11 +25,9 @@ impl Eq for Outer {
     }
 }
 
-func main(): i32 {
+test "eq_nested" {
     var a = new Outer { inner: new Inner { val: 1 }, tag: 10 };
     var b = new Outer { inner: new Inner { val: 1 }, tag: 10 };
 
-    if (a == b) {}
-
-    return 0;
+    assert(a == b);
 }

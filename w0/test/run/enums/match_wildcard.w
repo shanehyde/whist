@@ -1,3 +1,4 @@
+// Expected: PASS: match_wildcard
 // Test match with wildcard arm
 
 enum Color {
@@ -12,7 +13,7 @@ enum Shape {
     Rect(f64, f64),
 }
 
-func main(): i32 {
+test "match_wildcard" {
     var c: Color = Color::Green;
 
     var result: i64 = 0;
@@ -21,9 +22,7 @@ func main(): i32 {
         _ => { result = 99; },
     }
 
-    if (result != 99) {
-        return 1;
-    }
+    assert(result == 99);
 
     // Test wildcard with data enum
     var s: Shape = Shape::Rect(3.0, 4.0);
@@ -32,9 +31,5 @@ func main(): i32 {
         _ => { result = 42; },
     }
 
-    if (result != 42) {
-        return 2;
-    }
-
-    return 0;
+    assert(result == 42);
 }
