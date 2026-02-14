@@ -578,6 +578,30 @@ void emit_vec_methods(CodeGen* gen) {
                  option_tname, option_tname);
             emit(gen, "}\n\n");
         }
+
+        // Eq
+        if (type_supports_equality(elem_type)) {
+            emit(gen, "static inline bool __Vec_%s_eq(__Vec_%s* a, __Vec_%s* b) {\n", elem_tname,
+                 elem_tname, elem_tname);
+            emit(gen, "    if (a == b) return true;\n");
+            emit(gen, "    if (a->count != b->count) return false;\n");
+            emit(gen, "    for (int64_t i = 0; i < a->count; i++) {\n");
+            if (elem_type->kind == TYPE_STRING) {
+                emit(gen, "        if (strcmp(a->data[i], b->data[i]) != 0) return false;\n");
+            } else if (elem_type->kind == TYPE_STRUCT) {
+                emit(gen, "        if (!%s_eq(a->data[i], b->data[i])) return false;\n",
+                     elem_type->as.struc.name);
+            } else if (elem_type->kind == TYPE_VEC) {
+                const char* sub_tname = type_mangle_name(elem_type->as.vec.elem);
+                emit(gen, "        if (!__Vec_%s_eq(a->data[i], b->data[i])) return false;\n",
+                     sub_tname);
+            } else {
+                emit(gen, "        if (a->data[i] != b->data[i]) return false;\n");
+            }
+            emit(gen, "    }\n");
+            emit(gen, "    return true;\n");
+            emit(gen, "}\n\n");
+        }
     }
 }
 
