@@ -1,6 +1,5 @@
+// Expected: PASS: eq_runtime
 // Test value equality via Eq trait and sameref
-
-import std;
 
 struct Point {
     x: i64,
@@ -23,21 +22,21 @@ enum Shape {
     None,
 }
 
-func main(): i32 {
+test "eq_runtime" {
     // Struct equality
     var a = new Point { x: 1, y: 2 };
     var b = new Point { x: 1, y: 2 };
     var c = new Point { x: 3, y: 4 };
 
-    if (!(a == b)) { return 1; }
-    if (a != b)    { return 2; }
-    if (a == c)    { return 3; }
-    if (!(a != c)) { return 4; }
+    assert(a == b);
+    assert(!(a != b));
+    assert(!(a == c));
+    assert(a != c);
 
     // sameref: a and b are different allocations
-    if (sameref(a, b))  { return 5; }
+    assert(!sameref(a, b));
     var d = a;
-    if (!sameref(a, d)) { return 6; }
+    assert(sameref(a, d));
 
     // Data enum equality
     var s1 = Shape::Circle(5);
@@ -46,10 +45,8 @@ func main(): i32 {
     var s4 = Shape::None;
     var s5 = Shape::None;
 
-    if (!(s1 == s2)) { return 7; }
-    if (s1 == s3)    { return 8; }
-    if (s1 == s4)    { return 9; }
-    if (!(s4 == s5)) { return 10; }
-
-    return 0;
+    assert(s1 == s2);
+    assert(!(s1 == s3));
+    assert(!(s1 == s4));
+    assert(s4 == s5);
 }

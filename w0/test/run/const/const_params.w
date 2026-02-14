@@ -1,3 +1,4 @@
+// Expected: PASS: const_params
 // Test const parameters in function declarations
 
 func add(const a: i64, const b: i64): i64 {
@@ -13,9 +14,8 @@ func identity(const x: i32): i32 {
     return x;
 }
 
-func main(): i32 {
+test "const_params" {
     var sum = add(10, 20);
     var result = mixed(5, 10);
     var val = identity(42);
-    return 0;
 }

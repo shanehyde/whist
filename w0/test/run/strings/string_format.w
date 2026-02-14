@@ -1,11 +1,11 @@
+// Expected: PASS: string_format
 import std;
 
-func main(): i32 {
+test "string_format" {
     var s = std.format("x=%d", 42);
-    if (s != "x=42") { return 1; }
+    assert(s == "x=42");
     var s2 = std.format("%s has %d items", "list", 3);
-    if (s2 != "list has 3 items") { return 2; }
+    assert(s2 == "list has 3 items");
     var s3 = std.format("hello");
-    if (s3 != "hello") { return 3; }
-    return 0;
+    assert(s3 == "hello");
 }

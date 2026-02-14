@@ -1,3 +1,4 @@
+// Expected: PASS: type_alias_generic
 // Test generic type aliases
 
 struct Box<T> { value: T }
@@ -7,7 +8,7 @@ struct Pair<K, V> { key: K, value: V }
 type IntBox = Box<i64>;
 type StringPair<V> = Pair<string, V>;
 
-func main(): i32 {
+test "type_alias_generic" {
     // Use non-generic alias of a generic struct
     var b: IntBox = new Box<i64> { value: 42 };
 
@@ -17,6 +18,4 @@ func main(): i32 {
     // The aliased type is fully interchangeable
     var b2: Box<i64> = b;
     var p2: Pair<string, i64> = p;
-
-    return 0;
 }

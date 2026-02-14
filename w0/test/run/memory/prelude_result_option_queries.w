@@ -1,39 +1,22 @@
+// Expected: PASS: prelude_result_option_queries
 // Test Option/Result query methods provided by prelude
 
-func main(): i32 {
+test "prelude_result_option_queries" {
     var opt_some: Option<i64> = Option::Some(42);
     var opt_none: Option<i64> = Option::None;
 
-    if (!opt_some.has_value()) {
-        return 1;
-    }
-    if (opt_none.has_value()) {
-        return 2;
-    }
+    assert(opt_some.has_value());
+    assert(!opt_none.has_value());
 
     var res_ok: Result<i64, string> = Result::Ok(42);
     var res_err: Result<i64, string> = Result::Err("bad");
 
-    if (!res_ok.has_value()) {
-        return 3;
-    }
-    if (res_err.has_value()) {
-        return 4;
-    }
+    assert(res_ok.has_value());
+    assert(!res_err.has_value());
 
-    if (!res_ok.is_ok()) {
-        return 5;
-    }
-    if (res_err.is_ok()) {
-        return 6;
-    }
+    assert(res_ok.is_ok());
+    assert(!res_err.is_ok());
 
-    if (res_ok.is_err()) {
-        return 7;
-    }
-    if (!res_err.is_err()) {
-        return 8;
-    }
-
-    return 0;
+    assert(!res_ok.is_err());
+    assert(res_err.is_err());
 }

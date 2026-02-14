@@ -1,3 +1,4 @@
+// Expected: PASS: generic_enum_methods
 // Test generic enum method instantiation/dispatch
 
 enum Flag<T> {
@@ -12,16 +13,10 @@ func (const Flag<T>) has_value(): bool {
     }
 }
 
-func main(): i32 {
+test "generic_enum_methods" {
     var on: Flag<i64> = Flag::On(42);
     var off: Flag<i64> = Flag::Off;
 
-    if (!on.has_value()) {
-        return 1;
-    }
-    if (off.has_value()) {
-        return 2;
-    }
-
-    return 0;
+    assert(on.has_value());
+    assert(!off.has_value());
 }

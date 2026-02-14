@@ -1,3 +1,4 @@
+// Expected: PASS: type_alias
 // Test basic type aliases
 
 type UserId = i64;
@@ -12,7 +13,7 @@ func add_ids(a: UserId, b: UserId): UserId {
     return a + b;
 }
 
-func main(): i32 {
+test "type_alias" {
     var id: UserId = 42;
     var id2: UserId = 100;
     var total: UserId = add_ids(id, id2);
@@ -28,6 +29,4 @@ func main(): i32 {
     // Struct alias
     var p: Pos = new Point { x: 1, y: 2 };
     var q: Point = p;
-
-    return 0;
 }

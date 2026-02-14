@@ -1,5 +1,5 @@
+// Expected: PASS: functions
 // Test function definitions and calls
-// Expected exit: 180
 
 func add(a: i32, b: i32): i32 {
     return a + b;
@@ -16,9 +16,9 @@ func factorial(n: i32): i32 {
     return n * factorial(n - 1);
 }
 
-func main(): i32 {
+test "functions" {
     var sum = add(10, 20);
     var product = multiply(5, 6);
     var fact = factorial(5);
-    return sum + product + fact;
+    assert(sum + product + fact == 180);
 }

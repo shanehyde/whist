@@ -1,3 +1,4 @@
+// Expected: PASS: match_expr
 // Test match as an expression in multiple expression contexts
 
 enum Animal {
@@ -32,22 +33,18 @@ func add_one(v: i64): i64 {
     return v + 1;
 }
 
-func main(): i32 {
+test "match_expr" {
     // Match expression in variable initialization
     var label = match (Animal::Cat) {
         Dog => "canine",
         Cat => "feline",
         _ => "other",
     };
-    if (label != "feline") {
-        return 1;
-    }
+    assert(label == "feline");
 
     // Match expression in return context through helper
     var tag = area_tag(Shape::Rect(3.0, 4.0));
-    if (tag != 2) {
-        return 2;
-    }
+    assert(tag == 2);
 
     // Match expression as a function argument
     var v: i64 = add_one(match (Shape::Circle(9.0)) {
@@ -55,13 +52,7 @@ func main(): i32 {
         Rect(w, h) => 20,
         None => 30,
     });
-    if (v != 11) {
-        return 3;
-    }
+    assert(v == 11);
 
-    if (describe(Animal::Dog) != "canine") {
-        return 4;
-    }
-
-    return 0;
+    assert(describe(Animal::Dog) == "canine");
 }

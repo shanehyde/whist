@@ -1,6 +1,7 @@
+// Expected: PASS: foreach_vec_empty
 // Test foreach over empty Vec iterates zero times
 
-func main(): i32 {
+test "foreach_vec_empty" {
     var nums = new Vec<i64>{};
 
     var count: i64 = 0;
@@ -8,9 +9,5 @@ func main(): i32 {
         count = count + 1;
     }
 
-    if (count != 0) {
-        return 1;
-    }
-
-    return 0;
+    assert(count == 0);
 }

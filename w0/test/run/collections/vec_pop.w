@@ -1,49 +1,44 @@
-// Test Vec pop operation — returns Option<T>
+// Expected: PASS: vec_pop
+// Test Vec pop operation -- returns Option<T>
 
-func main(): i32 {
+test "vec_pop" {
     var nums = new Vec<i64>{10, 20, 30};
 
     // Pop returns Some(last_element)
     var last = nums.pop();
     match (last) {
         Some(v) => {
-            if (v != 30) { return 1; }
+            assert(v == 30);
         },
-        None => { return 2; },
+        None => { assert(false); },
     }
 
-    if (nums.count != 2) {
-        return 3;
-    }
+    assert(nums.count == 2);
 
     // Pop second element
     var second = nums.pop();
     match (second) {
         Some(v) => {
-            if (v != 20) { return 4; }
+            assert(v == 20);
         },
-        None => { return 5; },
+        None => { assert(false); },
     }
 
     // Pop first element
     var first = nums.pop();
     match (first) {
         Some(v) => {
-            if (v != 10) { return 6; }
+            assert(v == 10);
         },
-        None => { return 7; },
+        None => { assert(false); },
     }
 
-    if (nums.count != 0) {
-        return 8;
-    }
+    assert(nums.count == 0);
 
     // Pop from empty Vec returns None
     var empty_pop = nums.pop();
     match (empty_pop) {
-        Some(v) => { return 9; },
+        Some(v) => { assert(false); },
         None => {},
     }
-
-    return 0;
 }

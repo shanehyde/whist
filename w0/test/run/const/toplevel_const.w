@@ -1,3 +1,4 @@
+// Expected: PASS: toplevel_const
 // Test top-level const declarations
 
 const MAX = 1024;
@@ -8,12 +9,11 @@ const MAX_I32: i32 = 1024;
 private const INTERNAL = 42;
 const KEYWORDS: [3]string = ["if", "else", "while"];
 
-func main(): i32 {
+test "toplevel_const" {
     var x = MAX;
     var y = PI;
     var s = GREETING;
     var d = DEBUG;
     var m = MAX_I32;
     var i = INTERNAL;
-    return 0;
 }

@@ -1,3 +1,4 @@
+// Expected: PASS: rc_return
 // Test returning RC value from function
 
 struct Point {
@@ -10,10 +11,7 @@ func make_point(x: i64, y: i64): Point {
     return p;
 }
 
-func main(): i32 {
+test "rc_return" {
     var p: Point = make_point(10, 32);
-    if (p.x + p.y != 42) {
-        return 1;
-    }
-    return 0;
+    assert(p.x + p.y == 42);
 }

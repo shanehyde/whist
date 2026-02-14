@@ -1,3 +1,5 @@
+// Expected: PASS: generic_func_bounds
+
 trait Printable {
     const func label(): string;
 }
@@ -16,9 +18,8 @@ func get_label<T: Printable>(x: T): string {
     return x.label();
 }
 
-func main(): i32 {
+test "generic_func_bounds" {
     var d = new Dog{name: "Rex"};
     var s = get_label(d);
-    if (s != "Rex") { return 1; }
-    return 0;
+    assert(s == "Rex");
 }

@@ -1,3 +1,4 @@
+// Expected: PASS: defer_lifo
 // Test that defers execute in LIFO order
 
 func record(n: i64): void {
@@ -9,7 +10,6 @@ func test_lifo(): void {
     defer record(1);  // Should execute first
 }
 
-func main(): i32 {
+test "defer_lifo" {
     test_lifo();
-    return 0;
 }

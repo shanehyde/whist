@@ -1,7 +1,8 @@
+// Expected: PASS: traits_bounds
+
 trait HasValue {
     func value(): i64;
 }
-// Expected exit: 42
 
 struct Wrapper {
     v: i64,
@@ -17,8 +18,8 @@ struct Box<T: HasValue> {
     item: T,
 }
 
-func main(): i32 {
+test "traits_bounds" {
     var w = new Wrapper {v: 42};
     var b = new Box<Wrapper> {item: w};
-    return w.value();
+    assert(w.value() == 42);
 }

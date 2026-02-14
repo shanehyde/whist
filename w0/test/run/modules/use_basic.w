@@ -1,8 +1,9 @@
+// Expected: PASS: use_basic
 // Test basic use statement for a single function
 import std;
-use std.print;
+use std.abs_i64;
 
-func main(): i32 {
-    print("PASS: use_basic.w\n");
-    return 0;
+test "use_basic" {
+    var a = abs_i64(-42);
+    assert(a == 42);
 }

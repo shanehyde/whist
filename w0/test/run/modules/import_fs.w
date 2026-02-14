@@ -1,9 +1,9 @@
+// Expected: PASS: import_fs
 // Test importing the fs library with module qualification
 
 import fs;
-import std;
 
-func main(): i32 {
+test "import_fs" {
     // Convenience API
     var result = fs.write_file("/tmp/whist_fs_test.txt", "hello whist");
     var exists = fs.file_exists("/tmp/whist_fs_test.txt");
@@ -27,7 +27,4 @@ func main(): i32 {
     fs.close(h2);
 
     fs.remove_file("/tmp/whist_fs_handle_test.txt");
-
-    std.print("PASS: import_fs.w\n");
-    return 0;
 }

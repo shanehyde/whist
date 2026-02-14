@@ -1,3 +1,4 @@
+// Expected: PASS: prelude_value_methods
 // Test type-checking for Option/Result extraction methods from prelude
 
 func test_option(): i32 {
@@ -40,6 +41,5 @@ func test_panic(): void {
     // (not calling it here since --check only type-checks)
 }
 
-func main(): i32 {
-    return 0;
+test "prelude_value_methods" {
 }

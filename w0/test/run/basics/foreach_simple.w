@@ -1,14 +1,11 @@
-// Expected exit: 22
-extern stdio {
-    func printf(s: string): void;
-}
+// Expected: PASS: foreach_simple
 
-func main(): i32 {
+test "foreach_simple" {
     var result = 0;
     var z = 2;
 
     foreach (const num in 10..14 by z) {
         result = result + num;
     }
-    return result;  // Should return 10 + 12 = 22 (14 excluded)
+    assert(result == 22);  // 10 + 12 = 22 (14 excluded)
 }

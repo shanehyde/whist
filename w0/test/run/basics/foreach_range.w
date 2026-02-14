@@ -1,8 +1,9 @@
-// Expected exit: 15
-func main(): i32 {
+// Expected: PASS: foreach_range
+
+test "foreach_range" {
     var total = 0;
     foreach (const i in 1..6) {
         total = total + i;
     }
-    return total;
+    assert(total == 15);
 }

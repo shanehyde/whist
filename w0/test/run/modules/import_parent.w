@@ -1,16 +1,9 @@
+// Expected: PASS: import_parent
 // Test parent directory imports (../)
 
-import std;
 import "./util/inner/helper.w";
 
-func main(): i32 {
+test "import_parent" {
     var a = quadruple(3);
-
-    if (a != 12) {
-        std.print("FAIL: import_parent.w\n");
-        return 1;
-    }
-
-    std.print("PASS: import_parent.w\n");
-    return 0;
+    assert(a == 12);
 }

@@ -1,6 +1,7 @@
+// Expected: PASS: integers
 // Test various integer types
 
-func main(): i32 {
+test "integers" {
     // Signed integers
     var a: i8 = 127;
     var b: i16 = 32767;
@@ -23,5 +24,9 @@ func main(): i32 {
     // Mixed operations (result is i64)
     var mixed = a + b;
 
-    return 0;
+    // Verify some values
+    assert(a == 127);
+    assert(e == 255);
+    assert(masked == 15);
+    assert(shifted == 255);
 }

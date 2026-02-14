@@ -1,3 +1,5 @@
+// Expected: PASS: defer
+
 func cleanup(): void {
 }
 
@@ -17,18 +19,12 @@ func test_void_defer(): void {
     defer cleanup();
 }
 
-func main(): i32 {
+test "defer" {
     var result = test_single_defer();
-    if (result != 42) {
-        return 1;
-    }
+    assert(result == 42);
 
     var result2 = test_multiple_defers();
-    if (result2 != 100) {
-        return 3;
-    }
+    assert(result2 == 100);
 
     test_void_defer();
-
-    return 0;
 }

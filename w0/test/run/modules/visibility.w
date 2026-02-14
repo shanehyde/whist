@@ -1,3 +1,4 @@
+// Expected: PASS: visibility
 // Test visibility modifiers (public keyword)
 
 // Public struct - external linkage
@@ -45,7 +46,7 @@ public func (Point) magnitude_squared(): i64 {
     return self.x * self.x + self.y * self.y;
 }
 
-func main(): i32 {
+test "visibility" {
     var p = new Point { x: 3, y: 4 };
     var mag = p.magnitude_squared();
 
@@ -56,6 +57,4 @@ func main(): i32 {
 
     var h = helper();
     var sum = add(1, 2);
-
-    return 0;
 }

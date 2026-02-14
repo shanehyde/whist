@@ -1,3 +1,4 @@
+// Expected: PASS: vec_span
 // Test Vec slicing to Span
 
 func sum(s: Span<i64>): i64 {
@@ -8,26 +9,18 @@ func sum(s: Span<i64>): i64 {
     return total;
 }
 
-func main(): i32 {
+test "vec_span" {
     var nums = new Vec<i64>{10, 20, 30, 40, 50};
 
     // Full slice
     var all: Span<i64> = nums[:];
-    if (sum(all) != 150) {
-        return 1;
-    }
+    assert(sum(all) == 150);
 
     // Partial slice
     var mid: Span<i64> = nums[1:4];
-    if (sum(mid) != 90) {
-        return 2;
-    }
+    assert(sum(mid) == 90);
 
     // Start-only slice
     var tail: Span<i64> = nums[3:];
-    if (sum(tail) != 90) {
-        return 3;
-    }
-
-    return 0;
+    assert(sum(tail) == 90);
 }

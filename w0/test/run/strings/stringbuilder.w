@@ -1,6 +1,7 @@
+// Expected: PASS: stringbuilder
 // Test StringBuilder: type-check basic operations
 
-func main(): i32 {
+test "stringbuilder" {
     var sb = new StringBuilder{};
     sb.append("hello");
     sb.append_char(' ');
@@ -9,5 +10,4 @@ func main(): i32 {
     var n: i64 = sb.len();
     var c: i64 = sb.capacity();
     sb.clear();
-    return 0;
 }

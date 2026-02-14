@@ -1,6 +1,7 @@
+// Expected: PASS: shift_assign
 // Test shift assignment operators <<= and >>=
 
-func main(): i32 {
+test "shift_assign" {
     var a: i32 = 1;
     var b: i32 = 256;
 
@@ -11,8 +12,6 @@ func main(): i32 {
     b >>= 4;  // b = 256 >> 4 = 16
 
     // Verify both are equal
-    if (a == b && a == 16) {
-        return 0;
-    }
-    return 1;
+    assert(a == b);
+    assert(a == 16);
 }

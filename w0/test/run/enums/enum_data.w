@@ -1,3 +1,4 @@
+// Expected: PASS: enum_data
 // Test data enums (tagged unions)
 
 enum Shape {
@@ -6,7 +7,7 @@ enum Shape {
     None,
 }
 
-func main(): i32 {
+test "enum_data" {
     var s: Shape = Shape::Circle(3.14);
     var r: Shape = Shape::Rect(10.0, 20.0);
     var n: Shape = Shape::None;
@@ -15,6 +16,4 @@ func main(): i32 {
     var s2 = Shape::Circle(2.0);
     var r2 = Shape::Rect(1.0, 2.0);
     var n2 = Shape::None;
-
-    return 0;
 }

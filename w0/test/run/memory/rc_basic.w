@@ -1,3 +1,4 @@
+// Expected: PASS: rc_basic
 // Test basic RC allocation with new
 
 struct Point {
@@ -5,13 +6,8 @@ struct Point {
     y: i64,
 }
 
-func main(): i32 {
+test "rc_basic" {
     var p = new Point { x: 10, y: 20 };
-    if (p.x != 10) {
-        return 1;
-    }
-    if (p.y != 20) {
-        return 2;
-    }
-    return 0;
+    assert(p.x == 10);
+    assert(p.y == 20);
 }

@@ -1,3 +1,4 @@
+// Expected: PASS: const_struct_const_method
 // Test that const methods can be called on const struct bindings
 
 struct Point {
@@ -9,8 +10,7 @@ func (const Point) sum(): i64 {
     return self.x + self.y;
 }
 
-func main(): i32 {
+test "const_struct_const_method" {
     const p = new Point {x: 10, y: 20};
     var s = p.sum();
-    return 0;
 }

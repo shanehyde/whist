@@ -1,8 +1,10 @@
+// Expected: PASS: varargs
+
 extern stdio {
     func printf(fmt: string, ...): i32;
 }
 
-func main(): i32 {
+test "varargs" {
     // Call printf with various argument counts
     printf("hello %s\n", "world");
     printf("number: %d\n", 42);
@@ -10,6 +12,4 @@ func main(): i32 {
 
     // No args beyond format string
     printf("varargs test passed\n");
-
-    return 0;
 }

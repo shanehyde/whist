@@ -1,6 +1,7 @@
+// Expected: PASS: foreach_span
 // Test foreach over Span<i64>
 
-func main(): i32 {
+test "foreach_span" {
     var arr: [5]i64;
     arr[0] = 10;
     arr[1] = 20;
@@ -15,9 +16,7 @@ func main(): i32 {
         total = total + n;
     }
 
-    if (total != 150) {
-        return 1;
-    }
+    assert(total == 150);
 
     // Foreach over a slice of the span
     var s2: Span<i64> = arr[1:4];
@@ -26,9 +25,7 @@ func main(): i32 {
         total2 = total2 + n;
     }
 
-    if (total2 != 90) {
-        return 2;
-    }
+    assert(total2 == 90);
 
     // Foreach over empty span
     var empty: Span<i64> = arr[0:0];
@@ -37,9 +34,5 @@ func main(): i32 {
         total3 = total3 + n;
     }
 
-    if (total3 != 0) {
-        return 3;
-    }
-
-    return 0;
+    assert(total3 == 0);
 }

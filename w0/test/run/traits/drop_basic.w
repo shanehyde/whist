@@ -1,3 +1,5 @@
+// Expected: PASS: drop_basic
+
 trait Drop {
     func drop(): void;
 }
@@ -12,7 +14,6 @@ impl Drop for Resource {
     }
 }
 
-func main(): i32 {
+test "drop_basic" {
     var r = new Resource { id: 1 };
-    return 0;
 }

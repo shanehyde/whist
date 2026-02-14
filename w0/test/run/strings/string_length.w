@@ -1,7 +1,7 @@
-func main(): i32 {
+// Expected: PASS: string_length
+test "string_length" {
     var s = "hello";
-    if (s.length() != 5) { return 1; }
-    if ("".length() != 0) { return 2; }
-    if ("abc".length() != 3) { return 3; }
-    return 0;
+    assert(s.length() == 5);
+    assert("".length() == 0);
+    assert("abc".length() == 3);
 }

@@ -1,3 +1,4 @@
+// Expected: PASS: rc_drop_generic_two_fields
 // RC RUNTIME TEST: Generic Pair<A,B> where both A and B have Drop
 
 trait Drop {
@@ -29,9 +30,8 @@ struct Pair<A, B> {
     second: B,
 }
 
-func main(): i32 {
+test "rc_drop_generic_two_fields" {
     var a = new Alpha { id: 1 };
     var b = new Beta { id: 2 };
     var p = new Pair<Alpha, Beta> { first: a, second: b };
-    return 0;
 }

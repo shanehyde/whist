@@ -1,3 +1,4 @@
+// Expected: PASS: try_result_basic
 // Test ? operator on Result type
 
 enum Result<T, E> {
@@ -14,6 +15,5 @@ func do_work(): Result<bool, string> {
     return Result::Ok(x > 0);
 }
 
-func main(): i32 {
-    return 0;
+test "try_result_basic" {
 }

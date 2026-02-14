@@ -1,3 +1,4 @@
+// Expected: PASS: match_basic
 // Test basic match on data enum
 
 enum Shape {
@@ -6,7 +7,7 @@ enum Shape {
     None,
 }
 
-func main(): i32 {
+test "match_basic" {
     var s: Shape = Shape::Circle(3.14);
 
     var result: i64 = 0;
@@ -26,9 +27,7 @@ func main(): i32 {
     }
 
     // result should be 1
-    if (result != 1) {
-        return 1;
-    }
+    assert(result == 1);
 
     // Test matching Rect
     var r2: Shape = Shape::Rect(10.0, 20.0);
@@ -39,9 +38,7 @@ func main(): i32 {
         None => { area = 0.0; },
     }
 
-    if (area != 200.0) {
-        return 2;
-    }
+    assert(area == 200.0);
 
     // Test matching None
     var n: Shape = Shape::None;
@@ -52,9 +49,5 @@ func main(): i32 {
         None => { tag = 3; },
     }
 
-    if (tag != 3) {
-        return 3;
-    }
-
-    return 0;
+    assert(tag == 3);
 }

@@ -1,8 +1,7 @@
+// Expected: PASS: stringbuilder_basic
 // RC RUNTIME TEST: StringBuilder basic operations
 
-import std;
-
-func main(): i32 {
+test "stringbuilder_basic" {
     var sb = new StringBuilder{};
 
     // Test append
@@ -11,49 +10,31 @@ func main(): i32 {
     sb.append("world");
 
     // Verify len
-    if (sb.len() != 11) {
-        return 1;
-    }
+    assert(sb.len() == 11);
 
     // Verify capacity >= len
-    if (sb.capacity() < 11) {
-        return 2;
-    }
+    assert(sb.capacity() >= 11);
 
     // Verify to_string
     var s: string = sb.to_string();
-    if (s != "hello world") {
-        return 3;
-    }
+    assert(s == "hello world");
 
     // Test append_line (appends string + newline)
     sb.clear();
-    if (sb.len() != 0) {
-        return 4;
-    }
+    assert(sb.len() == 0);
 
     sb.append_line("line1");
     sb.append("line2");
     var s2: string = sb.to_string();
-    if (s2 != "line1\nline2") {
-        return 5;
-    }
+    assert(s2 == "line1\nline2");
 
     // Test clear preserves capacity
     var cap_before: i64 = sb.capacity();
     sb.clear();
-    if (sb.len() != 0) {
-        return 6;
-    }
-    if (sb.capacity() != cap_before) {
-        return 7;
-    }
+    assert(sb.len() == 0);
+    assert(sb.capacity() == cap_before);
 
     // Test to_string on empty builder
     var empty: string = sb.to_string();
-    if (empty != "") {
-        return 8;
-    }
-
-    return 0;
+    assert(empty == "");
 }

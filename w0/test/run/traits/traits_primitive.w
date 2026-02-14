@@ -1,4 +1,4 @@
-import std;
+// Expected: PASS: traits_primitive
 
 trait Hashable {
     const func hash(): i32;
@@ -14,12 +14,10 @@ struct Bucket<K: Hashable> {
     key: K,
 }
 
-func main(): i32 {
+test "traits_primitive" {
     var x: i32 = 42;
     var h: i32 = x.hash();
-    std.print(std.format("hash of 42 = %d\n", h));
+    assert(h == 42);
 
     var b: Bucket<i32> = new Bucket<i32>{key: 10};
-
-    return 0;
 }

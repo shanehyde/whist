@@ -1,9 +1,6 @@
+// Expected: PASS: std_system
 import std;
 
-func main(): i32 {
-    if (std.system("echo hello") != 0) {
-        return 1;
-    }
-
-    return 0;
+test "std_system" {
+    assert(std.system("echo hello") == 0);
 }
