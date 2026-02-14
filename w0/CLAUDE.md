@@ -110,7 +110,11 @@ bin/w0 --lib-path ../lib program.w | cc -x c -Ilib/include -o program - lib/whis
 **`fs.w`** — File I/O (imported as `import fs;`):
 - Convenience: `fs.read_file`, `fs.write_file`, `fs.append_file`, `fs.file_exists`, `fs.remove_file`, `fs.rename_file`, `fs.file_size`
 - Handle-based: `fs.open`, `fs.close`, `fs.read_line`, `fs.write_string`, `fs.flush`, `fs.seek`, `fs.tell`, `fs.eof`
-- Handles are `voidptr` (opaque FILE* pointers); `null` means invalid
+- Directory ops: `fs.mkdir`, `fs.mkdir_all`, `fs.rmdir`, `fs.is_dir`, `fs.is_file`, `fs.cwd`, `fs.chdir`
+- Directory iteration: `fs.open_dir`, `fs.read_dir`, `fs.close_dir` (handle-based, like file handles)
+- Path utilities: `fs.join_path`, `fs.dirname`, `fs.basename`, `fs.extension`, `fs.abs_path`
+- Metadata & temp: `fs.modified_time`, `fs.temp_dir`
+- Handles are `voidptr` (opaque FILE*/DIR* pointers); `null` means invalid
 - Requires `-Ilib/include` when compiling the generated C (for `fs.h` runtime)
 
 **`lib/include/`** — C header implementations backing extern modules (e.g., `fs.h`).

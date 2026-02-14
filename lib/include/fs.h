@@ -22,6 +22,9 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <limits.h>
+#include <errno.h>
 
 /* ---------- Convenience API (no handles) ---------- */
 
@@ -171,6 +174,168 @@ static inline bool fs__eof(void* handle) {
     FILE* fp = (FILE*)handle;
     if (!fp) return true;
     return feof(fp) != 0;
+}
+
+/* ---------- Directory operations ---------- */
+
+static inline int32_t fs__mkdir(const char* path) {
+    return (mkdir(path, 0755) == 0) ? 0 : -1;
+}
+
+static inline int32_t fs__mkdir_all(const char* path) {
+    char tmp[PATH_MAX];
+    size_t len = strlen(path);
+    if (len == 0 || len >= PATH_MAX) return -1;
+
+    memcpy(tmp, path, len + 1);
+
+    for (size_t i = 1; i < len; i++) {
+        if (tmp[i] == '/') {
+            tmp[i] = '\0';
+            if (mkdir(tmp, 0755) != 0 && errno != EEXIST) return -1;
+            tmp[i] = '/';
+        }
+    }
+    if (mkdir(tmp, 0755) != 0 && errno != EEXIST) return -1;
+    return 0;
+}
+
+static inline int32_t fs__rmdir(const char* path) {
+    return (rmdir(path) == 0) ? 0 : -1;
+}
+
+static inline bool fs__is_dir(const char* path) {
+    struct stat st;
+    if (stat(path, &st) != 0) return false;
+    return S_ISDIR(st.st_mode);
+}
+
+static inline bool fs__is_file(const char* path) {
+    struct stat st;
+    if (stat(path, &st) != 0) return false;
+    return S_ISREG(st.st_mode);
+}
+
+static inline const char* fs__cwd(void) {
+    char* result = getcwd(NULL, 0);
+    if (!result) return strdup("");
+    return result;
+}
+
+static inline int32_t fs__chdir(const char* path) {
+    return (chdir(path) == 0) ? 0 : -1;
+}
+
+/* ---------- Directory iteration (handle-based) ---------- */
+
+static inline void* fs__open_dir(const char* path) {
+    DIR* d = opendir(path);
+    return (void*)d;
+}
+
+static inline const char* fs__read_dir(void* handle) {
+    DIR* d = (DIR*)handle;
+    if (!d) return strdup("");
+    struct dirent* entry;
+    while ((entry = readdir(d)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+        return strdup(entry->d_name);
+    }
+    return strdup("");
+}
+
+static inline int32_t fs__close_dir(void* handle) {
+    DIR* d = (DIR*)handle;
+    if (!d) return -1;
+    return (closedir(d) == 0) ? 0 : -1;
+}
+
+/* ---------- Path utilities ---------- */
+
+static inline const char* fs__join_path(const char* a, const char* b) {
+    size_t alen = strlen(a);
+    size_t blen = strlen(b);
+    /* Strip trailing slash from a */
+    while (alen > 0 && a[alen - 1] == '/') alen--;
+    /* Strip leading slash from b */
+    while (blen > 0 && *b == '/') { b++; blen--; }
+
+    char* result = (char*)malloc(alen + 1 + blen + 1);
+    if (!result) return NULL;
+    memcpy(result, a, alen);
+    result[alen] = '/';
+    memcpy(result + alen + 1, b, blen);
+    result[alen + 1 + blen] = '\0';
+    return result;
+}
+
+static inline const char* fs__dirname(const char* path) {
+    size_t len = strlen(path);
+    /* Strip trailing slashes */
+    while (len > 1 && path[len - 1] == '/') len--;
+    /* Find last slash */
+    size_t i = len;
+    while (i > 0 && path[i - 1] != '/') i--;
+    if (i == 0) return strdup(".");
+    /* Strip trailing slashes from parent */
+    while (i > 1 && path[i - 1] == '/') i--;
+    char* result = (char*)malloc(i + 1);
+    if (!result) return NULL;
+    memcpy(result, path, i);
+    result[i] = '\0';
+    return result;
+}
+
+static inline const char* fs__basename(const char* path) {
+    size_t len = strlen(path);
+    /* Strip trailing slashes */
+    while (len > 1 && path[len - 1] == '/') len--;
+    /* Find last slash */
+    size_t i = len;
+    while (i > 0 && path[i - 1] != '/') i--;
+    size_t name_len = len - i;
+    char* result = (char*)malloc(name_len + 1);
+    if (!result) return NULL;
+    memcpy(result, path + i, name_len);
+    result[name_len] = '\0';
+    return result;
+}
+
+static inline const char* fs__extension(const char* path) {
+    size_t len = strlen(path);
+    /* Find last slash to avoid dots in directory names */
+    size_t last_slash = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (path[i] == '/') last_slash = i;
+    }
+    /* Find last dot after last slash */
+    const char* dot = NULL;
+    for (size_t i = last_slash; i < len; i++) {
+        if (path[i] == '.') dot = path + i;
+    }
+    if (!dot || dot == path + len - 1) return strdup("");
+    return strdup(dot);
+}
+
+static inline const char* fs__abs_path(const char* path) {
+    char* resolved = realpath(path, NULL);
+    if (!resolved) return strdup("");
+    return resolved;
+}
+
+/* ---------- Metadata & temp ---------- */
+
+static inline int64_t fs__modified_time(const char* path) {
+    struct stat st;
+    if (stat(path, &st) != 0) return -1;
+    return (int64_t)st.st_mtime;
+}
+
+static inline const char* fs__temp_dir(void) {
+    const char* tmp = getenv("TMPDIR");
+    if (tmp && tmp[0] != '\0') return strdup(tmp);
+    return strdup("/tmp");
 }
 
 #endif /* WHIST_FS_H */
