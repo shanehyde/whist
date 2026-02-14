@@ -176,6 +176,7 @@ int         type_is_signed_integer(Type* type);         // Is this a signed inte
 int         type_is_unsigned_integer(Type* type);       // Is this an unsigned integer type?
 int         type_supports_vec_contains(Type* type);     // Can Vec<T>.contains compare this type?
 int         type_supports_vec_sort(Type* type);         // Is this type sortable by Vec<T>.sort?
+int         type_supports_equality(Type* type);         // Can this type be compared with ==?
 const char* type_name(Type* type);
 
 // Builtin type lookup utilities

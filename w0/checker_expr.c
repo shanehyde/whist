@@ -161,6 +161,31 @@ static Type* check_comparison_op(Checker* checker, Node* node, Type* left, Type*
         check_error(checker, node->line, node->column, "Strings only support == and != comparison");
         return type_error;
     }
+    // Vec comparison: only == and != allowed, element type must support equality
+    if (left->kind == TYPE_VEC && right->kind == TYPE_VEC) {
+        if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
+            if (!type_equals(left->as.vec.elem, right->as.vec.elem)) {
+                check_error(checker, node->line, node->column,
+                            "Cannot compare Vec with different element types");
+                return type_error;
+            }
+            Type* elem = left->as.vec.elem;
+            if (!type_supports_equality(elem)) {
+                check_error(checker, node->line, node->column,
+                            "Vec element type '%s' does not support ==", type_name(elem));
+                return type_error;
+            }
+            char buf[256];
+            snprintf(buf, sizeof(buf), "__Vec_%s", type_mangle_name(elem));
+            node->as.binary.is_eq_op     = 1;
+            node->as.binary.eq_type_name = xstrdup(buf);
+            return type_bool;
+        }
+        check_error(checker, node->line, node->column,
+                    "Vec types only support == and != comparison");
+        return type_error;
+    }
+
     if (type_equals(left, right)) {
         // Struct == requires Eq trait impl
         if (left->kind == TYPE_STRUCT && (op == TOK_EQ_EQ || op == TOK_BANG_EQ)) {
