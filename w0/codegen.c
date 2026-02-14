@@ -638,11 +638,28 @@ static void stringify_expr_to(Node* node, char* buf, int buf_size, int* pos) {
     case NODE_BOOL_LIT:
         APPEND(node->as.bool_lit.value ? "true" : "false");
         break;
-    case NODE_STRING_LIT:
-        APPEND("\"");
-        APPEND(node->as.string_lit.value);
-        APPEND("\"");
+    case NODE_STRING_LIT: {
+        APPEND("\\\"");
+        const char* s = node->as.string_lit.value;
+        while (*s && *pos < buf_size - 1) {
+            if (*s == '"') {
+                APPEND("\\\"");
+            } else if (*s == '\\') {
+                APPEND("\\\\");
+            } else if (*s == '\n') {
+                APPEND("\\n");
+            } else if (*s == '\t') {
+                APPEND("\\t");
+            } else if (*s == '\r') {
+                APPEND("\\r");
+            } else {
+                buf[(*pos)++] = *s;
+            }
+            s++;
+        }
+        APPEND("\\\"");
         break;
+    }
     case NODE_NULL_LIT:
         APPEND("null");
         break;
