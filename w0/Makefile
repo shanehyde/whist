@@ -8,7 +8,7 @@ DEPS = $(SRC:.c=.d)
 BIN = bin
 TARGET = $(BIN)/w0
 
-.PHONY: all clean test test-verbose test-valid test-run test-errors format metrics complexity
+.PHONY: all clean test test-verbose test-valid test-run test-errors test-whist format metrics complexity
 
 all: $(TARGET)
 
@@ -39,6 +39,10 @@ test-valid: $(TARGET)
 
 test-errors: $(TARGET)
 	@./scripts/run_tests.sh --errors
+
+test-whist: $(TARGET)
+	@$(TARGET) --lib-path ../lib tools/test_runner.w | cc -x c -I../lib/include -o $(BIN)/test_runner - ../lib/whist_runtime.c
+	@cd . && $(BIN)/test_runner
 
 format:
 	clang-format -i *.c *.h
