@@ -338,6 +338,14 @@ static int is_extern_call(CodeGen* gen, Node* func) {
 }
 
 static void emit_regular_call(CodeGen* gen, Node* call, Node* func) {
+    // Generic free function calls use the checker-set mangled name
+    if (call->as.call.resolved_name) {
+        emit(gen, "%s(", call->as.call.resolved_name);
+        emit_call_args(gen, call, 0);
+        emit(gen, ")");
+        return;
+    }
+
     const char* alias_name = find_call_alias(gen, func);
     if (alias_name) {
         emit(gen, "%s(", alias_name);

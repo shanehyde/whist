@@ -130,6 +130,10 @@ typedef struct {
     NodeList receiver_type_args; // Type nodes for type arguments in receiver
     char*    name;
     int      name_length;
+    // Generic type parameters for free functions: func identity<T>(x: T): T
+    char** type_params;       // ["T"] or ["T", "U"]
+    char** type_param_bounds; // Trait bounds parallel to type_params (NULL entries = unbounded)
+    int    type_param_count;
     char*    extern_name; // Original C function name (when 'as' alias used), NULL otherwise
     int      extern_name_length;
     NodeList params;
@@ -210,6 +214,7 @@ struct Node {
         struct {
             Node*    func;
             NodeList args;
+            char*    resolved_name; // Set by checker: mangled name for generic function calls
         } call;
 
         // Index expression: arr[index]

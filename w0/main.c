@@ -49,15 +49,17 @@ static int compile_to_c(const char* source, const char* source_path, const char*
     CodeGen gen;
     codegen_init(&gen, out,
                  (CodeGenChecker){
-                     .instances      = checker.generics.instances,
-                     .instance_count = checker.generics.instance_count,
-                     .spans          = checker.containers.spans,
-                     .span_count     = checker.containers.span_count,
-                     .vecs           = checker.containers.vecs,
-                     .vec_count      = checker.containers.vec_count,
-                     .traits         = checker.traits.impls,
-                     .trait_count    = checker.traits.impl_count,
-                     .sem            = checker.sem,
+                     .instances            = checker.generics.instances,
+                     .instance_count       = checker.generics.instance_count,
+                     .spans                = checker.containers.spans,
+                     .span_count           = checker.containers.span_count,
+                     .vecs                 = checker.containers.vecs,
+                     .vec_count            = checker.containers.vec_count,
+                     .traits               = checker.traits.impls,
+                     .trait_count          = checker.traits.impl_count,
+                     .func_instances       = checker.generics.func_instances,
+                     .func_instance_count  = checker.generics.func_instance_count,
+                     .sem                  = checker.sem,
                  },
                  rc_debug, test_mode, source_path);
     codegen_emit(&gen, ast);
@@ -504,15 +506,17 @@ int main(int argc, char** argv) {
                 CodeGen gen;
                 codegen_init(&gen, out,
                              (CodeGenChecker){
-                                 .instances      = checker.generics.instances,
-                                 .instance_count = checker.generics.instance_count,
-                                 .spans          = checker.containers.spans,
-                                 .span_count     = checker.containers.span_count,
-                                 .vecs           = checker.containers.vecs,
-                                 .vec_count      = checker.containers.vec_count,
-                                 .traits         = checker.traits.impls,
-                                 .trait_count    = checker.traits.impl_count,
-                                 .sem            = checker.sem,
+                                 .instances            = checker.generics.instances,
+                                 .instance_count       = checker.generics.instance_count,
+                                 .spans                = checker.containers.spans,
+                                 .span_count           = checker.containers.span_count,
+                                 .vecs                 = checker.containers.vecs,
+                                 .vec_count            = checker.containers.vec_count,
+                                 .traits               = checker.traits.impls,
+                                 .trait_count          = checker.traits.impl_count,
+                                 .func_instances       = checker.generics.func_instances,
+                                 .func_instance_count  = checker.generics.func_instance_count,
+                                 .sem                  = checker.sem,
                              },
                              rc_debug, 0, source_file);
                 codegen_emit(&gen, ast);

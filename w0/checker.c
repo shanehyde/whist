@@ -108,6 +108,13 @@ void checker_init(Checker* checker) {
     checker->generics.current_type_params      = NULL;
     checker->generics.current_type_args        = NULL;
     checker->generics.current_type_param_count = 0;
+    // Generic free functions
+    checker->generics.func_defs              = NULL;
+    checker->generics.func_def_count         = 0;
+    checker->generics.func_def_capacity      = 0;
+    checker->generics.func_instances         = NULL;
+    checker->generics.func_instance_count    = 0;
+    checker->generics.func_instance_capacity = 0;
     // Span support
     checker->containers.spans         = NULL;
     checker->containers.span_count    = 0;
@@ -194,6 +201,26 @@ void checker_free(Checker* checker) {
         free(checker->generics.instances[i].type_args);
     }
     free(checker->generics.instances);
+    // Free generic free function definitions
+    for (int i = 0; i < checker->generics.func_def_count; i++) {
+        free(checker->generics.func_defs[i].name);
+        for (int j = 0; j < checker->generics.func_defs[i].type_param_count; j++) {
+            free(checker->generics.func_defs[i].type_params[j]);
+            free(checker->generics.func_defs[i].type_param_bounds[j]);
+        }
+        free(checker->generics.func_defs[i].type_params);
+        free(checker->generics.func_defs[i].type_param_bounds);
+        free((void*)checker->generics.func_defs[i].source_module);
+    }
+    free(checker->generics.func_defs);
+    // Free generic free function instances
+    for (int i = 0; i < checker->generics.func_instance_count; i++) {
+        free(checker->generics.func_instances[i].mangled_name);
+        free(checker->generics.func_instances[i].base_name);
+        free(checker->generics.func_instances[i].type_args);
+        node_free(checker->generics.func_instances[i].body);
+    }
+    free(checker->generics.func_instances);
     // Free span instances
     for (int i = 0; i < checker->containers.span_count; i++) {
         free(checker->containers.spans[i].mangled_name);
@@ -1090,6 +1117,13 @@ static void check_func_decl(Checker* checker, Node* node) {
     const char* receiver_type = fdn->receiver_type;
     int         is_method     = (receiver_type != NULL);
 
+    // Generic free function: func identity<T>(x: T): T — register template, skip body
+    if (!is_method && fdn->type_param_count > 0) {
+        register_generic_func_def(checker, name, fdn->type_params, fdn->type_param_bounds,
+                                  fdn->type_param_count, node);
+        return;
+    }
+
     // Check if this is a method on a generic struct: func (Box<T>) get(): T
     // or func (Pair<i32, Box<T>>) set(): void
     if (is_method && fdn->receiver_type_args.count > 0) {
@@ -1799,16 +1833,25 @@ static int is_generic_method_decl(Node* decl) {
            decl->as.func_decl.receiver_type_args.count > 0;
 }
 
+static int is_generic_func_decl(Node* decl) {
+    if (!decl || decl->type != NODE_FUNC_DECL) {
+        return 0;
+    }
+    return decl->as.func_decl.receiver_type == NULL &&
+           decl->as.func_decl.type_param_count > 0;
+}
+
 static int is_generic_impl_decl(Node* decl) {
     return decl && decl->type == NODE_IMPL_DECL && decl->as.impl_decl.type_args.count > 0;
 }
 
 static int decl_processed_in_early_passes(Node* decl) {
-    return is_type_decl(decl) || is_generic_method_decl(decl) || is_generic_impl_decl(decl);
+    return is_type_decl(decl) || is_generic_method_decl(decl) || is_generic_impl_decl(decl) ||
+           is_generic_func_decl(decl);
 }
 
 static int is_generic_registration_decl(Node* decl) {
-    return is_generic_method_decl(decl) || is_generic_impl_decl(decl);
+    return is_generic_method_decl(decl) || is_generic_impl_decl(decl) || is_generic_func_decl(decl);
 }
 
 static int is_regular_decl(Node* decl) {

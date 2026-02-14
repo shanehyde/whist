@@ -1109,6 +1109,120 @@ static void emit_generic_method_impls(CodeGen* gen, Node* ast) {
     }
 }
 
+// Find a generic free function declaration in the AST by name
+static Node* find_generic_func_decl(Node* ast, const char* name) {
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int d = 0; d < mod->as.module.decls.count; d++) {
+            Node* decl = mod->as.module.decls.nodes[d];
+            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.type_param_count > 0 &&
+                strcmp(decl->as.func_decl.name, name) == 0) {
+                return decl;
+            }
+        }
+    }
+    return NULL;
+}
+
+// Emit implementations for all instantiated generic free functions
+static void emit_generic_func_impls(CodeGen* gen, Node* ast) {
+    for (int i = 0; i < gen->checker.func_instance_count; i++) {
+        GenericFuncInstance* inst = &gen->checker.func_instances[i];
+
+        // Find template
+        Node* tmpl = find_generic_func_decl(ast, inst->base_name);
+        if (!tmpl)
+            continue;
+
+        func_decl_node* fdn = &tmpl->as.func_decl;
+
+        // Set up type substitution context
+        TypeSubstContext subst_ctx;
+        subst_ctx.type_params = fdn->type_params;
+        subst_ctx.type_args   = inst->type_args;
+        subst_ctx.count       = inst->type_arg_count;
+        gen->generics.subst   = &subst_ctx;
+
+        int is_void = return_type_is_void(fdn->return_type);
+
+        // Return type
+        emit_func_return_type(gen, fdn);
+
+        // Function name
+        emit(gen, " %s(", inst->mangled_name);
+
+        // Parameters
+        if (fdn->params.count == 0) {
+            emit(gen, "void");
+        } else {
+            for (int p = 0; p < fdn->params.count; p++) {
+                if (p > 0)
+                    emit(gen, ", ");
+                Node* param = fdn->params.nodes[p];
+                if (param->as.param.is_const) {
+                    emit(gen, "const ");
+                }
+                emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+            }
+        }
+        emit(gen, ") {\n");
+
+        // Clear defer stack for this function
+        defer_clear(gen);
+        gen->defer.return_type     = fdn->return_type;
+        gen->generics.modules      = fdn->accessible_modules;
+        gen->generics.module_count = fdn->accessible_modules_count;
+
+        // First pass: count defers to know if we need __ret
+        int has_defers = 0;
+        if (inst->body) {
+            for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
+                Node* stmt = inst->body->as.block.stmts.nodes[s];
+                if (stmt && stmt->type == NODE_DEFER) {
+                    has_defers = 1;
+                    break;
+                }
+            }
+        }
+
+        // Body
+        gen->out.indent++;
+
+        // Declare __ret if function has defers and is non-void
+        if (has_defers && !is_void) {
+            emit_indent(gen);
+            emit_type(gen, fdn->return_type);
+            emit(gen, " __ret;\n");
+        }
+
+        // Emit function body
+        if (inst->body) {
+            for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
+                emit_stmt(gen, inst->body->as.block.stmts.nodes[s]);
+            }
+        }
+
+        // Emit any remaining defers at function end
+        if (has_defers) {
+            for (int d = gen->defer.count - 1; d >= 0; d--) {
+                emit_stmt(gen, gen->defer.stack[d]);
+            }
+        }
+
+        gen->out.indent--;
+        emit(gen, "}\n\n");
+
+        // Clear RC tracking for generic function
+        rc_clear_all(gen);
+
+        gen->generics.subst        = NULL;
+        gen->generics.modules      = NULL;
+        gen->generics.module_count = 0;
+    }
+}
+
 // Main codegen entry point: emit all C code for a program AST
 void codegen_emit(CodeGen* gen, Node* ast) {
     if (!ast || ast->type != NODE_PROGRAM)
@@ -1139,6 +1253,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit_struct_cleanup(gen, ast);
     emit_declarations(gen, ast);
     emit_generic_method_impls(gen, ast);
+    emit_generic_func_impls(gen, ast);
     if (gen->test_mode) {
         emit_test_runner(gen, ast);
     } else if (has_user_main) {

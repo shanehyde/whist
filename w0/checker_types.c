@@ -96,6 +96,152 @@ GenericInstance* lookup_generic_instance(Checker* checker, const char* mangled_n
     return NULL;
 }
 
+// =============================================================================
+// Generic free function helpers
+// =============================================================================
+
+// Register a generic free function definition
+void register_generic_func_def(Checker* checker, const char* name, char** type_params,
+                                char** type_param_bounds, int type_param_count, Node* decl) {
+    // Check for duplicate
+    for (int i = 0; i < checker->generics.func_def_count; i++) {
+        if (strcmp(checker->generics.func_defs[i].name, name) == 0) {
+            return; // Already registered
+        }
+    }
+
+    VEC_GROW(checker->generics.func_defs, checker->generics.func_def_count,
+             checker->generics.func_def_capacity);
+    GenericFuncDef* def = &checker->generics.func_defs[checker->generics.func_def_count++];
+    def->name              = xstrdup(name);
+    def->type_params       = xmalloc(type_param_count * sizeof(char*));
+    def->type_param_bounds = xmalloc(type_param_count * sizeof(char*));
+    for (int i = 0; i < type_param_count; i++) {
+        def->type_params[i] = xstrdup(type_params[i]);
+        def->type_param_bounds[i] =
+            (type_param_bounds && type_param_bounds[i]) ? xstrdup(type_param_bounds[i]) : NULL;
+    }
+    def->type_param_count = type_param_count;
+    def->decl             = decl;
+    def->source_module    = checker->modules.current_module ? xstrdup(checker->modules.current_module)
+                                                            : NULL;
+}
+
+// Look up a generic free function definition by name
+GenericFuncDef* lookup_generic_func_def(Checker* checker, const char* name) {
+    for (int i = 0; i < checker->generics.func_def_count; i++) {
+        if (strcmp(checker->generics.func_defs[i].name, name) == 0) {
+            return &checker->generics.func_defs[i];
+        }
+    }
+    return NULL;
+}
+
+// Look up an already-instantiated generic free function by mangled name
+GenericFuncInstance* lookup_generic_func_instance(Checker* checker, const char* mangled_name) {
+    for (int i = 0; i < checker->generics.func_instance_count; i++) {
+        if (strcmp(checker->generics.func_instances[i].mangled_name, mangled_name) == 0) {
+            return &checker->generics.func_instances[i];
+        }
+    }
+    return NULL;
+}
+
+// Instantiate a generic free function with concrete type arguments
+GenericFuncInstance* instantiate_generic_func(Checker* checker, GenericFuncDef* def, Type** type_args,
+                                              int type_arg_count, int line, int col) {
+    (void)line;
+    (void)col;
+    // Generate mangled name
+    char* mangled = type_mangle_generic(def->name, type_args, type_arg_count);
+
+    // Check cache
+    GenericFuncInstance* existing = lookup_generic_func_instance(checker, mangled);
+    if (existing) {
+        free(mangled);
+        return existing;
+    }
+
+    func_decl_node* fdn = &def->decl->as.func_decl;
+
+    // Save and set up substitution context
+    char** old_params = checker->generics.current_type_params;
+    Type** old_args   = checker->generics.current_type_args;
+    int    old_count  = checker->generics.current_type_param_count;
+
+    checker->generics.current_type_params      = def->type_params;
+    checker->generics.current_type_args        = type_args;
+    checker->generics.current_type_param_count = def->type_param_count;
+
+    // Resolve concrete parameter types and return type
+    int    param_count = fdn->params.count;
+    Type** param_types = NULL;
+    if (param_count > 0) {
+        param_types = xmalloc(param_count * sizeof(Type*));
+    }
+    for (int i = 0; i < param_count; i++) {
+        Node* param = fdn->params.nodes[i];
+        param_types[i] = resolve_type(checker, param->as.param.type);
+    }
+    Type* return_type = type_void;
+    if (fdn->return_type) {
+        return_type = resolve_type(checker, fdn->return_type);
+    }
+
+    Type* func_type = type_func(param_types, param_count, return_type, fdn->is_varargs);
+
+    // Pre-declare the mangled function in the symbol table for recursion
+    checker_define(checker, mangled, SYM_FUNC, func_type, 1, fdn->is_public,
+                   checker->modules.current_module);
+
+    // Clone and type-check the body
+    Node* body = node_clone(fdn->body);
+
+    // Push scope for params
+    checker_push_scope(checker);
+    for (int i = 0; i < param_count; i++) {
+        Node* param = fdn->params.nodes[i];
+        checker_define(checker, param->as.param.name, SYM_VAR, param_types[i],
+                       param->as.param.is_const, 0, NULL);
+    }
+
+    // Set function return type context
+    Type* old_return = checker->current_func_return;
+    checker->current_func_return = return_type;
+
+    // Type-check body statements
+    if (body && body->type == NODE_BLOCK) {
+        for (int s = 0; s < body->as.block.stmts.count; s++) {
+            check_statement(checker, body->as.block.stmts.nodes[s]);
+        }
+    }
+
+    checker->current_func_return = old_return;
+    checker_pop_scope(checker);
+
+    // Restore substitution context
+    checker->generics.current_type_params      = old_params;
+    checker->generics.current_type_args        = old_args;
+    checker->generics.current_type_param_count = old_count;
+
+    // Store the instance
+    VEC_GROW(checker->generics.func_instances, checker->generics.func_instance_count,
+             checker->generics.func_instance_capacity);
+    GenericFuncInstance* inst = &checker->generics.func_instances[checker->generics.func_instance_count++];
+    inst->mangled_name  = xstrdup(mangled);
+    inst->base_name     = xstrdup(def->name);
+    inst->func_type     = func_type;
+    inst->type_args     = xmalloc(type_arg_count * sizeof(Type*));
+    for (int i = 0; i < type_arg_count; i++) {
+        inst->type_args[i] = type_args[i];
+    }
+    inst->type_arg_count = type_arg_count;
+    inst->body           = body;
+
+    free(mangled);
+    return inst;
+}
+
 // Look up an already-instantiated span type by mangled name
 static SpanInstance* lookup_span_instance(Checker* checker, const char* mangled_name) {
     for (int i = 0; i < checker->containers.span_count; i++) {
