@@ -230,6 +230,39 @@ static void emit_var_decl_rc_new_stringbuilder(CodeGen* gen, Node* node) {
     rc_push_var(gen, node->as.var_decl.name, rtype);
 }
 
+// Emit an RC-managed struct declaration with init call: var p = new Point(1, 2)
+static void emit_var_decl_rc_new_init(CodeGen* gen, Node* node) {
+    Type*       rtype   = node->as.var_decl.init->as.new_expr.resolved_type;
+    const char* tname   = rtype->as.struc.name;
+    char*       cleanup = get_cleanup_func_for_type(rtype);
+    emit_indent(gen);
+    emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s), %s);\n", tname, node->as.var_decl.name, tname,
+         tname, cleanup ? cleanup : "NULL");
+    free(cleanup);
+    emit_indent(gen);
+    emit(gen, "*%s = (%s){0};\n", node->as.var_decl.name, tname);
+    emit_indent(gen);
+    emit(gen, "%s_init(%s", tname, node->as.var_decl.name);
+    Node* new_node = node->as.var_decl.init;
+    for (int i = 0; i < new_node->as.new_expr.args.count; i++) {
+        emit(gen, ", ");
+        emit_expr(gen, new_node->as.new_expr.args.nodes[i]);
+    }
+    emit(gen, ");\n");
+    // Increment refcount for any RC-tracked idents passed as args
+    for (int i = 0; i < new_node->as.new_expr.args.count; i++) {
+        Node* arg = new_node->as.new_expr.args.nodes[i];
+        if (arg->type == NODE_IDENT && rc_is_tracked(gen, arg->as.ident.name)) {
+            Type*       vtype  = rc_get_var_type(gen, arg->as.ident.name);
+            const char* inc_fn = get_inc_func_for_type(vtype);
+            emit_indent(gen);
+            emit(gen, "%s(%s);\n", inc_fn, arg->as.ident.name);
+            free((char*)inc_fn);
+        }
+    }
+    rc_push_var(gen, node->as.var_decl.name, rtype);
+}
+
 // Emit an RC-managed struct declaration: var p = new Point { x: 1, y: 2 }
 static void emit_var_decl_rc_new_struct(CodeGen* gen, Node* node) {
     Type*       rtype   = node->as.var_decl.init->as.new_expr.resolved_type;
@@ -435,6 +468,8 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
                 emit_var_decl_rc_new_vec(gen, node);
             } else if (rtype && rtype->kind == TYPE_STRINGBUILDER) {
                 emit_var_decl_rc_new_stringbuilder(gen, node);
+            } else if (node->as.var_decl.init->as.new_expr.init == NULL) {
+                emit_var_decl_rc_new_init(gen, node);
             } else {
                 emit_var_decl_rc_new_struct(gen, node);
             }

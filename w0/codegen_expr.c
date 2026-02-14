@@ -672,6 +672,32 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
             }
         }
         emit(gen, " __rc_tmp%d; })", tmp);
+    } else if (node->as.new_expr.init == NULL) {
+        // Init-call form: new Type(args) as inline expression
+        const char* tname   = rtype->as.struc.name;
+        char*       cleanup = get_cleanup_func_for_type(rtype);
+        int         tmp     = gen->out.temp_count++;
+        emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s), %s); ", tname, tmp, tname, tname,
+             cleanup ? cleanup : "NULL");
+        emit(gen, "*__rc_tmp%d = (%s){0}; ", tmp, tname);
+        emit(gen, "%s_init(__rc_tmp%d", tname, tmp);
+        for (int i = 0; i < node->as.new_expr.args.count; i++) {
+            emit(gen, ", ");
+            emit_expr(gen, node->as.new_expr.args.nodes[i]);
+        }
+        emit(gen, ");");
+        // Increment refcount for any RC-tracked idents passed as args
+        for (int i = 0; i < node->as.new_expr.args.count; i++) {
+            Node* arg = node->as.new_expr.args.nodes[i];
+            if (arg->type == NODE_IDENT && rc_is_tracked(gen, arg->as.ident.name)) {
+                Type*       vtype  = rc_get_var_type(gen, arg->as.ident.name);
+                const char* inc_fn = get_inc_func_for_type(vtype);
+                emit(gen, " %s(%s);", inc_fn, arg->as.ident.name);
+                free((char*)inc_fn);
+            }
+        }
+        emit(gen, " __rc_tmp%d; })", tmp);
+        free(cleanup);
     } else {
         // new Type { fields } as inline expression using GCC statement expression
         const char* tname   = rtype->as.struc.name;

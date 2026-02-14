@@ -855,6 +855,11 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
         }
     }
 
+    // Propagate has_init from generic def to instantiation
+    if (def->has_init) {
+        struct_type->as.struc.has_init = 1;
+    }
+
     // Allocate per-instantiation method body storage
     GenericInstance* inst = lookup_generic_instance(checker, mangled);
     if (inst && def->method_count > 0) {

@@ -1399,11 +1399,63 @@ static Type* check_call_expr(Checker* checker, Node* node) {
     return func_type->as.func.return_type;
 }
 
-// Type-check a `new` expression: resolve type, validate struct init or Vec elements
+// Type-check a `new` expression: resolve type, validate struct init, Vec elements, or init call
 static Type* check_new_expr(Checker* checker, Node* node) {
     Type* resolved = resolve_type(checker, node->as.new_expr.type_node);
     if (resolved == type_error)
         return type_error;
+
+    // Init-call form: new Type(args)
+    if (node->as.new_expr.init == NULL) {
+        if (resolved->kind != TYPE_STRUCT) {
+            check_error(checker, node->line, node->column,
+                        "'new' constructor call requires a struct type");
+            return type_error;
+        }
+        if (!resolved->as.struc.has_init) {
+            check_error(checker, node->line, node->column, "Type '%s' does not have an init method",
+                        resolved->as.struc.name);
+            return type_error;
+        }
+        // Look up init method type from struct's method list
+        Type* init_func_type = NULL;
+        for (int j = 0; j < resolved->as.struc.method_count; j++) {
+            if (strcmp(resolved->as.struc.method_names[j], "init") == 0) {
+                init_func_type = resolved->as.struc.method_types[j];
+                break;
+            }
+        }
+        if (!init_func_type) {
+            check_error(checker, node->line, node->column, "Type '%s' does not have an init method",
+                        resolved->as.struc.name);
+            return type_error;
+        }
+        // Validate arg count matches init param count
+        int expected_params = init_func_type->as.func.param_count;
+        int actual_args     = node->as.new_expr.args.count;
+        if (actual_args != expected_params) {
+            check_error(checker, node->line, node->column, "init expects %d argument(s), got %d",
+                        expected_params, actual_args);
+            return type_error;
+        }
+        // Type-check each arg against init's param types
+        for (int i = 0; i < actual_args; i++) {
+            Type* arg_type = check_expression(checker, node->as.new_expr.args.nodes[i]);
+            if (arg_type->kind == TYPE_ERROR)
+                continue;
+            Type* param_type = init_func_type->as.func.param_types[i];
+            if (!type_assignable(param_type, arg_type)) {
+                check_error(checker, node->as.new_expr.args.nodes[i]->line,
+                            node->as.new_expr.args.nodes[i]->column,
+                            "init argument %d: expected '%s', got '%s'", i + 1,
+                            type_name(param_type), type_name(arg_type));
+            }
+        }
+        node->as.new_expr.resolved_type = resolved;
+        return resolved;
+    }
+
+    // Struct literal form below: new Type { fields }
     if (resolved->kind == TYPE_VEC) {
         // new Vec<T>{} or new Vec<T>{1, 2, 3}
         Type* elem_type = resolved->as.vec.elem;
@@ -1436,6 +1488,13 @@ static Type* check_new_expr(Checker* checker, Node* node) {
     if (resolved->kind != TYPE_STRUCT) {
         check_error(checker, node->line, node->column, "'new' requires a struct type, got '%s'",
                     type_name(resolved));
+        return type_error;
+    }
+    // Error if struct has init but user uses literal form
+    if (resolved->as.struc.has_init) {
+        check_error(checker, node->line, node->column,
+                    "Type '%s' has an init method; use 'new %s(args)' instead of 'new %s { ... }'",
+                    resolved->as.struc.name, resolved->as.struc.name, resolved->as.struc.name);
         return type_error;
     }
     Type* init_type = check_struct_init(checker, node->as.new_expr.init, resolved);

@@ -278,11 +278,12 @@ struct Node {
             int      is_data_enum; // set by checker: 1 if parent enum has data variants
         } enum_value;
 
-        // New expression: new Type { fields }
+        // New expression: new Type { fields } or new Type(args)
         struct {
-            Node* type_node;     // NODE_IDENT or NODE_GENERIC_TYPE
-            Node* init;          // NODE_STRUCT_INIT
-            Type* resolved_type; // Set by checker
+            Node*    type_node;     // NODE_IDENT or NODE_GENERIC_TYPE
+            Node*    init;          // NODE_STRUCT_INIT (field form) or NULL (init-call form)
+            NodeList args;          // Arguments for init call (when init is NULL)
+            Type*    resolved_type; // Set by checker
         } new_expr;
 
         // String interpolation: $"text {expr} text"
