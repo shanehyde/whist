@@ -1553,11 +1553,50 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     fdn->receiver_type_args = receiver_type_args;
     fdn->name               = copy_token_string(&name);
     fdn->name_length        = name.length;
+    fdn->type_params        = NULL;
+    fdn->type_param_bounds  = NULL;
+    fdn->type_param_count   = 0;
     fdn->extern_name        = NULL;
     fdn->extern_name_length = 0;
     fdn->is_varargs         = 0;
     fdn->return_is_const    = 0;
     nodelist_init(&fdn->params);
+
+    // Parse type parameters for generic free functions: func identity<T>(x: T): T
+    // Only for free functions (not methods with receivers)
+    if (!receiver_type && match_token(parser, TOK_LT)) {
+        int capacity        = 4;
+        fdn->type_params       = xmalloc(capacity * sizeof(char*));
+        fdn->type_param_bounds = xmalloc(capacity * sizeof(char*));
+
+        do {
+            Token param_name = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected type parameter name");
+
+            if (fdn->type_param_count >= capacity) {
+                capacity *= 2;
+                fdn->type_params =
+                    xrealloc(fdn->type_params, capacity * sizeof(char*));
+                fdn->type_param_bounds =
+                    xrealloc(fdn->type_param_bounds, capacity * sizeof(char*));
+            }
+
+            fdn->type_params[fdn->type_param_count] = copy_token_string(&param_name);
+
+            // Check for trait bound: T: TraitName
+            if (match_token(parser, TOK_COLON)) {
+                Token bound_name = parser->current;
+                consume_token(parser, TOK_IDENT, "Expected trait name after ':'");
+                fdn->type_param_bounds[fdn->type_param_count] = copy_token_string(&bound_name);
+            } else {
+                fdn->type_param_bounds[fdn->type_param_count] = NULL;
+            }
+
+            fdn->type_param_count++;
+        } while (match_token(parser, TOK_COMMA));
+
+        consume_token(parser, TOK_GT, "Expected '>' after type parameters");
+    }
 
     consume_token(parser, TOK_LPAREN, "Expected '(' after function name");
 

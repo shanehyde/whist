@@ -600,6 +600,11 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
         return;
     }
 
+    // Skip generic free function templates - they get instantiated separately
+    if (!is_method && node->as.func_decl.type_param_count > 0) {
+        return;
+    }
+
     // Check if function is void
     int is_void = return_type_is_void(node->as.func_decl.return_type);
 
@@ -1311,6 +1316,11 @@ void emit_function_forward_decls(CodeGen* gen, Node* ast) {
                     continue;
                 }
 
+                // Skip generic free function templates (they get instantiated separately)
+                if (!is_method && fdn->type_param_count > 0) {
+                    continue;
+                }
+
                 // In test mode, skip user's main function
                 if (gen->test_mode && !is_method && strcmp(fdn->name, "main") == 0) {
                     continue;
@@ -1455,5 +1465,64 @@ void emit_function_forward_decls(CodeGen* gen, Node* ast) {
 
         free(methods);
     }
+
+    // Forward declarations for instantiated generic free functions
+    for (int i = 0; i < gen->checker.func_instance_count; i++) {
+        GenericFuncInstance* inst = &gen->checker.func_instances[i];
+
+        // Find the template declaration in the AST
+        Node* tmpl = NULL;
+        for (int m = 0; m < ast->as.program.modules.count; m++) {
+            Node* mod = ast->as.program.modules.nodes[m];
+            if (!mod || mod->type != NODE_MODULE)
+                continue;
+            for (int d = 0; d < mod->as.module.decls.count; d++) {
+                Node* decl = mod->as.module.decls.nodes[d];
+                if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.type_param_count > 0 &&
+                    strcmp(decl->as.func_decl.name, inst->base_name) == 0) {
+                    tmpl = decl;
+                    break;
+                }
+            }
+            if (tmpl)
+                break;
+        }
+        if (!tmpl)
+            continue;
+
+        func_decl_node* fdn = &tmpl->as.func_decl;
+
+        // Set up type substitution
+        TypeSubstContext subst_ctx;
+        subst_ctx.type_params = fdn->type_params;
+        subst_ctx.type_args   = inst->type_args;
+        subst_ctx.count       = inst->type_arg_count;
+        gen->generics.subst   = &subst_ctx;
+
+        // Return type
+        emit_func_return_type(gen, fdn);
+
+        // Function name
+        emit(gen, " %s(", inst->mangled_name);
+
+        // Parameters
+        if (fdn->params.count == 0) {
+            emit(gen, "void");
+        } else {
+            for (int p = 0; p < fdn->params.count; p++) {
+                if (p > 0)
+                    emit(gen, ", ");
+                Node* param = fdn->params.nodes[p];
+                if (param->as.param.is_const) {
+                    emit(gen, "const ");
+                }
+                emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+            }
+        }
+        emit(gen, ");\n");
+
+        gen->generics.subst = NULL;
+    }
+
     emit(gen, "\n");
 }

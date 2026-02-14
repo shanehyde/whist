@@ -58,15 +58,17 @@ typedef struct {
 } CodeGenGenerics;
 
 typedef struct {
-    GenericInstance* instances;
-    int              instance_count;
-    SpanInstance*    spans;
-    int              span_count;
-    VecInstance*     vecs;
-    int              vec_count;
-    TraitImpl*       traits;
-    int              trait_count;
-    SemInfo*         sem;
+    GenericInstance*     instances;
+    int                  instance_count;
+    SpanInstance*        spans;
+    int                  span_count;
+    VecInstance*         vecs;
+    int                  vec_count;
+    TraitImpl*           traits;
+    int                  trait_count;
+    GenericFuncInstance* func_instances;
+    int                  func_instance_count;
+    SemInfo*             sem;
 } CodeGenChecker;
 // CodeGenChecker pointers are borrowed from checker state (not owned by codegen).
 

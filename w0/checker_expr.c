@@ -9,6 +9,128 @@
 // Forward declaration for check_struct_init (called by check_new_expr)
 static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
 
+// Infer type parameters from a parameter type node and the actual argument type.
+// Recursively walks the parameter type AST and binds type parameter names to
+// concrete types from the argument. `inferred` array is parallel to def->type_params.
+static void infer_type_param(Checker* checker, GenericFuncDef* def, Node* param_type, Type* arg_type,
+                             Type** inferred) {
+    if (!param_type || !arg_type || arg_type->kind == TYPE_ERROR)
+        return;
+
+    // Direct type parameter reference: T
+    if (param_type->type == NODE_IDENT) {
+        for (int i = 0; i < def->type_param_count; i++) {
+            if (strcmp(param_type->as.ident.name, def->type_params[i]) == 0) {
+                if (!inferred[i]) {
+                    inferred[i] = arg_type;
+                }
+                return;
+            }
+        }
+        return;
+    }
+
+    // Generic type: Vec<T>, Span<T>, Box<T>, Pair<K, V>, etc.
+    if (param_type->type == NODE_GENERIC_TYPE) {
+        const char* base = param_type->as.generic_type.base_name;
+
+        // Vec<T> → recurse on element type
+        if (strcmp(base, "Vec") == 0 && arg_type->kind == TYPE_VEC &&
+            param_type->as.generic_type.type_args.count == 1) {
+            infer_type_param(checker, def, param_type->as.generic_type.type_args.nodes[0],
+                             arg_type->as.vec.elem, inferred);
+            return;
+        }
+
+        // Span<T> → recurse on element type
+        if (strcmp(base, "Span") == 0 && arg_type->kind == TYPE_SPAN &&
+            param_type->as.generic_type.type_args.count == 1) {
+            infer_type_param(checker, def, param_type->as.generic_type.type_args.nodes[0],
+                             arg_type->as.span.elem, inferred);
+            return;
+        }
+
+        // User-defined generic struct: Box<T>, Pair<K, V>
+        if (arg_type->kind == TYPE_STRUCT) {
+            // Find the generic instance matching the arg type
+            for (int i = 0; i < checker->generics.instance_count; i++) {
+                GenericInstance* inst = &checker->generics.instances[i];
+                if (strcmp(inst->mangled_name, arg_type->as.struc.name) == 0) {
+                    int n = param_type->as.generic_type.type_args.count;
+                    if (n == inst->type_arg_count) {
+                        for (int j = 0; j < n; j++) {
+                            infer_type_param(checker, def,
+                                             param_type->as.generic_type.type_args.nodes[j],
+                                             inst->type_args[j], inferred);
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Generic enum: Option<T>, Result<T, E>
+        if (arg_type->kind == TYPE_ENUM) {
+            for (int i = 0; i < checker->generics.instance_count; i++) {
+                GenericInstance* inst = &checker->generics.instances[i];
+                if (strcmp(inst->mangled_name, arg_type->as.enm.name) == 0) {
+                    int n = param_type->as.generic_type.type_args.count;
+                    if (n == inst->type_arg_count) {
+                        for (int j = 0; j < n; j++) {
+                            infer_type_param(checker, def,
+                                             param_type->as.generic_type.type_args.nodes[j],
+                                             inst->type_args[j], inferred);
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        return;
+    }
+
+    // Function type: func(T1, T2): R
+    if (param_type->type == NODE_FUNC_TYPE && arg_type->kind == TYPE_FUNC) {
+        int n = param_type->as.func_type.param_types.count;
+        if (n == arg_type->as.func.param_count) {
+            for (int i = 0; i < n; i++) {
+                infer_type_param(checker, def, param_type->as.func_type.param_types.nodes[i],
+                                 arg_type->as.func.param_types[i], inferred);
+            }
+        }
+        if (param_type->as.func_type.return_type) {
+            infer_type_param(checker, def, param_type->as.func_type.return_type,
+                             arg_type->as.func.return_type, inferred);
+        }
+        return;
+    }
+
+    // Tuple type: (T1, T2, ...)
+    if (param_type->type == NODE_TUPLE_TYPE && arg_type->kind == TYPE_TUPLE) {
+        int n = param_type->as.tuple_type.elem_types.count;
+        if (n == arg_type->as.tuple.elem_count) {
+            for (int i = 0; i < n; i++) {
+                infer_type_param(checker, def, param_type->as.tuple_type.elem_types.nodes[i],
+                                 arg_type->as.tuple.elem_types[i], inferred);
+            }
+        }
+        return;
+    }
+
+    // Array type: [n]T or []T
+    if (param_type->type == NODE_ARRAY_TYPE) {
+        if (arg_type->kind == TYPE_ARRAY) {
+            infer_type_param(checker, def, param_type->as.array_type.elem_type,
+                             arg_type->as.array.elem, inferred);
+        } else if (arg_type->kind == TYPE_SPAN) {
+            infer_type_param(checker, def, param_type->as.array_type.elem_type,
+                             arg_type->as.span.elem, inferred);
+        }
+        return;
+    }
+}
+
 // Return the const variable/field name if node is a const binding or const field access, else NULL
 static const char* get_const_binding_name(Checker* checker, Node* node) {
     if (node && node->type == NODE_IDENT) {
@@ -1097,6 +1219,103 @@ static Type* check_call_expr(Checker* checker, Node* node) {
             return type_error;
         }
         return type_void;
+    }
+
+    // Check if callee is a generic free function
+    if (callee->type == NODE_IDENT) {
+        GenericFuncDef* gdef = lookup_generic_func_def(checker, callee->as.ident.name);
+        if (gdef) {
+            func_decl_node* fdn = &gdef->decl->as.func_decl;
+
+            // Check argument count
+            if (node->as.call.args.count != fdn->params.count) {
+                check_error(checker, node->line, node->column,
+                            "Generic function '%s' expects %d arguments, got %d", gdef->name,
+                            fdn->params.count, node->as.call.args.count);
+                return type_error;
+            }
+
+            // Type-check arguments
+            int    arg_count = node->as.call.args.count;
+            Type** arg_types = xmalloc(arg_count * sizeof(Type*));
+            int    has_error = 0;
+            for (int i = 0; i < arg_count; i++) {
+                arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
+                if (arg_types[i]->kind == TYPE_ERROR) {
+                    has_error = 1;
+                }
+            }
+            if (has_error) {
+                free(arg_types);
+                return type_error;
+            }
+
+            // Infer type parameters from argument types
+            Type** inferred = xcalloc(gdef->type_param_count, sizeof(Type*));
+            for (int i = 0; i < arg_count; i++) {
+                Node* param_type_node = fdn->params.nodes[i]->as.param.type;
+                infer_type_param(checker, gdef, param_type_node, arg_types[i], inferred);
+            }
+
+            // Check all type params were inferred
+            for (int i = 0; i < gdef->type_param_count; i++) {
+                if (!inferred[i]) {
+                    check_error(checker, node->line, node->column,
+                                "Cannot infer type parameter '%s' for generic function '%s'",
+                                gdef->type_params[i], gdef->name);
+                    free(arg_types);
+                    free(inferred);
+                    return type_error;
+                }
+            }
+
+            // Check trait bounds
+            for (int i = 0; i < gdef->type_param_count; i++) {
+                if (gdef->type_param_bounds[i]) {
+                    const char* bound             = gdef->type_param_bounds[i];
+                    const char* arg_type_name_str = NULL;
+                    if (inferred[i]->kind == TYPE_STRUCT) {
+                        arg_type_name_str = inferred[i]->as.struc.name;
+                    } else {
+                        arg_type_name_str = type_name(inferred[i]);
+                    }
+                    int satisfied = 0;
+                    if (arg_type_name_str) {
+                        for (int t = 0; t < checker->traits.impl_count; t++) {
+                            if (strcmp(checker->traits.impls[t].trait_name, bound) == 0 &&
+                                strcmp(checker->traits.impls[t].type_name, arg_type_name_str) == 0) {
+                                satisfied = 1;
+                                break;
+                            }
+                        }
+                    }
+                    if (!satisfied) {
+                        check_error(checker, node->line, node->column,
+                                    "Type '%s' does not implement trait '%s' required by '%s'",
+                                    type_name(inferred[i]), bound, gdef->name);
+                        free(arg_types);
+                        free(inferred);
+                        return type_error;
+                    }
+                }
+            }
+
+            // Instantiate the generic function
+            GenericFuncInstance* inst =
+                instantiate_generic_func(checker, gdef, inferred, gdef->type_param_count,
+                                         node->line, node->column);
+            free(arg_types);
+            free(inferred);
+
+            if (!inst) {
+                return type_error;
+            }
+
+            // Set resolved name on the call node for codegen
+            node->as.call.resolved_name = xstrdup(inst->mangled_name);
+
+            return inst->func_type->as.func.return_type;
+        }
     }
 
     Type* func_type = check_expression(checker, node->as.call.func);

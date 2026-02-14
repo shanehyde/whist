@@ -134,6 +134,7 @@ void node_free(Node* node) {
     case NODE_CALL:
         node_free(node->as.call.func);
         nodelist_free(&node->as.call.args);
+        free(node->as.call.resolved_name);
         break;
     case NODE_INDEX:
         node_free(node->as.index.object);
@@ -229,6 +230,13 @@ void node_free(Node* node) {
         nodelist_free(&node->as.func_decl.params);
         node_free(node->as.func_decl.return_type);
         node_free(node->as.func_decl.body);
+        // Free type parameters and bounds for generic free functions
+        for (int i = 0; i < node->as.func_decl.type_param_count; i++) {
+            free(node->as.func_decl.type_params[i]);
+            free(node->as.func_decl.type_param_bounds[i]);
+        }
+        free(node->as.func_decl.type_params);
+        free(node->as.func_decl.type_param_bounds);
         // Free accessible modules list
         for (int i = 0; i < node->as.func_decl.accessible_modules_count; i++) {
             free(node->as.func_decl.accessible_modules[i]);
@@ -400,6 +408,10 @@ static void node_reset_checker_flags(Node* node) {
         node->as.var_decl.is_rc            = 0;
         node->as.var_decl.resolved_type    = NULL;
         node->as.var_decl.destruct_pattern = NULL;
+        break;
+    case NODE_CALL:
+        free(node->as.call.resolved_name);
+        node->as.call.resolved_name = NULL;
         break;
     case NODE_FOREACH:
         node->as.foreach_stmt.resolved_type = NULL;

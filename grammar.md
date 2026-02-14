@@ -57,7 +57,7 @@ Use statements selectively bring symbols from an imported module into unqualifie
 ### Function Declaration
 
 ```bnf
-<func-decl> ::= 'func' [ <receiver> ] <identifier> '(' [ <param-list> ] ')' [ ':' <return-type> ]
+<func-decl> ::= 'func' [ <receiver> ] <identifier> [ '<' <type-param-list> '>' ] '(' [ <param-list> ] ')' [ ':' <return-type> ]
 <func-defn> ::= <func-decl> <block>
 
 <receiver> ::= '(' [ 'const' ] <identifier> [ '<' <type-arg-list> '>' ] ')'
@@ -75,6 +75,13 @@ Use statements selectively bring symbols from an imported module into unqualifie
 ```
 
 When an `extern` block has no explicit visibility modifier at top level, functions in the block default to private unless overridden per function.
+
+**Generic free functions:** Free functions (without a receiver) can have type parameters:
+- `func identity<T>(x: T): T` — single type parameter
+- `func first<A, B>(a: A, b: B): A` — multiple type parameters
+- `func get_label<T: Printable>(x: T): string` — type parameter with trait bound
+
+Type arguments are inferred from call-site argument types (no explicit type arguments at call sites). Each unique instantiation produces a monomorphized C function (e.g., `identity_i64`, `identity_string`).
 
 **Generic methods:** Methods can be defined on generic structs using type arguments in the receiver:
 - `func (Box<T>) get(): T` — method on any `Box<T>` instantiation

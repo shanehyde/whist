@@ -88,6 +88,26 @@ typedef struct {
     Type* type;         // The TYPE_VEC instance
 } VecInstance;
 
+// Generic free function definition (template)
+typedef struct {
+    char*       name;
+    char**      type_params;       // ["T"] or ["T", "U"]
+    char**      type_param_bounds; // Trait bounds parallel to type_params (NULL = unbounded)
+    int         type_param_count;
+    Node*       decl;              // Original AST node (NODE_FUNC_DECL)
+    const char* source_module;
+} GenericFuncDef;
+
+// Instantiated generic free function
+typedef struct {
+    char*  mangled_name;  // "identity_i64"
+    char*  base_name;     // "identity"
+    Type*  func_type;     // Concrete TYPE_FUNC
+    Type** type_args;
+    int    type_arg_count;
+    Node*  body;          // Cloned + type-checked body
+} GenericFuncInstance;
+
 // Module import tracking
 typedef struct {
     char**      direct_imports;
@@ -108,6 +128,13 @@ typedef struct {
     char**           current_type_params; // Type parameter names
     Type**           current_type_args;   // Concrete types for each param
     int              current_type_param_count;
+    // Generic free functions
+    GenericFuncDef*      func_defs;
+    int                  func_def_count;
+    int                  func_def_capacity;
+    GenericFuncInstance*  func_instances;
+    int                  func_instance_count;
+    int                  func_instance_capacity;
 } CheckerGenerics;
 
 // Instantiated container types (Span, Vec)
