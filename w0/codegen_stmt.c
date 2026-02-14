@@ -82,7 +82,7 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
         emit_indent(gen);
         emit(gen, "__rc_inc(__rc_tmp%d);\n", temp_id);
         emit_indent(gen);
-        emit(gen, "%s(%s);\n", rc_get_dec_func(gen, var_name), var_name);
+        emit(gen, "__rc_dec(%s);\n", var_name);
         emit_indent(gen);
         emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
         return;
@@ -133,10 +133,7 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
                                rc_is_tracked(gen, expr->as.assign.value->as.ident.name)) ||
                               expr->as.assign.value->type == NODE_NEW_EXPR;
             if (value_is_rc && field_ty && field_ty->kind == TYPE_STRUCT) {
-                // Determine the dec function for the field's type
-                char*       member_dec_owned = (char*)get_dec_func_for_type(field_ty);
-                const char* member_dec       = member_dec_owned;
-                int         tmp              = gen->out.temp_count++;
+                int tmp = gen->out.temp_count++;
                 emit_indent(gen);
                 emit(gen, "void* __rc_tmp%d = (void*)", tmp);
                 emit_expr(gen, expr->as.assign.value);
@@ -144,30 +141,23 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
                 emit_indent(gen);
                 emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
                 emit_indent(gen);
-                emit(gen, "%s(", member_dec);
+                emit(gen, "__rc_dec(");
                 emit_expr(gen, member);
                 emit(gen, ");\n");
                 emit_indent(gen);
                 emit_expr(gen, member);
                 emit(gen, " = __rc_tmp%d;\n", tmp);
-                free(member_dec_owned);
                 return;
             }
         }
         // Handle self.field = new_value in method bodies (self is not RC-tracked)
         if (!obj_is_rc && member->as.member.object->type == NODE_IDENT &&
             strcmp(member->as.member.object->as.ident.name, "self") == 0) {
-            int   value_is_rc = expr->as.assign.value->type == NODE_NEW_EXPR;
-            char* dec_fn      = NULL;
-            if (value_is_rc && gen->generics.tmpl) {
-                // Generic method: look up field type from template
-                Node* ftype = lookup_generic_template_field_type(gen, member->as.member.name);
-                dec_fn      = resolve_generic_field_dec_func(gen, ftype);
-            }
-            if (dec_fn) {
+            int value_is_rc = expr->as.assign.value->type == NODE_NEW_EXPR;
+            if (value_is_rc) {
                 // Dec the old field value, then assign the new one
                 emit_indent(gen);
-                emit(gen, "%s(", dec_fn);
+                emit(gen, "__rc_dec(");
                 emit_expr(gen, member);
                 emit(gen, ");\n");
                 emit_indent(gen);
@@ -175,7 +165,6 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
                 emit(gen, " = ");
                 emit_expr(gen, expr->as.assign.value);
                 emit(gen, ";\n");
-                free(dec_fn);
                 return;
             }
         }
@@ -209,8 +198,8 @@ static void emit_var_decl_rc_new_vec(CodeGen* gen, Node* node) {
     Type*       rtype      = node->as.var_decl.init->as.new_expr.resolved_type;
     const char* elem_tname = type_mangle_name(rtype->as.vec.elem);
     emit_indent(gen);
-    emit(gen, "__Vec_%s* %s = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s));\n", elem_tname,
-         node->as.var_decl.name, elem_tname, elem_tname);
+    emit(gen, "__Vec_%s* %s = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s), __Vec_%s_cleanup);\n",
+         elem_tname, node->as.var_decl.name, elem_tname, elem_tname, elem_tname);
     emit_indent(gen);
     emit(gen, "%s->data = NULL; %s->count = 0; %s->capacity = 0;\n", node->as.var_decl.name,
          node->as.var_decl.name, node->as.var_decl.name);
@@ -224,30 +213,37 @@ static void emit_var_decl_rc_new_vec(CodeGen* gen, Node* node) {
             emit(gen, ");\n");
         }
     }
-    char dec_buf[256];
-    snprintf(dec_buf, sizeof(dec_buf), "__rc_dec_Vec_%s", elem_tname);
-    rc_push_var(gen, node->as.var_decl.name, dec_buf, rtype);
+    rc_push_var(gen, node->as.var_decl.name, rtype);
 }
 
 // Emit an RC-managed StringBuilder declaration: var sb = new StringBuilder{}
 static void emit_var_decl_rc_new_stringbuilder(CodeGen* gen, Node* node) {
     emit_indent(gen);
-    emit(gen, "__StringBuilder* %s = (__StringBuilder*)__rc_alloc(sizeof(__StringBuilder));\n",
+    emit(gen,
+         "__StringBuilder* %s = (__StringBuilder*)__rc_alloc(sizeof(__StringBuilder), "
+         "__StringBuilder_cleanup);\n",
          node->as.var_decl.name);
     emit_indent(gen);
     emit(gen, "%s->data = NULL; %s->count = 0; %s->capacity = 0;\n", node->as.var_decl.name,
          node->as.var_decl.name, node->as.var_decl.name);
     Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
-    rc_push_var(gen, node->as.var_decl.name, "__rc_dec_StringBuilder", rtype);
+    rc_push_var(gen, node->as.var_decl.name, rtype);
 }
 
 // Emit an RC-managed struct declaration: var p = new Point { x: 1, y: 2 }
 static void emit_var_decl_rc_new_struct(CodeGen* gen, Node* node) {
-    Type*       rtype = node->as.var_decl.init->as.new_expr.resolved_type;
-    const char* tname = rtype->as.struc.name;
+    Type*       rtype   = node->as.var_decl.init->as.new_expr.resolved_type;
+    const char* tname   = rtype->as.struc.name;
+    char*       cleanup = get_cleanup_func_for_type(rtype);
     emit_indent(gen);
-    emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s));\n", tname, node->as.var_decl.name, tname,
-         tname);
+    if (cleanup) {
+        emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s), %s);\n", tname, node->as.var_decl.name,
+             tname, tname, cleanup);
+    } else {
+        emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s), NULL);\n", tname, node->as.var_decl.name,
+             tname, tname);
+    }
+    free(cleanup);
     emit_indent(gen);
     emit(gen, "*%s = (%s)", node->as.var_decl.name, tname);
     emit_struct_init(gen, node->as.var_decl.init->as.new_expr.init);
@@ -267,9 +263,7 @@ static void emit_var_decl_rc_new_struct(CodeGen* gen, Node* node) {
             free((char*)inc_fn);
         }
     }
-    const char* dec_fn = get_dec_func_for_type(rtype);
-    rc_push_var(gen, node->as.var_decl.name, dec_fn, rtype);
-    free((char*)dec_fn);
+    rc_push_var(gen, node->as.var_decl.name, rtype);
 }
 
 // Emit an RC copy or ownership transfer: var x = existing_rc_var or func_call()
@@ -302,9 +296,7 @@ static void emit_var_decl_rc_copy(CodeGen* gen, Node* node) {
         emit(gen, "%s(%s);\n", inc_fn, node->as.var_decl.name);
         free((char*)inc_fn);
     }
-    const char* dec_fn = get_dec_func_for_type(rc_type);
-    rc_push_var(gen, node->as.var_decl.name, dec_fn, rc_type);
-    free((char*)dec_fn);
+    rc_push_var(gen, node->as.var_decl.name, rc_type);
 }
 
 // Emit a type-and-name declaration inferred from the initializer expression.

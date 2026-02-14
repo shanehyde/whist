@@ -29,17 +29,19 @@ extern char** __w0_argv;
 /* --- RC core --- */
 typedef struct {
     size_t refcount;
+    void (*cleanup)(void*);
 } __RcHeader;
 
 #ifdef WHIST_RC_DEBUG
 
-static inline void* __rc_alloc(size_t size) {
+static inline void* __rc_alloc(size_t size, void (*cleanup)(void*)) {
     __RcHeader* h = (__RcHeader*)malloc(sizeof(__RcHeader) + size);
     if (!h) {
         fprintf(stderr, "Panic: out of memory\n");
         exit(1);
     }
     h->refcount = 1;
+    h->cleanup  = cleanup;
     void* ptr   = (void*)(h + 1);
     fprintf(stderr, "RC_ALLOC: %p (size=%zu, rc=1)\n", ptr, size);
     return ptr;
@@ -58,6 +60,8 @@ static inline void __rc_dec(void* ptr) {
         return;
     __RcHeader* h = (__RcHeader*)ptr - 1;
     if (--h->refcount == 0) {
+        if (h->cleanup)
+            h->cleanup(ptr);
         fprintf(stderr, "RC_FREE: %p\n", ptr);
         free(h);
     } else {
@@ -67,13 +71,14 @@ static inline void __rc_dec(void* ptr) {
 
 #else /* !WHIST_RC_DEBUG */
 
-static inline void* __rc_alloc(size_t size) {
+static inline void* __rc_alloc(size_t size, void (*cleanup)(void*)) {
     __RcHeader* h = (__RcHeader*)malloc(sizeof(__RcHeader) + size);
     if (!h) {
         fprintf(stderr, "Panic: out of memory\n");
         exit(1);
     }
     h->refcount = 1;
+    h->cleanup  = cleanup;
     return (void*)(h + 1);
 }
 
@@ -87,8 +92,11 @@ static inline void __rc_dec(void* ptr) {
     if (!ptr)
         return;
     __RcHeader* h = (__RcHeader*)ptr - 1;
-    if (--h->refcount == 0)
+    if (--h->refcount == 0) {
+        if (h->cleanup)
+            h->cleanup(ptr);
         free(h);
+    }
 }
 
 #endif /* WHIST_RC_DEBUG */
@@ -226,14 +234,9 @@ static inline const char* __StringBuilder_to_string(__StringBuilder* self) {
     return r;
 }
 
-static inline void __rc_dec_StringBuilder(__StringBuilder* ptr) {
-    if (!ptr)
-        return;
-    __RcHeader* h = (__RcHeader*)ptr - 1;
-    if (--h->refcount == 0) {
-        free(ptr->data);
-        free(h);
-    }
+static inline void __StringBuilder_cleanup(void* raw) {
+    __StringBuilder* ptr = (__StringBuilder*)raw;
+    free(ptr->data);
 }
 
 #endif /* WHIST_RUNTIME_H */

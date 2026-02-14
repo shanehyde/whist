@@ -104,61 +104,6 @@ static char* resolve_generic_method_target(CodeGen* gen, Node* member) {
     return mangled;
 }
 
-// Build the __rc_dec function name for a field type AST node in a generic method body.
-// Returns a malloc'd string, or NULL if the field is not RC-managed. Caller must free.
-char* resolve_generic_field_dec_func(CodeGen* gen, Node* field_type_node) {
-    if (!field_type_node)
-        return NULL;
-    if (field_type_node->type == NODE_GENERIC_TYPE) {
-        const char* base = field_type_node->as.generic_type.base_name;
-        if (strcmp(base, "Vec") == 0) {
-            // Vec<T> → __rc_dec_Vec_T
-            Node* elem = field_type_node->as.generic_type.type_args.nodes[0];
-            char  buf[256];
-            if (elem->type == NODE_IDENT) {
-                const char* elem_name = elem->as.ident.name;
-                Type*       resolved  = subst_lookup(gen, elem_name);
-                if (resolved) {
-                    snprintf(buf, sizeof(buf), "__rc_dec_Vec_%s", type_name(resolved));
-                } else {
-                    snprintf(buf, sizeof(buf), "__rc_dec_Vec_%s", elem_name);
-                }
-                return xstrdup(buf);
-            } else if (elem->type == NODE_GENERIC_TYPE) {
-                char* mangled = build_mangled_name_from_generic_node(gen, elem);
-                snprintf(buf, sizeof(buf), "__rc_dec_Vec_%s", mangled);
-                free(mangled);
-                return xstrdup(buf);
-            }
-            return NULL;
-        }
-        if (strcmp(base, "Span") == 0)
-            return NULL; // Spans are value types, not RC
-        // Generic struct → __rc_dec_MangledName
-        char* mangled = build_mangled_name_from_generic_node(gen, field_type_node);
-        char  buf[256];
-        snprintf(buf, sizeof(buf), "__rc_dec_%s", mangled);
-        free(mangled);
-        return xstrdup(buf);
-    }
-    if (field_type_node->type == NODE_IDENT) {
-        const char* name     = field_type_node->as.ident.name;
-        Type*       resolved = subst_lookup(gen, name);
-        if (resolved) {
-            if (resolved->kind == TYPE_STRUCT)
-                return (char*)get_dec_func_for_type(resolved);
-            return NULL;
-        }
-        // Non-generic struct field
-        if (!type_is_builtin_name(name) && !is_enum_type_name(gen, name)) {
-            char buf[256];
-            snprintf(buf, sizeof(buf), "__rc_dec_%s", name);
-            return xstrdup(buf);
-        }
-    }
-    return NULL;
-}
-
 // Emit a string literal with C escape sequences
 static void emit_string_lit(CodeGen* gen, Node* node) {
     emit(gen, "\"");
@@ -693,7 +638,7 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
         int tmp = gen->out.temp_count++;
         emit(gen,
              "({ __StringBuilder* __rc_tmp%d = (__StringBuilder*)__rc_alloc("
-             "sizeof(__StringBuilder)); "
+             "sizeof(__StringBuilder), __StringBuilder_cleanup); "
              "__rc_tmp%d->data = NULL; __rc_tmp%d->count = 0; __rc_tmp%d->capacity = 0; "
              "__rc_tmp%d; })",
              tmp, tmp, tmp, tmp, tmp);
@@ -704,9 +649,10 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
         const char* elem_tname = type_mangle_name(rtype->as.vec.elem);
         int         tmp        = gen->out.temp_count++;
         emit(gen,
-             "({ __Vec_%s* __rc_tmp%d = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s)); "
+             "({ __Vec_%s* __rc_tmp%d = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s), "
+             "__Vec_%s_cleanup); "
              "__rc_tmp%d->data = NULL; __rc_tmp%d->count = 0; __rc_tmp%d->capacity = 0;",
-             elem_tname, tmp, elem_tname, elem_tname, tmp, tmp, tmp);
+             elem_tname, tmp, elem_tname, elem_tname, elem_tname, tmp, tmp, tmp);
         // Push initial elements
         Node* init = node->as.new_expr.init;
         for (int i = 0; i < init->as.struct_init.fields.count; i++) {
@@ -720,10 +666,17 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
         emit(gen, " __rc_tmp%d; })", tmp);
     } else {
         // new Type { fields } as inline expression using GCC statement expression
-        const char* tname = rtype->as.struc.name;
-        int         tmp   = gen->out.temp_count++;
-        emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s)); *__rc_tmp%d = (%s)", tname, tmp,
-             tname, tname, tmp, tname);
+        const char* tname   = rtype->as.struc.name;
+        char*       cleanup = get_cleanup_func_for_type(rtype);
+        int         tmp     = gen->out.temp_count++;
+        if (cleanup) {
+            emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s), %s); *__rc_tmp%d = (%s)",
+                 tname, tmp, tname, tname, cleanup, tmp, tname);
+        } else {
+            emit(gen, "({ %s* __rc_tmp%d = (%s*)__rc_alloc(sizeof(%s), NULL); *__rc_tmp%d = (%s)",
+                 tname, tmp, tname, tname, tmp, tname);
+        }
+        free(cleanup);
         emit_struct_init(gen, node->as.new_expr.init);
         emit(gen, ";");
         // Increment refcount for any RC-tracked idents stored in struct fields
@@ -919,7 +872,12 @@ static void emit_try_expr(CodeGen* gen, Node* node) {
 
     // Inline RC cleanup (no newlines, stay inside statement expr)
     for (int i = 0; i < gen->rc.count; i++) {
-        emit(gen, "%s(%s); ", gen->rc.vars[i].dec_func, gen->rc.vars[i].name);
+        Type* t = gen->rc.vars[i].type;
+        if (t && t->kind == TYPE_ENUM && t->as.enm.has_rc_fields) {
+            emit(gen, "__rc_dec_%s(%s); ", t->as.enm.name, gen->rc.vars[i].name);
+        } else {
+            emit(gen, "__rc_dec(%s); ", gen->rc.vars[i].name);
+        }
     }
 
     // Early return with error/none value

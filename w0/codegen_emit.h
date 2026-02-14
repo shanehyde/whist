@@ -40,9 +40,8 @@ void emit_enum_eq_helpers(CodeGen* gen, Node* ast);
 // RC emission (defined in codegen_rc.c)
 void emit_rc_runtime(CodeGen* gen);
 void emit_enum_rc_helpers(CodeGen* gen, Node* ast);
-void emit_struct_rc_dec_forward_decls(CodeGen* gen, Node* ast);
-void emit_struct_rc_dec(CodeGen* gen, Node* ast);
+void emit_struct_cleanup(CodeGen* gen, Node* ast);
 void emit_vec_methods(CodeGen* gen);
-void emit_vec_rc_dec(CodeGen* gen);
+void emit_vec_cleanup(CodeGen* gen);
 
 #endif
