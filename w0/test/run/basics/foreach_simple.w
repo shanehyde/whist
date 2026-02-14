@@ -1,3 +1,4 @@
+// Expected exit: 22
 extern stdio {
     func printf(s: string): void;
 }

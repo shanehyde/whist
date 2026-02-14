@@ -1,4 +1,5 @@
 // Test operators
+// Expected exit: 19
 
 func main(): i32 {
     var a = 10;

@@ -1,4 +1,4 @@
-// Expected error: Type mismatch
+// Expected error: expected 'func(i64): i64'
 func add(a: i64, b: i64): i64 {
     return a + b;
 }

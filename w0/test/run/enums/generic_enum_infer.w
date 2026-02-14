@@ -1,4 +1,5 @@
 // Test type inference for generic enums
+// Expected exit: 1
 
 enum Option<T> {
     None,

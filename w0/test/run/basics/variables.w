@@ -1,4 +1,5 @@
 // Test variable declarations and types
+// Expected exit: 142
 
 func main(): i32 {
     // Type inference

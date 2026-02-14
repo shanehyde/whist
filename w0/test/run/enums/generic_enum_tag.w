@@ -1,4 +1,5 @@
 // Test .tag access on generic enums
+// Expected exit: 1
 
 enum Option<T> {
     None,

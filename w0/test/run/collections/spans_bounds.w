@@ -1,4 +1,6 @@
 // Test span bounds checking (this should panic at runtime)
+// Expected exit: 1
+// Expected stderr: Panic: span index 5 out of bounds
 func main(): i32 {
     var arr: [3]i64;
     arr[0] = 1;
