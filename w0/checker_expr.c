@@ -12,8 +12,8 @@ static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
 // Infer type parameters from a parameter type node and the actual argument type.
 // Recursively walks the parameter type AST and binds type parameter names to
 // concrete types from the argument. `inferred` array is parallel to def->type_params.
-static void infer_type_param(Checker* checker, GenericFuncDef* def, Node* param_type, Type* arg_type,
-                             Type** inferred) {
+static void infer_type_param(Checker* checker, GenericFuncDef* def, Node* param_type,
+                             Type* arg_type, Type** inferred) {
     if (!param_type || !arg_type || arg_type->kind == TYPE_ERROR)
         return;
 
@@ -1179,176 +1179,181 @@ static Type* check_enum_value_expr(Checker* checker, Node* node) {
     return enum_type;
 }
 
-// Type-check a function call: validate callee, argument count, and argument types
-static Type* check_call_expr(Checker* checker, Node* node) {
-    // Handle sameref(a, b) builtin
+static int ident_matches(Node* node, const char* name, int len) {
+    return node->type == NODE_IDENT && node->as.ident.length == len &&
+           strncmp(node->as.ident.name, name, len) == 0;
+}
+
+static int try_check_sameref_builtin(Checker* checker, Node* node, Type** out_type) {
+    if (!ident_matches(node->as.call.func, "sameref", 7)) {
+        return 0;
+    }
+    if (node->as.call.args.count != 2) {
+        check_error(checker, node->line, node->column, "sameref() requires exactly 2 arguments");
+        *out_type = type_error;
+        return 1;
+    }
+
+    Type* a = check_expression(checker, node->as.call.args.nodes[0]);
+    Type* b = check_expression(checker, node->as.call.args.nodes[1]);
+    if (a->kind != TYPE_STRUCT) {
+        check_error(checker, node->line, node->column,
+                    "sameref() requires struct arguments, got '%s'", type_name(a));
+        *out_type = type_error;
+        return 1;
+    }
+    if (!type_equals(a, b)) {
+        check_error(checker, node->line, node->column, "sameref() arguments must be the same type");
+        *out_type = type_error;
+        return 1;
+    }
+
+    *out_type = type_bool;
+    return 1;
+}
+
+static int try_check_assert_builtin(Checker* checker, Node* node, Type** out_type) {
+    if (!ident_matches(node->as.call.func, "assert", 6) || checker_lookup(checker, "assert")) {
+        return 0;
+    }
+    if (node->as.call.args.count != 1) {
+        check_error(checker, node->line, node->column, "assert() requires exactly 1 argument");
+        *out_type = type_error;
+        return 1;
+    }
+
+    Type* arg_type = check_expression(checker, node->as.call.args.nodes[0]);
+    if (arg_type->kind != TYPE_ERROR && !type_equals(arg_type, type_bool)) {
+        check_error(checker, node->line, node->column, "assert() argument must be bool, got '%s'",
+                    type_name(arg_type));
+        *out_type = type_error;
+        return 1;
+    }
+
+    *out_type = type_void;
+    return 1;
+}
+
+static int type_satisfies_trait_bound(Checker* checker, Type* type, const char* trait_name) {
+    const char* type_name_str = NULL;
+    if (type->kind == TYPE_STRUCT) {
+        type_name_str = type->as.struc.name;
+    } else {
+        type_name_str = type_name(type);
+    }
+    if (!type_name_str) {
+        return 0;
+    }
+
+    for (int i = 0; i < checker->traits.impl_count; i++) {
+        if (strcmp(checker->traits.impls[i].trait_name, trait_name) == 0 &&
+            strcmp(checker->traits.impls[i].type_name, type_name_str) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static Type* try_check_generic_free_function_call(Checker* checker, Node* node) {
     Node* callee = node->as.call.func;
-    if (callee->type == NODE_IDENT && callee->as.ident.length == 7 &&
-        strncmp(callee->as.ident.name, "sameref", 7) == 0) {
-        if (node->as.call.args.count != 2) {
-            check_error(checker, node->line, node->column,
-                        "sameref() requires exactly 2 arguments");
-            return type_error;
-        }
-        Type* a = check_expression(checker, node->as.call.args.nodes[0]);
-        Type* b = check_expression(checker, node->as.call.args.nodes[1]);
-        if (a->kind != TYPE_STRUCT) {
-            check_error(checker, node->line, node->column,
-                        "sameref() requires struct arguments, got '%s'", type_name(a));
-            return type_error;
-        }
-        if (!type_equals(a, b)) {
-            check_error(checker, node->line, node->column,
-                        "sameref() arguments must be the same type");
-            return type_error;
-        }
-        return type_bool;
+    if (callee->type != NODE_IDENT) {
+        return NULL;
     }
 
-    // Handle assert(expr) builtin — only if no user-defined assert function in scope
-    if (callee->type == NODE_IDENT && callee->as.ident.length == 6 &&
-        strncmp(callee->as.ident.name, "assert", 6) == 0 && !checker_lookup(checker, "assert")) {
-        if (node->as.call.args.count != 1) {
-            check_error(checker, node->line, node->column, "assert() requires exactly 1 argument");
-            return type_error;
-        }
-        Type* arg_type = check_expression(checker, node->as.call.args.nodes[0]);
-        if (arg_type->kind != TYPE_ERROR && !type_equals(arg_type, type_bool)) {
-            check_error(checker, node->line, node->column,
-                        "assert() argument must be bool, got '%s'", type_name(arg_type));
-            return type_error;
-        }
-        return type_void;
+    GenericFuncDef* gdef = lookup_generic_func_def(checker, callee->as.ident.name);
+    if (!gdef) {
+        return NULL;
     }
 
-    // Check if callee is a generic free function
-    if (callee->type == NODE_IDENT) {
-        GenericFuncDef* gdef = lookup_generic_func_def(checker, callee->as.ident.name);
-        if (gdef) {
-            func_decl_node* fdn = &gdef->decl->as.func_decl;
+    func_decl_node* fdn = &gdef->decl->as.func_decl;
+    if (node->as.call.args.count != fdn->params.count) {
+        check_error(checker, node->line, node->column,
+                    "Generic function '%s' expects %d arguments, got %d", gdef->name,
+                    fdn->params.count, node->as.call.args.count);
+        return type_error;
+    }
 
-            // Check argument count
-            if (node->as.call.args.count != fdn->params.count) {
-                check_error(checker, node->line, node->column,
-                            "Generic function '%s' expects %d arguments, got %d", gdef->name,
-                            fdn->params.count, node->as.call.args.count);
-                return type_error;
-            }
+    int    arg_count = node->as.call.args.count;
+    Type** arg_types = xmalloc(arg_count * sizeof(Type*));
+    int    has_error = 0;
+    for (int i = 0; i < arg_count; i++) {
+        arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
+        if (arg_types[i]->kind == TYPE_ERROR) {
+            has_error = 1;
+        }
+    }
+    if (has_error) {
+        free(arg_types);
+        return type_error;
+    }
 
-            // Type-check arguments
-            int    arg_count = node->as.call.args.count;
-            Type** arg_types = xmalloc(arg_count * sizeof(Type*));
-            int    has_error = 0;
-            for (int i = 0; i < arg_count; i++) {
-                arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
-                if (arg_types[i]->kind == TYPE_ERROR) {
-                    has_error = 1;
-                }
-            }
-            if (has_error) {
-                free(arg_types);
-                return type_error;
-            }
+    Type** inferred = xcalloc(gdef->type_param_count, sizeof(Type*));
+    for (int i = 0; i < arg_count; i++) {
+        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
+        infer_type_param(checker, gdef, param_type_node, arg_types[i], inferred);
+    }
 
-            // Infer type parameters from argument types
-            Type** inferred = xcalloc(gdef->type_param_count, sizeof(Type*));
-            for (int i = 0; i < arg_count; i++) {
-                Node* param_type_node = fdn->params.nodes[i]->as.param.type;
-                infer_type_param(checker, gdef, param_type_node, arg_types[i], inferred);
-            }
-
-            // Check all type params were inferred
-            for (int i = 0; i < gdef->type_param_count; i++) {
-                if (!inferred[i]) {
-                    check_error(checker, node->line, node->column,
-                                "Cannot infer type parameter '%s' for generic function '%s'",
-                                gdef->type_params[i], gdef->name);
-                    free(arg_types);
-                    free(inferred);
-                    return type_error;
-                }
-            }
-
-            // Check trait bounds
-            for (int i = 0; i < gdef->type_param_count; i++) {
-                if (gdef->type_param_bounds[i]) {
-                    const char* bound             = gdef->type_param_bounds[i];
-                    const char* arg_type_name_str = NULL;
-                    if (inferred[i]->kind == TYPE_STRUCT) {
-                        arg_type_name_str = inferred[i]->as.struc.name;
-                    } else {
-                        arg_type_name_str = type_name(inferred[i]);
-                    }
-                    int satisfied = 0;
-                    if (arg_type_name_str) {
-                        for (int t = 0; t < checker->traits.impl_count; t++) {
-                            if (strcmp(checker->traits.impls[t].trait_name, bound) == 0 &&
-                                strcmp(checker->traits.impls[t].type_name, arg_type_name_str) == 0) {
-                                satisfied = 1;
-                                break;
-                            }
-                        }
-                    }
-                    if (!satisfied) {
-                        check_error(checker, node->line, node->column,
-                                    "Type '%s' does not implement trait '%s' required by '%s'",
-                                    type_name(inferred[i]), bound, gdef->name);
-                        free(arg_types);
-                        free(inferred);
-                        return type_error;
-                    }
-                }
-            }
-
-            // Instantiate the generic function
-            GenericFuncInstance* inst =
-                instantiate_generic_func(checker, gdef, inferred, gdef->type_param_count,
-                                         node->line, node->column);
+    for (int i = 0; i < gdef->type_param_count; i++) {
+        if (!inferred[i]) {
+            check_error(checker, node->line, node->column,
+                        "Cannot infer type parameter '%s' for generic function '%s'",
+                        gdef->type_params[i], gdef->name);
             free(arg_types);
             free(inferred);
-
-            if (!inst) {
-                return type_error;
-            }
-
-            // Set resolved name on the call node for codegen
-            node->as.call.resolved_name = xstrdup(inst->mangled_name);
-
-            return inst->func_type->as.func.return_type;
+            return type_error;
         }
     }
 
-    Type* func_type = check_expression(checker, node->as.call.func);
+    for (int i = 0; i < gdef->type_param_count; i++) {
+        const char* bound = gdef->type_param_bounds[i];
+        if (!bound) {
+            continue;
+        }
+        if (!type_satisfies_trait_bound(checker, inferred[i], bound)) {
+            check_error(checker, node->line, node->column,
+                        "Type '%s' does not implement trait '%s' required by '%s'",
+                        type_name(inferred[i]), bound, gdef->name);
+            free(arg_types);
+            free(inferred);
+            return type_error;
+        }
+    }
 
-    if (func_type->kind == TYPE_ERROR)
-        return type_error;
+    GenericFuncInstance* inst = instantiate_generic_func(
+        checker, gdef, inferred, gdef->type_param_count, node->line, node->column);
+    free(arg_types);
+    free(inferred);
 
-    if (func_type->kind != TYPE_FUNC) {
-        check_error_cannot(checker, node->line, node->column, "call", func_type);
+    if (!inst) {
         return type_error;
     }
 
-    // Check argument count
+    node->as.call.resolved_name = xstrdup(inst->mangled_name);
+    return inst->func_type->as.func.return_type;
+}
+
+static int check_call_arg_count(Checker* checker, Node* node, Type* func_type) {
     if (func_type->as.func.is_varargs) {
-        // Varargs: require at least param_count arguments
         if (node->as.call.args.count < func_type->as.func.param_count) {
             check_error(checker, node->line, node->column, "Expected at least %d arguments, got %d",
                         func_type->as.func.param_count, node->as.call.args.count);
-            return type_error;
+            return 0;
         }
-    } else {
-        if (node->as.call.args.count != func_type->as.func.param_count) {
-            check_error(checker, node->line, node->column, "Expected %d arguments, got %d",
-                        func_type->as.func.param_count, node->as.call.args.count);
-            return type_error;
-        }
+        return 1;
     }
 
-    // Check argument types (only for named params)
+    if (node->as.call.args.count != func_type->as.func.param_count) {
+        check_error(checker, node->line, node->column, "Expected %d arguments, got %d",
+                    func_type->as.func.param_count, node->as.call.args.count);
+        return 0;
+    }
+    return 1;
+}
+
+static void check_call_named_args(Checker* checker, Node* node, Type* func_type) {
     for (int i = 0; i < func_type->as.func.param_count; i++) {
         Type* arg_type   = check_expression(checker, node->as.call.args.nodes[i]);
         Type* param_type = func_type->as.func.param_types[i];
-
         if (!type_assignable(param_type, arg_type)) {
             char ctx[32];
             snprintf(ctx, sizeof(ctx), "Argument %d", i + 1);
@@ -1356,12 +1361,41 @@ static Type* check_call_expr(Checker* checker, Node* node) {
                              node->as.call.args.nodes[i]->column, ctx, param_type, arg_type);
         }
     }
+}
 
-    // Type-check extra variadic arguments (but don't check against param types)
+static void check_call_variadic_tail_args(Checker* checker, Node* node, Type* func_type) {
     for (int i = func_type->as.func.param_count; i < node->as.call.args.count; i++) {
         check_expression(checker, node->as.call.args.nodes[i]);
     }
+}
 
+// Type-check a function call: validate callee, argument count, and argument types
+static Type* check_call_expr(Checker* checker, Node* node) {
+    Type* builtin_type = NULL;
+    if (try_check_sameref_builtin(checker, node, &builtin_type) ||
+        try_check_assert_builtin(checker, node, &builtin_type)) {
+        return builtin_type;
+    }
+
+    Type* generic_call_type = try_check_generic_free_function_call(checker, node);
+    if (generic_call_type) {
+        return generic_call_type;
+    }
+
+    Type* func_type = check_expression(checker, node->as.call.func);
+    if (func_type->kind == TYPE_ERROR) {
+        return type_error;
+    }
+    if (func_type->kind != TYPE_FUNC) {
+        check_error_cannot(checker, node->line, node->column, "call", func_type);
+        return type_error;
+    }
+    if (!check_call_arg_count(checker, node, func_type)) {
+        return type_error;
+    }
+
+    check_call_named_args(checker, node, func_type);
+    check_call_variadic_tail_args(checker, node, func_type);
     return func_type->as.func.return_type;
 }
 

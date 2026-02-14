@@ -1277,252 +1277,277 @@ void emit_struct_body_typedefs(CodeGen* gen, Node* ast) {
     }
 }
 
-// Emit forward declarations for all functions, methods, and generic method instances
-void emit_function_forward_decls(CodeGen* gen, Node* ast) {
+static const char* module_forward_prefix(Node* mod) {
+    if (strcmp(mod->as.module.name, "main") == 0) {
+        return NULL;
+    }
+    return mod->as.module.name;
+}
+
+static void collect_decl_functions(Node* decl, Node*** funcs, int* func_count, int* func_cap) {
+    if (decl->type == NODE_FUNC_DECL) {
+        VEC_GROW(*funcs, *func_count, *func_cap);
+        (*funcs)[(*func_count)++] = decl;
+        return;
+    }
+    if (decl->type != NODE_IMPL_DECL) {
+        return;
+    }
+    for (int i = 0; i < decl->as.impl_decl.methods.count; i++) {
+        VEC_GROW(*funcs, *func_count, *func_cap);
+        (*funcs)[(*func_count)++] = decl->as.impl_decl.methods.nodes[i];
+    }
+}
+
+static int should_emit_non_generic_forward_decl(CodeGen* gen, func_decl_node* fdn) {
+    int is_method = (fdn->receiver_type != NULL);
+
+    if (is_method && fdn->receiver_type_args.count > 0) {
+        return 0;
+    }
+    if (!is_method && fdn->type_param_count > 0) {
+        return 0;
+    }
+    if (gen->test_mode && !is_method && strcmp(fdn->name, "main") == 0) {
+        return 0;
+    }
+    return 1;
+}
+
+static void emit_non_generic_forward_decl(CodeGen* gen, func_decl_node* fdn,
+                                          const char* module_prefix) {
+    int is_method = (fdn->receiver_type != NULL);
+
+    if (!fdn->is_public && strcmp(fdn->name, "main") != 0) {
+        emit(gen, "static ");
+    }
+
+    emit_func_return_type(gen, fdn);
+    emit_function_name(gen, fdn->name, is_method ? fdn->receiver_type : NULL, module_prefix);
+
+    if (is_method) {
+        if (fdn->receiver_is_const && strcmp(fdn->receiver_type, "string") != 0) {
+            emit(gen, "const ");
+        }
+        if (type_is_builtin_name(fdn->receiver_type)) {
+            emit(gen, "%s self", type_c_name(fdn->receiver_type));
+        } else {
+            emit(gen, "%s* self", fdn->receiver_type);
+        }
+        if (fdn->params.count > 0) {
+            emit(gen, ", ");
+        }
+    }
+
+    if (fdn->params.count == 0 && !is_method) {
+        emit(gen, "void");
+    } else {
+        for (int i = 0; i < fdn->params.count; i++) {
+            if (i > 0)
+                emit(gen, ", ");
+            Node* param = fdn->params.nodes[i];
+            emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+        }
+    }
+    emit(gen, ");\n");
+}
+
+static void emit_non_generic_function_forward_decls(CodeGen* gen, Node* ast) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
             continue;
-        // Determine if this is a library module (not "main")
-        const char* module_prefix = NULL;
-        if (strcmp(mod->as.module.name, "main") != 0) {
-            module_prefix = mod->as.module.name;
-        }
+
+        const char* module_prefix = module_forward_prefix(mod);
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
 
-            // Collect func_decl nodes: either top-level or inside impl blocks
             Node** funcs      = NULL;
             int    func_count = 0;
             int    func_cap   = 0;
-
-            if (decl->type == NODE_FUNC_DECL) {
-                VEC_GROW(funcs, func_count, func_cap);
-                funcs[func_count++] = decl;
-            } else if (decl->type == NODE_IMPL_DECL) {
-                for (int k = 0; k < decl->as.impl_decl.methods.count; k++) {
-                    VEC_GROW(funcs, func_count, func_cap);
-                    funcs[func_count++] = decl->as.impl_decl.methods.nodes[k];
-                }
-            }
+            collect_decl_functions(decl, &funcs, &func_count, &func_cap);
 
             for (int fi = 0; fi < func_count; fi++) {
-                Node*           fdecl     = funcs[fi];
-                func_decl_node* fdn       = &fdecl->as.func_decl;
-                int             is_method = (fdn->receiver_type != NULL);
-
-                // Skip generic method templates (they get instantiated separately)
-                if (is_method && fdn->receiver_type_args.count > 0) {
+                func_decl_node* fdn = &funcs[fi]->as.func_decl;
+                if (!should_emit_non_generic_forward_decl(gen, fdn)) {
                     continue;
                 }
-
-                // Skip generic free function templates (they get instantiated separately)
-                if (!is_method && fdn->type_param_count > 0) {
-                    continue;
-                }
-
-                // In test mode, skip user's main function
-                if (gen->test_mode && !is_method && strcmp(fdn->name, "main") == 0) {
-                    continue;
-                }
-
-                // Emit static for private functions (except main)
-                if (!fdn->is_public && strcmp(fdn->name, "main") != 0) {
-                    emit(gen, "static ");
-                }
-
-                emit_func_return_type(gen, fdn);
-
-                // Emit function name with appropriate prefix
-                emit_function_name(gen, fdn->name, is_method ? fdn->receiver_type : NULL,
-                                   module_prefix);
-
-                // Emit self parameter for methods
-                if (is_method) {
-                    if (fdn->receiver_is_const && strcmp(fdn->receiver_type, "string") != 0) {
-                        emit(gen, "const ");
-                    }
-                    if (type_is_builtin_name(fdn->receiver_type)) {
-                        emit(gen, "%s self", type_c_name(fdn->receiver_type));
-                    } else {
-                        emit(gen, "%s* self", fdn->receiver_type);
-                    }
-                    if (fdn->params.count > 0) {
-                        emit(gen, ", ");
-                    }
-                }
-
-                if (fdn->params.count == 0 && !is_method) {
-                    emit(gen, "void");
-                } else {
-                    for (int j = 0; j < fdn->params.count; j++) {
-                        if (j > 0)
-                            emit(gen, ", ");
-                        Node* param = fdn->params.nodes[j];
-                        emit_type_with_name(gen, param->as.param.type, param->as.param.name);
-                    }
-                }
-                emit(gen, ");\n");
+                emit_non_generic_forward_decl(gen, fdn, module_prefix);
             }
+
             free(funcs);
         }
     }
+}
 
-    // Forward declarations for instantiated generic methods
+static int find_generic_type_template(Node* ast, const char* base_name, Node** out_template,
+                                      int* out_is_struct, int* out_param_count) {
+    Node* template = find_generic_struct_decl(ast, base_name);
+    if (template) {
+        *out_template    = template;
+        *out_is_struct   = 1;
+        *out_param_count = template->as.struct_decl.type_param_count;
+        return 1;
+    }
+
+    template = find_generic_enum_decl(ast, base_name);
+    if (!template) {
+        return 0;
+    }
+    *out_template    = template;
+    *out_is_struct   = 0;
+    *out_param_count = template->as.enum_decl.type_param_count;
+    return 1;
+}
+
+static void emit_single_generic_method_forward_decl(CodeGen* gen, GenericInstance* info,
+                                                    Node* template, int is_struct, int param_count,
+                                                    Node* method) {
+    func_decl_node* fdn = &method->as.func_decl;
+
+    char** method_params     = NULL;
+    Type** method_args       = NULL;
+    int    method_bind_count = 0;
+    codegen_extract_method_bindings(&fdn->receiver_type_args, info->type_args, info->type_arg_count,
+                                    &method_params, &method_args, &method_bind_count);
+
+    int    combined_count  = param_count + method_bind_count;
+    char** combined_params = xmalloc(combined_count * sizeof(char*));
+    Type** combined_args   = xmalloc(combined_count * sizeof(Type*));
+
+    for (int i = 0; i < param_count; i++) {
+        if (is_struct) {
+            combined_params[i] = template->as.struct_decl.type_params[i];
+        } else {
+            combined_params[i] = template->as.enum_decl.type_params[i];
+        }
+        combined_args[i] = info->type_args[i];
+    }
+    for (int i = 0; i < method_bind_count; i++) {
+        combined_params[param_count + i] = method_params[i];
+        combined_args[param_count + i]   = method_args[i];
+    }
+
+    TypeSubstContext  subst_ctx;
+    TypeSubstContext* old_subst = gen->generics.subst;
+    subst_ctx.type_params       = combined_params;
+    subst_ctx.type_args         = combined_args;
+    subst_ctx.count             = combined_count;
+    gen->generics.subst         = &subst_ctx;
+
+    emit_func_return_type(gen, fdn);
+    emit(gen, " %s_%s(", info->mangled_name, fdn->name);
+
+    if (fdn->receiver_is_const) {
+        emit(gen, "const ");
+    }
+    emit(gen, "%s* self", info->mangled_name);
+
+    for (int i = 0; i < fdn->params.count; i++) {
+        emit(gen, ", ");
+        Node* param = fdn->params.nodes[i];
+        if (param->as.param.is_const) {
+            emit(gen, "const ");
+        }
+        emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+    }
+    emit(gen, ");\n");
+
+    gen->generics.subst = old_subst;
+    free(combined_params);
+    free(combined_args);
+    for (int i = 0; i < method_bind_count; i++) {
+        free(method_params[i]);
+    }
+    free(method_params);
+    free(method_args);
+}
+
+static void emit_generic_method_forward_decls(CodeGen* gen, Node* ast) {
     for (int i = 0; i < gen->checker.instance_count; i++) {
         GenericInstance* info = &gen->checker.instances[i];
 
-        // Find the generic type template to get type params
-        Node* template    = find_generic_struct_decl(ast, info->base_name);
+        Node* template    = NULL;
         int   is_struct   = 0;
         int   param_count = 0;
-        if (template) {
-            is_struct   = 1;
-            param_count = template->as.struct_decl.type_param_count;
-        } else {
-            template = find_generic_enum_decl(ast, info->base_name);
-            if (template) {
-                param_count = template->as.enum_decl.type_param_count;
-            }
-        }
-        if (!template)
+        if (!find_generic_type_template(ast, info->base_name, &template, &is_struct,
+                                        &param_count)) {
             continue;
+        }
 
-        // Find all methods for this generic type
         Node** methods      = NULL;
         int    method_count = 0;
         collect_generic_methods(ast, info->base_name, &methods, &method_count);
 
-        // Emit forward declaration for each method
         for (int j = 0; j < method_count; j++) {
-            Node*           method = methods[j];
-            func_decl_node* fdn    = &method->as.func_decl;
-
-            // Extract method-specific type bindings
-            char** method_params     = NULL;
-            Type** method_args       = NULL;
-            int    method_bind_count = 0;
-            codegen_extract_method_bindings(&fdn->receiver_type_args, info->type_args,
-                                            info->type_arg_count, &method_params, &method_args,
-                                            &method_bind_count);
-
-            // Build combined substitution context
-            int    combined_count  = param_count + method_bind_count;
-            char** combined_params = xmalloc(combined_count * sizeof(char*));
-            Type** combined_args   = xmalloc(combined_count * sizeof(Type*));
-
-            for (int k = 0; k < param_count; k++) {
-                if (is_struct) {
-                    combined_params[k] = template->as.struct_decl.type_params[k];
-                } else {
-                    combined_params[k] = template->as.enum_decl.type_params[k];
-                }
-                combined_args[k] = info->type_args[k];
-            }
-            for (int k = 0; k < method_bind_count; k++) {
-                combined_params[param_count + k] = method_params[k];
-                combined_args[param_count + k]   = method_args[k];
-            }
-
-            TypeSubstContext subst_ctx;
-            subst_ctx.type_params = combined_params;
-            subst_ctx.type_args   = combined_args;
-            subst_ctx.count       = combined_count;
-            gen->generics.subst   = &subst_ctx;
-
-            // Return type (with substitution)
-            emit_func_return_type(gen, fdn);
-
-            // Method name: MangledStruct_methodname(
-            emit(gen, " %s_%s(", info->mangled_name, fdn->name);
-
-            // Self parameter
-            if (fdn->receiver_is_const) {
-                emit(gen, "const ");
-            }
-            emit(gen, "%s* self", info->mangled_name);
-
-            // Other parameters
-            for (int p = 0; p < fdn->params.count; p++) {
-                emit(gen, ", ");
-                Node* param = fdn->params.nodes[p];
-                if (param->as.param.is_const) {
-                    emit(gen, "const ");
-                }
-                emit_type_with_name(gen, param->as.param.type, param->as.param.name);
-            }
-            emit(gen, ");\n");
-
-            gen->generics.subst = NULL;
-            free(combined_params);
-            free(combined_args);
-            for (int k = 0; k < method_bind_count; k++) {
-                free(method_params[k]);
-            }
-            free(method_params);
-            free(method_args);
+            emit_single_generic_method_forward_decl(gen, info, template, is_struct, param_count,
+                                                    methods[j]);
         }
 
         free(methods);
     }
+}
 
-    // Forward declarations for instantiated generic free functions
+static Node* find_generic_func_decl_in_ast(Node* ast, const char* name) {
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int d = 0; d < mod->as.module.decls.count; d++) {
+            Node* decl = mod->as.module.decls.nodes[d];
+            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.type_param_count > 0 &&
+                strcmp(decl->as.func_decl.name, name) == 0) {
+                return decl;
+            }
+        }
+    }
+    return NULL;
+}
+
+static void emit_single_generic_func_forward_decl(CodeGen* gen, GenericFuncInstance* inst,
+                                                  func_decl_node* fdn) {
+    TypeSubstContext  subst_ctx;
+    TypeSubstContext* old_subst = gen->generics.subst;
+    subst_ctx.type_params       = fdn->type_params;
+    subst_ctx.type_args         = inst->type_args;
+    subst_ctx.count             = inst->type_arg_count;
+    gen->generics.subst         = &subst_ctx;
+
+    emit_func_return_type(gen, fdn);
+    emit(gen, " %s(", inst->mangled_name);
+
+    if (fdn->params.count == 0) {
+        emit(gen, "void");
+    } else {
+        for (int i = 0; i < fdn->params.count; i++) {
+            if (i > 0)
+                emit(gen, ", ");
+            Node* param = fdn->params.nodes[i];
+            if (param->as.param.is_const) {
+                emit(gen, "const ");
+            }
+            emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+        }
+    }
+    emit(gen, ");\n");
+    gen->generics.subst = old_subst;
+}
+
+static void emit_generic_func_forward_decls(CodeGen* gen, Node* ast) {
     for (int i = 0; i < gen->checker.func_instance_count; i++) {
         GenericFuncInstance* inst = &gen->checker.func_instances[i];
-
-        // Find the template declaration in the AST
-        Node* tmpl = NULL;
-        for (int m = 0; m < ast->as.program.modules.count; m++) {
-            Node* mod = ast->as.program.modules.nodes[m];
-            if (!mod || mod->type != NODE_MODULE)
-                continue;
-            for (int d = 0; d < mod->as.module.decls.count; d++) {
-                Node* decl = mod->as.module.decls.nodes[d];
-                if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.type_param_count > 0 &&
-                    strcmp(decl->as.func_decl.name, inst->base_name) == 0) {
-                    tmpl = decl;
-                    break;
-                }
-            }
-            if (tmpl)
-                break;
-        }
-        if (!tmpl)
+        Node*                tmpl = find_generic_func_decl_in_ast(ast, inst->base_name);
+        if (!tmpl) {
             continue;
-
-        func_decl_node* fdn = &tmpl->as.func_decl;
-
-        // Set up type substitution
-        TypeSubstContext subst_ctx;
-        subst_ctx.type_params = fdn->type_params;
-        subst_ctx.type_args   = inst->type_args;
-        subst_ctx.count       = inst->type_arg_count;
-        gen->generics.subst   = &subst_ctx;
-
-        // Return type
-        emit_func_return_type(gen, fdn);
-
-        // Function name
-        emit(gen, " %s(", inst->mangled_name);
-
-        // Parameters
-        if (fdn->params.count == 0) {
-            emit(gen, "void");
-        } else {
-            for (int p = 0; p < fdn->params.count; p++) {
-                if (p > 0)
-                    emit(gen, ", ");
-                Node* param = fdn->params.nodes[p];
-                if (param->as.param.is_const) {
-                    emit(gen, "const ");
-                }
-                emit_type_with_name(gen, param->as.param.type, param->as.param.name);
-            }
         }
-        emit(gen, ");\n");
-
-        gen->generics.subst = NULL;
+        emit_single_generic_func_forward_decl(gen, inst, &tmpl->as.func_decl);
     }
+}
 
+// Emit forward declarations for all functions, methods, and generic method instances
+void emit_function_forward_decls(CodeGen* gen, Node* ast) {
+    emit_non_generic_function_forward_decls(gen, ast);
+    emit_generic_method_forward_decls(gen, ast);
+    emit_generic_func_forward_decls(gen, ast);
     emit(gen, "\n");
 }
