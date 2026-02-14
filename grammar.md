@@ -133,11 +133,26 @@ Traits define a set of required method signatures that types can implement. Trai
 ```bnf
 <impl-decl>   ::= 'impl' <identifier> 'for' <identifier> [ '<' <type-arg-list> '>' ]
                    '{' { <impl-method> } '}'
+               | 'impl' <identifier> [ '<' <type-arg-list> '>' ]
+                   '{' { <impl-method> } '}'
 
 <impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <return-type> ] <block>
 ```
 
-An `impl` block provides concrete method implementations for a trait on a specific type. Methods inside `impl` blocks do not specify a receiver — it is inferred from the `for Type` clause. Use `const func` for immutable-receiver methods. For generic target types, specify the type parameters on the impl header (e.g., `impl Drop for Box<T>`). All trait methods must be implemented.
+**Trait impl:** `impl Trait for Type { ... }` provides concrete method implementations for a trait on a specific type. Methods inside `impl` blocks do not specify a receiver — it is inferred from the `for Type` clause. Use `const func` for immutable-receiver methods. For generic target types, specify the type parameters on the impl header (e.g., `impl Drop for Box<T>`). All trait methods must be implemented.
+
+**Inherent impl:** `impl Type { ... }` defines methods directly on a type without a trait. This is used for the `init` constructor pattern:
+
+```whist
+impl Point {
+    func init(x: i64, y: i64) {
+        self.x = x;
+        self.y = y;
+    }
+}
+```
+
+The `init` method has special constraints: it must not declare a return type, and each type can have at most one `init` method. When a struct has an `init` method, instances must be created with `new Type(args)` — the struct literal form `new Type { ... }` is disallowed.
 
 ### Type Alias
 
@@ -398,6 +413,7 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
                 | <match-expr>
 
 <new-expr> ::= 'new' <type> '{' [ <init-list> ] '}'
+            | 'new' <type> '(' [ <arg-list> ] ')'
 
 <init-list> ::= <field-init-list>
              | <element-list>
@@ -426,6 +442,8 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
 **Array literals:** `[1, 2, 3, 4, 5]` creates an array. The element type is inferred from the first element. All elements must have compatible types. Trailing commas are allowed.
 
 **New expressions:** `new Point { x: 1, y: 2 }` heap-allocates a struct with reference counting. `new Vec<i64>{1, 2, 3}` heap-allocates a Vec with initial elements (or `new Vec<i64>{}` for empty). The returned pointer is automatically freed when its reference count drops to zero. Copies of RC pointers (`var q = p`) increment the reference count. RC variables are automatically decremented when they go out of scope.
+
+**Constructor form:** `new Point(1, 2)` heap-allocates a struct (zero-initialized), then calls its `init` method with the provided arguments. This form is required when the struct has an `init` method defined in an inherent `impl` block. The struct literal form `new Type { ... }` is disallowed for types with `init`.
 
 **Slice expressions:** `arr[start:end]` creates a `Span<T>` view into an array, span, or vec. Both bounds are optional:
 - `arr[:]` — full span (all elements)
