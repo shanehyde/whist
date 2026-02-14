@@ -97,6 +97,32 @@ func to_string(n: i64): string {
     return std__to_string(n);
 }
 
+// Command execution with output capture
+struct ExecResult {
+    exit_code: i32,
+    output: string,
+    error_output: string
+}
+
+private extern std_exec {
+    func std__exec(cmd: string): voidptr;
+    func std__exec_exit_code(handle: voidptr): i32;
+    func std__exec_output(handle: voidptr): string;
+    func std__exec_error_output(handle: voidptr): string;
+    func std__exec_free(handle: voidptr): void;
+}
+
+func exec(cmd: string): ExecResult {
+    var handle = std__exec(cmd);
+    var result = new ExecResult {
+        exit_code: std__exec_exit_code(handle),
+        output: std__exec_output(handle),
+        error_output: std__exec_error_output(handle)
+    };
+    std__exec_free(handle);
+    return result;
+}
+
 // Private internal function - should not be visible outside std
 private func _internal_std(): i64 {
     return 42;
