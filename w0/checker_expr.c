@@ -454,12 +454,39 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
         }
         return type_func(NULL, 0, option_type, 0);
     }
-    // Mutating methods: push, pop, insert, remove, swap_remove, clear, reserve, shrink_to_fit, sort
-    if (strcmp(member_name, "push") == 0 || strcmp(member_name, "pop") == 0 ||
-        strcmp(member_name, "insert") == 0 || strcmp(member_name, "remove") == 0 ||
-        strcmp(member_name, "swap_remove") == 0 || strcmp(member_name, "clear") == 0 ||
-        strcmp(member_name, "reserve") == 0 || strcmp(member_name, "shrink_to_fit") == 0 ||
-        strcmp(member_name, "sort") == 0) {
+    // pop is mutating and returns Option<T>
+    if (strcmp(member_name, "pop") == 0) {
+        const char* const_name = get_const_binding_name(checker, node->as.member.object);
+        if (const_name) {
+            check_error(checker, node->line, node->column,
+                        "Cannot call mutating method '%s' on const '%s'", member_name, const_name);
+            return type_error;
+        }
+        char mangled[256];
+        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
+        sem_info_set_member_struct_name(checker->sem, node, mangled);
+
+        // Look up or instantiate Option<elem_type>
+        GenericDef* option_def          = lookup_generic_def(checker, "Option");
+        Type**      args                = xmalloc(sizeof(Type*));
+        args[0]                         = elem_type;
+        char*            option_mangled = type_mangle_generic("Option", args, 1);
+        GenericInstance* existing       = lookup_generic_instance(checker, option_mangled);
+        Type*            option_type;
+        if (existing) {
+            option_type = existing->type;
+            free(option_mangled);
+            free(args);
+        } else {
+            option_type = instantiate_generic_enum(checker, option_def, option_mangled, args, 1);
+        }
+        return type_func(NULL, 0, option_type, 0);
+    }
+    // Mutating methods: push, insert, remove, swap_remove, clear, reserve, shrink_to_fit, sort
+    if (strcmp(member_name, "push") == 0 || strcmp(member_name, "insert") == 0 ||
+        strcmp(member_name, "remove") == 0 || strcmp(member_name, "swap_remove") == 0 ||
+        strcmp(member_name, "clear") == 0 || strcmp(member_name, "reserve") == 0 ||
+        strcmp(member_name, "shrink_to_fit") == 0 || strcmp(member_name, "sort") == 0) {
         const char* const_name = get_const_binding_name(checker, node->as.member.object);
         if (const_name) {
             check_error(checker, node->line, node->column,
@@ -481,9 +508,6 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
             Type** params = xmalloc(1 * sizeof(Type*));
             params[0]     = elem_type;
             return type_func(params, 1, type_void, 0);
-        }
-        if (strcmp(member_name, "pop") == 0) {
-            return type_func(NULL, 0, elem_type, 0);
         }
         if (strcmp(member_name, "insert") == 0) {
             Type** params = xmalloc(2 * sizeof(Type*));
