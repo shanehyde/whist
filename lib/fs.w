@@ -26,6 +26,31 @@ private extern fs {
     func fs__seek(handle: voidptr, offset: i64, whence: i32): i32;
     func fs__tell(handle: voidptr): i64;
     func fs__eof(handle: voidptr): bool;
+
+    // Directory operations
+    func fs__mkdir(path: string): i32;
+    func fs__mkdir_all(path: string): i32;
+    func fs__rmdir(path: string): i32;
+    func fs__is_dir(path: string): bool;
+    func fs__is_file(path: string): bool;
+    func fs__cwd(): string;
+    func fs__chdir(path: string): i32;
+
+    // Directory iteration (handle-based)
+    func fs__open_dir(path: string): voidptr;
+    func fs__read_dir(handle: voidptr): string;
+    func fs__close_dir(handle: voidptr): i32;
+
+    // Path utilities
+    func fs__join_path(a: string, b: string): string;
+    func fs__dirname(path: string): string;
+    func fs__basename(path: string): string;
+    func fs__extension(path: string): string;
+    func fs__abs_path(path: string): string;
+
+    // Metadata & temp
+    func fs__modified_time(path: string): i64;
+    func fs__temp_dir(): string;
 }
 
 // Convenience API
@@ -90,4 +115,80 @@ func tell(handle: voidptr): i64 {
 
 func eof(handle: voidptr): bool {
     return fs__eof(handle);
+}
+
+// Directory operations
+
+func mkdir(path: string): i32 {
+    return fs__mkdir(path);
+}
+
+func mkdir_all(path: string): i32 {
+    return fs__mkdir_all(path);
+}
+
+func rmdir(path: string): i32 {
+    return fs__rmdir(path);
+}
+
+func is_dir(path: string): bool {
+    return fs__is_dir(path);
+}
+
+func is_file(path: string): bool {
+    return fs__is_file(path);
+}
+
+func cwd(): string {
+    return fs__cwd();
+}
+
+func chdir(path: string): i32 {
+    return fs__chdir(path);
+}
+
+// Directory iteration (handle-based)
+
+func open_dir(path: string): voidptr {
+    return fs__open_dir(path);
+}
+
+func read_dir(handle: voidptr): string {
+    return fs__read_dir(handle);
+}
+
+func close_dir(handle: voidptr): i32 {
+    return fs__close_dir(handle);
+}
+
+// Path utilities
+
+func join_path(a: string, b: string): string {
+    return fs__join_path(a, b);
+}
+
+func dirname(path: string): string {
+    return fs__dirname(path);
+}
+
+func basename(path: string): string {
+    return fs__basename(path);
+}
+
+func extension(path: string): string {
+    return fs__extension(path);
+}
+
+func abs_path(path: string): string {
+    return fs__abs_path(path);
+}
+
+// Metadata & temp
+
+func modified_time(path: string): i64 {
+    return fs__modified_time(path);
+}
+
+func temp_dir(): string {
+    return fs__temp_dir();
 }
