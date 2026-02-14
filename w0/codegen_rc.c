@@ -27,32 +27,26 @@
 // rc_cleanup_all is used before early returns in conditional branches where
 // the var list must remain intact for the non-returning path.
 
-// Return the appropriate __rc_dec function name for a type (type-specific or generic)
-const char* get_dec_func_for_type(Type* t) {
+// Return the cleanup function name for a type, or NULL if none needed.
+// Returns a malloc'd string. Caller must free.
+char* get_cleanup_func_for_type(Type* t) {
     if (t && t->kind == TYPE_STRUCT && (t->as.struc.has_drop || t->as.struc.has_rc_fields)) {
-        // Build "__rc_dec_TypeName"
-        size_t len = strlen("__rc_dec_") + strlen(t->as.struc.name) + 1;
+        size_t len = strlen("__") + strlen(t->as.struc.name) + strlen("_cleanup") + 1;
         char*  buf = xmalloc(len);
-        snprintf(buf, len, "__rc_dec_%s", t->as.struc.name);
-        return buf;
-    }
-    if (t && t->kind == TYPE_ENUM && t->as.enm.has_rc_fields) {
-        size_t len = strlen("__rc_dec_") + strlen(t->as.enm.name) + 1;
-        char*  buf = xmalloc(len);
-        snprintf(buf, len, "__rc_dec_%s", t->as.enm.name);
+        snprintf(buf, len, "__%s_cleanup", t->as.struc.name);
         return buf;
     }
     if (t && t->kind == TYPE_STRINGBUILDER) {
-        return xstrdup("__rc_dec_StringBuilder");
+        return xstrdup("__StringBuilder_cleanup");
     }
     if (t && t->kind == TYPE_VEC) {
         const char* elem_tname = type_mangle_name(t->as.vec.elem);
-        size_t      len        = strlen("__rc_dec_Vec_") + strlen(elem_tname) + 1;
+        size_t      len        = strlen("__Vec_") + strlen(elem_tname) + strlen("_cleanup") + 1;
         char*       buf        = xmalloc(len);
-        snprintf(buf, len, "__rc_dec_Vec_%s", elem_tname);
+        snprintf(buf, len, "__Vec_%s_cleanup", elem_tname);
         return buf;
     }
-    return xstrdup("__rc_dec");
+    return NULL;
 }
 
 // Return the appropriate __rc_inc function name for a type (enum-specific or generic)
@@ -67,13 +61,22 @@ const char* get_inc_func_for_type(Type* t) {
 }
 
 // Register an RC-managed variable for scope-based cleanup tracking
-void rc_push_var(CodeGen* gen, const char* name, const char* dec_func, Type* type) {
+void rc_push_var(CodeGen* gen, const char* name, Type* type) {
     VEC_GROW(gen->rc.vars, gen->rc.count, gen->rc.capacity);
     gen->rc.vars[gen->rc.count].name        = xstrdup(name);
-    gen->rc.vars[gen->rc.count].dec_func    = xstrdup(dec_func);
     gen->rc.vars[gen->rc.count].type        = type;
     gen->rc.vars[gen->rc.count].scope_depth = gen->rc.depth;
     gen->rc.count++;
+}
+
+// Emit the appropriate dec call for an RC variable (enum value types need type-specific dec)
+static void emit_rc_dec_var(CodeGen* gen, RcVar* var) {
+    Type* t = var->type;
+    if (t && t->kind == TYPE_ENUM && t->as.enm.has_rc_fields) {
+        emit(gen, "__rc_dec_%s(%s)", t->as.enm.name, var->name);
+    } else {
+        emit(gen, "__rc_dec(%s)", var->name);
+    }
 }
 
 // Emit dec for vars at the given depth, remove them from list
@@ -82,9 +85,9 @@ void rc_cleanup_scope(CodeGen* gen, int depth) {
     for (int i = 0; i < gen->rc.count; i++) {
         if (gen->rc.vars[i].scope_depth == depth) {
             emit_indent(gen);
-            emit(gen, "%s(%s);\n", gen->rc.vars[i].dec_func, gen->rc.vars[i].name);
+            emit_rc_dec_var(gen, &gen->rc.vars[i]);
+            emit(gen, ";\n");
             free(gen->rc.vars[i].name);
-            free(gen->rc.vars[i].dec_func);
         } else {
             gen->rc.vars[dst++] = gen->rc.vars[i];
         }
@@ -99,7 +102,8 @@ void rc_cleanup_all(CodeGen* gen, const char* skip_name) {
             continue;
         }
         emit_indent(gen);
-        emit(gen, "%s(%s);\n", gen->rc.vars[i].dec_func, gen->rc.vars[i].name);
+        emit_rc_dec_var(gen, &gen->rc.vars[i]);
+        emit(gen, ";\n");
     }
 }
 
@@ -107,19 +111,9 @@ void rc_cleanup_all(CodeGen* gen, const char* skip_name) {
 void rc_clear_all(CodeGen* gen) {
     for (int i = 0; i < gen->rc.count; i++) {
         free(gen->rc.vars[i].name);
-        free(gen->rc.vars[i].dec_func);
     }
     gen->rc.count = 0;
     gen->rc.depth = 0;
-}
-
-// Look up the stored dec_func for a tracked RC variable
-const char* rc_get_dec_func(CodeGen* gen, const char* name) {
-    for (int i = 0; i < gen->rc.count; i++) {
-        if (strcmp(gen->rc.vars[i].name, name) == 0)
-            return gen->rc.vars[i].dec_func;
-    }
-    return "__rc_dec";
 }
 
 // Look up the stored Type* for a tracked RC variable
@@ -320,83 +314,6 @@ static int collect_rc_field_info(CodeGen* gen, Node* struct_decl, RcFieldInfo** 
     return count;
 }
 
-// Check if a field type needs a type-specific __rc_dec_TypeName (has Drop or RC fields)
-static int field_needs_custom_dec(CodeGen* gen, const char* field_type_name, Node* ast) {
-    if (!field_type_name)
-        return 0;
-    if (struct_implements_drop(gen, field_type_name))
-        return 1;
-    // Check if field type has RC fields (scan non-generic structs)
-    for (int m = 0; m < ast->as.program.modules.count; m++) {
-        Node* mod = ast->as.program.modules.nodes[m];
-        if (!mod || mod->type != NODE_MODULE)
-            continue;
-        for (int i = 0; i < mod->as.module.decls.count; i++) {
-            Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type == NODE_STRUCT_DECL && decl->as.struct_decl.type_param_count == 0 &&
-                strcmp(decl->as.struct_decl.name, field_type_name) == 0) {
-                for (int f = 0; f < decl->as.struct_decl.fields.count; f++) {
-                    Node* field = decl->as.struct_decl.fields.nodes[f];
-                    if (field->as.field.type && type_node_has_rc(gen, field->as.field.type))
-                        return 1;
-                }
-                return 0;
-            }
-        }
-    }
-    // Check generic instances (e.g., field type "Box_Inner")
-    for (int i = 0; i < gen->checker.instance_count; i++) {
-        if (strcmp(gen->checker.instances[i].mangled_name, field_type_name) == 0) {
-            Type* t = gen->checker.instances[i].type;
-            if (t && t->kind == TYPE_STRUCT && (t->as.struc.has_drop || t->as.struc.has_rc_fields))
-                return 1;
-            return 0;
-        }
-    }
-    return 0;
-}
-
-// Emit forward declarations for __rc_dec_TypeName functions (needed for cross-references)
-void emit_struct_rc_dec_forward_decls(CodeGen* gen, Node* ast) {
-    for (int m = 0; m < ast->as.program.modules.count; m++) {
-        Node* mod = ast->as.program.modules.nodes[m];
-        if (!mod || mod->type != NODE_MODULE)
-            continue;
-        for (int i = 0; i < mod->as.module.decls.count; i++) {
-            Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type != NODE_STRUCT_DECL)
-                continue;
-            if (decl->as.struct_decl.type_param_count > 0)
-                continue;
-            const char* sname     = decl->as.struct_decl.name;
-            int         needs_dec = struct_implements_drop(gen, sname);
-            if (!needs_dec) {
-                for (int f = 0; f < decl->as.struct_decl.fields.count; f++) {
-                    Node* field = decl->as.struct_decl.fields.nodes[f];
-                    if (field->as.field.type && type_node_has_rc(gen, field->as.field.type)) {
-                        needs_dec = 1;
-                        break;
-                    }
-                }
-            }
-            if (needs_dec) {
-                emit(gen, "static inline void __rc_dec_%s(%s* ptr);\n", sname, sname);
-            }
-        }
-    }
-    for (int i = 0; i < gen->checker.instance_count; i++) {
-        GenericInstance* info = &gen->checker.instances[i];
-        Type*            t    = info->type;
-        if (!t || t->kind != TYPE_STRUCT)
-            continue;
-        if (struct_implements_drop(gen, info->base_name) || t->as.struc.has_rc_fields) {
-            emit(gen, "static inline void __rc_dec_%s(%s* ptr);\n", info->mangled_name,
-                 info->mangled_name);
-        }
-    }
-    emit(gen, "\n");
-}
-
 // Emit push, pop, insert, remove, swap_remove, clear, reserve, shrink_to_fit, contains, sort,
 // first, and last method implementations for each Vec type instance
 void emit_vec_methods(CodeGen* gen) {
@@ -579,15 +496,7 @@ void emit_vec_methods(CodeGen* gen) {
         emit(gen, "static inline void __Vec_%s_clear(__Vec_%s* self) {\n", elem_tname, elem_tname);
         if (elem_is_ptr) {
             emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
-            if (elem_type->kind == TYPE_VEC) {
-                emit(gen, "        __rc_dec_Vec_%s(self->data[i]);\n",
-                     type_mangle_name(elem_type->as.vec.elem));
-            } else if (elem_type->kind == TYPE_STRUCT &&
-                       (elem_type->as.struc.has_drop || elem_type->as.struc.has_rc_fields)) {
-                emit(gen, "        __rc_dec_%s(self->data[i]);\n", elem_type->as.struc.name);
-            } else {
-                emit(gen, "        __rc_dec(self->data[i]);\n");
-            }
+            emit(gen, "        __rc_dec(self->data[i]);\n");
             emit(gen, "    }\n");
         }
         emit(gen, "    self->count = 0;\n");
@@ -671,57 +580,29 @@ void emit_vec_methods(CodeGen* gen) {
     }
 }
 
-// Emit __rc_dec_Vec_T functions that free Vec elements and the Vec itself
-void emit_vec_rc_dec(CodeGen* gen) {
-    for (int i = 0; i < gen->checker.vec_count; i++) {
-        VecInstance* inst       = &gen->checker.vecs[i];
-        const char*  elem_tname = type_mangle_name(inst->elem_type);
-        emit(gen, "static inline void __rc_dec_Vec_%s(__Vec_%s* ptr);\n", elem_tname, elem_tname);
-    }
-
-    // Emit __rc_dec_Vec_* definitions
+// Emit __Vec_T_cleanup functions that free Vec elements and data array
+void emit_vec_cleanup(CodeGen* gen) {
     for (int i = 0; i < gen->checker.vec_count; i++) {
         VecInstance* inst        = &gen->checker.vecs[i];
         Type*        elem_type   = inst->elem_type;
         const char*  elem_tname  = type_mangle_name(elem_type);
         int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC);
 
-        emit(gen, "static inline void __rc_dec_Vec_%s(__Vec_%s* ptr) {\n", elem_tname, elem_tname);
-        emit(gen, "    if (!ptr) return;\n");
-        emit(gen, "    __RcHeader* h = (__RcHeader*)ptr - 1;\n");
-        emit(gen, "    if (--h->refcount == 0) {\n");
+        emit(gen, "static inline void __Vec_%s_cleanup(void* raw) {\n", elem_tname);
+        emit(gen, "    __Vec_%s* ptr = (__Vec_%s*)raw;\n", elem_tname, elem_tname);
         if (elem_is_ptr) {
-            emit(gen, "        for (int64_t i = 0; i < ptr->count; i++) {\n");
-            if (elem_type->kind == TYPE_VEC) {
-                emit(gen, "            __rc_dec_Vec_%s(ptr->data[i]);\n",
-                     type_mangle_name(elem_type->as.vec.elem));
-            } else if (elem_type->kind == TYPE_STRUCT &&
-                       (elem_type->as.struc.has_drop || elem_type->as.struc.has_rc_fields)) {
-                emit(gen, "            __rc_dec_%s(ptr->data[i]);\n", elem_type->as.struc.name);
-            } else {
-                emit(gen, "            __rc_dec(ptr->data[i]);\n");
-            }
-            emit(gen, "        }\n");
+            emit(gen, "    for (int64_t i = 0; i < ptr->count; i++) {\n");
+            emit(gen, "        __rc_dec(ptr->data[i]);\n");
+            emit(gen, "    }\n");
         }
-        emit(gen, "        free(ptr->data);\n");
-        if (gen->rc.debug) {
-            emit(gen, "        fprintf(stderr, \"RC_FREE: %%p\\n\", (void*)ptr);\n");
-        }
-        emit(gen, "        free(h);\n");
-        if (gen->rc.debug) {
-            emit(gen, "    } else {\n");
-            emit(gen, "        fprintf(stderr, \"RC_DEC: %%p (rc=%%zu)\\n\", (void*)ptr, "
-                      "h->refcount);\n");
-        }
-        emit(gen, "    }\n");
+        emit(gen, "    free(ptr->data);\n");
         emit(gen, "}\n\n");
     }
 }
 
-// Emit __rc_dec_TypeName definitions for structs with Drop or RC-managed fields
-void emit_struct_rc_dec(CodeGen* gen, Node* ast) {
-    // Emit type-specific __rc_dec_TypeName functions for structs with Drop or RC fields
-    // Non-generic structs: scan modules for struct decls with resolved types
+// Emit __TypeName_cleanup definitions for structs with Drop or RC-managed fields
+void emit_struct_cleanup(CodeGen* gen, Node* ast) {
+    // Non-generic structs
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
@@ -742,35 +623,19 @@ void emit_struct_rc_dec(CodeGen* gen, Node* ast) {
             if (!has_drop && rc_field_count == 0)
                 continue;
 
-            emit(gen, "static inline void __rc_dec_%s(%s* ptr) {\n", sname, sname);
-            emit(gen, "    if (!ptr) return;\n");
-            emit(gen, "    __RcHeader* h = (__RcHeader*)ptr - 1;\n");
-            emit(gen, "    if (--h->refcount == 0) {\n");
+            emit(gen, "static inline void __%s_cleanup(void* raw) {\n", sname);
+            emit(gen, "    %s* ptr = (%s*)raw;\n", sname, sname);
             if (has_drop) {
-                emit(gen, "        %s_drop(ptr);\n", sname);
+                emit(gen, "    %s_drop(ptr);\n", sname);
             }
             for (int f = 0; f < rc_field_count; f++) {
-                const char* field_tname = rc_fields[f].type_name;
                 if (rc_fields[f].is_enum) {
-                    emit(gen, "        __rc_dec_%s(ptr->%s);\n", field_tname,
-                         rc_fields[f].field_name);
-                } else if (field_needs_custom_dec(gen, field_tname, ast)) {
-                    emit(gen, "        __rc_dec_%s(ptr->%s);\n", field_tname,
+                    emit(gen, "    __rc_dec_%s(ptr->%s);\n", rc_fields[f].type_name,
                          rc_fields[f].field_name);
                 } else {
-                    emit(gen, "        __rc_dec(ptr->%s);\n", rc_fields[f].field_name);
+                    emit(gen, "    __rc_dec(ptr->%s);\n", rc_fields[f].field_name);
                 }
             }
-            if (gen->rc.debug) {
-                emit(gen, "        fprintf(stderr, \"RC_FREE: %%p\\n\", (void*)ptr);\n");
-            }
-            emit(gen, "        free(h);\n");
-            if (gen->rc.debug) {
-                emit(gen, "    } else {\n");
-                emit(gen, "        fprintf(stderr, \"RC_DEC: %%p (rc=%%zu)\\n\", (void*)ptr, "
-                          "h->refcount);\n");
-            }
-            emit(gen, "    }\n");
             emit(gen, "}\n\n");
 
             for (int f = 0; f < rc_field_count; f++) {
@@ -781,7 +646,7 @@ void emit_struct_rc_dec(CodeGen* gen, Node* ast) {
         }
     }
 
-    // Generic instances: emit __rc_dec_MangledName for those with Drop or RC fields
+    // Generic instances
     for (int i = 0; i < gen->checker.instance_count; i++) {
         GenericInstance* info = &gen->checker.instances[i];
         Type*            t    = info->type;
@@ -795,37 +660,19 @@ void emit_struct_rc_dec(CodeGen* gen, Node* ast) {
             continue;
 
         const char* mname = info->mangled_name;
-        emit(gen, "static inline void __rc_dec_%s(%s* ptr) {\n", mname, mname);
-        emit(gen, "    if (!ptr) return;\n");
-        emit(gen, "    __RcHeader* h = (__RcHeader*)ptr - 1;\n");
-        emit(gen, "    if (--h->refcount == 0) {\n");
+        emit(gen, "static inline void __%s_cleanup(void* raw) {\n", mname);
+        emit(gen, "    %s* ptr = (%s*)raw;\n", mname, mname);
         if (has_drop) {
-            emit(gen, "        %s_drop(ptr);\n", mname);
+            emit(gen, "    %s_drop(ptr);\n", mname);
         }
         for (int f = 0; f < t->as.struc.field_count; f++) {
             Type* ft = t->as.struc.field_types[f];
             if (ft && ft->kind == TYPE_STRUCT) {
-                if (ft->as.struc.has_drop || ft->as.struc.has_rc_fields) {
-                    emit(gen, "        __rc_dec_%s(ptr->%s);\n", ft->as.struc.name,
-                         t->as.struc.field_names[f]);
-                } else {
-                    emit(gen, "        __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
-                }
+                emit(gen, "    __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
             } else if (ft && ft->kind == TYPE_VEC) {
-                emit(gen, "        __rc_dec_Vec_%s(ptr->%s);\n", type_mangle_name(ft->as.vec.elem),
-                     t->as.struc.field_names[f]);
+                emit(gen, "    __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
             }
         }
-        if (gen->rc.debug) {
-            emit(gen, "        fprintf(stderr, \"RC_FREE: %%p\\n\", (void*)ptr);\n");
-        }
-        emit(gen, "        free(h);\n");
-        if (gen->rc.debug) {
-            emit(gen, "    } else {\n");
-            emit(gen, "        fprintf(stderr, \"RC_DEC: %%p (rc=%%zu)\\n\", (void*)ptr, "
-                      "h->refcount);\n");
-        }
-        emit(gen, "    }\n");
         emit(gen, "}\n\n");
     }
 }

@@ -520,7 +520,6 @@ void codegen_free(CodeGen* gen) {
     free(gen->defer.stack);
     for (int i = 0; i < gen->rc.count; i++) {
         free(gen->rc.vars[i].name);
-        free(gen->rc.vars[i].dec_func);
     }
     free(gen->rc.vars);
     for (int i = 0; i < gen->enums.count; i++) {
@@ -1135,10 +1134,9 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit_struct_body_typedefs(gen, ast);
     emit_function_forward_decls(gen, ast);
     emit_enum_eq_helpers(gen, ast);
-    emit_struct_rc_dec_forward_decls(gen, ast);
-    emit_vec_rc_dec(gen);
+    emit_vec_cleanup(gen);
     emit_vec_methods(gen);
-    emit_struct_rc_dec(gen, ast);
+    emit_struct_cleanup(gen, ast);
     emit_declarations(gen, ast);
     emit_generic_method_impls(gen, ast);
     if (gen->test_mode) {

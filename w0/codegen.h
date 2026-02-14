@@ -17,8 +17,7 @@ typedef struct {
 // RC-managed variable tracking entry
 typedef struct {
     char* name;
-    char* dec_func; // "__rc_dec" or "__rc_dec_TypeName"
-    Type* type;     // Type* for the RC variable (not owned)
+    Type* type; // Type* for the RC variable (not owned)
     int   scope_depth;
 } RcVar;
 
