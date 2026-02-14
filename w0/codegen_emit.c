@@ -588,6 +588,11 @@ static void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
 
 // Emit a function declaration: signature, body, defer cleanup, and RC cleanup
 static void emit_func_decl(CodeGen* gen, Node* node) {
+    // Skip body-less non-extern methods (duck-type trait declarations)
+    if (node->as.func_decl.body == NULL && !node->as.func_decl.is_extern) {
+        return;
+    }
+
     int is_method = (node->as.func_decl.receiver_type != NULL);
 
     // In test mode, skip user's main function
@@ -1302,6 +1307,9 @@ static void collect_decl_functions(Node* decl, Node*** funcs, int* func_count, i
 static int should_emit_non_generic_forward_decl(CodeGen* gen, func_decl_node* fdn) {
     int is_method = (fdn->receiver_type != NULL);
 
+    if (fdn->body == NULL && !fdn->is_extern) {
+        return 0;
+    }
     if (is_method && fdn->receiver_type_args.count > 0) {
         return 0;
     }

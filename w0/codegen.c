@@ -389,7 +389,8 @@ void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
             // Direct generic methods: func (Box<T>) get(): T
-            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type != NULL &&
+            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.body != NULL &&
+                decl->as.func_decl.receiver_type != NULL &&
                 decl->as.func_decl.receiver_type_args.count > 0 &&
                 strcmp(decl->as.func_decl.receiver_type, struct_name) == 0) {
                 VEC_GROW(methods, count, capacity);
@@ -399,7 +400,7 @@ void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods
             if (decl->type == NODE_IMPL_DECL) {
                 for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
                     Node* method = decl->as.impl_decl.methods.nodes[j];
-                    if (method->type == NODE_FUNC_DECL &&
+                    if (method->type == NODE_FUNC_DECL && method->as.func_decl.body != NULL &&
                         method->as.func_decl.receiver_type != NULL &&
                         method->as.func_decl.receiver_type_args.count > 0 &&
                         strcmp(method->as.func_decl.receiver_type, struct_name) == 0) {
