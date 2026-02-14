@@ -533,18 +533,6 @@ void emit_vec_methods(CodeGen* gen) {
             emit(gen, "}\n\n");
         }
 
-        // Pop
-        emit(gen, "static inline ");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, " __Vec_%s_pop(__Vec_%s* self) {\n", elem_tname, elem_tname);
-        emit(gen, "    if (self->count == 0) {\n");
-        emit(gen, "        fprintf(stderr, \"Panic: pop from empty Vec\\n\");\n");
-        emit(gen, "        exit(1);\n");
-        emit(gen, "    }\n");
-        emit(gen, "    self->count--;\n");
-        emit(gen, "    return self->data[self->count];\n");
-        emit(gen, "}\n\n");
-
         // Remove
         emit(gen, "static inline ");
         emit_resolved_type(gen, elem_type);
@@ -663,6 +651,20 @@ void emit_vec_methods(CodeGen* gen) {
             emit(gen,
                  "    return (Option_%s){.tag = Option_%s_Some, "
                  ".Some = {.f0 = self->data[self->count - 1]}};\n",
+                 option_tname, option_tname);
+            emit(gen, "}\n\n");
+
+            // Pop — returns Option<T>, transfers ownership (no __rc_inc)
+            emit(gen, "static inline Option_%s __Vec_%s_pop(__Vec_%s* self) {\n", option_tname,
+                 elem_tname, elem_tname);
+            emit(gen, "    if (self->count == 0) {\n");
+            emit(gen, "        return (Option_%s){.tag = Option_%s_None};\n", option_tname,
+                 option_tname);
+            emit(gen, "    }\n");
+            emit(gen, "    self->count--;\n");
+            emit(gen,
+                 "    return (Option_%s){.tag = Option_%s_Some, "
+                 ".Some = {.f0 = self->data[self->count]}};\n",
                  option_tname, option_tname);
             emit(gen, "}\n\n");
         }
