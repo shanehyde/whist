@@ -412,6 +412,12 @@ void print_ast(Node* node, int depth) {
     case NODE_USE_DECL:
         print_use_decl(node);
         break;
+    case NODE_TEST_DECL:
+        printf("TestDecl: \"%.*s\"\n", node->as.test_decl.name_length, node->as.test_decl.name);
+        print_indent(depth + 1);
+        printf("Body:\n");
+        print_ast(node->as.test_decl.body, depth + 2);
+        break;
 
     // Statements
     case NODE_BLOCK:

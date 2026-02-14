@@ -47,6 +47,7 @@ typedef enum {
     TOK_IMPORT,
     TOK_AS,
     TOK_USE,
+    TOK_TEST,
 
     // Operators
     TOK_PLUS,    // +

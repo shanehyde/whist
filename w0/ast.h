@@ -83,6 +83,7 @@ typedef enum {
     NODE_IMPL_DECL,
     NODE_TYPE_ALIAS,
     NODE_USE_DECL,
+    NODE_TEST_DECL,
 
     NODE_EXTERN_MODULE,
     NODE_MODULE,
@@ -511,6 +512,13 @@ struct Node {
             int*   symbol_name_lengths;
             int    symbol_count;
         } use_decl;
+
+        // Test block: test "name" { body }
+        struct {
+            char* name;
+            int   name_length;
+            Node* body;
+        } test_decl;
 
         struct {
             char*    module_name;

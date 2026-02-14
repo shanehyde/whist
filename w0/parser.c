@@ -2141,10 +2141,46 @@ static int parse_import_stmt(Parser* parser, Node* program, Node* current_module
 }
 
 // ============================================================================
+// Test Declaration Parsing
+// ============================================================================
+
+static Node* parse_test_decl(Parser* parser) {
+    int line = parser->previous.line;
+    int col  = parser->previous.column;
+
+    if (parser->current.type != TOK_STRING) {
+        parse_error(parser, "Expected test name string after 'test'");
+        return NULL;
+    }
+    advance_token(parser);
+
+    // Extract the string contents (without quotes)
+    const char* name_start  = parser->previous.start + 1;       // skip opening quote
+    int         name_length = (int)parser->previous.length - 2; // exclude both quotes
+
+    Node* node              = node_new(NODE_TEST_DECL, line, col);
+    node->as.test_decl.name = xmalloc(name_length + 1);
+    memcpy(node->as.test_decl.name, name_start, name_length);
+    node->as.test_decl.name[name_length] = '\0';
+    node->as.test_decl.name_length       = name_length;
+
+    consume_token(parser, TOK_LBRACE, "Expected '{' after test name");
+    node->as.test_decl.body = parse_block(parser);
+
+    return node;
+}
+
+// ============================================================================
 // Top-level Declaration Parsing
 // ============================================================================
 
 static Node* parse_declaration(Parser* parser) {
+    // test blocks have no visibility modifier
+    if (check_token(parser, TOK_TEST)) {
+        advance_token(parser);
+        return parse_test_decl(parser);
+    }
+
     int is_public      = match_token(parser, TOK_PUBLIC);
     int has_visibility = is_public;
 
@@ -2152,6 +2188,13 @@ static Node* parse_declaration(Parser* parser) {
         has_visibility = match_token(parser, TOK_PRIVATE);
         is_public      = !has_visibility; // default to public if no modifier
     }
+
+    // Error if visibility modifier used with test
+    if (has_visibility && check_token(parser, TOK_TEST)) {
+        parse_error(parser, "Test blocks cannot have visibility modifiers");
+        return NULL;
+    }
+
     if (match_token(parser, TOK_EXTERN)) {
         // Extern defaults to private when no visibility modifier
         return parse_extern_decls(parser, has_visibility ? is_public : 0);

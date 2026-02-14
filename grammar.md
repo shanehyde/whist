@@ -26,6 +26,7 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
                | [ 'public' | 'private' ] <var-decl>
                | <impl-decl>
                | <extern-module>
+               | <test-decl>
 ```
 
 **Visibility:** Top-level declarations are private by default (file-local scope). The `public` keyword gives a declaration external linkage. In generated C code, private declarations are prefixed with `static`. The `main` function is always treated as having external linkage regardless of the `public` modifier.
@@ -157,6 +158,25 @@ Aliases are fully interchangeable with the underlying type: `var id: UserId = 42
 ```
 
 **Tuple destructuring:** `var (a, b) = expr;` unpacks a tuple into individual variables. The number of elements must match the tuple's arity. Nested patterns are supported: `var (x, (y, z)) = (1, (2, 3));` unpacks nested tuples.
+
+### Test Declaration
+
+```bnf
+<test-decl> ::= 'test' <string-literal> '{' <block> '}'
+```
+
+Test declarations define inline unit tests. Each test has a name (string literal) and a body block. Test blocks are top-level declarations that cannot have visibility modifiers (`public test` or `private test` is an error).
+
+In normal compilation, test blocks are completely ignored (zero overhead). When invoked with `w0 test`, test blocks are compiled and executed with pass/fail reporting.
+
+**`assert` builtin:** Inside test blocks (or anywhere), `assert(expr)` validates that `expr` is `true`. The argument must be a `bool` expression. On failure, `assert` prints the stringified expression and source location, then marks the test as failed. If a user-defined `assert` function exists in scope, it takes precedence over the builtin.
+
+```whist
+test "arithmetic" {
+    assert(1 + 1 == 2);
+    assert(add(2, 3) == 5);
+}
+```
 
 ---
 
@@ -395,8 +415,8 @@ as       break    by          const     continue  defer
 else     enum     extern      false     for       foreach
 func     if       impl        import    in        match
 new      null     public      private   return    self
-struct   trait    true        type      use       var
-while
+struct   test     trait       true      type      use
+var      while
 ```
 
 ### Identifiers

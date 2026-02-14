@@ -318,6 +318,10 @@ void node_free(Node* node) {
         free(node->as.use_decl.symbol_names);
         free(node->as.use_decl.symbol_name_lengths);
         break;
+    case NODE_TEST_DECL:
+        free(node->as.test_decl.name);
+        node_free(node->as.test_decl.body);
+        break;
     case NODE_EXTERN_MODULE:
         nodelist_free(&node->as.extern_module.decls);
         free(node->as.extern_module.module_name);
@@ -600,6 +604,11 @@ Node* node_clone(Node* node) {
                 c->as.match_arm.bindings[i] = xstrdup(node->as.match_arm.bindings[i]);
             }
         }
+        break;
+    case NODE_TEST_DECL:
+        c->as.test_decl.name        = xstrdup(node->as.test_decl.name);
+        c->as.test_decl.name_length = node->as.test_decl.name_length;
+        c->as.test_decl.body        = node_clone(node->as.test_decl.body);
         break;
     case NODE_PARAM:
         c->as.param.name        = xstrdup(node->as.param.name);

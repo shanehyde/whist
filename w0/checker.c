@@ -43,6 +43,7 @@ static void check_trait_decl(Checker* checker, Node* node);
 static void check_type_alias_decl(Checker* checker, Node* node);
 static void check_impl_decl(Checker* checker, Node* node);
 static void check_use_decl(Checker* checker, Node* node);
+static void check_test_decl(Checker* checker, Node* node);
 static int  is_prelude_symbol(Symbol* sym);
 
 // =============================================================================
@@ -1678,6 +1679,21 @@ static void check_use_decl(Checker* checker, Node* node) {
     }
 }
 
+// Type-check a test block: push scope, check body statements, pop scope
+static void check_test_decl(Checker* checker, Node* node) {
+    checker_push_scope(checker);
+
+    // Check body statements like a void function body
+    Node* body = node->as.test_decl.body;
+    if (body && body->type == NODE_BLOCK) {
+        for (int i = 0; i < body->as.block.stmts.count; i++) {
+            check_statement(checker, body->as.block.stmts.nodes[i]);
+        }
+    }
+
+    checker_pop_scope(checker);
+}
+
 // Dispatch declaration type-checking based on node type
 static void check_decl(Checker* checker, Node* node) {
     if (!node)
@@ -1714,6 +1730,10 @@ static void check_decl(Checker* checker, Node* node) {
 
     case NODE_USE_DECL:
         check_use_decl(checker, node);
+        break;
+
+    case NODE_TEST_DECL:
+        check_test_decl(checker, node);
         break;
 
     case NODE_VAR_DECL:

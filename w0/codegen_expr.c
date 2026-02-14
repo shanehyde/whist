@@ -430,6 +430,21 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
         return;
     }
 
+    // assert(expr) builtin
+    if (func->type == NODE_IDENT && func->as.ident.length == 6 &&
+        strncmp(func->as.ident.name, "assert", 6) == 0) {
+        Node*       arg      = node->as.call.args.nodes[0];
+        char*       expr_str = stringify_expr(arg);
+        const char* file     = gen->source_file ? gen->source_file : "<unknown>";
+        emit(gen, "do { if (!(");
+        emit_expr(gen, arg);
+        emit(gen,
+             ")) { fprintf(stderr, \"ASSERT FAILED: %%s\\n  at %%s:%%d\\n\", "
+             "\"%s\", \"%s\", %d); longjmp(__test_jmp_buf, 1); } } while(0)",
+             expr_str, file, node->line);
+        return;
+    }
+
     const char* callee_module_name = NULL;
     const char* callee_struct_name = NULL;
     if (func->type == NODE_MEMBER) {

@@ -115,12 +115,18 @@ typedef struct {
     const char* current_module;
     // 1 if currently emitting an enum method body
     int in_enum_method;
+    // Test mode: 1 = emit test runner instead of user main
+    int test_mode;
+    int test_index; // Counter for emitting __test_N function names
+    // Source file path for assert error messages
+    const char* source_file;
 } CodeGen;
 
 // Codegen lifecycle:
 // - codegen_init stores borrowed checker-derived metadata and output handles.
 // - codegen_emit consumes AST + semantic annotations to emit C; it does not own AST/checker data.
-void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_debug);
+void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_debug, int test_mode,
+                  const char* source_file);
 void codegen_emit(CodeGen* gen, Node* ast);
 void codegen_free(CodeGen* gen);
 

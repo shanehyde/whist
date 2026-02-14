@@ -462,7 +462,8 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
 }
 
 // Initialize the code generator with output stream, checker results, and RC debug flag
-void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_debug) {
+void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_debug, int test_mode,
+                  const char* source_file) {
     gen->out.file       = out;
     gen->out.indent     = 0;
     gen->out.temp_count = 0;
@@ -510,6 +511,9 @@ void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_d
     gen->tuple_type_capacity = 0;
     gen->current_module      = NULL;
     gen->in_enum_method      = 0;
+    gen->test_mode           = test_mode;
+    gen->test_index          = 0;
+    gen->source_file         = source_file;
 }
 
 void codegen_free(CodeGen* gen) {
@@ -567,7 +571,12 @@ static void emit_c_headers(CodeGen* gen) {
     if (gen->rc.debug) {
         emit(gen, "#define WHIST_RC_DEBUG\n");
     }
-    emit(gen, "#include <whist_runtime.h>\n\n");
+    emit(gen, "#include <whist_runtime.h>\n");
+    if (gen->test_mode) {
+        emit(gen, "#include <setjmp.h>\n");
+        emit(gen, "static jmp_buf __test_jmp_buf;\n");
+    }
+    emit(gen, "\n");
 }
 
 // Return 1 if the program declares a top-level `main` function in the main module.
@@ -599,6 +608,154 @@ static void emit_main_wrapper(CodeGen* gen) {
     emit(gen, "    __w0_argv = argv;\n");
     emit(gen, "    return __w0_user_main();\n");
     emit(gen, "}\n\n");
+}
+
+// Stringify an expression AST node into a human-readable string for assert messages
+static void stringify_expr_to(Node* node, char* buf, int buf_size, int* pos) {
+    if (!node || *pos >= buf_size - 1)
+        return;
+
+#define APPEND(s)                                                                                  \
+    do {                                                                                           \
+        const char* _s = (s);                                                                      \
+        while (*_s && *pos < buf_size - 1)                                                         \
+            buf[(*pos)++] = *_s++;                                                                 \
+    } while (0)
+
+    switch (node->type) {
+    case NODE_INT_LIT: {
+        char tmp[32];
+        snprintf(tmp, sizeof(tmp), "%ld", node->as.int_lit.value);
+        APPEND(tmp);
+        break;
+    }
+    case NODE_FLOAT_LIT: {
+        char tmp[32];
+        snprintf(tmp, sizeof(tmp), "%g", node->as.float_lit.value);
+        APPEND(tmp);
+        break;
+    }
+    case NODE_BOOL_LIT:
+        APPEND(node->as.bool_lit.value ? "true" : "false");
+        break;
+    case NODE_STRING_LIT:
+        APPEND("\"");
+        APPEND(node->as.string_lit.value);
+        APPEND("\"");
+        break;
+    case NODE_NULL_LIT:
+        APPEND("null");
+        break;
+    case NODE_IDENT:
+        for (int i = 0; i < node->as.ident.length && *pos < buf_size - 1; i++)
+            buf[(*pos)++] = node->as.ident.name[i];
+        break;
+    case NODE_BINARY: {
+        APPEND("(");
+        stringify_expr_to(node->as.binary.left, buf, buf_size, pos);
+        APPEND(" ");
+        APPEND(token_type_symbol(node->as.binary.op));
+        APPEND(" ");
+        stringify_expr_to(node->as.binary.right, buf, buf_size, pos);
+        APPEND(")");
+        break;
+    }
+    case NODE_UNARY:
+        APPEND(token_type_symbol(node->as.unary.op));
+        stringify_expr_to(node->as.unary.operand, buf, buf_size, pos);
+        break;
+    case NODE_CALL: {
+        stringify_expr_to(node->as.call.func, buf, buf_size, pos);
+        APPEND("(");
+        for (int i = 0; i < node->as.call.args.count; i++) {
+            if (i > 0)
+                APPEND(", ");
+            stringify_expr_to(node->as.call.args.nodes[i], buf, buf_size, pos);
+        }
+        APPEND(")");
+        break;
+    }
+    case NODE_MEMBER:
+        stringify_expr_to(node->as.member.object, buf, buf_size, pos);
+        APPEND(".");
+        for (int i = 0; i < node->as.member.length && *pos < buf_size - 1; i++)
+            buf[(*pos)++] = node->as.member.name[i];
+        break;
+    case NODE_INDEX:
+        stringify_expr_to(node->as.index.object, buf, buf_size, pos);
+        APPEND("[");
+        stringify_expr_to(node->as.index.index, buf, buf_size, pos);
+        APPEND("]");
+        break;
+    default:
+        APPEND("...");
+        break;
+    }
+#undef APPEND
+}
+
+char* stringify_expr(Node* node) {
+    static char buf[512];
+    int         pos = 0;
+    stringify_expr_to(node, buf, sizeof(buf), &pos);
+    buf[pos] = '\0';
+    return buf;
+}
+
+// Collect all NODE_TEST_DECL nodes from the program AST
+typedef struct {
+    Node** tests;
+    int    count;
+    int    capacity;
+} TestCollector;
+
+static void collect_test_decls(Node* ast, TestCollector* tc) {
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        if (strcmp(mod->as.module.name, "main") != 0)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl && decl->type == NODE_TEST_DECL) {
+                VEC_GROW(tc->tests, tc->count, tc->capacity);
+                tc->tests[tc->count++] = decl;
+            }
+        }
+    }
+}
+
+// Emit the test runner main function
+static void emit_test_runner(CodeGen* gen, Node* ast) {
+    TestCollector tc = {NULL, 0, 0};
+    collect_test_decls(ast, &tc);
+
+    emit(gen, "int main(int argc, char** argv) {\n");
+    emit(gen, "    __w0_argc = argc;\n");
+    emit(gen, "    __w0_argv = argv;\n");
+    emit(gen, "    int __passed = 0, __failed = 0;\n");
+
+    for (int i = 0; i < tc.count; i++) {
+        Node* t = tc.tests[i];
+        emit(gen, "    if (setjmp(__test_jmp_buf) == 0) {\n");
+        emit(gen, "        __test_%d();\n", i);
+        emit(gen, "        __passed++;\n");
+        emit(gen, "        fprintf(stderr, \"PASS: %.*s\\n\");\n", t->as.test_decl.name_length,
+             t->as.test_decl.name);
+        emit(gen, "    } else {\n");
+        emit(gen, "        __failed++;\n");
+        emit(gen, "        fprintf(stderr, \"FAIL: %.*s\\n\");\n", t->as.test_decl.name_length,
+             t->as.test_decl.name);
+        emit(gen, "    }\n");
+    }
+
+    emit(gen, "    fprintf(stderr, \"\\n%%d passed, %%d failed, %%d total\\n\", __passed, "
+              "__failed, __passed + __failed);\n");
+    emit(gen, "    return __failed > 0 ? 1 : 0;\n");
+    emit(gen, "}\n");
+
+    free(tc.tests);
 }
 
 // Build the list of all enum type names (non-generic and generic instances)
@@ -984,7 +1141,9 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit_struct_rc_dec(gen, ast);
     emit_declarations(gen, ast);
     emit_generic_method_impls(gen, ast);
-    if (has_user_main) {
+    if (gen->test_mode) {
+        emit_test_runner(gen, ast);
+    } else if (has_user_main) {
         emit_main_wrapper(gen);
     }
 }
