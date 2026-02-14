@@ -102,7 +102,7 @@ GenericInstance* lookup_generic_instance(Checker* checker, const char* mangled_n
 
 // Register a generic free function definition
 void register_generic_func_def(Checker* checker, const char* name, char** type_params,
-                                char** type_param_bounds, int type_param_count, Node* decl) {
+                               char** type_param_bounds, int type_param_count, Node* decl) {
     // Check for duplicate
     for (int i = 0; i < checker->generics.func_def_count; i++) {
         if (strcmp(checker->generics.func_defs[i].name, name) == 0) {
@@ -112,7 +112,7 @@ void register_generic_func_def(Checker* checker, const char* name, char** type_p
 
     VEC_GROW(checker->generics.func_defs, checker->generics.func_def_count,
              checker->generics.func_def_capacity);
-    GenericFuncDef* def = &checker->generics.func_defs[checker->generics.func_def_count++];
+    GenericFuncDef* def    = &checker->generics.func_defs[checker->generics.func_def_count++];
     def->name              = xstrdup(name);
     def->type_params       = xmalloc(type_param_count * sizeof(char*));
     def->type_param_bounds = xmalloc(type_param_count * sizeof(char*));
@@ -123,8 +123,8 @@ void register_generic_func_def(Checker* checker, const char* name, char** type_p
     }
     def->type_param_count = type_param_count;
     def->decl             = decl;
-    def->source_module    = checker->modules.current_module ? xstrdup(checker->modules.current_module)
-                                                            : NULL;
+    def->source_module =
+        checker->modules.current_module ? xstrdup(checker->modules.current_module) : NULL;
 }
 
 // Look up a generic free function definition by name
@@ -148,8 +148,9 @@ GenericFuncInstance* lookup_generic_func_instance(Checker* checker, const char* 
 }
 
 // Instantiate a generic free function with concrete type arguments
-GenericFuncInstance* instantiate_generic_func(Checker* checker, GenericFuncDef* def, Type** type_args,
-                                              int type_arg_count, int line, int col) {
+GenericFuncInstance* instantiate_generic_func(Checker* checker, GenericFuncDef* def,
+                                              Type** type_args, int type_arg_count, int line,
+                                              int col) {
     (void)line;
     (void)col;
     // Generate mangled name
@@ -180,7 +181,7 @@ GenericFuncInstance* instantiate_generic_func(Checker* checker, GenericFuncDef* 
         param_types = xmalloc(param_count * sizeof(Type*));
     }
     for (int i = 0; i < param_count; i++) {
-        Node* param = fdn->params.nodes[i];
+        Node* param    = fdn->params.nodes[i];
         param_types[i] = resolve_type(checker, param->as.param.type);
     }
     Type* return_type = type_void;
@@ -206,7 +207,7 @@ GenericFuncInstance* instantiate_generic_func(Checker* checker, GenericFuncDef* 
     }
 
     // Set function return type context
-    Type* old_return = checker->current_func_return;
+    Type* old_return             = checker->current_func_return;
     checker->current_func_return = return_type;
 
     // Type-check body statements
@@ -227,11 +228,12 @@ GenericFuncInstance* instantiate_generic_func(Checker* checker, GenericFuncDef* 
     // Store the instance
     VEC_GROW(checker->generics.func_instances, checker->generics.func_instance_count,
              checker->generics.func_instance_capacity);
-    GenericFuncInstance* inst = &checker->generics.func_instances[checker->generics.func_instance_count++];
-    inst->mangled_name  = xstrdup(mangled);
-    inst->base_name     = xstrdup(def->name);
-    inst->func_type     = func_type;
-    inst->type_args     = xmalloc(type_arg_count * sizeof(Type*));
+    GenericFuncInstance* inst =
+        &checker->generics.func_instances[checker->generics.func_instance_count++];
+    inst->mangled_name = xstrdup(mangled);
+    inst->base_name    = xstrdup(def->name);
+    inst->func_type    = func_type;
+    inst->type_args    = xmalloc(type_arg_count * sizeof(Type*));
     for (int i = 0; i < type_arg_count; i++) {
         inst->type_args[i] = type_args[i];
     }

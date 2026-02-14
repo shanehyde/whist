@@ -1837,8 +1837,7 @@ static int is_generic_func_decl(Node* decl) {
     if (!decl || decl->type != NODE_FUNC_DECL) {
         return 0;
     }
-    return decl->as.func_decl.receiver_type == NULL &&
-           decl->as.func_decl.type_param_count > 0;
+    return decl->as.func_decl.receiver_type == NULL && decl->as.func_decl.type_param_count > 0;
 }
 
 static int is_generic_impl_decl(Node* decl) {
