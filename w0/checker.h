@@ -60,6 +60,7 @@ typedef struct {
     Node** methods; // Array of NODE_FUNC_DECL
     int    method_count;
     int    method_capacity;
+    int    has_init; // 1 if an inherent impl block defines an init method
 } GenericDef;
 
 // Instantiated generic struct

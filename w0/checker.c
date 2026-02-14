@@ -1510,10 +1510,81 @@ static Type* substitute_self(Type* type, Type* concrete) {
     return type;
 }
 
+// Type-check an inherent impl block (no trait): impl Type { methods }
+static void check_inherent_impl_decl(Checker* checker, Node* node) {
+    const char* type_name_str = node->as.impl_decl.type_name;
+
+    // Look up the target type
+    Symbol*     type_sym    = checker_lookup(checker, type_name_str);
+    GenericDef* generic_def = NULL;
+    int         is_generic  = 0;
+    if (!type_sym || type_sym->kind != SYM_TYPE ||
+        (type_sym->type->kind != TYPE_STRUCT && type_sym->type->kind != TYPE_ENUM)) {
+        generic_def = lookup_generic_def(checker, type_name_str);
+        if (generic_def) {
+            is_generic = 1;
+        } else {
+            check_error(checker, node->line, node->column,
+                        "Cannot implement methods for unknown type '%s'", type_name_str);
+            return;
+        }
+    }
+
+    // Set Self for method body checking
+    if (!is_generic)
+        checker->self_type = type_sym->type;
+
+    for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
+        Node*           method      = node->as.impl_decl.methods.nodes[i];
+        const char*     method_name = method->as.func_decl.name;
+        func_decl_node* fdn         = &method->as.func_decl;
+
+        // Validate init method constraints
+        if (strcmp(method_name, "init") == 0) {
+            if (fdn->return_type != NULL) {
+                check_error(checker, method->line, method->column,
+                            "init must not have a return type");
+                continue;
+            }
+            if (!is_generic && type_sym->type->kind == TYPE_STRUCT) {
+                if (type_sym->type->as.struc.has_init) {
+                    check_error(checker, method->line, method->column,
+                                "Type '%s' already has an init method", type_name_str);
+                    continue;
+                }
+            }
+        }
+
+        if (is_generic) {
+            check_decl(checker, method);
+
+            // Set has_init on the generic def
+            if (strcmp(method_name, "init") == 0) {
+                generic_def->has_init = 1;
+            }
+        } else {
+            check_decl(checker, method);
+
+            // Set has_init flag after successful check_decl
+            if (strcmp(method_name, "init") == 0 && type_sym->type->kind == TYPE_STRUCT) {
+                type_sym->type->as.struc.has_init = 1;
+            }
+        }
+    }
+
+    checker->self_type = NULL;
+}
+
 // Type-check an impl block: verify methods match trait signatures and register trait impl
 static void check_impl_decl(Checker* checker, Node* node) {
     const char* trait_name    = node->as.impl_decl.trait_name;
     const char* type_name_str = node->as.impl_decl.type_name;
+
+    // Handle inherent impl blocks (no trait)
+    if (trait_name == NULL) {
+        check_inherent_impl_decl(checker, node);
+        return;
+    }
 
     // Look up the trait
     Symbol* trait_sym = checker_lookup(checker, trait_name);

@@ -110,6 +110,7 @@ void node_free(Node* node) {
     case NODE_NEW_EXPR:
         node_free(node->as.new_expr.type_node);
         node_free(node->as.new_expr.init);
+        nodelist_free(&node->as.new_expr.args);
         break;
     case NODE_STRING_INTERP:
         nodelist_free(&node->as.string_interp.parts);
@@ -516,6 +517,7 @@ Node* node_clone(Node* node) {
     case NODE_NEW_EXPR:
         c->as.new_expr.type_node = node_clone(node->as.new_expr.type_node);
         c->as.new_expr.init      = node_clone(node->as.new_expr.init);
+        c->as.new_expr.args      = nodelist_clone(&node->as.new_expr.args);
         break;
     case NODE_STRING_INTERP:
         c->as.string_interp.parts      = nodelist_clone(&node->as.string_interp.parts);

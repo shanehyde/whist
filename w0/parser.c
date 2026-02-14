@@ -680,16 +680,38 @@ static Node* parse_new_expr(Parser* parser, Token new_token) {
     if (!type_node) {
         return NULL;
     }
-    consume_token(parser, TOK_LBRACE, "Expected '{' after type in new expression");
-    Node* init = parse_struct_init(parser);
-    if (!init) {
-        node_free(type_node);
-        return NULL;
-    }
+
     Node* node                      = node_new(NODE_NEW_EXPR, new_token.line, new_token.column);
     node->as.new_expr.type_node     = type_node;
-    node->as.new_expr.init          = init;
     node->as.new_expr.resolved_type = NULL;
+
+    if (check_token(parser, TOK_LPAREN)) {
+        // Init-call form: new Type(args)
+        advance_token(parser); // consume '('
+        node->as.new_expr.init = NULL;
+        nodelist_init(&node->as.new_expr.args);
+        if (!check_token(parser, TOK_RPAREN)) {
+            do {
+                Node* arg = parse_expression(parser);
+                if (!arg) {
+                    node_free(node);
+                    return NULL;
+                }
+                nodelist_push(&node->as.new_expr.args, arg);
+            } while (match_token(parser, TOK_COMMA));
+        }
+        consume_token(parser, TOK_RPAREN, "Expected ')' after init arguments");
+    } else {
+        // Struct literal form: new Type { fields }
+        consume_token(parser, TOK_LBRACE, "Expected '{' or '(' after type in new expression");
+        Node* init = parse_struct_init(parser);
+        if (!init) {
+            node_free(node);
+            return NULL;
+        }
+        node->as.new_expr.init = init;
+        nodelist_init(&node->as.new_expr.args);
+    }
     return node;
 }
 
@@ -1807,23 +1829,31 @@ static Node* parse_trait_decl(Parser* parser, int is_public) {
 }
 
 static Node* parse_impl_decl(Parser* parser) {
-    Token trait_name = parser->current;
-    consume_token(parser, TOK_IDENT, "Expected trait name after 'impl'");
+    Token first_name = parser->current;
+    consume_token(parser, TOK_IDENT, "Expected name after 'impl'");
 
-    consume_token(parser, TOK_FOR, "Expected 'for' after trait name in impl block");
-
-    Token type_name = parser->current;
-    consume_token(parser, TOK_IDENT, "Expected type name after 'for'");
-
-    Node* node                    = node_new(NODE_IMPL_DECL, trait_name.line, trait_name.column);
-    node->as.impl_decl.trait_name = copy_token_string(&trait_name);
-    node->as.impl_decl.trait_name_length = trait_name.length;
-    node->as.impl_decl.type_name         = copy_token_string(&type_name);
-    node->as.impl_decl.type_name_length  = type_name.length;
+    Node* node = node_new(NODE_IMPL_DECL, first_name.line, first_name.column);
     nodelist_init(&node->as.impl_decl.type_args);
     nodelist_init(&node->as.impl_decl.methods);
 
-    // Parse optional type args: impl Drop for Box<T> { ... }
+    if (check_token(parser, TOK_FOR)) {
+        // Trait impl: impl Trait for Type { ... }
+        advance_token(parser); // consume 'for'
+        Token type_name = parser->current;
+        consume_token(parser, TOK_IDENT, "Expected type name after 'for'");
+        node->as.impl_decl.trait_name        = copy_token_string(&first_name);
+        node->as.impl_decl.trait_name_length = first_name.length;
+        node->as.impl_decl.type_name         = copy_token_string(&type_name);
+        node->as.impl_decl.type_name_length  = type_name.length;
+    } else {
+        // Inherent impl: impl Type { ... } or impl Type<T> { ... }
+        node->as.impl_decl.trait_name        = NULL;
+        node->as.impl_decl.trait_name_length = 0;
+        node->as.impl_decl.type_name         = copy_token_string(&first_name);
+        node->as.impl_decl.type_name_length  = first_name.length;
+    }
+
+    // Parse optional type args: impl Drop for Box<T> { ... } or impl Box<T> { ... }
     if (match_token(parser, TOK_LT)) {
         do {
             Node* type_arg = parse_type(parser);
