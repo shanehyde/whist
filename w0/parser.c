@@ -552,23 +552,105 @@ static Node* parse_float_lit(Token token) {
 }
 
 static Node* parse_string_lit(Token token) {
-    Node*  node               = node_new(NODE_STRING_LIT, token.line, token.column);
-    size_t max_len            = token.length - 2; // Skip quotes
-    node->as.string_lit.value = xmalloc(max_len + 1);
+    Node* node = node_new(NODE_STRING_LIT, token.line, token.column);
 
-    const char* src = token.start + 1;
-    const char* end = token.start + token.length - 1;
-    char*       dst = node->as.string_lit.value;
+    int is_triple = token.length >= 6 && token.start[0] == '"' && token.start[1] == '"' &&
+                    token.start[2] == '"';
+
+    const char* src;
+    const char* end;
+    if (is_triple) {
+        src = token.start + 3;
+        end = token.start + token.length - 3;
+    } else {
+        src = token.start + 1;
+        end = token.start + token.length - 1;
+    }
+
+    // Phase 1: Decode escape sequences into a raw buffer
+    size_t max_len = end - src;
+    char*  raw     = xmalloc(max_len + 1);
+    size_t raw_len = 0;
     while (src < end) {
         if (*src == '\\' && src + 1 < end) {
             src++;
-            *dst++ = decode_escape(*src++);
+            raw[raw_len++] = decode_escape(*src++);
         } else {
-            *dst++ = *src++;
+            raw[raw_len++] = *src++;
         }
     }
-    *dst                       = '\0';
-    node->as.string_lit.length = dst - node->as.string_lit.value;
+    raw[raw_len] = '\0';
+
+    if (!is_triple) {
+        node->as.string_lit.value  = raw;
+        node->as.string_lit.length = raw_len;
+        return node;
+    }
+
+    // Phase 2: Triple-quoted indentation stripping
+    // Skip leading newline after opening """
+    const char* content     = raw;
+    size_t      content_len = raw_len;
+    if (content_len > 0 && content[0] == '\n') {
+        content++;
+        content_len--;
+    }
+
+    // Find the last line (after final newline) to determine indent prefix
+    const char* last_newline = NULL;
+    for (size_t i = content_len; i > 0; i--) {
+        if (content[i - 1] == '\n') {
+            last_newline = &content[i - 1];
+            break;
+        }
+    }
+
+    size_t      prefix_len = 0;
+    const char* prefix     = NULL;
+    if (last_newline) {
+        // Last line is everything after the final newline
+        const char* last_line     = last_newline + 1;
+        size_t      last_line_len = content_len - (last_line - content);
+        // Check if last line is all whitespace
+        int all_ws = 1;
+        for (size_t i = 0; i < last_line_len; i++) {
+            if (last_line[i] != ' ' && last_line[i] != '\t') {
+                all_ws = 0;
+                break;
+            }
+        }
+        if (all_ws) {
+            prefix     = last_line;
+            prefix_len = last_line_len;
+            // Remove the trailing whitespace-only line (and its preceding newline)
+            content_len = last_newline - content;
+        }
+    }
+
+    // Build result by stripping prefix from start of each line
+    char*  result     = xmalloc(content_len + 1);
+    size_t result_len = 0;
+    size_t i          = 0;
+    while (i < content_len) {
+        // Strip prefix at start of line
+        if (prefix_len > 0 && i + prefix_len <= content_len &&
+            memcmp(&content[i], prefix, prefix_len) == 0) {
+            i += prefix_len;
+        }
+        // Copy until end of line
+        while (i < content_len && content[i] != '\n') {
+            result[result_len++] = content[i++];
+        }
+        // Copy the newline
+        if (i < content_len && content[i] == '\n') {
+            result[result_len++] = content[i++];
+        }
+    }
+    result[result_len] = '\0';
+
+    free(raw);
+    node->as.string_lit.value  = result;
+    node->as.string_lit.length = result_len;
     return node;
 }
 

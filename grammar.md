@@ -505,6 +505,8 @@ var      while
 
 <string-literal> ::= '"' { <string-char> } '"'
 
+<triple-string-literal> ::= '"""' <newline> { <any-char> } '"""'
+
 <interp-string-literal> ::= '$"' { <interp-part> } '"'
 
 <interp-part> ::= <string-char>
