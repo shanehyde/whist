@@ -1565,7 +1565,7 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     // Parse type parameters for generic free functions: func identity<T>(x: T): T
     // Only for free functions (not methods with receivers)
     if (!receiver_type && match_token(parser, TOK_LT)) {
-        int capacity        = 4;
+        int capacity           = 4;
         fdn->type_params       = xmalloc(capacity * sizeof(char*));
         fdn->type_param_bounds = xmalloc(capacity * sizeof(char*));
 
@@ -1575,10 +1575,8 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
 
             if (fdn->type_param_count >= capacity) {
                 capacity *= 2;
-                fdn->type_params =
-                    xrealloc(fdn->type_params, capacity * sizeof(char*));
-                fdn->type_param_bounds =
-                    xrealloc(fdn->type_param_bounds, capacity * sizeof(char*));
+                fdn->type_params       = xrealloc(fdn->type_params, capacity * sizeof(char*));
+                fdn->type_param_bounds = xrealloc(fdn->type_param_bounds, capacity * sizeof(char*));
             }
 
             fdn->type_params[fdn->type_param_count] = copy_token_string(&param_name);

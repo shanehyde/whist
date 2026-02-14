@@ -94,18 +94,18 @@ typedef struct {
     char**      type_params;       // ["T"] or ["T", "U"]
     char**      type_param_bounds; // Trait bounds parallel to type_params (NULL = unbounded)
     int         type_param_count;
-    Node*       decl;              // Original AST node (NODE_FUNC_DECL)
+    Node*       decl; // Original AST node (NODE_FUNC_DECL)
     const char* source_module;
 } GenericFuncDef;
 
 // Instantiated generic free function
 typedef struct {
-    char*  mangled_name;  // "identity_i64"
-    char*  base_name;     // "identity"
-    Type*  func_type;     // Concrete TYPE_FUNC
+    char*  mangled_name; // "identity_i64"
+    char*  base_name;    // "identity"
+    Type*  func_type;    // Concrete TYPE_FUNC
     Type** type_args;
     int    type_arg_count;
-    Node*  body;          // Cloned + type-checked body
+    Node*  body; // Cloned + type-checked body
 } GenericFuncInstance;
 
 // Module import tracking
@@ -132,7 +132,7 @@ typedef struct {
     GenericFuncDef*      func_defs;
     int                  func_def_count;
     int                  func_def_capacity;
-    GenericFuncInstance*  func_instances;
+    GenericFuncInstance* func_instances;
     int                  func_instance_count;
     int                  func_instance_capacity;
 } CheckerGenerics;
