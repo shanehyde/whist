@@ -147,6 +147,17 @@ typedef struct {
     int           vec_capacity;
 } CheckerContainers;
 
+// Deferred trait check: body-less method in impl block (duck-type conformance)
+typedef struct {
+    char* type_name;
+    char* method_name;
+    Type* expected_type; // Function type from trait (Self substituted)
+    int   is_const;
+    int   is_generic;
+    int   line;
+    int   col;
+} DeferredTraitCheck;
+
 // Trait implementations and primitive methods
 typedef struct {
     TraitImpl*       impls;
@@ -155,6 +166,10 @@ typedef struct {
     PrimitiveMethod* primitive_methods;
     int              primitive_method_count;
     int              primitive_method_capacity;
+    // Deferred trait checks (body-less methods in impl blocks)
+    DeferredTraitCheck* deferred_checks;
+    int                 deferred_check_count;
+    int                 deferred_check_capacity;
 } CheckerTraits;
 
 struct Checker {

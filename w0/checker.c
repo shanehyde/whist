@@ -131,10 +131,14 @@ void checker_init(Checker* checker) {
     checker->traits.primitive_methods         = NULL;
     checker->traits.primitive_method_count    = 0;
     checker->traits.primitive_method_capacity = 0;
-    checker->alias_depth                      = 0;
-    checker->enum_target_hint                 = NULL;
-    checker->self_type                        = NULL;
-    checker->sem                              = sem_info_new();
+    // Deferred trait checks
+    checker->traits.deferred_checks         = NULL;
+    checker->traits.deferred_check_count    = 0;
+    checker->traits.deferred_check_capacity = 0;
+    checker->alias_depth                    = 0;
+    checker->enum_target_hint               = NULL;
+    checker->self_type                      = NULL;
+    checker->sem                            = sem_info_new();
     types_init();
 }
 
@@ -243,6 +247,12 @@ void checker_free(Checker* checker) {
         free(checker->traits.primitive_methods[i].method_name);
     }
     free(checker->traits.primitive_methods);
+    // Free deferred trait checks
+    for (int i = 0; i < checker->traits.deferred_check_count; i++) {
+        free(checker->traits.deferred_checks[i].type_name);
+        free(checker->traits.deferred_checks[i].method_name);
+    }
+    free(checker->traits.deferred_checks);
     sem_info_free(checker->sem);
     checker->sem = NULL;
     types_cleanup();
@@ -1574,6 +1584,21 @@ static void check_impl_decl(Checker* checker, Node* node) {
         }
 
         if (is_generic) {
+            // Body-less method in generic impl: record deferred check, skip registration
+            if (method->as.func_decl.body == NULL) {
+                VEC_GROW(checker->traits.deferred_checks, checker->traits.deferred_check_count,
+                         checker->traits.deferred_check_capacity);
+                DeferredTraitCheck* dc =
+                    &checker->traits.deferred_checks[checker->traits.deferred_check_count++];
+                dc->type_name     = xstrdup(type_name_str);
+                dc->method_name   = xstrdup(method_name);
+                dc->expected_type = NULL; // Full validation deferred to instantiation
+                dc->is_const      = impl_is_const;
+                dc->is_generic    = 1;
+                dc->line          = method->line;
+                dc->col           = method->column;
+                continue;
+            }
             // For generic structs, the method has a generic receiver (e.g., func (Box<T>)
             // drop()) Process it via check_decl which routes to the generic method registration
             // path
@@ -1614,6 +1639,22 @@ static void check_impl_decl(Checker* checker, Node* node) {
                         method_name, p + 1, trait_name, type_name(trait_param),
                         type_name(impl_func_type->as.func.param_types[p]));
                 }
+            }
+
+            // Body-less method: record deferred check, skip check_decl
+            if (method->as.func_decl.body == NULL) {
+                VEC_GROW(checker->traits.deferred_checks, checker->traits.deferred_check_count,
+                         checker->traits.deferred_check_capacity);
+                DeferredTraitCheck* dc =
+                    &checker->traits.deferred_checks[checker->traits.deferred_check_count++];
+                dc->type_name     = xstrdup(type_name_str);
+                dc->method_name   = xstrdup(method_name);
+                dc->expected_type = impl_func_type;
+                dc->is_const      = impl_is_const;
+                dc->is_generic    = 0;
+                dc->line          = method->line;
+                dc->col           = method->column;
+                continue;
             }
 
             // Process the method as a regular func_decl (registers on struct/primitive, checks
@@ -1908,6 +1949,106 @@ static const CheckerPassSpec k_checker_pass_specs[] = {
     },
 };
 
+// Verify deferred trait checks: ensure body-less methods in impl blocks have
+// matching standalone receiver methods defined elsewhere.
+static void verify_deferred_trait_checks(Checker* checker) {
+    for (int i = 0; i < checker->traits.deferred_check_count; i++) {
+        DeferredTraitCheck* dc = &checker->traits.deferred_checks[i];
+
+        if (dc->is_generic) {
+            // For generic types, verify the GenericDef has a method with matching name and body
+            GenericDef* def = lookup_generic_def(checker, dc->type_name);
+            if (!def) {
+                check_error(checker, dc->line, dc->col,
+                            "No standalone method '%s' found for type '%s'", dc->method_name,
+                            dc->type_name);
+                continue;
+            }
+            int found = 0;
+            for (int j = 0; j < def->method_count; j++) {
+                Node* m = def->methods[j];
+                if (strcmp(m->as.func_decl.name, dc->method_name) == 0 &&
+                    m->as.func_decl.body != NULL) {
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found) {
+                check_error(checker, dc->line, dc->col,
+                            "No standalone method '%s' found for type '%s'", dc->method_name,
+                            dc->type_name);
+            }
+            continue;
+        }
+
+        // Non-generic: look up mangled name in symbol table
+        char mangled[256];
+        snprintf(mangled, sizeof(mangled), "%s_%s", dc->type_name, dc->method_name);
+
+        Symbol* sym = checker_lookup(checker, mangled);
+        if (!sym) {
+            check_error(checker, dc->line, dc->col, "No standalone method '%s' found for type '%s'",
+                        dc->method_name, dc->type_name);
+            continue;
+        }
+
+        // Compare function signatures
+        Type* actual_type = sym->type;
+        Type* expected    = dc->expected_type;
+
+        if (actual_type->kind != TYPE_FUNC || expected->kind != TYPE_FUNC) {
+            continue;
+        }
+
+        // Check return type
+        if (!type_equals(actual_type->as.func.return_type, expected->as.func.return_type)) {
+            check_error(checker, dc->line, dc->col,
+                        "Method '%s' on '%s' return type mismatch: trait expects '%s', got '%s'",
+                        dc->method_name, dc->type_name, type_name(expected->as.func.return_type),
+                        type_name(actual_type->as.func.return_type));
+            continue;
+        }
+
+        // Check parameter count
+        if (actual_type->as.func.param_count != expected->as.func.param_count) {
+            check_error(checker, dc->line, dc->col,
+                        "Method '%s' on '%s' parameter count mismatch: trait expects %d, got %d",
+                        dc->method_name, dc->type_name, expected->as.func.param_count,
+                        actual_type->as.func.param_count);
+            continue;
+        }
+
+        // Check parameter types
+        for (int p = 0; p < expected->as.func.param_count; p++) {
+            if (!type_equals(actual_type->as.func.param_types[p],
+                             expected->as.func.param_types[p])) {
+                check_error(
+                    checker, dc->line, dc->col,
+                    "Method '%s' on '%s' parameter %d type mismatch: trait expects '%s', got '%s'",
+                    dc->method_name, dc->type_name, p + 1,
+                    type_name(expected->as.func.param_types[p]),
+                    type_name(actual_type->as.func.param_types[p]));
+            }
+        }
+
+        // Check const-ness: look up the struct's method list
+        Symbol* type_sym = checker_lookup(checker, dc->type_name);
+        if (type_sym && type_sym->kind == SYM_TYPE && type_sym->type->kind == TYPE_STRUCT) {
+            Type* st = type_sym->type;
+            for (int j = 0; j < st->as.struc.method_count; j++) {
+                if (strcmp(st->as.struc.method_names[j], dc->method_name) == 0) {
+                    if (st->as.struc.method_is_const[j] != dc->is_const) {
+                        check_error(checker, dc->line, dc->col,
+                                    "Method '%s' on '%s' receiver mutability mismatch",
+                                    dc->method_name, dc->type_name);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
+
 // Type-check an entire program AST using four sequential passes.
 //
 // The multi-pass design is required because declarations can reference each
@@ -1942,6 +2083,8 @@ int checker_check(Checker* checker, Node* ast) {
     for (size_t i = 0; i < sizeof(k_checker_pass_specs) / sizeof(k_checker_pass_specs[0]); i++) {
         run_checker_pass(checker, ast, &k_checker_pass_specs[i]);
     }
+
+    verify_deferred_trait_checks(checker);
 
     checker->modules.current_module = NULL;
     checker_pop_scope(checker);
