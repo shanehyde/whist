@@ -407,14 +407,15 @@ void emit_vec_methods(CodeGen* gen) {
         // Sort (ascending)
         if (type_supports_vec_sort(elem_type)) {
             emit(gen, "static int __Vec_%s_sort_cmp(const void* a, const void* b) {\n", elem_tname);
-            emit(gen, "    const ");
+            const char* const_prefix = (elem_type->kind == TYPE_STRING) ? "" : "const ";
+            emit(gen, "    %s", const_prefix);
             emit_resolved_type(gen, elem_type);
-            emit(gen, "* lhs = (const ");
+            emit(gen, "* lhs = (%s", const_prefix);
             emit_resolved_type(gen, elem_type);
             emit(gen, "*)a;\n");
-            emit(gen, "    const ");
+            emit(gen, "    %s", const_prefix);
             emit_resolved_type(gen, elem_type);
-            emit(gen, "* rhs = (const ");
+            emit(gen, "* rhs = (%s", const_prefix);
             emit_resolved_type(gen, elem_type);
             emit(gen, "*)b;\n");
             if (elem_type->kind == TYPE_STRING) {
