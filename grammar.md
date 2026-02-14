@@ -25,11 +25,11 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
                | [ 'public' | 'private' ] <type-alias>
                | [ 'public' | 'private' ] <var-decl>
                | <impl-decl>
-               | <extern-module>
+               | [ 'public' | 'private' ] <extern-module>
                | <test-decl>
 ```
 
-**Visibility:** Top-level declarations are private by default (file-local scope). The `public` keyword gives a declaration external linkage. In generated C code, private declarations are prefixed with `static`. The `main` function is always treated as having external linkage regardless of the `public` modifier.
+**Visibility:** Top-level declarations are public by default (module-exported scope). Use `private` for file-local linkage. In generated C code, private declarations are prefixed with `static`. The `main` function is always treated as having external linkage regardless of the `private` modifier.
 
 ---
 
@@ -58,21 +58,23 @@ Use statements selectively bring symbols from an imported module into unqualifie
 
 ```bnf
 <func-decl> ::= 'func' [ <receiver> ] <identifier> '(' [ <param-list> ] ')' [ ':' <return-type> ]
-<func-defn> ::= <func-decl> '{' <block> '}'
+<func-defn> ::= <func-decl> <block>
 
 <receiver> ::= '(' [ 'const' ] <identifier> [ '<' <type-arg-list> '>' ] ')'
 
 <param-list> ::= <param> { ',' <param> } [ ',' '...' ]
                | '...'
 
-<param> ::= <identifier> [ ':' <type> ]
+<param> ::= [ 'const' ] <identifier> [ ':' <type> ]
 
 <return-type> ::= [ 'const' ] <type>
 
 <extern-func-decl> ::= <func-decl> [ 'as' <identifier> ] ';'
 
-<extern-module> ::= 'extern' <identifier> '{' { <extern-func-decl> } '}'
+<extern-module> ::= 'extern' <identifier> '{' { [ 'public' | 'private' ] <extern-func-decl> } '}'
 ```
+
+When an `extern` block has no explicit visibility modifier at top level, functions in the block default to private unless overridden per function.
 
 **Generic methods:** Methods can be defined on generic structs using type arguments in the receiver:
 - `func (Box<T>) get(): T` — method on any `Box<T>` instantiation
@@ -91,7 +93,7 @@ as compatible (no deep/shallow immutability distinction yet).
 
 <type-param> ::= <identifier> [ ':' <identifier> ]
 
-<field-decl> ::= <identifier> ':' <type> [ ',' ]
+<field-decl> ::= [ 'const' ] <identifier> ':' <type> [ ',' ]
 ```
 
 **Generic structs:** Structs can be parameterized by one or more type parameters:
@@ -106,7 +108,7 @@ Generic structs are monomorphized at compile time, generating specialized C code
 ```bnf
 <enum-decl>    ::= 'enum' <identifier> [ '<' <type-param-list> '>' ] '{' { <enum-variant> } '}'
 
-<enum-variant> ::= <identifier> [ '(' <type> { ',' <type> } ')' ] [ ',' ]
+<enum-variant> ::= <identifier> [ '(' <type> { ',' <type> } ')' ] [ '=' [ '-' ] <int-literal> ] [ ',' ]
 ```
 
 ### Trait Declaration
@@ -125,7 +127,7 @@ Traits define a set of required method signatures that types can implement. Trai
 <impl-decl>   ::= 'impl' <identifier> 'for' <identifier> [ '<' <type-arg-list> '>' ]
                    '{' { <impl-method> } '}'
 
-<impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <return-type> ] '{' <block> '}'
+<impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <return-type> ] <block>
 ```
 
 An `impl` block provides concrete method implementations for a trait on a specific type. Methods inside `impl` blocks do not specify a receiver — it is inferred from the `for Type` clause. Use `const func` for immutable-receiver methods. For generic target types, specify the type parameters on the impl header (e.g., `impl Drop for Box<T>`). All trait methods must be implemented.
@@ -149,7 +151,7 @@ Aliases are fully interchangeable with the underlying type: `var id: UserId = 42
 
 ```bnf
 <var-decl> ::= ( 'var' | 'const' ) <identifier> [ ':' <type> ] [ '=' <expression> ] ';'
-            | 'var' <destruct-pattern> '=' <expression> ';'
+            | ( 'var' | 'const' ) <destruct-pattern> [ ':' <type> ] '=' <expression> ';'
 
 <destruct-pattern> ::= '(' <destruct-element> ',' <destruct-element> { ',' <destruct-element> } ')'
 
@@ -157,12 +159,12 @@ Aliases are fully interchangeable with the underlying type: `var id: UserId = 42
                     | <destruct-pattern>
 ```
 
-**Tuple destructuring:** `var (a, b) = expr;` unpacks a tuple into individual variables. The number of elements must match the tuple's arity. Nested patterns are supported: `var (x, (y, z)) = (1, (2, 3));` unpacks nested tuples.
+**Tuple destructuring:** `var (a, b) = expr;` and `const (a, b) = expr;` unpack a tuple into individual bindings. The number of elements must match the tuple's arity. Nested patterns are supported: `var (x, (y, z)) = (1, (2, 3));` unpacks nested tuples.
 
 ### Test Declaration
 
 ```bnf
-<test-decl> ::= 'test' <string-literal> '{' <block> '}'
+<test-decl> ::= 'test' <string-literal> <block>
 ```
 
 Test declarations define inline unit tests. Each test has a name (string literal) and a body block. Test blocks are top-level declarations that cannot have visibility modifiers (`public test` or `private test` is an error).
@@ -185,14 +187,17 @@ test "arithmetic" {
 ```bnf
 <type> ::= <identifier>
         | <identifier> '<' <type-arg-list> '>'
-        | '*' <type>
+        | 'func' '(' [ <type-list> ] ')' [ ':' <type> ]
         | '[' [ <expression> ] ']' <type>
         | '(' <type> ',' <type> { ',' <type> } ')'
 
 <type-arg-list> ::= <type> { ',' <type> }
+<type-list> ::= <type> { ',' <type> }
 ```
 
 **Built-in types** are resolved as identifiers: `void`, `bool`, `i8`–`i64`, `u8`–`u64`, `f32`, `f64`, `char`, `string`, `voidptr`. `voidptr` maps to `void*` in C and is used for opaque pointer handles. It supports `null` assignment and equality comparison (`==`/`!=`) with `null`, but no arithmetic.
+
+**Pointer type syntax:** Explicit pointer type syntax (`*T`) is not supported in the bootstrap compiler.
 
 **Generic types:** `Box<i64>` or `Pair<i32, string>` instantiate a generic struct with concrete type arguments. Nested generics are supported: `Box<Pair<i32, i64>>`.
 
@@ -211,8 +216,16 @@ Create spans using slice syntax: `var s: Span<i64> = arr[:];`
 - `vec[i]` — bounds-checked element access (panics if out of bounds)
 - `vec[i] = x` — bounds-checked element write
 - `vec.push(x)` — append an element
-- `vec.pop()` — remove and return the last element (panics if empty)
+- `vec.insert(i, x)` — insert an element at index `i`
+- `vec.remove(i)` — remove and return the element at index `i`
+- `vec.swap_remove(i)` — remove index `i` by swapping with the last element
+- `vec.pop()` — remove and return the last element as `Option<T>` (`None` if empty)
 - `vec.clear()` — remove all elements (decrements RC for struct elements)
+- `vec.reserve(n)` — reserve additional capacity
+- `vec.shrink_to_fit()` — shrink capacity to current length
+- `vec.contains(x)` — membership test (when `T` supports equality)
+- `vec.first()` / `vec.last()` — return `Option<T>`
+- `vec.sort()` — in-place sort (for orderable primitive `T`)
 - `vec.data` — private (compile error if accessed directly)
 - Slice syntax produces a `Span<T>`: `vec[:]`, `vec[1:3]`, `vec[2:]`
 
@@ -238,17 +251,18 @@ Create vecs: `var v = new Vec<i64>{};` or `var v = new Vec<i64>{1, 2, 3};`
 
 <block> ::= '{' { <statement> } '}'
 
-<if-stmt> ::= 'if' '(' <expression> ')' '{' <block> '}' [ 'else' ( <if-stmt> | '{' <block> '}' ) ]
+<if-stmt> ::= 'if' '(' <expression> ')' <block> [ 'else' ( <if-stmt> | <block> ) ]
 
-<while-stmt> ::= 'while' '(' <expression> ')' '{' <block> '}'
+<while-stmt> ::= 'while' '(' <expression> ')' <block>
 
-<for-stmt> ::= 'for' '(' [ <for-init> ] ';' [ <expression> ] ';' [ <expression> ] ')' '{' <block> '}'
+<for-stmt> ::= 'for' '(' <for-init> [ <expression> ] ';' [ <expression> ] ')' <block>
 
 <for-init> ::= <var-decl>
-            | <expression>
+            | <expression> ';'
+            | ';'
 
-<foreach-stmt> ::= 'foreach' '(' 'const' <identifier> 'in' <expression> '..' <expression> [ 'by' <expression> ] ')' '{' <block> '}'
-                 | 'foreach' '(' 'const' <identifier> 'in' <expression> ')' '{' <block> '}'
+<foreach-stmt> ::= 'foreach' '(' 'const' <identifier> 'in' <expression> '..' <expression> [ 'by' <expression> ] ')' <block>
+                 | 'foreach' '(' 'const' <identifier> 'in' <expression> ')' <block>
 
 The first form iterates over a range. The range `start..end` is **end-exclusive**: iterates from `start` up to but not including `end`. For example, `0..5` iterates `0, 1, 2, 3, 4`.
 
@@ -326,6 +340,7 @@ Cast expressions convert between compatible types. Supported conversions:
 - `char` to any integer type (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`)
 - Any integer type to `char`
 - Integer to integer (widening or narrowing)
+- Simple enum (no payload variants) to integer
 - Struct reference to `voidptr` (opaque pointer)
 - `voidptr` to `u64` (opaque pointer value for hashing/interop)
 - Identity casts (same type to same type)
@@ -338,7 +353,7 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
 <unary-expr> ::= <unary-op> <unary-expr>
               | <postfix-expr>
 
-<unary-op> ::= '!' | '-' | '~' | '&' | '*'
+<unary-op> ::= '!' | '-' | '~'
 ```
 
 ### Postfix Expressions
@@ -350,7 +365,7 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
               | '[' <expression> ']'           (* index *)
               | '[' [ <expression> ] ':' [ <expression> ] ']'  (* slice *)
               | '.' <identifier>               (* member access *)
-              | '->' <identifier>              (* pointer member access *)
+              | '?'                             (* try operator *)
 
 <arg-list> ::= <expression> { ',' <expression> }
 ```
@@ -373,6 +388,7 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
                 | <new-expr>
                 | <tuple-literal>
                 | <array-literal>
+                | <match-expr>
 
 <new-expr> ::= 'new' <type> '{' [ <init-list> ] '}'
 
@@ -390,7 +406,13 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
 <element-list> ::= <expression> { ',' <expression> } [ ',' ]
 
 <tuple-literal> ::= '(' <expression> ',' <expression> { ',' <expression> } ')'
+
+<match-expr> ::= 'match' '(' <expression> ')' '{' { <match-expr-arm> } '}'
+
+<match-expr-arm> ::= <match-pattern> '=>' <expression> [ ',' ]
 ```
+
+`match` can be used as a statement or expression. In expression form, each arm body must be an expression (block bodies are not allowed).
 
 **Tuple literals:** `(1, "hello")` creates a tuple value. Tuples must have at least two elements. Access elements by index: `t[0]`, `t[1]`.
 
@@ -465,16 +487,20 @@ var      while
                | '{' <expression> '}'
 
 <string-char> ::= <any-char-except-quote-or-backslash>
-               | <escape-sequence>
+               | <string-escape-sequence>
 
-<char-literal> ::= '\'' ( <char-char> | <escape-sequence> ) '\''
+<char-literal> ::= '\'' ( <char-char> | <char-escape-sequence> ) '\''
 
 <char-char> ::= <any-char-except-quote-or-backslash>
 
-<escape-sequence> ::= '\\' ( 'n' | 't' | 'r' | '0' | '\\' | '\'' | '"' )
-                   | '\\x' <hex-digit> <hex-digit>
-                   | '\\' <octal-digit> [ <octal-digit> [ <octal-digit> ] ]
+<string-escape-sequence> ::= '\\' ( 'n' | 't' | 'r' | '0' | '\\' | '\'' | '"' )
+
+<char-escape-sequence> ::= <string-escape-sequence>
+                         | '\\x' <hex-digit> <hex-digit>
+                         | '\\' <octal-digit> [ <octal-digit> [ <octal-digit> ] ]
 ```
+
+Current bootstrap limitation: string/char semantic decoding only handles simple escapes (`\n`, `\t`, `\r`, `\0`, `\\`, `\'`, `\"`). Hex/octal char escapes are tokenized but not numerically decoded yet.
 
 **String interpolation:** `$"Hello {name}!"` embeds expressions inside `{...}` braces. Any expression that resolves to a printable type (`i8`–`i64`, `u8`–`u64`, `f32`, `f64`, `bool`, `char`, `string`) can appear inside braces. Use `{{` and `}}` for literal brace characters. Interpolated strings produce a `string` value.
 
@@ -485,7 +511,7 @@ var      while
 =     <     >
 +=    -=    *=    /=    %=    &=    |=    ^=
 ==    !=    <=    >=    &&    ||    <<    >>    <<=   >>=
-->    =>    ::    ..
+=>    ::    ..    ...   ?
 (     )     {     }     [     ]     ;     :     ,     .
 ```
 
@@ -517,5 +543,5 @@ From lowest to highest precedence:
 | 10         | `+` `-`                                                  | Left          |
 | 11         | `*` `/` `%`                                              | Left          |
 | 12         | `as` (type cast)                                         | Left          |
-| 13         | `!` `-` `~` `&` `*` (unary prefix)                       | Right         |
-| 14         | `()` `[]` `.` `->` (postfix)                             | Left          |
+| 13         | `!` `-` `~` (unary prefix)                               | Right         |
+| 14         | `()` `[]` `.` `?` (postfix)                              | Left          |
