@@ -244,6 +244,23 @@ static Token string(Lexer* lexer) {
     return make_token(lexer, TOK_STRING);
 }
 
+static Token triple_string(Lexer* lexer) {
+    // Opening """ already consumed. Scan until closing """.
+    while (!is_at_end(lexer)) {
+        if (peek(lexer) == '"' && peek_next(lexer) == '"' && lexer->current[2] == '"') {
+            advance(lexer); // first "
+            advance(lexer); // second "
+            advance(lexer); // third "
+            return make_token(lexer, TOK_STRING);
+        }
+        if (peek(lexer) == '\\' && peek_next(lexer) != '\0') {
+            advance(lexer); // skip backslash
+        }
+        advance(lexer);
+    }
+    return error_token(lexer, "Unterminated triple-quoted string");
+}
+
 static Token interp_string(Lexer* lexer) {
     // Scan from after $" to closing ", tracking brace depth for {expr} regions
     int brace_depth = 0;
@@ -437,6 +454,11 @@ Token lexer_next(Lexer* lexer) {
             return make_token(lexer, TOK_GT_EQ);
         return make_token(lexer, TOK_GT);
     case '"':
+        if (peek(lexer) == '"' && peek_next(lexer) == '"') {
+            advance(lexer); // second "
+            advance(lexer); // third "
+            return triple_string(lexer);
+        }
         return string(lexer);
     case '\'':
         return character(lexer);
