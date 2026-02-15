@@ -323,20 +323,22 @@ void emit_vec_methods(CodeGen* gen) {
         const char*  elem_tname  = type_mangle_name(elem_type);
         int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC);
 
-        // Push
-        emit(gen, "static inline void __Vec_%s_push(__Vec_%s* self, ", elem_tname, elem_tname);
-        emit_resolved_type(gen, elem_type);
-        emit(gen, " value) {\n");
-        emit(gen, "    if (self->count == self->capacity) {\n");
-        emit(gen, "        int64_t new_cap = self->capacity == 0 ? 4 : self->capacity * 2;\n");
-        emit(gen, "        self->data = realloc(self->data, new_cap * sizeof(");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, "));\n");
-        emit(gen, "        self->capacity = new_cap;\n");
-        emit(gen, "    }\n");
-        emit(gen, "    self->data[self->count] = value;\n");
-        emit(gen, "    self->count++;\n");
-        emit(gen, "}\n\n");
+        // Push (Vec<string> push is provided by whist_runtime.h)
+        if (elem_type->kind != TYPE_STRING) {
+            emit(gen, "static inline void __Vec_%s_push(__Vec_%s* self, ", elem_tname, elem_tname);
+            emit_resolved_type(gen, elem_type);
+            emit(gen, " value) {\n");
+            emit(gen, "    if (self->count == self->capacity) {\n");
+            emit(gen, "        int64_t new_cap = self->capacity == 0 ? 4 : self->capacity * 2;\n");
+            emit(gen, "        self->data = realloc(self->data, new_cap * sizeof(");
+            emit_resolved_type(gen, elem_type);
+            emit(gen, "));\n");
+            emit(gen, "        self->capacity = new_cap;\n");
+            emit(gen, "    }\n");
+            emit(gen, "    self->data[self->count] = value;\n");
+            emit(gen, "    self->count++;\n");
+            emit(gen, "}\n\n");
+        }
 
         // Insert
         emit(gen, "static inline void __Vec_%s_insert(__Vec_%s* self, int64_t index, ", elem_tname,
@@ -579,32 +581,6 @@ void emit_vec_methods(CodeGen* gen) {
             emit(gen, "}\n\n");
         }
 
-        // String split — emit __String_split when Vec<string> is instantiated
-        if (elem_type->kind == TYPE_STRING) {
-            emit(gen, "static inline __Vec_string* __String_split(const char* s, const char* "
-                      "delim) {\n");
-            emit(gen, "    __Vec_string* vec = (__Vec_string*)__rc_alloc(sizeof(__Vec_string), "
-                      "__Vec_string_cleanup);\n");
-            emit(gen, "    vec->data = NULL;\n");
-            emit(gen, "    vec->count = 0;\n");
-            emit(gen, "    vec->capacity = 0;\n");
-            emit(gen, "    size_t dlen = strlen(delim);\n");
-            emit(gen, "    const char* p = s;\n");
-            emit(gen, "    for (;;) {\n");
-            emit(gen, "        const char* found = strstr(p, delim);\n");
-            emit(gen, "        if (!found) {\n");
-            emit(gen, "            __Vec_string_push(vec, __String_substr(p, 0, "
-                      "(int64_t)strlen(p)));\n");
-            emit(gen, "            break;\n");
-            emit(gen, "        }\n");
-            emit(gen, "        __Vec_string_push(vec, __String_substr(p, 0, "
-                      "(int64_t)(found - p)));\n");
-            emit(gen, "        p = found + dlen;\n");
-            emit(gen, "    }\n");
-            emit(gen, "    return vec;\n");
-            emit(gen, "}\n\n");
-        }
-
         // Eq
         if (type_supports_equality(elem_type)) {
             emit(gen, "static inline bool __Vec_%s_eq(__Vec_%s* a, __Vec_%s* b) {\n", elem_tname,
@@ -638,6 +614,10 @@ void emit_vec_cleanup(CodeGen* gen) {
         Type*        elem_type   = inst->elem_type;
         const char*  elem_tname  = type_mangle_name(elem_type);
         int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC);
+
+        // Vec<string> cleanup is provided by whist_runtime.h
+        if (elem_type->kind == TYPE_STRING)
+            continue;
 
         emit(gen, "static inline void __Vec_%s_cleanup(void* raw) {\n", elem_tname);
         emit(gen, "    __Vec_%s* ptr = (__Vec_%s*)raw;\n", elem_tname, elem_tname);

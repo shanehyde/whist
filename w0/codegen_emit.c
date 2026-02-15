@@ -888,6 +888,10 @@ void emit_vec_typedefs(CodeGen* gen) {
         Type*        elem_type  = inst->elem_type;
         const char*  elem_tname = type_mangle_name(elem_type);
 
+        // Vec<string> typedef is provided by whist_runtime.h
+        if (elem_type->kind == TYPE_STRING)
+            continue;
+
         emit(gen, "typedef struct {\n");
         emit(gen, "    ");
         emit_resolved_type(gen, elem_type);
