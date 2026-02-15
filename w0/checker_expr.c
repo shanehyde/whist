@@ -152,14 +152,10 @@ static const char* get_const_binding_name(Checker* checker, Node* node) {
 static Type* check_comparison_op(Checker* checker, Node* node, Type* left, Type* right) {
     TokenType op = node->as.binary.op;
 
-    // String comparison: only == and != allowed
+    // String comparison
     if (left->kind == TYPE_STRING && right->kind == TYPE_STRING) {
-        if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
-            node->as.binary.is_string_op = 1;
-            return type_bool;
-        }
-        check_error(checker, node->line, node->column, "Strings only support == and != comparison");
-        return type_error;
+        node->as.binary.is_string_op = 1;
+        return type_bool;
     }
     // Vec comparison: only == and != allowed, element type must support equality
     if (left->kind == TYPE_VEC && right->kind == TYPE_VEC) {

@@ -1098,6 +1098,30 @@ void emit_expr(CodeGen* gen, Node* node) {
                 emit(gen, ", ");
                 emit_expr(gen, node->as.binary.right);
                 emit(gen, ") != 0)");
+            } else if (op == TOK_LT) {
+                emit(gen, "(strcmp(");
+                emit_expr(gen, node->as.binary.left);
+                emit(gen, ", ");
+                emit_expr(gen, node->as.binary.right);
+                emit(gen, ") < 0)");
+            } else if (op == TOK_GT) {
+                emit(gen, "(strcmp(");
+                emit_expr(gen, node->as.binary.left);
+                emit(gen, ", ");
+                emit_expr(gen, node->as.binary.right);
+                emit(gen, ") > 0)");
+            } else if (op == TOK_LT_EQ) {
+                emit(gen, "(strcmp(");
+                emit_expr(gen, node->as.binary.left);
+                emit(gen, ", ");
+                emit_expr(gen, node->as.binary.right);
+                emit(gen, ") <= 0)");
+            } else if (op == TOK_GT_EQ) {
+                emit(gen, "(strcmp(");
+                emit_expr(gen, node->as.binary.left);
+                emit(gen, ", ");
+                emit_expr(gen, node->as.binary.right);
+                emit(gen, ") >= 0)");
             } else if (op == TOK_PLUS) {
                 emit(gen, "__String_concat(");
                 emit_expr(gen, node->as.binary.left);
