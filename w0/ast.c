@@ -36,6 +36,35 @@ void pattern_tuple_push(DestructPattern* pattern, DestructPattern* elem) {
     pattern->as.tuple.elements[pattern->as.tuple.count++] = elem;
 }
 
+DestructPattern* pattern_new_struct(int capacity) {
+    DestructPattern* pattern             = xcalloc(1, sizeof(DestructPattern));
+    pattern->kind                        = PATTERN_STRUCT;
+    pattern->as.struc.field_names        = xmalloc(capacity * sizeof(char*));
+    pattern->as.struc.field_name_lengths = xmalloc(capacity * sizeof(int));
+    pattern->as.struc.field_types        = xcalloc(capacity, sizeof(Type*));
+    pattern->as.struc.count              = 0;
+    pattern->as.struc.capacity           = capacity;
+    pattern->resolved_type               = NULL;
+    return pattern;
+}
+
+void pattern_struct_push(DestructPattern* pattern, const char* name, int length) {
+    if (pattern->as.struc.count >= pattern->as.struc.capacity) {
+        pattern->as.struc.capacity *= 2;
+        pattern->as.struc.field_names =
+            xrealloc(pattern->as.struc.field_names, pattern->as.struc.capacity * sizeof(char*));
+        pattern->as.struc.field_name_lengths = xrealloc(pattern->as.struc.field_name_lengths,
+                                                        pattern->as.struc.capacity * sizeof(int));
+        pattern->as.struc.field_types =
+            xrealloc(pattern->as.struc.field_types, pattern->as.struc.capacity * sizeof(Type*));
+    }
+    int i                            = pattern->as.struc.count++;
+    pattern->as.struc.field_names[i] = xmalloc(length + 1);
+    memcpy(pattern->as.struc.field_names[i], name, length);
+    pattern->as.struc.field_names[i][length] = '\0';
+    pattern->as.struc.field_name_lengths[i]  = length;
+}
+
 void pattern_free(DestructPattern* pattern) {
     if (!pattern)
         return;
@@ -49,6 +78,14 @@ void pattern_free(DestructPattern* pattern) {
             pattern_free(pattern->as.tuple.elements[i]);
         }
         free(pattern->as.tuple.elements);
+        break;
+    case PATTERN_STRUCT:
+        for (int i = 0; i < pattern->as.struc.count; i++) {
+            free(pattern->as.struc.field_names[i]);
+        }
+        free(pattern->as.struc.field_names);
+        free(pattern->as.struc.field_name_lengths);
+        free(pattern->as.struc.field_types);
         break;
     }
     free(pattern);

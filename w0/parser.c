@@ -1538,6 +1538,49 @@ static DestructPattern* parse_destruct_pattern(Parser* parser) {
 static Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
     Token start = parser->current;
 
+    // Check for struct destructuring: var {field1, field2} = expr;
+    if (check_token(parser, TOK_LBRACE)) {
+        advance_token(parser); // consume '{'
+
+        DestructPattern* pattern = pattern_new_struct(4);
+
+        // Parse first field name (required)
+        Token field = parser->current;
+        consume_token(parser, TOK_IDENT, "Expected field name");
+        pattern_struct_push(pattern, field.start, field.length);
+
+        // Parse remaining comma-separated field names
+        while (match_token(parser, TOK_COMMA)) {
+            field = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected field name");
+            pattern_struct_push(pattern, field.start, field.length);
+        }
+
+        consume_token(parser, TOK_RBRACE, "Expected '}'");
+
+        Node*          node = node_new(NODE_VAR_DECL, start.line, start.column);
+        var_decl_node* vdn  = &node->as.var_decl;
+
+        vdn->name             = NULL;
+        vdn->name_length      = 0;
+        vdn->is_public        = is_public;
+        vdn->is_const         = is_const;
+        vdn->type             = NULL;
+        vdn->init             = NULL;
+        vdn->destruct_pattern = pattern;
+
+        // Initializer is required for struct destructuring
+        if (!match_token(parser, TOK_EQ)) {
+            parse_error(parser, "Struct destructuring requires an initializer");
+            node_free(node);
+            return NULL;
+        }
+        vdn->init = parse_expression(parser);
+
+        consume_token(parser, TOK_SEMICOLON, "Expected ';' after variable declaration");
+        return node;
+    }
+
     // Check for destructuring: var (a, b) = ... or var (a, (b, c)) = ...
     if (check_token(parser, TOK_LPAREN)) {
         DestructPattern* pattern = parse_destruct_pattern(parser);

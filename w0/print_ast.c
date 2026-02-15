@@ -38,6 +38,15 @@ static void print_destruct_pattern(DestructPattern* pattern) {
         }
         printf(")");
         break;
+    case PATTERN_STRUCT:
+        printf("{");
+        for (int i = 0; i < pattern->as.struc.count; i++) {
+            if (i > 0)
+                printf(", ");
+            printf("%s", pattern->as.struc.field_names[i]);
+        }
+        printf("}");
+        break;
     }
 }
 

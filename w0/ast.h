@@ -10,7 +10,8 @@ typedef struct Type            Type;
 // Destructuring pattern kinds
 typedef enum {
     PATTERN_IDENT, // Single identifier: x
-    PATTERN_TUPLE  // Nested tuple: (a, b) or (a, (b, c))
+    PATTERN_TUPLE, // Nested tuple: (a, b) or (a, (b, c))
+    PATTERN_STRUCT // Struct fields: {x, y}
 } PatternKind;
 
 // Recursive destructuring pattern for tuple unpacking
@@ -25,6 +26,13 @@ struct DestructPattern {
             DestructPattern** elements;
             int               count;
         } tuple;
+        struct {
+            char** field_names;
+            int*   field_name_lengths;
+            int    count;
+            int    capacity;
+            Type** field_types; // Set by checker (parallel array)
+        } struc;
     } as;
     Type* resolved_type; // Set by checker
 };
@@ -33,6 +41,8 @@ struct DestructPattern {
 DestructPattern* pattern_new_ident(const char* name, int length);
 DestructPattern* pattern_new_tuple(int capacity);
 void             pattern_tuple_push(DestructPattern* pattern, DestructPattern* elem);
+DestructPattern* pattern_new_struct(int capacity);
+void             pattern_struct_push(DestructPattern* pattern, const char* name, int length);
 void             pattern_free(DestructPattern* pattern);
 
 typedef enum {

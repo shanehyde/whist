@@ -174,14 +174,19 @@ Aliases are fully interchangeable with the underlying type: `var id: UserId = 42
 ```bnf
 <var-decl> ::= ( 'var' | 'const' ) <identifier> [ ':' <type> ] [ '=' <expression> ] ';'
             | ( 'var' | 'const' ) <destruct-pattern> [ ':' <type> ] '=' <expression> ';'
+            | ( 'var' | 'const' ) <struct-destruct> '=' <expression> ';'
 
 <destruct-pattern> ::= '(' <destruct-element> ',' <destruct-element> { ',' <destruct-element> } ')'
 
 <destruct-element> ::= <identifier>
                     | <destruct-pattern>
+
+<struct-destruct> ::= '{' <identifier> { ',' <identifier> } '}'
 ```
 
 **Tuple destructuring:** `var (a, b) = expr;` and `const (a, b) = expr;` unpack a tuple into individual bindings. The number of elements must match the tuple's arity. Nested patterns are supported: `var (x, (y, z)) = (1, (2, 3));` unpacks nested tuples.
+
+**Struct destructuring:** `var {field1, field2} = expr;` extracts named fields from a struct into local variables with the same names. The expression must evaluate to a struct type, and each identifier must match a field name on that struct. Partial destructuring is allowed (not all fields need to be listed). The underlying struct is kept alive as an RC-tracked temporary for the enclosing scope.
 
 ### Test Declaration
 
