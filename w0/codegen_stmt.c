@@ -225,6 +225,52 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
         emit(gen, ";\n");
         return;
     }
+    // Handle calls with anonymous new args — hoist to prevent RC leak
+    if (expr->type == NODE_CALL) {
+        int has_new_args = 0;
+        for (int i = 0; i < expr->as.call.args.count; i++) {
+            if (expr->as.call.args.nodes[i]->type == NODE_NEW_EXPR) {
+                has_new_args = 1;
+                break;
+            }
+        }
+        if (has_new_args) {
+            int   saved_count = gen->hoist.count;
+            char* temps[16];
+            int   temp_count = 0;
+            for (int i = 0; i < expr->as.call.args.count; i++) {
+                Node* arg = expr->as.call.args.nodes[i];
+                if (arg->type == NODE_NEW_EXPR) {
+                    int  id = gen->out.temp_count++;
+                    char name[32];
+                    snprintf(name, sizeof(name), "__rc_tmp%d", id);
+                    emit_hoisted_new_expr(gen, arg, name);
+                    if (gen->hoist.count >= gen->hoist.capacity) {
+                        int new_cap      = gen->hoist.capacity == 0 ? 8 : gen->hoist.capacity * 2;
+                        gen->hoist.nodes = xrealloc(gen->hoist.nodes, new_cap * sizeof(Node*));
+                        gen->hoist.names = xrealloc(gen->hoist.names, new_cap * sizeof(char*));
+                        gen->hoist.capacity = new_cap;
+                    }
+                    gen->hoist.nodes[gen->hoist.count] = arg;
+                    gen->hoist.names[gen->hoist.count] = xstrdup(name);
+                    gen->hoist.count++;
+                    temps[temp_count++] = gen->hoist.names[gen->hoist.count - 1];
+                }
+            }
+            emit_indent(gen);
+            emit_expr(gen, expr);
+            emit(gen, ";\n");
+            for (int i = 0; i < temp_count; i++) {
+                emit_indent(gen);
+                emit(gen, "__rc_dec(%s);\n", temps[i]);
+            }
+            for (int i = saved_count; i < gen->hoist.count; i++) {
+                free(gen->hoist.names[i]);
+            }
+            gen->hoist.count = saved_count;
+            return;
+        }
+    }
     emit_indent(gen);
     emit_expr(gen, expr);
     emit(gen, ";\n");

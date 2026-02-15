@@ -44,6 +44,7 @@ void             pattern_tuple_push(DestructPattern* pattern, DestructPattern* e
 DestructPattern* pattern_new_struct(int capacity);
 void             pattern_struct_push(DestructPattern* pattern, const char* name, int length);
 void             pattern_free(DestructPattern* pattern);
+DestructPattern* pattern_clone(DestructPattern* pattern);
 
 typedef enum {
     // Expressions

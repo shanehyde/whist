@@ -513,6 +513,11 @@ void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_d
     gen->string_lits.count    = 0;
     gen->string_lits.capacity = 0;
 
+    gen->hoist.nodes    = NULL;
+    gen->hoist.names    = NULL;
+    gen->hoist.count    = 0;
+    gen->hoist.capacity = 0;
+
     gen->tuple_types         = NULL;
     gen->tuple_type_count    = 0;
     gen->tuple_type_capacity = 0;
@@ -550,6 +555,11 @@ void codegen_free(CodeGen* gen) {
     }
     free(gen->aliases.uses);
     free(gen->tuple_types);
+    for (int i = 0; i < gen->hoist.count; i++) {
+        free(gen->hoist.names[i]);
+    }
+    free(gen->hoist.nodes);
+    free(gen->hoist.names);
 }
 
 // Collect tuple types from all declarations and register non-generic type aliases

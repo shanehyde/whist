@@ -604,16 +604,14 @@ static void emit_member_expr(CodeGen* gen, Node* node) {
     }
 }
 
-// Emit a `new` expression as a GCC statement expression: __rc_alloc + field init
-static void emit_new_expr(CodeGen* gen, Node* node) {
+// Resolve the type of a new expression, handling generic method bodies where
+// resolved_type may be NULL and must be resolved from the type_node.
+static Type* resolve_new_expr_type(CodeGen* gen, Node* node) {
     Type* rtype = node->as.new_expr.resolved_type;
-    // In generic method bodies, the checker doesn't visit the body, so resolved_type
-    // may be NULL. Resolve from the type_node using the current substitution context.
     if (!rtype) {
         Node* tn = node->as.new_expr.type_node;
         if (tn->type == NODE_GENERIC_TYPE) {
             if (strcmp(tn->as.generic_type.base_name, "Vec") == 0) {
-                // Look up the Vec instance by mangled name
                 char* mangled = build_mangled_name_from_generic_node(gen, tn);
                 for (int vi = 0; vi < gen->checker.vec_count; vi++) {
                     if (strcmp(gen->checker.vecs[vi].mangled_name, mangled) == 0) {
@@ -623,7 +621,6 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
                 }
                 free(mangled);
             } else {
-                // Look up the generic struct instance by mangled name
                 char* mangled = build_mangled_name_from_generic_node(gen, tn);
                 for (int gi = 0; gi < gen->checker.instance_count; gi++) {
                     if (strcmp(gen->checker.instances[gi].mangled_name, mangled) == 0) {
@@ -634,12 +631,24 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
                 free(mangled);
             }
         } else if (tn->type == NODE_IDENT) {
-            // Simple type name — check substitution context first
             Type* resolved = subst_lookup(gen, tn->as.ident.name);
             if (resolved)
                 rtype = resolved;
         }
     }
+    return rtype;
+}
+
+// Emit a `new` expression as a GCC statement expression: __rc_alloc + field init
+static void emit_new_expr(CodeGen* gen, Node* node) {
+    // Check if this node was hoisted — if so, emit just the temp name
+    for (int i = 0; i < gen->hoist.count; i++) {
+        if (gen->hoist.nodes[i] == node) {
+            emit(gen, "%s", gen->hoist.names[i]);
+            return;
+        }
+    }
+    Type* rtype = resolve_new_expr_type(gen, node);
     if (!rtype) {
         fprintf(stderr,
                 "codegen: emit_new_expr: could not resolve type for new expression at line %d\n",
@@ -733,6 +742,106 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
             }
         }
         emit(gen, " __rc_tmp%d; })", tmp);
+    }
+}
+
+// Emit a `new` expression as standalone statements with a given temp name.
+// Used by the hoisting logic in emit_expr_stmt to allocate anonymous new args
+// before the call, so they can be __rc_dec'd after.
+void emit_hoisted_new_expr(CodeGen* gen, Node* node, const char* temp_name) {
+    Type* rtype = resolve_new_expr_type(gen, node);
+    if (!rtype) {
+        fprintf(stderr,
+                "codegen: emit_hoisted_new_expr: could not resolve type for new expression at "
+                "line %d\n",
+                node->line);
+        return;
+    }
+    if (rtype->kind == TYPE_STRINGBUILDER) {
+        emit_indent(gen);
+        emit(gen,
+             "__StringBuilder* %s = (__StringBuilder*)__rc_alloc("
+             "sizeof(__StringBuilder), __StringBuilder_cleanup);\n",
+             temp_name);
+        emit_indent(gen);
+        emit(gen, "%s->data = NULL; %s->count = 0; %s->capacity = 0;\n", temp_name, temp_name,
+             temp_name);
+        return;
+    }
+    if (rtype->kind == TYPE_VEC) {
+        const char* elem_tname = type_mangle_name(rtype->as.vec.elem);
+        emit_indent(gen);
+        emit(gen, "__Vec_%s* %s = (__Vec_%s*)__rc_alloc(sizeof(__Vec_%s), __Vec_%s_cleanup);\n",
+             elem_tname, temp_name, elem_tname, elem_tname, elem_tname);
+        emit_indent(gen);
+        emit(gen, "%s->data = NULL; %s->count = 0; %s->capacity = 0;\n", temp_name, temp_name,
+             temp_name);
+        Node* init = node->as.new_expr.init;
+        for (int i = 0; i < init->as.struct_init.fields.count; i++) {
+            Node* field = init->as.struct_init.fields.nodes[i];
+            if (field && field->type == NODE_FIELD_INIT) {
+                emit_indent(gen);
+                emit(gen, "__Vec_%s_push(%s, ", elem_tname, temp_name);
+                emit_expr(gen, field->as.field_init.value);
+                emit(gen, ");\n");
+            }
+        }
+        return;
+    }
+    if (node->as.new_expr.init == NULL) {
+        // Init-call form: new Type(args)
+        const char* tname   = rtype->as.struc.name;
+        char*       cleanup = get_cleanup_func_for_type(rtype);
+        emit_indent(gen);
+        emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s), %s);\n", tname, temp_name, tname, tname,
+             cleanup ? cleanup : "NULL");
+        emit_indent(gen);
+        emit(gen, "*%s = (%s){0};\n", temp_name, tname);
+        emit_indent(gen);
+        emit(gen, "%s_init(%s", tname, temp_name);
+        for (int i = 0; i < node->as.new_expr.args.count; i++) {
+            emit(gen, ", ");
+            emit_expr(gen, node->as.new_expr.args.nodes[i]);
+        }
+        emit(gen, ");\n");
+        for (int i = 0; i < node->as.new_expr.args.count; i++) {
+            Node* arg = node->as.new_expr.args.nodes[i];
+            if (arg->type == NODE_IDENT && rc_is_tracked(gen, arg->as.ident.name)) {
+                Type*       vtype  = rc_get_var_type(gen, arg->as.ident.name);
+                const char* inc_fn = get_inc_func_for_type(vtype);
+                emit_indent(gen);
+                emit(gen, "%s(%s);\n", inc_fn, arg->as.ident.name);
+                free((char*)inc_fn);
+            }
+        }
+        free(cleanup);
+        return;
+    }
+    // new Type { fields }
+    const char* tname   = rtype->as.struc.name;
+    char*       cleanup = get_cleanup_func_for_type(rtype);
+    emit_indent(gen);
+    emit(gen, "%s* %s = (%s*)__rc_alloc(sizeof(%s), %s);\n", tname, temp_name, tname, tname,
+         cleanup ? cleanup : "NULL");
+    free(cleanup);
+    emit_indent(gen);
+    emit(gen, "*%s = (%s)", temp_name, tname);
+    emit_struct_init(gen, node->as.new_expr.init);
+    emit(gen, ";\n");
+    // Increment refcount for any RC-tracked idents stored in struct fields
+    Node* rc_init = node->as.new_expr.init;
+    for (int i = 0; i < rc_init->as.struct_init.fields.count; i++) {
+        Node* field = rc_init->as.struct_init.fields.nodes[i];
+        if (field && field->type == NODE_FIELD_INIT &&
+            field->as.field_init.value->type == NODE_IDENT &&
+            rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
+            const char* vname  = field->as.field_init.value->as.ident.name;
+            Type*       vtype  = rc_get_var_type(gen, vname);
+            const char* inc_fn = get_inc_func_for_type(vtype);
+            emit_indent(gen);
+            emit(gen, "%s(%s);\n", inc_fn, vname);
+            free((char*)inc_fn);
+        }
     }
 }
 
