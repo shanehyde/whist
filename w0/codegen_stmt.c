@@ -135,7 +135,9 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
 
             int value_is_rc = (expr->as.assign.value->type == NODE_IDENT &&
                                rc_is_tracked(gen, expr->as.assign.value->as.ident.name)) ||
-                              expr->as.assign.value->type == NODE_NEW_EXPR;
+                              expr->as.assign.value->type == NODE_NEW_EXPR ||
+                              (expr->as.assign.value->type == NODE_INDEX &&
+                               expr->as.assign.value->as.index.is_rc_elem);
             // For string fields, any value assignment needs RC handling
             if (field_ty && field_ty->kind == TYPE_STRING) {
                 value_is_rc = 1;
@@ -192,6 +194,28 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
         emit(gen, "->count, ");
         emit_expr(gen, idx_node->as.index.index);
         emit(gen, ", %d, %d);\n", idx_node->line, idx_node->column);
+        // RC handling: save new value to temp, inc, dec old, assign temp
+        if (idx_node->as.index.is_rc_elem) {
+            int tmp = gen->out.temp_count++;
+            emit_indent(gen);
+            emit(gen, "void* __rc_tmp%d = ", tmp);
+            emit_expr(gen, expr->as.assign.value);
+            emit(gen, ";\n");
+            emit_indent(gen);
+            emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
+            emit_indent(gen);
+            emit(gen, "__rc_dec(");
+            emit_expr(gen, idx_node->as.index.object);
+            emit(gen, "->data[");
+            emit_expr(gen, idx_node->as.index.index);
+            emit(gen, "]);\n");
+            emit_indent(gen);
+            emit_expr(gen, idx_node->as.index.object);
+            emit(gen, "->data[");
+            emit_expr(gen, idx_node->as.index.index);
+            emit(gen, "] = __rc_tmp%d;\n", tmp);
+            return;
+        }
         emit_indent(gen);
         emit_expr(gen, idx_node->as.index.object);
         emit(gen, "->data[");
@@ -294,19 +318,24 @@ static void emit_var_decl_rc_new_struct(CodeGen* gen, Node* node) {
     emit(gen, "*%s = (%s)", node->as.var_decl.name, tname);
     emit_struct_init(gen, node->as.var_decl.init->as.new_expr.init);
     emit(gen, ";\n");
-    // Increment refcount for any RC-tracked idents stored in struct fields
+    // Increment refcount for any RC values stored in struct fields
     Node* rc_init = node->as.var_decl.init->as.new_expr.init;
     for (int i = 0; i < rc_init->as.struct_init.fields.count; i++) {
         Node* field = rc_init->as.struct_init.fields.nodes[i];
-        if (field && field->type == NODE_FIELD_INIT &&
-            field->as.field_init.value->type == NODE_IDENT &&
-            rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
-            const char* vname  = field->as.field_init.value->as.ident.name;
-            Type*       vtype  = rc_get_var_type(gen, vname);
-            const char* inc_fn = get_inc_func_for_type(vtype);
-            emit_indent(gen);
-            emit(gen, "%s(%s);\n", inc_fn, vname);
-            free((char*)inc_fn);
+        if (field && field->type == NODE_FIELD_INIT) {
+            Node* val = field->as.field_init.value;
+            if (val->type == NODE_IDENT && rc_is_tracked(gen, val->as.ident.name)) {
+                const char* vname  = val->as.ident.name;
+                Type*       vtype  = rc_get_var_type(gen, vname);
+                const char* inc_fn = get_inc_func_for_type(vtype);
+                emit_indent(gen);
+                emit(gen, "%s(%s);\n", inc_fn, vname);
+                free((char*)inc_fn);
+            } else if (val->type == NODE_INDEX && val->as.index.is_rc_elem) {
+                // Vec index read of RC element — inc the borrowed reference
+                emit_indent(gen);
+                emit(gen, "__rc_inc(%s->%s);\n", node->as.var_decl.name, field->as.field_init.name);
+            }
         }
     }
     rc_push_var(gen, node->as.var_decl.name, rtype);

@@ -381,7 +381,13 @@ static Type* check_index_expr(Checker* checker, Node* node) {
             return type_error;
         }
         node->as.index.is_vec_index = 1;
-        return object->as.vec.elem;
+        Type* elem                  = object->as.vec.elem;
+        if (elem->kind == TYPE_STRUCT || elem->kind == TYPE_VEC ||
+            elem->kind == TYPE_STRINGBUILDER || elem->kind == TYPE_STRING ||
+            (elem->kind == TYPE_ENUM && elem->as.enm.has_rc_fields)) {
+            node->as.index.is_rc_elem = 1;
+        }
+        return elem;
     }
     if (object->kind == TYPE_STRING) {
         if (!type_is_integer(index)) {

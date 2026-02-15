@@ -6,6 +6,7 @@
 
 #include "alloc.h"
 #include "codegen_emit.h"
+#include "codegen_internal.h"
 #include "codegen_types.h"
 #include "types.h"
 #include "vec.h"
@@ -1352,6 +1353,15 @@ static void emit_generic_method_impls(CodeGen* gen, Node* ast) {
 
             gen->in_enum_method = was_in_enum_method;
 
+            // RC cleanup for implicit void return
+            if (gen->rc.count > 0 && method_body) {
+                int   sc   = method_body->as.block.stmts.count;
+                Node* last = sc > 0 ? method_body->as.block.stmts.nodes[sc - 1] : NULL;
+                if (!last || last->type != NODE_RETURN) {
+                    rc_cleanup_all(gen, NULL);
+                }
+            }
+
             // Emit any remaining defers at function end (for void functions or fallthrough)
             if (has_defers) {
                 for (int d = gen->defer.count - 1; d >= 0; d--) {
@@ -1474,6 +1484,15 @@ static void emit_generic_func_impls(CodeGen* gen, Node* ast) {
         if (inst->body) {
             for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
                 emit_stmt(gen, inst->body->as.block.stmts.nodes[s]);
+            }
+        }
+
+        // RC cleanup for implicit void return
+        if (gen->rc.count > 0 && inst->body) {
+            int   sc   = inst->body->as.block.stmts.count;
+            Node* last = sc > 0 ? inst->body->as.block.stmts.nodes[sc - 1] : NULL;
+            if (!last || last->type != NODE_RETURN) {
+                rc_cleanup_all(gen, NULL);
             }
         }
 
