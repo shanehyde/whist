@@ -635,6 +635,95 @@ void emit_vec_methods(CodeGen* gen) {
     }
 }
 
+// Emit user-defined method implementations for each Vec type instance
+void emit_vec_user_methods(CodeGen* gen, Node* ast) {
+    for (int i = 0; i < gen->checker.vec_count; i++) {
+        VecInstance* inst = &gen->checker.vecs[i];
+        if (inst->method_count == 0) {
+            continue;
+        }
+
+        const char* elem_tname = type_mangle_name(inst->elem_type);
+
+        // Get the Vec GenericDef's methods from AST to get param type nodes
+        Node** methods      = NULL;
+        int    method_count = 0;
+        collect_generic_methods(ast, "Vec", &methods, &method_count);
+
+        for (int m = 0; m < inst->method_count && m < method_count; m++) {
+            func_decl_node* fdn = &methods[m]->as.func_decl;
+
+            // Set up substitution: T -> elem_type
+            TypeSubstContext subst_ctx;
+            char*            tp   = "T";
+            subst_ctx.type_params = &tp;
+            subst_ctx.type_args   = &inst->elem_type;
+            subst_ctx.count       = 1;
+            gen->generics.subst   = &subst_ctx;
+
+            // Emit return type
+            if (fdn->return_is_const && fdn->return_type) {
+                emit(gen, "const ");
+            }
+            emit_type(gen, fdn->return_type);
+
+            // Method name: __Vec_T_methodname(
+            emit(gen, " __Vec_%s_%s(__Vec_%s* self", elem_tname, fdn->name, elem_tname);
+
+            // Other parameters
+            for (int p = 0; p < fdn->params.count; p++) {
+                emit(gen, ", ");
+                Node* param = fdn->params.nodes[p];
+                if (param->as.param.is_const) {
+                    emit(gen, "const ");
+                }
+                emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+            }
+            emit(gen, ") {\n");
+
+            // Clear defer stack for this function
+            defer_clear(gen);
+            gen->defer.return_type = fdn->return_type;
+
+            // Use per-instantiation cloned body
+            Node* method_body = NULL;
+            if (inst->method_bodies && m < inst->method_body_count && inst->method_bodies[m]) {
+                method_body = inst->method_bodies[m];
+            } else {
+                method_body = fdn->body;
+            }
+
+            gen->out.indent++;
+
+            if (method_body) {
+                for (int s = 0; s < method_body->as.block.stmts.count; s++) {
+                    emit_stmt(gen, method_body->as.block.stmts.nodes[s]);
+                }
+            }
+
+            // RC cleanup for implicit void return
+            if (gen->rc.count > 0 && method_body) {
+                int   sc   = method_body->as.block.stmts.count;
+                Node* last = sc > 0 ? method_body->as.block.stmts.nodes[sc - 1] : NULL;
+                if (!last || last->type != NODE_RETURN) {
+                    rc_cleanup_all(gen, NULL);
+                }
+            }
+
+            gen->out.indent--;
+            emit(gen, "}\n\n");
+
+            // Clear defer stack and RC tracking
+            defer_clear(gen);
+            rc_clear_all(gen);
+            gen->defer.return_type = NULL;
+            gen->generics.subst    = NULL;
+        }
+
+        free(methods);
+    }
+}
+
 // Emit __Vec_T_cleanup functions that free Vec elements and data array
 void emit_vec_cleanup(CodeGen* gen) {
     for (int i = 0; i < gen->checker.vec_count; i++) {

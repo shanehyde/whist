@@ -42,6 +42,7 @@ void emit_rc_runtime(CodeGen* gen);
 void emit_enum_rc_helpers(CodeGen* gen, Node* ast);
 void emit_struct_cleanup(CodeGen* gen, Node* ast);
 void emit_vec_methods(CodeGen* gen);
+void emit_vec_user_methods(CodeGen* gen, Node* ast);
 void emit_vec_cleanup(CodeGen* gen);
 
 #endif

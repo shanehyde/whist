@@ -1566,10 +1566,57 @@ static void emit_generic_func_forward_decls(CodeGen* gen, Node* ast) {
     }
 }
 
+static void emit_vec_user_method_forward_decls(CodeGen* gen, Node* ast) {
+    for (int i = 0; i < gen->checker.vec_count; i++) {
+        VecInstance* inst = &gen->checker.vecs[i];
+        if (inst->method_count == 0) {
+            continue;
+        }
+
+        const char* elem_tname = type_mangle_name(inst->elem_type);
+
+        // Find the Vec GenericDef's methods in the AST to get parameter type nodes
+        Node** methods      = NULL;
+        int    method_count = 0;
+        collect_generic_methods(ast, "Vec", &methods, &method_count);
+
+        for (int m = 0; m < inst->method_count && m < method_count; m++) {
+            func_decl_node* fdn = &methods[m]->as.func_decl;
+
+            // Set up substitution: T -> elem_type
+            TypeSubstContext  subst_ctx;
+            TypeSubstContext* old_subst = gen->generics.subst;
+            char*             tp        = "T";
+            subst_ctx.type_params       = &tp;
+            subst_ctx.type_args         = &inst->elem_type;
+            subst_ctx.count             = 1;
+            gen->generics.subst         = &subst_ctx;
+
+            emit_func_return_type(gen, fdn);
+            emit(gen, " __Vec_%s_%s(__Vec_%s* self", elem_tname, fdn->name, elem_tname);
+
+            for (int p = 0; p < fdn->params.count; p++) {
+                emit(gen, ", ");
+                Node* param = fdn->params.nodes[p];
+                if (param->as.param.is_const) {
+                    emit(gen, "const ");
+                }
+                emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+            }
+            emit(gen, ");\n");
+
+            gen->generics.subst = old_subst;
+        }
+
+        free(methods);
+    }
+}
+
 // Emit forward declarations for all functions, methods, and generic method instances
 void emit_function_forward_decls(CodeGen* gen, Node* ast) {
     emit_non_generic_function_forward_decls(gen, ast);
     emit_generic_method_forward_decls(gen, ast);
     emit_generic_func_forward_decls(gen, ast);
+    emit_vec_user_method_forward_decls(gen, ast);
     emit(gen, "\n");
 }

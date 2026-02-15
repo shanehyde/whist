@@ -275,15 +275,27 @@ static VecInstance* lookup_vec_instance(Checker* checker, const char* mangled_na
     return NULL;
 }
 
+// Public wrapper for lookup_vec_instance (for use by checker_expr.c)
+VecInstance* lookup_vec_instance_pub(Checker* checker, const char* mangled_name) {
+    return lookup_vec_instance(checker, mangled_name);
+}
+
 // Register an instantiated vec type
 static void register_vec_instance(Checker* checker, const char* mangled_name, Type* elem_type,
                                   Type* vec_type) {
     VEC_GROW(checker->containers.vecs, checker->containers.vec_count,
              checker->containers.vec_capacity);
-    VecInstance* inst  = &checker->containers.vecs[checker->containers.vec_count++];
-    inst->mangled_name = xstrdup(mangled_name);
-    inst->elem_type    = elem_type;
-    inst->type         = vec_type;
+    VecInstance* inst       = &checker->containers.vecs[checker->containers.vec_count++];
+    inst->mangled_name      = xstrdup(mangled_name);
+    inst->elem_type         = elem_type;
+    inst->type              = vec_type;
+    inst->method_names      = NULL;
+    inst->method_types      = NULL;
+    inst->method_is_const   = NULL;
+    inst->method_count      = 0;
+    inst->method_capacity   = 0;
+    inst->method_bodies     = NULL;
+    inst->method_body_count = 0;
 }
 
 // Register an instantiated generic type
@@ -680,6 +692,101 @@ Type* instantiate_generic_enum(Checker* checker, GenericDef* def, char* mangled,
     return enum_type;
 }
 
+// Instantiate user-defined methods on a Vec<T> instance from the Vec GenericDef
+static void instantiate_vec_user_methods(Checker* checker, const char* mangled, Type* elem_type,
+                                         Type* vec_type) {
+    GenericDef* vec_def = lookup_generic_def(checker, "Vec");
+    if (!vec_def || vec_def->method_count == 0) {
+        return;
+    }
+
+    VecInstance* inst = lookup_vec_instance(checker, mangled);
+    if (!inst) {
+        return;
+    }
+
+    // Allocate method body storage
+    inst->method_bodies     = xcalloc(vec_def->method_count, sizeof(Node*));
+    inst->method_body_count = vec_def->method_count;
+
+    for (int m = 0; m < vec_def->method_count; m++) {
+        Node*           method_decl = vec_def->methods[m];
+        func_decl_node* mfdn        = &method_decl->as.func_decl;
+
+        // Set up substitution context: T -> elem_type
+        char** old_params = checker->generics.current_type_params;
+        Type** old_args   = checker->generics.current_type_args;
+        int    old_count  = checker->generics.current_type_param_count;
+
+        char* tp                                   = "T";
+        checker->generics.current_type_params      = &tp;
+        checker->generics.current_type_args        = &elem_type;
+        checker->generics.current_type_param_count = 1;
+
+        // Resolve parameter types
+        int    param_count = mfdn->params.count;
+        Type** param_types = NULL;
+        if (param_count > 0) {
+            param_types = xmalloc(param_count * sizeof(Type*));
+            for (int p = 0; p < param_count; p++) {
+                Node* param    = mfdn->params.nodes[p];
+                param_types[p] = resolve_type(checker, param->as.param.type);
+            }
+        }
+
+        Type* return_type =
+            mfdn->return_type ? resolve_type(checker, mfdn->return_type) : type_void;
+
+        Type* method_type = type_func(param_types, param_count, return_type, 0);
+
+        // Clone and type-check the body
+        if (mfdn->body) {
+            Node* body_clone       = node_clone(mfdn->body);
+            inst->method_bodies[m] = body_clone;
+
+            checker_push_scope(checker);
+            Type* old_return             = checker->current_func_return;
+            checker->current_func_return = return_type;
+
+            // Inject 'self' as a Vec<T> variable
+            checker_define(checker, "self", SYM_VAR, vec_type, mfdn->receiver_is_const, 0, NULL);
+
+            // Define parameters
+            for (int p = 0; p < param_count; p++) {
+                Node* param = mfdn->params.nodes[p];
+                checker_define(checker, param->as.param.name, SYM_VAR, param_types[p],
+                               param->as.param.is_const, 0, NULL);
+            }
+
+            // Check body statements on the cloned body
+            for (int s = 0; s < body_clone->as.block.stmts.count; s++) {
+                check_statement(checker, body_clone->as.block.stmts.nodes[s]);
+            }
+
+            checker->current_func_return = old_return;
+            checker_pop_scope(checker);
+        }
+
+        // Restore substitution context
+        checker->generics.current_type_params      = old_params;
+        checker->generics.current_type_args        = old_args;
+        checker->generics.current_type_param_count = old_count;
+
+        // Register the method on the VecInstance
+        VEC_GROW(inst->method_names, inst->method_count, inst->method_capacity);
+        // Also grow parallel arrays manually
+        inst->method_types = xrealloc(inst->method_types, (inst->method_count + 1) * sizeof(Type*));
+        inst->method_is_const =
+            xrealloc(inst->method_is_const, (inst->method_count + 1) * sizeof(int));
+
+        int n                    = inst->method_count;
+        inst->method_names[n]    = xstrdup(mfdn->name);
+        inst->method_types[n]    = method_type;
+        inst->method_is_const[n] = mfdn->receiver_is_const;
+        inst->method_count       = n + 1;
+    }
+}
+
 // Resolve Vec<T> type: validate single arg, create vec type, and register span companion
 static Type* resolve_vec_type(Checker* checker, Node* type_node) {
     int arg_count = type_node->as.generic_type.type_args.count;
@@ -719,6 +826,9 @@ static Type* resolve_vec_type(Checker* checker, Node* type_node) {
         register_span_instance(checker, span_mangled, elem_type, span_type);
     }
 
+    // Instantiate user-defined methods on this Vec<T>
+    instantiate_vec_user_methods(checker, mangled, elem_type, vec_type);
+
     return vec_type;
 }
 
@@ -743,6 +853,9 @@ Type* ensure_vec_type(Checker* checker, Type* elem_type) {
         Type* span_type = type_span(elem_type);
         register_span_instance(checker, span_mangled, elem_type, span_type);
     }
+
+    // Instantiate user-defined methods on this Vec<T>
+    instantiate_vec_user_methods(checker, mangled, elem_type, vec_type);
 
     return vec_type;
 }
