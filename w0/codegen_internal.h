@@ -28,6 +28,7 @@ int         rc_is_tracked(CodeGen* gen, const char* name);
 void  emit_expr(CodeGen* gen, Node* node);
 void  emit_struct_init(CodeGen* gen, Node* node);
 void  emit_hoisted_new_expr(CodeGen* gen, Node* node, const char* temp_name);
+void  emit_hoisted_owned_temp(CodeGen* gen, Node* node, const char* temp_name);
 void  emit_destruct_pattern(CodeGen* gen, DestructPattern* pattern, const char* temp_prefix,
                             int is_const);
 Node* lookup_generic_template_field_type(CodeGen* gen, const char* field_name);

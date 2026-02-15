@@ -178,6 +178,8 @@ struct Node {
     NodeType type;
     int      line;
     int      column;
+    int      is_owned_temp;   // Set by checker: expression produces an owned RC value
+    Type*    owned_temp_type; // Set by checker: the RC type of the owned temporary
 
     union {
         // Literals

@@ -430,6 +430,10 @@ static NodeList nodelist_clone(NodeList* list) {
 // corresponding reset here. This is the ONLY place checker flags are cleared for clones.
 // All fields listed here correspond to "Set by checker" comments in ast.h.
 static void node_reset_checker_flags(Node* node) {
+    // Top-level flags (apply to all expression node types)
+    node->is_owned_temp   = 0;
+    node->owned_temp_type = NULL;
+
     switch (node->type) {
     case NODE_BINARY:
         node->as.binary.is_string_op = 0;
