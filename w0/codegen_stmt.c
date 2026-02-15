@@ -161,7 +161,8 @@ static int emit_rc_member_assign_stmt(CodeGen* gen, Node* expr) {
             value_is_rc = 1;
         }
         if (value_is_rc && field_ty &&
-            (field_ty->kind == TYPE_STRUCT || field_ty->kind == TYPE_STRING)) {
+            (field_ty->kind == TYPE_STRUCT || field_ty->kind == TYPE_STRING ||
+             field_ty->kind == TYPE_VEC || field_ty->kind == TYPE_STRINGBUILDER)) {
             int tmp = gen->out.temp_count++;
             emit_indent(gen);
             emit(gen, "void* __rc_tmp%d = (void*)", tmp);

@@ -327,7 +327,8 @@ void emit_vec_methods(CodeGen* gen) {
         Type*        elem_type   = inst->elem_type;
         const char*  elem_tname  = type_mangle_name(elem_type);
         int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC ||
-                           elem_type->kind == TYPE_STRING);
+                           elem_type->kind == TYPE_STRING || elem_type->kind == TYPE_STRINGBUILDER);
+        int elem_is_rc_enum = (elem_type->kind == TYPE_ENUM && elem_type->as.enm.has_rc_fields);
 
         // Push (Vec<string> push is provided by whist_runtime.h)
         if (elem_type->kind != TYPE_STRING) {
@@ -343,6 +344,8 @@ void emit_vec_methods(CodeGen* gen) {
             emit(gen, "    }\n");
             if (elem_is_ptr) {
                 emit(gen, "    __rc_inc(value);\n");
+            } else if (elem_is_rc_enum) {
+                emit(gen, "    __rc_inc_%s(value);\n", elem_type->as.enm.name);
             }
             emit(gen, "    self->data[self->count] = value;\n");
             emit(gen, "    self->count++;\n");
@@ -378,6 +381,8 @@ void emit_vec_methods(CodeGen* gen) {
             } else {
                 emit(gen, "    __rc_inc(value);\n");
             }
+        } else if (elem_is_rc_enum) {
+            emit(gen, "    __rc_inc_%s(value);\n", elem_type->as.enm.name);
         }
         emit(gen, "    self->data[index] = value;\n");
         emit(gen, "    self->count++;\n");
@@ -521,6 +526,10 @@ void emit_vec_methods(CodeGen* gen) {
                 emit(gen, "        __rc_dec(self->data[i]);\n");
             }
             emit(gen, "    }\n");
+        } else if (elem_is_rc_enum) {
+            emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
+            emit(gen, "        __rc_dec_%s(self->data[i]);\n", elem_type->as.enm.name);
+            emit(gen, "    }\n");
         }
         emit(gen, "    self->count = 0;\n");
         emit(gen, "}\n\n");
@@ -567,6 +576,8 @@ void emit_vec_methods(CodeGen* gen) {
                 } else {
                     emit(gen, "    __rc_inc(self->data[0]);\n");
                 }
+            } else if (elem_is_rc_enum) {
+                emit(gen, "    __rc_inc_%s(self->data[0]);\n", elem_type->as.enm.name);
             }
             emit(gen,
                  "    return (Option_%s){.tag = Option_%s_Some, .Some = {.f0 = "
@@ -587,6 +598,9 @@ void emit_vec_methods(CodeGen* gen) {
                 } else {
                     emit(gen, "    __rc_inc(self->data[self->count - 1]);\n");
                 }
+            } else if (elem_is_rc_enum) {
+                emit(gen, "    __rc_inc_%s(self->data[self->count - 1]);\n",
+                     elem_type->as.enm.name);
             }
             emit(gen,
                  "    return (Option_%s){.tag = Option_%s_Some, "
@@ -730,7 +744,9 @@ void emit_vec_cleanup(CodeGen* gen) {
         VecInstance* inst        = &gen->checker.vecs[i];
         Type*        elem_type   = inst->elem_type;
         const char*  elem_tname  = type_mangle_name(elem_type);
-        int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC);
+        int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC ||
+                           elem_type->kind == TYPE_STRINGBUILDER);
+        int elem_is_rc_enum = (elem_type->kind == TYPE_ENUM && elem_type->as.enm.has_rc_fields);
 
         // Vec<string> cleanup is provided by whist_runtime.h
         if (elem_type->kind == TYPE_STRING)
@@ -741,6 +757,10 @@ void emit_vec_cleanup(CodeGen* gen) {
         if (elem_is_ptr) {
             emit(gen, "    for (int64_t i = 0; i < ptr->count; i++) {\n");
             emit(gen, "        __rc_dec(ptr->data[i]);\n");
+            emit(gen, "    }\n");
+        } else if (elem_is_rc_enum) {
+            emit(gen, "    for (int64_t i = 0; i < ptr->count; i++) {\n");
+            emit(gen, "        __rc_dec_%s(ptr->data[i]);\n", elem_type->as.enm.name);
             emit(gen, "    }\n");
         }
         emit(gen, "    free(ptr->data);\n");
@@ -818,10 +838,14 @@ void emit_struct_cleanup(CodeGen* gen, Node* ast) {
         }
         for (int f = 0; f < t->as.struc.field_count; f++) {
             Type* ft = t->as.struc.field_types[f];
-            if (ft && (ft->kind == TYPE_STRUCT || ft->kind == TYPE_VEC)) {
+            if (ft && (ft->kind == TYPE_STRUCT || ft->kind == TYPE_VEC ||
+                       ft->kind == TYPE_STRINGBUILDER)) {
                 emit(gen, "    __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
             } else if (ft && ft->kind == TYPE_STRING) {
                 emit(gen, "    __rc_dec((void*)ptr->%s);\n", t->as.struc.field_names[f]);
+            } else if (ft && ft->kind == TYPE_ENUM && ft->as.enm.has_rc_fields) {
+                emit(gen, "    __rc_dec_%s(ptr->%s);\n", ft->as.enm.name,
+                     t->as.struc.field_names[f]);
             }
         }
         emit(gen, "}\n\n");
