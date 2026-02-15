@@ -198,7 +198,7 @@ struct Node {
             TokenType op;
             Node*     left;
             Node*     right;
-            int       is_string_op; // Set by checker for string ==, !=, +
+            int       is_string_op; // Set by checker for string ==, !=, <, >, <=, >=, +
             int       is_eq_op;     // Set by checker for struct/data-enum == !=
             int       is_enum_eq;   // Set by checker: 1 if eq is for a data enum
             char*     eq_type_name; // Set by checker: type name for Eq method call
