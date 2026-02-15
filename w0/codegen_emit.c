@@ -133,6 +133,73 @@ void emit_function_name(CodeGen* gen, const char* func_name, const char* receive
     }
 }
 
+static Node* find_alias_target(CodeGen* gen, const char* name) {
+    for (int i = 0; i < gen->aliases.type_count; i++) {
+        if (strcmp(gen->aliases.types[i], name) == 0) {
+            return gen->aliases.type_targets[i];
+        }
+    }
+    return NULL;
+}
+
+static void emit_ident_type(CodeGen* gen, Node* type_node) {
+    const char* name = type_node->as.ident.name;
+
+    Type* resolved = subst_lookup(gen, name);
+    if (resolved) {
+        emit_resolved_type(gen, resolved);
+        return;
+    }
+
+    const char* c_type = type_c_name(name);
+    if (c_type) {
+        emit(gen, "%s", c_type);
+        return;
+    }
+
+    if (is_enum_type_name(gen, name)) {
+        emit(gen, "%s", name);
+        return;
+    }
+
+    Node* alias_target = find_alias_target(gen, name);
+    if (alias_target) {
+        emit_type(gen, alias_target);
+        return;
+    }
+
+    emit(gen, "%s*", name);
+}
+
+static void emit_vec_or_span_type_arg(CodeGen* gen, Node* arg) {
+    if (arg->type == NODE_IDENT) {
+        const char* arg_name = arg->as.ident.name;
+        Type*       resolved = subst_lookup(gen, arg_name);
+        if (resolved) {
+            emit(gen, "%s", type_mangle_name(resolved));
+        } else {
+            emit(gen, "%s", arg_name);
+        }
+        return;
+    }
+
+    if (arg->type == NODE_GENERIC_TYPE) {
+        // Nested generic like Vec<HashEntry<V>>.
+        char* mangled = build_mangled_name_from_generic_node(gen, arg);
+        emit(gen, "%s", mangled);
+        free(mangled);
+    }
+}
+
+static void emit_regular_generic_type(CodeGen* gen, Node* type_node) {
+    char* mangled = build_mangled_name_from_generic_node(gen, type_node);
+    emit(gen, "%s", mangled);
+    if (!is_enum_type_name(gen, mangled)) {
+        emit(gen, "*");
+    }
+    free(mangled);
+}
+
 // Emit a type from a type annotation node
 void emit_type(CodeGen* gen, Node* type_node) {
     if (!type_node) {
@@ -141,39 +208,9 @@ void emit_type(CodeGen* gen, Node* type_node) {
     }
 
     switch (type_node->type) {
-    case NODE_IDENT: {
-        const char* name = type_node->as.ident.name;
-
-        // Check for type parameter substitution (for generic methods)
-        Type* resolved = subst_lookup(gen, name);
-        if (resolved) {
-            emit_resolved_type(gen, resolved);
-            return;
-        }
-
-        const char* c_type = type_c_name(name);
-        if (c_type) {
-            emit(gen, "%s", c_type);
-        } else if (is_enum_type_name(gen, name)) {
-            // Enum type - value type, no pointer
-            emit(gen, "%s", name);
-        } else {
-            // Check if this is a type alias — resolve to target type
-            int alias_found = 0;
-            for (int i = 0; i < gen->aliases.type_count; i++) {
-                if (strcmp(gen->aliases.types[i], name) == 0) {
-                    emit_type(gen, gen->aliases.type_targets[i]);
-                    alias_found = 1;
-                    break;
-                }
-            }
-            if (!alias_found) {
-                // User-defined struct type - emit as pointer (struct references)
-                emit(gen, "%s*", name);
-            }
-        }
+    case NODE_IDENT:
+        emit_ident_type(gen, type_node);
         break;
-    }
     case NODE_UNARY:
         // Pointer types no longer supported in the language
         emit(gen, "/* pointer types not supported */");
@@ -223,65 +260,14 @@ void emit_type(CodeGen* gen, Node* type_node) {
 
         if (is_vec || is_span) {
             emit(gen, "%s", is_vec ? "__Vec_" : "__Span_");
-            Node* arg = type_node->as.generic_type.type_args.nodes[0];
-            if (arg->type == NODE_IDENT) {
-                const char* arg_name = arg->as.ident.name;
-                Type*       resolved = subst_lookup(gen, arg_name);
-                if (resolved) {
-                    emit(gen, "%s", type_mangle_name(resolved));
-                } else {
-                    emit(gen, "%s", arg_name);
-                }
-            } else if (arg->type == NODE_GENERIC_TYPE) {
-                // Nested generic like Vec<HashEntry<V>> — build substituted mangled name
-                char* mangled = build_mangled_name_from_generic_node(gen, arg);
-                emit(gen, "%s", mangled);
-                free(mangled);
-            }
+            emit_vec_or_span_type_arg(gen, type_node->as.generic_type.type_args.nodes[0]);
             if (is_vec)
                 emit(gen, "*"); // Vec is RC-managed pointer
             break;
         }
 
-        // Regular generic struct (Box, Pair, etc.) - emit as pointer
-        emit(gen, "%s", base);
-        for (int i = 0; i < type_node->as.generic_type.type_args.count; i++) {
-            emit(gen, "_");
-            Node* arg = type_node->as.generic_type.type_args.nodes[i];
-            if (arg->type == NODE_IDENT) {
-                const char* arg_name = arg->as.ident.name;
-                Type*       resolved = subst_lookup(gen, arg_name);
-                if (resolved) {
-                    emit(gen, "%s", type_name(resolved));
-                } else {
-                    emit(gen, "%s", arg_name);
-                }
-            } else if (arg->type == NODE_GENERIC_TYPE) {
-                // Nested generic - recurse to get mangled name
-                emit(gen, "%s", arg->as.generic_type.base_name);
-                for (int j = 0; j < arg->as.generic_type.type_args.count; j++) {
-                    emit(gen, "_");
-                    Node* nested = arg->as.generic_type.type_args.nodes[j];
-                    if (nested->type == NODE_IDENT) {
-                        const char* nested_name = nested->as.ident.name;
-                        Type*       resolved_n  = subst_lookup(gen, nested_name);
-                        if (resolved_n) {
-                            emit(gen, "%s", type_name(resolved_n));
-                        } else {
-                            emit(gen, "%s", nested_name);
-                        }
-                    }
-                }
-            }
-        }
-        // Only emit * for struct types, not for generic enums
-        {
-            char* mangled = build_mangled_name_from_generic_node(gen, type_node);
-            if (!is_enum_type_name(gen, mangled)) {
-                emit(gen, "*"); // Struct reference
-            }
-            free(mangled);
-        }
+        // Regular generic struct/enum type.
+        emit_regular_generic_type(gen, type_node);
         break;
     }
     case NODE_FUNC_TYPE: {
@@ -308,58 +294,93 @@ void emit_type(CodeGen* gen, Node* type_node) {
 }
 
 // Emit a resolved Type* (used for inferred types like tuples)
+static const char* resolved_builtin_c_type(TypeKind kind) {
+    switch (kind) {
+    case TYPE_VOID:
+        return "void";
+    case TYPE_BOOL:
+        return "bool";
+    case TYPE_INT64:
+        return "int64_t";
+    case TYPE_INT8:
+        return "int8_t";
+    case TYPE_INT16:
+        return "int16_t";
+    case TYPE_INT32:
+        return "int32_t";
+    case TYPE_UINT64:
+        return "uint64_t";
+    case TYPE_UINT8:
+        return "uint8_t";
+    case TYPE_UINT16:
+        return "uint16_t";
+    case TYPE_UINT32:
+        return "uint32_t";
+    case TYPE_F32:
+        return "float";
+    case TYPE_F64:
+        return "double";
+    case TYPE_CHAR:
+        return "char";
+    case TYPE_STRING:
+        return "const char*";
+    case TYPE_VOIDPTR:
+        return "void*";
+    case TYPE_STRINGBUILDER:
+        return "__StringBuilder*";
+    default:
+        return NULL;
+    }
+}
+
+static void emit_resolved_tuple_type(CodeGen* gen, Type* type) {
+    int idx = -1;
+    for (int i = 0; i < gen->tuple_type_count; i++) {
+        if (tuple_types_equal(gen->tuple_types[i], type)) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx >= 0) {
+        emit(gen, "__tuple_t%d", idx);
+        return;
+    }
+
+    // Fallback to inline struct (shouldn't happen if collection is correct)
+    emit(gen, "struct { ");
+    for (int i = 0; i < type->as.tuple.elem_count; i++) {
+        emit_resolved_type(gen, type->as.tuple.elem_types[i]);
+        emit(gen, " _%d; ", i);
+    }
+    emit(gen, "}");
+}
+
+static void emit_resolved_func_type(CodeGen* gen, Type* type) {
+    emit_resolved_type(gen, type->as.func.return_type);
+    emit(gen, " (*)(");
+    for (int i = 0; i < type->as.func.param_count; i++) {
+        if (i > 0)
+            emit(gen, ", ");
+        emit_resolved_type(gen, type->as.func.param_types[i]);
+    }
+    if (type->as.func.param_count == 0)
+        emit(gen, "void");
+    emit(gen, ")");
+}
+
 void emit_resolved_type(CodeGen* gen, Type* type) {
     if (!type) {
         emit(gen, "void");
         return;
     }
 
+    const char* builtin = resolved_builtin_c_type(type->kind);
+    if (builtin) {
+        emit(gen, "%s", builtin);
+        return;
+    }
+
     switch (type->kind) {
-    case TYPE_VOID:
-        emit(gen, "void");
-        break;
-    case TYPE_BOOL:
-        emit(gen, "bool");
-        break;
-    case TYPE_INT64:
-        emit(gen, "int64_t");
-        break;
-    case TYPE_INT8:
-        emit(gen, "int8_t");
-        break;
-    case TYPE_INT16:
-        emit(gen, "int16_t");
-        break;
-    case TYPE_INT32:
-        emit(gen, "int32_t");
-        break;
-    case TYPE_UINT64:
-        emit(gen, "uint64_t");
-        break;
-    case TYPE_UINT8:
-        emit(gen, "uint8_t");
-        break;
-    case TYPE_UINT16:
-        emit(gen, "uint16_t");
-        break;
-    case TYPE_UINT32:
-        emit(gen, "uint32_t");
-        break;
-    case TYPE_F32:
-        emit(gen, "float");
-        break;
-    case TYPE_F64:
-        emit(gen, "double");
-        break;
-    case TYPE_CHAR:
-        emit(gen, "char");
-        break;
-    case TYPE_STRING:
-        emit(gen, "const char*");
-        break;
-    case TYPE_VOIDPTR:
-        emit(gen, "void*");
-        break;
     case TYPE_ARRAY:
         emit_resolved_type(gen, type->as.array.elem);
         if (type->as.array.size >= 0) {
@@ -377,45 +398,14 @@ void emit_resolved_type(CodeGen* gen, Type* type) {
     case TYPE_VEC:
         emit(gen, "__Vec_%s*", type_mangle_name(type->as.vec.elem));
         break;
-    case TYPE_STRINGBUILDER:
-        emit(gen, "__StringBuilder*");
-        break;
     case TYPE_ENUM:
         emit(gen, "%s", type->as.enm.name);
         break;
-    case TYPE_TUPLE: {
-        // Find the typedef index for this tuple type
-        int idx = -1;
-        for (int i = 0; i < gen->tuple_type_count; i++) {
-            if (tuple_types_equal(gen->tuple_types[i], type)) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx >= 0) {
-            emit(gen, "__tuple_t%d", idx);
-        } else {
-            // Fallback to inline struct (shouldn't happen if collection is correct)
-            emit(gen, "struct { ");
-            for (int i = 0; i < type->as.tuple.elem_count; i++) {
-                emit_resolved_type(gen, type->as.tuple.elem_types[i]);
-                emit(gen, " _%d; ", i);
-            }
-            emit(gen, "}");
-        }
+    case TYPE_TUPLE:
+        emit_resolved_tuple_type(gen, type);
         break;
-    }
     case TYPE_FUNC:
-        emit_resolved_type(gen, type->as.func.return_type);
-        emit(gen, " (*)(");
-        for (int i = 0; i < type->as.func.param_count; i++) {
-            if (i > 0)
-                emit(gen, ", ");
-            emit_resolved_type(gen, type->as.func.param_types[i]);
-        }
-        if (type->as.func.param_count == 0)
-            emit(gen, "void");
-        emit(gen, ")");
+        emit_resolved_func_type(gen, type);
         break;
     default:
         emit(gen, "/* unknown type */");
@@ -586,147 +576,170 @@ static void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
     emit_type(gen, fdn->return_type);
 }
 
-// Emit a function declaration: signature, body, defer cleanup, and RC cleanup
-static void emit_func_decl(CodeGen* gen, Node* node) {
-    // Skip body-less non-extern methods (duck-type trait declarations)
-    if (node->as.func_decl.body == NULL && !node->as.func_decl.is_extern) {
-        return;
+static int should_skip_func_decl(CodeGen* gen, func_decl_node* fdn, int is_method) {
+    // Skip body-less non-extern methods (duck-type trait declarations).
+    if (fdn->body == NULL && !fdn->is_extern) {
+        return 1;
     }
 
-    int is_method = (node->as.func_decl.receiver_type != NULL);
-
-    // In test mode, skip user's main function
-    if (gen->test_mode && !is_method && strcmp(node->as.func_decl.name, "main") == 0) {
-        return;
+    // In test mode, skip user's main function.
+    if (gen->test_mode && !is_method && strcmp(fdn->name, "main") == 0) {
+        return 1;
     }
 
-    // Skip generic method templates - they get instantiated separately
-    if (is_method && node->as.func_decl.receiver_type_args.count > 0) {
-        return;
+    // Skip generic method templates - they get instantiated separately.
+    if (is_method && fdn->receiver_type_args.count > 0) {
+        return 1;
     }
 
-    // Skip generic free function templates - they get instantiated separately
-    if (!is_method && node->as.func_decl.type_param_count > 0) {
-        return;
+    // Skip generic free function templates - they get instantiated separately.
+    if (!is_method && fdn->type_param_count > 0) {
+        return 1;
     }
 
-    // Check if function is void
-    int is_void = return_type_is_void(node->as.func_decl.return_type);
+    return 0;
+}
 
-    // Emit static for private functions (except main)
-    if (!node->as.func_decl.is_public && strcmp(node->as.func_decl.name, "main") != 0) {
-        emit(gen, "static ");
+static void emit_method_self_param(CodeGen* gen, func_decl_node* fdn) {
+    if (fdn->receiver_is_const && strcmp(fdn->receiver_type, "string") != 0) {
+        emit(gen, "const ");
     }
+    if (type_is_builtin_name(fdn->receiver_type)) {
+        emit(gen, "%s self", type_c_name(fdn->receiver_type));
+    } else {
+        emit(gen, "%s* self", fdn->receiver_type);
+    }
+}
 
-    // Return type
-    emit_func_return_type(gen, &node->as.func_decl);
-
-    // Function name (mangled for methods and library functions)
-    emit_function_name(gen, node->as.func_decl.name,
-                       is_method ? node->as.func_decl.receiver_type : NULL, gen->current_module);
-
-    // Parameters
+static void emit_func_params(CodeGen* gen, func_decl_node* fdn, int is_method) {
     if (is_method) {
-        // Emit self parameter first
-        if (node->as.func_decl.receiver_is_const &&
-            strcmp(node->as.func_decl.receiver_type, "string") != 0) {
-            emit(gen, "const ");
-        }
-        if (type_is_builtin_name(node->as.func_decl.receiver_type)) {
-            emit(gen, "%s self", type_c_name(node->as.func_decl.receiver_type));
-        } else {
-            emit(gen, "%s* self", node->as.func_decl.receiver_type);
-        }
-        if (node->as.func_decl.params.count > 0) {
+        emit_method_self_param(gen, fdn);
+        if (fdn->params.count > 0) {
             emit(gen, ", ");
         }
     }
 
-    if (node->as.func_decl.params.count == 0 && !is_method) {
+    if (fdn->params.count == 0 && !is_method) {
         emit(gen, "void");
-    } else {
-        for (int i = 0; i < node->as.func_decl.params.count; i++) {
-            if (i > 0)
-                emit(gen, ", ");
-            Node* param = node->as.func_decl.params.nodes[i];
-            if (param->as.param.is_const) {
-                emit(gen, "const ");
-            }
-            emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+        return;
+    }
+
+    for (int i = 0; i < fdn->params.count; i++) {
+        if (i > 0) {
+            emit(gen, ", ");
+        }
+        Node* param = fdn->params.nodes[i];
+        if (param->as.param.is_const) {
+            emit(gen, "const ");
+        }
+        emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+    }
+}
+
+static int func_body_has_top_level_defer(func_decl_node* fdn) {
+    if (!fdn->body) {
+        return 0;
+    }
+    for (int i = 0; i < fdn->body->as.block.stmts.count; i++) {
+        Node* stmt = fdn->body->as.block.stmts.nodes[i];
+        if (stmt && stmt->type == NODE_DEFER) {
+            return 1;
         }
     }
+    return 0;
+}
+
+static void emit_func_body_stmts(CodeGen* gen, func_decl_node* fdn) {
+    if (!fdn->body) {
+        return;
+    }
+    for (int i = 0; i < fdn->body->as.block.stmts.count; i++) {
+        emit_stmt(gen, fdn->body->as.block.stmts.nodes[i]);
+    }
+}
+
+static void emit_implicit_return_rc_cleanup(CodeGen* gen, func_decl_node* fdn) {
+    if (gen->rc.count <= 0 || !fdn->body) {
+        return;
+    }
+    int   stmt_count = fdn->body->as.block.stmts.count;
+    Node* last       = stmt_count > 0 ? fdn->body->as.block.stmts.nodes[stmt_count - 1] : NULL;
+    if (!last || last->type != NODE_RETURN) {
+        rc_cleanup_all(gen, NULL);
+    }
+}
+
+static void emit_defer_cleanup_section(CodeGen* gen, int is_void) {
+    if (gen->defer.count <= 0) {
+        return;
+    }
+
+    emit(gen, "__cleanup:;\n");
+    // Emit deferred statements in reverse order (LIFO).
+    for (int i = gen->defer.count - 1; i >= 0; i--) {
+        emit_stmt(gen, gen->defer.stack[i]);
+    }
+
+    emit_indent(gen);
+    if (is_void) {
+        emit(gen, "return;\n");
+    } else {
+        emit(gen, "return __ret;\n");
+    }
+}
+
+// Emit a function declaration: signature, body, defer cleanup, and RC cleanup
+static void emit_func_decl(CodeGen* gen, Node* node) {
+    func_decl_node* fdn       = &node->as.func_decl;
+    int             is_method = (fdn->receiver_type != NULL);
+    if (should_skip_func_decl(gen, fdn, is_method)) {
+        return;
+    }
+
+    int is_void = return_type_is_void(fdn->return_type);
+
+    // Emit static for private functions (except main).
+    if (!fdn->is_public && strcmp(fdn->name, "main") != 0) {
+        emit(gen, "static ");
+    }
+
+    emit_func_return_type(gen, fdn);
+
+    // Function name (mangled for methods and library functions).
+    emit_function_name(gen, fdn->name, is_method ? fdn->receiver_type : NULL, gen->current_module);
+    emit_func_params(gen, fdn, is_method);
     emit(gen, ") {\n");
 
-    // Clear defer stack for this function
+    // Clear defer stack for this function.
     defer_clear(gen);
-    gen->defer.return_type = node->as.func_decl.return_type;
+    gen->defer.return_type = fdn->return_type;
+    int has_defers         = func_body_has_top_level_defer(fdn);
 
-    // First pass: count defers to know if we need __ret
-    int has_defers = 0;
-    if (node->as.func_decl.body) {
-        for (int i = 0; i < node->as.func_decl.body->as.block.stmts.count; i++) {
-            Node* stmt = node->as.func_decl.body->as.block.stmts.nodes[i];
-            if (stmt && stmt->type == NODE_DEFER) {
-                has_defers = 1;
-                break;
-            }
-        }
-    }
-
-    // Body
     gen->out.indent++;
 
-    // Declare __ret if function has defers and is non-void
+    // Declare __ret if function has defers and is non-void.
     if (has_defers && !is_void) {
         emit_indent(gen);
-        emit_type(gen, node->as.func_decl.return_type);
+        emit_type(gen, fdn->return_type);
         emit(gen, " __ret;\n");
     }
 
-    // Track if we're inside an enum method body (for match(self) dereference)
+    // Track if we're inside an enum method body (for match(self) dereference).
     int was_in_enum_method = gen->in_enum_method;
-    if (is_method && is_enum_type_name(gen, node->as.func_decl.receiver_type)) {
+    if (is_method && is_enum_type_name(gen, fdn->receiver_type)) {
         gen->in_enum_method = 1;
     }
 
-    if (node->as.func_decl.body) {
-        for (int i = 0; i < node->as.func_decl.body->as.block.stmts.count; i++) {
-            emit_stmt(gen, node->as.func_decl.body->as.block.stmts.nodes[i]);
-        }
-    }
+    emit_func_body_stmts(gen, fdn);
 
     gen->in_enum_method = was_in_enum_method;
-
-    // RC cleanup for implicit void return (no explicit return statement at end)
-    if (gen->rc.count > 0 && node->as.func_decl.body) {
-        int   stmt_count = node->as.func_decl.body->as.block.stmts.count;
-        Node* last =
-            stmt_count > 0 ? node->as.func_decl.body->as.block.stmts.nodes[stmt_count - 1] : NULL;
-        if (!last || last->type != NODE_RETURN) {
-            rc_cleanup_all(gen, NULL);
-        }
-    }
-
-    // Emit cleanup section if there are defers
-    if (gen->defer.count > 0) {
-        emit(gen, "__cleanup:;\n");
-        // Emit deferred statements in reverse order (LIFO)
-        for (int i = gen->defer.count - 1; i >= 0; i--) {
-            emit_stmt(gen, gen->defer.stack[i]);
-        }
-        // Emit final return
-        emit_indent(gen);
-        if (is_void) {
-            emit(gen, "return;\n");
-        } else {
-            emit(gen, "return __ret;\n");
-        }
-    }
+    emit_implicit_return_rc_cleanup(gen, fdn);
+    emit_defer_cleanup_section(gen, is_void);
 
     gen->out.indent--;
     emit(gen, "}\n\n");
 
-    // Clear defer stack and RC tracking
+    // Clear defer stack and RC tracking.
     defer_clear(gen);
     rc_clear_all(gen);
     gen->defer.return_type = NULL;
