@@ -17,6 +17,9 @@ static void emit_member_expr(CodeGen* gen, Node* node);
 static void emit_new_expr(CodeGen* gen, Node* node);
 static void emit_string_interp(CodeGen* gen, Node* node);
 static void emit_match_expr(CodeGen* gen, Node* node);
+static void emit_binary_expr(CodeGen* gen, Node* node);
+static void emit_assign_expr(CodeGen* gen, Node* node);
+static void emit_compound_literal_from_list(CodeGen* gen, NodeList* elements);
 
 static const char* member_struct_name(CodeGen* gen, Node* member) {
     return sem_info_get_member_struct_name(gen->checker.sem, member, member->as.member.struct_name);
@@ -1157,6 +1160,112 @@ static void emit_match_expr(CodeGen* gen, Node* node) {
     emit(gen, "__matchv%d; })", match_id);
 }
 
+static void emit_ident_expr(CodeGen* gen, Node* node) {
+    // In enum methods, self is a pointer but represents a value — dereference it.
+    if (gen->in_enum_method && node->as.ident.length == 4 &&
+        memcmp(node->as.ident.name, "self", 4) == 0) {
+        emit(gen, "(*self)");
+    } else {
+        emit(gen, "%.*s", node->as.ident.length, node->as.ident.name);
+    }
+}
+
+static void emit_eq_binary_expr(CodeGen* gen, Node* node) {
+    const char* tname = node->as.binary.eq_type_name;
+    emit(gen, "(");
+    if (node->as.binary.op == TOK_BANG_EQ) {
+        emit(gen, "!");
+    }
+    if (node->as.binary.is_enum_eq) {
+        emit(gen, "__%s_eq(", tname);
+    } else {
+        emit(gen, "%s_eq(", tname);
+    }
+    emit_expr(gen, node->as.binary.left);
+    emit(gen, ", ");
+    emit_expr(gen, node->as.binary.right);
+    emit(gen, "))");
+}
+
+static const char* string_compare_suffix(TokenType op) {
+    switch (op) {
+    case TOK_EQ_EQ:
+        return " == 0";
+    case TOK_BANG_EQ:
+        return " != 0";
+    case TOK_LT:
+        return " < 0";
+    case TOK_GT:
+        return " > 0";
+    case TOK_LT_EQ:
+        return " <= 0";
+    case TOK_GT_EQ:
+        return " >= 0";
+    default:
+        return NULL;
+    }
+}
+
+static void emit_string_binary_expr(CodeGen* gen, Node* node) {
+    TokenType op = node->as.binary.op;
+    if (op == TOK_PLUS) {
+        emit(gen, "__String_concat(");
+        emit_expr(gen, node->as.binary.left);
+        emit(gen, ", ");
+        emit_expr(gen, node->as.binary.right);
+        emit(gen, ")");
+        return;
+    }
+
+    const char* suffix = string_compare_suffix(op);
+    if (!suffix) {
+        return;
+    }
+
+    emit(gen, "(strcmp(");
+    emit_expr(gen, node->as.binary.left);
+    emit(gen, ", ");
+    emit_expr(gen, node->as.binary.right);
+    emit(gen, ")%s)", suffix);
+}
+
+static void emit_binary_expr(CodeGen* gen, Node* node) {
+    if (node->as.binary.is_eq_op) {
+        emit_eq_binary_expr(gen, node);
+        return;
+    }
+
+    if (node->as.binary.is_string_op) {
+        emit_string_binary_expr(gen, node);
+        return;
+    }
+
+    emit(gen, "(");
+    emit_expr(gen, node->as.binary.left);
+    emit(gen, " %s ", binary_op_str(node->as.binary.op));
+    emit_expr(gen, node->as.binary.right);
+    emit(gen, ")");
+}
+
+static void emit_assign_expr(CodeGen* gen, Node* node) {
+    emit(gen, "(");
+    emit_expr(gen, node->as.assign.target);
+    emit(gen, " %s ", assign_op_str(node->as.assign.op));
+    emit_expr(gen, node->as.assign.value);
+    emit(gen, ")");
+}
+
+static void emit_compound_literal_from_list(CodeGen* gen, NodeList* elements) {
+    emit(gen, "{");
+    for (int i = 0; i < elements->count; i++) {
+        if (i > 0) {
+            emit(gen, ", ");
+        }
+        emit_expr(gen, elements->nodes[i]);
+    }
+    emit(gen, "}");
+}
+
 // Dispatch expression code generation based on node type
 void emit_expr(CodeGen* gen, Node* node) {
     if (!node)
@@ -1188,13 +1297,7 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_IDENT:
-        // In enum methods, self is a pointer but represents a value — dereference it
-        if (gen->in_enum_method && node->as.ident.length == 4 &&
-            memcmp(node->as.ident.name, "self", 4) == 0) {
-            emit(gen, "(*self)");
-        } else {
-            emit(gen, "%.*s", node->as.ident.length, node->as.ident.name);
-        }
+        emit_ident_expr(gen, node);
         break;
 
     case NODE_ENUM_VALUE:
@@ -1202,71 +1305,7 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_BINARY:
-        if (node->as.binary.is_eq_op) {
-            const char* tname = node->as.binary.eq_type_name;
-            emit(gen, "(");
-            if (node->as.binary.op == TOK_BANG_EQ)
-                emit(gen, "!");
-            if (node->as.binary.is_enum_eq)
-                emit(gen, "__%s_eq(", tname);
-            else
-                emit(gen, "%s_eq(", tname);
-            emit_expr(gen, node->as.binary.left);
-            emit(gen, ", ");
-            emit_expr(gen, node->as.binary.right);
-            emit(gen, "))");
-        } else if (node->as.binary.is_string_op) {
-            TokenType op = node->as.binary.op;
-            if (op == TOK_EQ_EQ) {
-                emit(gen, "(strcmp(");
-                emit_expr(gen, node->as.binary.left);
-                emit(gen, ", ");
-                emit_expr(gen, node->as.binary.right);
-                emit(gen, ") == 0)");
-            } else if (op == TOK_BANG_EQ) {
-                emit(gen, "(strcmp(");
-                emit_expr(gen, node->as.binary.left);
-                emit(gen, ", ");
-                emit_expr(gen, node->as.binary.right);
-                emit(gen, ") != 0)");
-            } else if (op == TOK_LT) {
-                emit(gen, "(strcmp(");
-                emit_expr(gen, node->as.binary.left);
-                emit(gen, ", ");
-                emit_expr(gen, node->as.binary.right);
-                emit(gen, ") < 0)");
-            } else if (op == TOK_GT) {
-                emit(gen, "(strcmp(");
-                emit_expr(gen, node->as.binary.left);
-                emit(gen, ", ");
-                emit_expr(gen, node->as.binary.right);
-                emit(gen, ") > 0)");
-            } else if (op == TOK_LT_EQ) {
-                emit(gen, "(strcmp(");
-                emit_expr(gen, node->as.binary.left);
-                emit(gen, ", ");
-                emit_expr(gen, node->as.binary.right);
-                emit(gen, ") <= 0)");
-            } else if (op == TOK_GT_EQ) {
-                emit(gen, "(strcmp(");
-                emit_expr(gen, node->as.binary.left);
-                emit(gen, ", ");
-                emit_expr(gen, node->as.binary.right);
-                emit(gen, ") >= 0)");
-            } else if (op == TOK_PLUS) {
-                emit(gen, "__String_concat(");
-                emit_expr(gen, node->as.binary.left);
-                emit(gen, ", ");
-                emit_expr(gen, node->as.binary.right);
-                emit(gen, ")");
-            }
-        } else {
-            emit(gen, "(");
-            emit_expr(gen, node->as.binary.left);
-            emit(gen, " %s ", binary_op_str(node->as.binary.op));
-            emit_expr(gen, node->as.binary.right);
-            emit(gen, ")");
-        }
+        emit_binary_expr(gen, node);
         break;
 
     case NODE_UNARY:
@@ -1292,11 +1331,7 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_ASSIGN:
-        emit(gen, "(");
-        emit_expr(gen, node->as.assign.target);
-        emit(gen, " %s ", assign_op_str(node->as.assign.op));
-        emit_expr(gen, node->as.assign.value);
-        emit(gen, ")");
+        emit_assign_expr(gen, node);
         break;
 
     case NODE_STRUCT_INIT:
@@ -1304,25 +1339,13 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_TUPLE_LIT:
-        // Tuple literal: (e1, e2, ...) -> {e1, e2, ...}
-        emit(gen, "{");
-        for (int i = 0; i < node->as.tuple_lit.elements.count; i++) {
-            if (i > 0)
-                emit(gen, ", ");
-            emit_expr(gen, node->as.tuple_lit.elements.nodes[i]);
-        }
-        emit(gen, "}");
+        // Tuple literal: (e1, e2, ...) -> {e1, e2, ...}.
+        emit_compound_literal_from_list(gen, &node->as.tuple_lit.elements);
         break;
 
     case NODE_ARRAY_LIT:
-        // Array literal: [e1, e2, ...] -> {e1, e2, ...}
-        emit(gen, "{");
-        for (int i = 0; i < node->as.array_lit.elements.count; i++) {
-            if (i > 0)
-                emit(gen, ", ");
-            emit_expr(gen, node->as.array_lit.elements.nodes[i]);
-        }
-        emit(gen, "}");
+        // Array literal: [e1, e2, ...] -> {e1, e2, ...}.
+        emit_compound_literal_from_list(gen, &node->as.array_lit.elements);
         break;
 
     case NODE_NEW_EXPR:
