@@ -119,6 +119,13 @@ typedef struct {
         int    count;
         int    capacity;
     } string_lits;
+    // Hoisted anonymous new expressions (for RC cleanup after calls)
+    struct {
+        Node** nodes; // new expr node pointers (not owned)
+        char** names; // corresponding hoisted temp names (owned)
+        int    count;
+        int    capacity;
+    } hoist;
     // Current module name (NULL for "main")
     const char* current_module;
     // 1 if currently emitting an enum method body

@@ -479,8 +479,8 @@ static void node_reset_checker_flags(Node* node) {
         node->as.array_lit.resolved_type = NULL;
         break;
     case NODE_VAR_DECL:
-        node->as.var_decl.is_rc            = 0;
-        node->as.var_decl.resolved_type    = NULL;
+        node->as.var_decl.is_rc         = 0;
+        node->as.var_decl.resolved_type = NULL;
         break;
     case NODE_CALL:
         free(node->as.call.resolved_name);
@@ -629,11 +629,11 @@ Node* node_clone(Node* node) {
         break;
     case NODE_VAR_DECL:
         c->as.var_decl.name = node->as.var_decl.name ? xstrdup(node->as.var_decl.name) : NULL;
-        c->as.var_decl.name_length = node->as.var_decl.name_length;
-        c->as.var_decl.type        = node_clone(node->as.var_decl.type);
-        c->as.var_decl.init        = node_clone(node->as.var_decl.init);
-        c->as.var_decl.is_const          = node->as.var_decl.is_const;
-        c->as.var_decl.destruct_pattern  = pattern_clone(node->as.var_decl.destruct_pattern);
+        c->as.var_decl.name_length      = node->as.var_decl.name_length;
+        c->as.var_decl.type             = node_clone(node->as.var_decl.type);
+        c->as.var_decl.init             = node_clone(node->as.var_decl.init);
+        c->as.var_decl.is_const         = node->as.var_decl.is_const;
+        c->as.var_decl.destruct_pattern = pattern_clone(node->as.var_decl.destruct_pattern);
         break;
     case NODE_BLOCK:
         c->as.block.stmts = nodelist_clone(&node->as.block.stmts);
