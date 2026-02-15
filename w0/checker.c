@@ -1604,6 +1604,67 @@ static Type* substitute_self(Type* type, Type* concrete) {
     return type;
 }
 
+static int find_trait_method_index(Type* trait_type, const char* method_name) {
+    for (int i = 0; i < trait_type->as.trait.method_count; i++) {
+        if (strcmp(trait_type->as.trait.method_names[i], method_name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void add_deferred_trait_check(Checker* checker, const char* type_name,
+                                     const char* method_name, Type* expected_type, int is_const,
+                                     int is_generic, int line, int col) {
+    VEC_GROW(checker->traits.deferred_checks, checker->traits.deferred_check_count,
+             checker->traits.deferred_check_capacity);
+    DeferredTraitCheck* dc =
+        &checker->traits.deferred_checks[checker->traits.deferred_check_count++];
+    dc->type_name     = xstrdup(type_name);
+    dc->method_name   = xstrdup(method_name);
+    dc->expected_type = expected_type;
+    dc->is_const      = is_const;
+    dc->is_generic    = is_generic;
+    dc->line          = line;
+    dc->col           = col;
+}
+
+static int check_trait_method_signature(Checker* checker, Node* method, const char* trait_name,
+                                        Type* trait_type, int trait_method_idx,
+                                        Type* impl_func_type) {
+    Type* trait_func_type = trait_type->as.trait.method_types[trait_method_idx];
+    Type* trait_ret = substitute_self(trait_func_type->as.func.return_type, checker->self_type);
+
+    if (!type_equals(impl_func_type->as.func.return_type, trait_ret)) {
+        check_error(checker, method->line, method->column,
+                    "Method '%s' return type mismatch: trait '%s' expects '%s', got '%s'",
+                    method->as.func_decl.name, trait_name, type_name(trait_ret),
+                    type_name(impl_func_type->as.func.return_type));
+        return 0;
+    }
+
+    if (impl_func_type->as.func.param_count != trait_func_type->as.func.param_count) {
+        check_error(checker, method->line, method->column,
+                    "Method '%s' parameter count mismatch: trait '%s' expects %d, got %d",
+                    method->as.func_decl.name, trait_name, trait_func_type->as.func.param_count,
+                    impl_func_type->as.func.param_count);
+        return 0;
+    }
+
+    for (int p = 0; p < trait_func_type->as.func.param_count; p++) {
+        Type* trait_param =
+            substitute_self(trait_func_type->as.func.param_types[p], checker->self_type);
+        if (!type_equals(impl_func_type->as.func.param_types[p], trait_param)) {
+            check_error(checker, method->line, method->column,
+                        "Method '%s' parameter %d type mismatch: trait '%s' expects '%s', got '%s'",
+                        method->as.func_decl.name, p + 1, trait_name, type_name(trait_param),
+                        type_name(impl_func_type->as.func.param_types[p]));
+        }
+    }
+
+    return 1;
+}
+
 // Type-check an inherent impl block (no trait): impl Type { methods }
 static void check_inherent_impl_decl(Checker* checker, Node* node) {
     const char* type_name_str = node->as.impl_decl.type_name;
@@ -1716,21 +1777,11 @@ static void check_impl_decl(Checker* checker, Node* node) {
 
     // Process each method in the impl block
     for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
-        Node* method = node->as.impl_decl.methods.nodes[i];
-
-        // Verify this method exists in the trait
+        Node*       method           = node->as.impl_decl.methods.nodes[i];
         const char* method_name      = method->as.func_decl.name;
-        int         found_in_trait   = 0;
-        int         trait_method_idx = -1;
-        for (int j = 0; j < trait_type->as.trait.method_count; j++) {
-            if (strcmp(trait_type->as.trait.method_names[j], method_name) == 0) {
-                found_in_trait   = 1;
-                trait_method_idx = j;
-                break;
-            }
-        }
+        int         trait_method_idx = find_trait_method_index(trait_type, method_name);
 
-        if (!found_in_trait) {
+        if (trait_method_idx < 0) {
             check_error(checker, method->line, method->column,
                         "Method '%s' is not declared in trait '%s'", method_name, trait_name);
             continue;
@@ -1749,83 +1800,31 @@ static void check_impl_decl(Checker* checker, Node* node) {
         }
 
         if (is_generic) {
-            // Body-less method in generic impl: record deferred check, skip registration
             if (method->as.func_decl.body == NULL) {
-                VEC_GROW(checker->traits.deferred_checks, checker->traits.deferred_check_count,
-                         checker->traits.deferred_check_capacity);
-                DeferredTraitCheck* dc =
-                    &checker->traits.deferred_checks[checker->traits.deferred_check_count++];
-                dc->type_name     = xstrdup(type_name_str);
-                dc->method_name   = xstrdup(method_name);
-                dc->expected_type = NULL; // Full validation deferred to instantiation
-                dc->is_const      = impl_is_const;
-                dc->is_generic    = 1;
-                dc->line          = method->line;
-                dc->col           = method->column;
+                // Full signature validation is deferred to concrete instantiations.
+                add_deferred_trait_check(checker, type_name_str, method_name, NULL, impl_is_const,
+                                         1, method->line, method->column);
                 continue;
             }
-            // For generic structs, the method has a generic receiver (e.g., func (Box<T>)
-            // drop()) Process it via check_decl which routes to the generic method registration
-            // path
+            // For generic structs, receiver methods register through the generic method path.
             check_decl(checker, method);
-        } else {
-            // Verify the method signature matches the trait signature
-            Type* impl_func_type  = get_function_type(checker, method);
-            Type* trait_func_type = trait_type->as.trait.method_types[trait_method_idx];
-
-            // Check return type (substitute Self in trait signature with concrete type)
-            Type* trait_ret =
-                substitute_self(trait_func_type->as.func.return_type, checker->self_type);
-            if (!type_equals(impl_func_type->as.func.return_type, trait_ret)) {
-                check_error(checker, method->line, method->column,
-                            "Method '%s' return type mismatch: trait '%s' expects '%s', got '%s'",
-                            method_name, trait_name, type_name(trait_ret),
-                            type_name(impl_func_type->as.func.return_type));
-                continue;
-            }
-
-            // Check parameter types
-            if (impl_func_type->as.func.param_count != trait_func_type->as.func.param_count) {
-                check_error(checker, method->line, method->column,
-                            "Method '%s' parameter count mismatch: trait '%s' expects %d, got %d",
-                            method_name, trait_name, trait_func_type->as.func.param_count,
-                            impl_func_type->as.func.param_count);
-                continue;
-            }
-
-            for (int p = 0; p < trait_func_type->as.func.param_count; p++) {
-                Type* trait_param =
-                    substitute_self(trait_func_type->as.func.param_types[p], checker->self_type);
-                if (!type_equals(impl_func_type->as.func.param_types[p], trait_param)) {
-                    check_error(
-                        checker, method->line, method->column,
-                        "Method '%s' parameter %d type mismatch: trait '%s' expects '%s', got "
-                        "'%s'",
-                        method_name, p + 1, trait_name, type_name(trait_param),
-                        type_name(impl_func_type->as.func.param_types[p]));
-                }
-            }
-
-            // Body-less method: record deferred check, skip check_decl
-            if (method->as.func_decl.body == NULL) {
-                VEC_GROW(checker->traits.deferred_checks, checker->traits.deferred_check_count,
-                         checker->traits.deferred_check_capacity);
-                DeferredTraitCheck* dc =
-                    &checker->traits.deferred_checks[checker->traits.deferred_check_count++];
-                dc->type_name     = xstrdup(type_name_str);
-                dc->method_name   = xstrdup(method_name);
-                dc->expected_type = impl_func_type;
-                dc->is_const      = impl_is_const;
-                dc->is_generic    = 0;
-                dc->line          = method->line;
-                dc->col           = method->column;
-                continue;
-            }
-
-            // Process the method as a regular func_decl (registers on struct/primitive, checks
-            // body)
-            check_decl(checker, method);
+            continue;
         }
+
+        Type* impl_func_type = get_function_type(checker, method);
+        if (!check_trait_method_signature(checker, method, trait_name, trait_type, trait_method_idx,
+                                          impl_func_type)) {
+            continue;
+        }
+
+        if (method->as.func_decl.body == NULL) {
+            add_deferred_trait_check(checker, type_name_str, method_name, impl_func_type,
+                                     impl_is_const, 0, method->line, method->column);
+            continue;
+        }
+
+        // Process the method as a regular func_decl (registers on struct/primitive, checks body)
+        check_decl(checker, method);
     }
 
     // Verify all required trait methods are implemented
