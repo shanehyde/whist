@@ -1814,10 +1814,19 @@ static void apply_trait_impl_flags(Checker* checker, Node* node, const char* tra
                                    const char* type_name_str, Symbol* type_sym, int is_generic,
                                    int is_primitive) {
     if (strcmp(trait_name, "Drop") == 0 && !is_generic && !is_primitive) {
-        type_sym->type->as.struc.has_drop = 1;
+        if (type_sym->type->kind == TYPE_STRUCT) {
+            type_sym->type->as.struc.has_drop = 1;
+        } else if (type_sym->type->kind == TYPE_ENUM) {
+            // Drop on enums is not yet supported — but don't access .as.struc
+            check_error(checker, node->line, node->column,
+                        "Drop trait is not supported for enum types");
+        }
     }
 
     if (strcmp(trait_name, "Eq") == 0 && !is_generic && !is_primitive) {
+        if (type_sym->type->kind != TYPE_STRUCT) {
+            return;
+        }
         type_sym->type->as.struc.has_eq = 1;
         // All struct-typed fields must also implement Eq.
         Type* stype = type_sym->type;
