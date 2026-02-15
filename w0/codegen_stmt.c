@@ -38,24 +38,99 @@ void emit_block_contents(CodeGen* gen, Node* block) {
     gen->rc.depth--;
 }
 
-// Emit an expression statement (NODE_EXPR_STMT).
-// Handles RC var reassignment, RC member assignment, Vec index assignment,
-// and simple expression statements.
-static void emit_expr_stmt(CodeGen* gen, Node* node) {
-    Node* expr = node->as.expr_stmt.expr;
+static Type* find_struct_field_type(Type* struct_type, const char* field_name) {
+    if (!struct_type || struct_type->kind != TYPE_STRUCT) {
+        return NULL;
+    }
+    for (int i = 0; i < struct_type->as.struc.field_count; i++) {
+        if (strcmp(struct_type->as.struc.field_names[i], field_name) == 0) {
+            return struct_type->as.struc.field_types[i];
+        }
+    }
+    return NULL;
+}
 
-    // Handle RC reassignment: p = new_value
-    // Must inc new value, dec old value, then assign
-    if (expr->type == NODE_ASSIGN && expr->as.assign.op == TOK_EQ &&
-        expr->as.assign.target->type == NODE_IDENT &&
-        rc_is_tracked(gen, expr->as.assign.target->as.ident.name)) {
-        const char* var_name = expr->as.assign.target->as.ident.name;
-        Type*       var_type = rc_get_var_type(gen, var_name);
-        if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
-            // Enum value reassignment: dec old payload, then assign, then inc if copying
+static void hoist_push_new_arg(CodeGen* gen, Node* arg, const char* temp_name) {
+    if (gen->hoist.count >= gen->hoist.capacity) {
+        int new_cap         = gen->hoist.capacity == 0 ? 8 : gen->hoist.capacity * 2;
+        gen->hoist.nodes    = xrealloc(gen->hoist.nodes, new_cap * sizeof(Node*));
+        gen->hoist.names    = xrealloc(gen->hoist.names, new_cap * sizeof(char*));
+        gen->hoist.capacity = new_cap;
+    }
+    gen->hoist.nodes[gen->hoist.count] = arg;
+    gen->hoist.names[gen->hoist.count] = xstrdup(temp_name);
+    gen->hoist.count++;
+}
+
+static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
+    if (expr->type != NODE_ASSIGN || expr->as.assign.op != TOK_EQ ||
+        expr->as.assign.target->type != NODE_IDENT ||
+        !rc_is_tracked(gen, expr->as.assign.target->as.ident.name)) {
+        return 0;
+    }
+
+    const char* var_name = expr->as.assign.target->as.ident.name;
+    Type*       var_type = rc_get_var_type(gen, var_name);
+    if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
+        // Enum value reassignment: dec old payload, then assign, then inc if copying
+        int temp_id = gen->out.temp_count++;
+        emit_indent(gen);
+        emit(gen, "%s __rc_tmp%d = ", var_type->as.enm.name, temp_id);
+        emit_expr(gen, expr->as.assign.value);
+        emit(gen, ";\n");
+
+        int needs_inc = (expr->as.assign.value->type == NODE_IDENT &&
+                         rc_is_tracked(gen, expr->as.assign.value->as.ident.name));
+        if (needs_inc) {
+            emit_indent(gen);
+            emit(gen, "__rc_inc_%s(__rc_tmp%d);\n", var_type->as.enm.name, temp_id);
+        }
+
+        emit_indent(gen);
+        emit(gen, "__rc_dec_%s(%s);\n", var_type->as.enm.name, var_name);
+        emit_indent(gen);
+        emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
+        return 1;
+    }
+
+    // Evaluate new value into a temp (in case it references the old value)
+    int temp_id = gen->out.temp_count++;
+    emit_indent(gen);
+    emit(gen, "void* __rc_tmp%d = (void*)", temp_id);
+    emit_expr(gen, expr->as.assign.value);
+    emit(gen, ";\n");
+    emit_indent(gen);
+    emit(gen, "__rc_inc(__rc_tmp%d);\n", temp_id);
+    emit_indent(gen);
+    if (var_type && var_type->kind == TYPE_STRING) {
+        emit(gen, "__rc_dec((void*)%s);\n", var_name);
+    } else {
+        emit(gen, "__rc_dec(%s);\n", var_name);
+    }
+    emit_indent(gen);
+    emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
+    return 1;
+}
+
+static int emit_rc_member_assign_stmt(CodeGen* gen, Node* expr) {
+    if (expr->type != NODE_ASSIGN || expr->as.assign.op != TOK_EQ ||
+        expr->as.assign.target->type != NODE_MEMBER) {
+        return 0;
+    }
+
+    Node* member    = expr->as.assign.target;
+    int   obj_is_rc = member->as.member.object->type == NODE_IDENT &&
+                    rc_is_tracked(gen, member->as.member.object->as.ident.name);
+
+    if (obj_is_rc) {
+        const char* obj_name = member->as.member.object->as.ident.name;
+        Type*       obj_type = rc_get_var_type(gen, obj_name);
+        Type*       field_ty = find_struct_field_type(obj_type, member->as.member.name);
+
+        if (field_ty && field_ty->kind == TYPE_ENUM && field_ty->as.enm.has_rc_fields) {
             int temp_id = gen->out.temp_count++;
             emit_indent(gen);
-            emit(gen, "%s __rc_tmp%d = ", var_type->as.enm.name, temp_id);
+            emit(gen, "%s __rc_tmp%d = ", field_ty->as.enm.name, temp_id);
             emit_expr(gen, expr->as.assign.value);
             emit(gen, ";\n");
 
@@ -63,214 +138,167 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
                              rc_is_tracked(gen, expr->as.assign.value->as.ident.name));
             if (needs_inc) {
                 emit_indent(gen);
-                emit(gen, "__rc_inc_%s(__rc_tmp%d);\n", var_type->as.enm.name, temp_id);
+                emit(gen, "__rc_inc_%s(__rc_tmp%d);\n", field_ty->as.enm.name, temp_id);
             }
 
             emit_indent(gen);
-            emit(gen, "__rc_dec_%s(%s);\n", var_type->as.enm.name, var_name);
+            emit(gen, "__rc_dec_%s(", field_ty->as.enm.name);
+            emit_expr(gen, member);
+            emit(gen, ");\n");
             emit_indent(gen);
-            emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
-            return;
+            emit_expr(gen, member);
+            emit(gen, " = __rc_tmp%d;\n", temp_id);
+            return 1;
         }
 
-        // Evaluate new value into a temp (in case it references the old value)
-        int temp_id = gen->out.temp_count++;
-        emit_indent(gen);
-        emit(gen, "void* __rc_tmp%d = (void*)", temp_id);
-        emit_expr(gen, expr->as.assign.value);
-        emit(gen, ";\n");
-        emit_indent(gen);
-        emit(gen, "__rc_inc(__rc_tmp%d);\n", temp_id);
-        emit_indent(gen);
-        if (var_type && var_type->kind == TYPE_STRING) {
-            emit(gen, "__rc_dec((void*)%s);\n", var_name);
-        } else {
-            emit(gen, "__rc_dec(%s);\n", var_name);
+        int value_is_rc = (expr->as.assign.value->type == NODE_IDENT &&
+                           rc_is_tracked(gen, expr->as.assign.value->as.ident.name)) ||
+                          expr->as.assign.value->type == NODE_NEW_EXPR ||
+                          (expr->as.assign.value->type == NODE_INDEX &&
+                           expr->as.assign.value->as.index.is_rc_elem);
+        // For string fields, any value assignment needs RC handling
+        if (field_ty && field_ty->kind == TYPE_STRING) {
+            value_is_rc = 1;
         }
-        emit_indent(gen);
-        emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
-        return;
-    }
-    // Handle RC member assignment: line1.start = z
-    if (expr->type == NODE_ASSIGN && expr->as.assign.op == TOK_EQ &&
-        expr->as.assign.target->type == NODE_MEMBER) {
-        Node* member    = expr->as.assign.target;
-        int   obj_is_rc = member->as.member.object->type == NODE_IDENT &&
-                        rc_is_tracked(gen, member->as.member.object->as.ident.name);
-        if (obj_is_rc) {
-            const char* obj_name = member->as.member.object->as.ident.name;
-            Type*       obj_type = rc_get_var_type(gen, obj_name);
-            Type*       field_ty = NULL;
-            if (obj_type && obj_type->kind == TYPE_STRUCT) {
-                for (int f = 0; f < obj_type->as.struc.field_count; f++) {
-                    if (strcmp(obj_type->as.struc.field_names[f], member->as.member.name) == 0) {
-                        field_ty = obj_type->as.struc.field_types[f];
-                        break;
-                    }
-                }
-            }
-            if (field_ty && field_ty->kind == TYPE_ENUM && field_ty->as.enm.has_rc_fields) {
-                int temp_id = gen->out.temp_count++;
-                emit_indent(gen);
-                emit(gen, "%s __rc_tmp%d = ", field_ty->as.enm.name, temp_id);
-                emit_expr(gen, expr->as.assign.value);
-                emit(gen, ";\n");
-
-                int needs_inc = (expr->as.assign.value->type == NODE_IDENT &&
-                                 rc_is_tracked(gen, expr->as.assign.value->as.ident.name));
-                if (needs_inc) {
-                    emit_indent(gen);
-                    emit(gen, "__rc_inc_%s(__rc_tmp%d);\n", field_ty->as.enm.name, temp_id);
-                }
-
-                emit_indent(gen);
-                emit(gen, "__rc_dec_%s(", field_ty->as.enm.name);
-                emit_expr(gen, member);
-                emit(gen, ");\n");
-                emit_indent(gen);
-                emit_expr(gen, member);
-                emit(gen, " = __rc_tmp%d;\n", temp_id);
-                return;
-            }
-
-            int value_is_rc = (expr->as.assign.value->type == NODE_IDENT &&
-                               rc_is_tracked(gen, expr->as.assign.value->as.ident.name)) ||
-                              expr->as.assign.value->type == NODE_NEW_EXPR ||
-                              (expr->as.assign.value->type == NODE_INDEX &&
-                               expr->as.assign.value->as.index.is_rc_elem);
-            // For string fields, any value assignment needs RC handling
-            if (field_ty && field_ty->kind == TYPE_STRING) {
-                value_is_rc = 1;
-            }
-            if (value_is_rc && field_ty &&
-                (field_ty->kind == TYPE_STRUCT || field_ty->kind == TYPE_STRING)) {
-                int tmp = gen->out.temp_count++;
-                emit_indent(gen);
-                emit(gen, "void* __rc_tmp%d = (void*)", tmp);
-                emit_expr(gen, expr->as.assign.value);
-                emit(gen, ";\n");
-                emit_indent(gen);
-                emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
-                emit_indent(gen);
-                if (field_ty->kind == TYPE_STRING) {
-                    emit(gen, "__rc_dec((void*)");
-                } else {
-                    emit(gen, "__rc_dec(");
-                }
-                emit_expr(gen, member);
-                emit(gen, ");\n");
-                emit_indent(gen);
-                emit_expr(gen, member);
-                emit(gen, " = __rc_tmp%d;\n", tmp);
-                return;
-            }
-        }
-        // Handle self.field = new_value in method bodies (self is not RC-tracked)
-        if (!obj_is_rc && member->as.member.object->type == NODE_IDENT &&
-            strcmp(member->as.member.object->as.ident.name, "self") == 0) {
-            int value_is_rc = expr->as.assign.value->type == NODE_NEW_EXPR;
-            if (value_is_rc) {
-                // Dec the old field value, then assign the new one
-                emit_indent(gen);
-                emit(gen, "__rc_dec(");
-                emit_expr(gen, member);
-                emit(gen, ");\n");
-                emit_indent(gen);
-                emit_expr(gen, member);
-                emit(gen, " = ");
-                emit_expr(gen, expr->as.assign.value);
-                emit(gen, ";\n");
-                return;
-            }
-        }
-    }
-    // Handle Vec index assignment: v[i] = x → bounds check + direct data write
-    if (expr->type == NODE_ASSIGN && expr->as.assign.target->type == NODE_INDEX &&
-        expr->as.assign.target->as.index.is_vec_index) {
-        Node* idx_node = expr->as.assign.target;
-        emit_indent(gen);
-        emit(gen, "__w0_vec_check(");
-        emit_expr(gen, idx_node->as.index.object);
-        emit(gen, "->count, ");
-        emit_expr(gen, idx_node->as.index.index);
-        emit(gen, ", %d, %d);\n", idx_node->line, idx_node->column);
-        // RC handling: save new value to temp, inc, dec old, assign temp
-        if (idx_node->as.index.is_rc_elem) {
+        if (value_is_rc && field_ty &&
+            (field_ty->kind == TYPE_STRUCT || field_ty->kind == TYPE_STRING)) {
             int tmp = gen->out.temp_count++;
             emit_indent(gen);
-            emit(gen, "void* __rc_tmp%d = ", tmp);
+            emit(gen, "void* __rc_tmp%d = (void*)", tmp);
             emit_expr(gen, expr->as.assign.value);
             emit(gen, ";\n");
             emit_indent(gen);
             emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
             emit_indent(gen);
-            emit(gen, "__rc_dec(");
-            emit_expr(gen, idx_node->as.index.object);
-            emit(gen, "->data[");
-            emit_expr(gen, idx_node->as.index.index);
-            emit(gen, "]);\n");
+            if (field_ty->kind == TYPE_STRING) {
+                emit(gen, "__rc_dec((void*)");
+            } else {
+                emit(gen, "__rc_dec(");
+            }
+            emit_expr(gen, member);
+            emit(gen, ");\n");
             emit_indent(gen);
-            emit_expr(gen, idx_node->as.index.object);
-            emit(gen, "->data[");
-            emit_expr(gen, idx_node->as.index.index);
-            emit(gen, "] = __rc_tmp%d;\n", tmp);
-            return;
+            emit_expr(gen, member);
+            emit(gen, " = __rc_tmp%d;\n", tmp);
+            return 1;
         }
+    }
+
+    // Handle self.field = new_value in method bodies (self is not RC-tracked)
+    if (!obj_is_rc && member->as.member.object->type == NODE_IDENT &&
+        strcmp(member->as.member.object->as.ident.name, "self") == 0 &&
+        expr->as.assign.value->type == NODE_NEW_EXPR) {
+        // Dec the old field value, then assign the new one
+        emit_indent(gen);
+        emit(gen, "__rc_dec(");
+        emit_expr(gen, member);
+        emit(gen, ");\n");
+        emit_indent(gen);
+        emit_expr(gen, member);
+        emit(gen, " = ");
+        emit_expr(gen, expr->as.assign.value);
+        emit(gen, ";\n");
+        return 1;
+    }
+
+    return 0;
+}
+
+static int emit_vec_index_assign_stmt(CodeGen* gen, Node* expr) {
+    if (expr->type != NODE_ASSIGN || expr->as.assign.target->type != NODE_INDEX ||
+        !expr->as.assign.target->as.index.is_vec_index) {
+        return 0;
+    }
+
+    Node* idx_node = expr->as.assign.target;
+    emit_indent(gen);
+    emit(gen, "__w0_vec_check(");
+    emit_expr(gen, idx_node->as.index.object);
+    emit(gen, "->count, ");
+    emit_expr(gen, idx_node->as.index.index);
+    emit(gen, ", %d, %d);\n", idx_node->line, idx_node->column);
+    // RC handling: save new value to temp, inc, dec old, assign temp
+    if (idx_node->as.index.is_rc_elem) {
+        int tmp = gen->out.temp_count++;
+        emit_indent(gen);
+        emit(gen, "void* __rc_tmp%d = ", tmp);
+        emit_expr(gen, expr->as.assign.value);
+        emit(gen, ";\n");
+        emit_indent(gen);
+        emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
+        emit_indent(gen);
+        emit(gen, "__rc_dec(");
+        emit_expr(gen, idx_node->as.index.object);
+        emit(gen, "->data[");
+        emit_expr(gen, idx_node->as.index.index);
+        emit(gen, "]);\n");
         emit_indent(gen);
         emit_expr(gen, idx_node->as.index.object);
         emit(gen, "->data[");
         emit_expr(gen, idx_node->as.index.index);
-        emit(gen, "] %s ", assign_op_str(expr->as.assign.op));
-        emit_expr(gen, expr->as.assign.value);
-        emit(gen, ";\n");
+        emit(gen, "] = __rc_tmp%d;\n", tmp);
+        return 1;
+    }
+    emit_indent(gen);
+    emit_expr(gen, idx_node->as.index.object);
+    emit(gen, "->data[");
+    emit_expr(gen, idx_node->as.index.index);
+    emit(gen, "] %s ", assign_op_str(expr->as.assign.op));
+    emit_expr(gen, expr->as.assign.value);
+    emit(gen, ";\n");
+    return 1;
+}
+
+static int emit_call_with_hoisted_new_args_stmt(CodeGen* gen, Node* expr) {
+    if (expr->type != NODE_CALL) {
+        return 0;
+    }
+
+    int has_new_args = 0;
+    for (int i = 0; i < expr->as.call.args.count; i++) {
+        if (expr->as.call.args.nodes[i]->type == NODE_NEW_EXPR) {
+            has_new_args = 1;
+            break;
+        }
+    }
+    if (!has_new_args) {
+        return 0;
+    }
+
+    int saved_count = gen->hoist.count;
+    for (int i = 0; i < expr->as.call.args.count; i++) {
+        Node* arg = expr->as.call.args.nodes[i];
+        if (arg->type == NODE_NEW_EXPR) {
+            int  id = gen->out.temp_count++;
+            char name[32];
+            snprintf(name, sizeof(name), "__rc_tmp%d", id);
+            emit_hoisted_new_expr(gen, arg, name);
+            hoist_push_new_arg(gen, arg, name);
+        }
+    }
+    emit_indent(gen);
+    emit_expr(gen, expr);
+    emit(gen, ";\n");
+    for (int i = saved_count; i < gen->hoist.count; i++) {
+        emit_indent(gen);
+        emit(gen, "__rc_dec(%s);\n", gen->hoist.names[i]);
+        free(gen->hoist.names[i]);
+    }
+    gen->hoist.count = saved_count;
+    return 1;
+}
+
+// Emit an expression statement (NODE_EXPR_STMT).
+// Handles RC var reassignment, RC member assignment, Vec index assignment,
+// and simple expression statements.
+static void emit_expr_stmt(CodeGen* gen, Node* node) {
+    Node* expr = node->as.expr_stmt.expr;
+
+    if (emit_rc_ident_assign_stmt(gen, expr) || emit_rc_member_assign_stmt(gen, expr) ||
+        emit_vec_index_assign_stmt(gen, expr) || emit_call_with_hoisted_new_args_stmt(gen, expr)) {
         return;
     }
-    // Handle calls with anonymous new args — hoist to prevent RC leak
-    if (expr->type == NODE_CALL) {
-        int has_new_args = 0;
-        for (int i = 0; i < expr->as.call.args.count; i++) {
-            if (expr->as.call.args.nodes[i]->type == NODE_NEW_EXPR) {
-                has_new_args = 1;
-                break;
-            }
-        }
-        if (has_new_args) {
-            int   saved_count = gen->hoist.count;
-            char* temps[16];
-            int   temp_count = 0;
-            for (int i = 0; i < expr->as.call.args.count; i++) {
-                Node* arg = expr->as.call.args.nodes[i];
-                if (arg->type == NODE_NEW_EXPR) {
-                    int  id = gen->out.temp_count++;
-                    char name[32];
-                    snprintf(name, sizeof(name), "__rc_tmp%d", id);
-                    emit_hoisted_new_expr(gen, arg, name);
-                    if (gen->hoist.count >= gen->hoist.capacity) {
-                        int new_cap      = gen->hoist.capacity == 0 ? 8 : gen->hoist.capacity * 2;
-                        gen->hoist.nodes = xrealloc(gen->hoist.nodes, new_cap * sizeof(Node*));
-                        gen->hoist.names = xrealloc(gen->hoist.names, new_cap * sizeof(char*));
-                        gen->hoist.capacity = new_cap;
-                    }
-                    gen->hoist.nodes[gen->hoist.count] = arg;
-                    gen->hoist.names[gen->hoist.count] = xstrdup(name);
-                    gen->hoist.count++;
-                    temps[temp_count++] = gen->hoist.names[gen->hoist.count - 1];
-                }
-            }
-            emit_indent(gen);
-            emit_expr(gen, expr);
-            emit(gen, ";\n");
-            for (int i = 0; i < temp_count; i++) {
-                emit_indent(gen);
-                emit(gen, "__rc_dec(%s);\n", temps[i]);
-            }
-            for (int i = saved_count; i < gen->hoist.count; i++) {
-                free(gen->hoist.names[i]);
-            }
-            gen->hoist.count = saved_count;
-            return;
-        }
-    }
+
     emit_indent(gen);
     emit_expr(gen, expr);
     emit(gen, ";\n");
