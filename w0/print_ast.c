@@ -20,6 +20,32 @@ static void print_node_list(const char* label, NodeList* list, int depth) {
     }
 }
 
+static void print_labeled_child(const char* label, Node* child, int depth) {
+    print_indent(depth);
+    printf("%s:\n", label);
+    print_ast(child, depth + 1);
+}
+
+static void print_optional_labeled_child(const char* label, Node* child, int depth) {
+    if (child) {
+        print_labeled_child(label, child, depth);
+    }
+}
+
+static void print_inline_type_params(char** type_params, int type_param_count) {
+    if (type_param_count <= 0) {
+        return;
+    }
+
+    printf("<");
+    for (int i = 0; i < type_param_count; i++) {
+        if (i > 0)
+            printf(", ");
+        printf("%s", type_params[i]);
+    }
+    printf(">");
+}
+
 // Print a destructuring pattern (recursive)
 static void print_destruct_pattern(DestructPattern* pattern) {
     if (!pattern)
@@ -76,14 +102,8 @@ static void print_func_decl(Node* node, int depth) {
     if (node->as.func_decl.params.count > 0) {
         print_node_list("Params", &node->as.func_decl.params, depth + 1);
     }
-    if (node->as.func_decl.return_type) {
-        print_indent(depth + 1);
-        printf("ReturnType:\n");
-        print_ast(node->as.func_decl.return_type, depth + 2);
-    }
-    print_indent(depth + 1);
-    printf("Body:\n");
-    print_ast(node->as.func_decl.body, depth + 2);
+    print_optional_labeled_child("ReturnType", node->as.func_decl.return_type, depth + 1);
+    print_labeled_child("Body", node->as.func_decl.body, depth + 1);
 }
 
 static void print_struct_decl(Node* node, int depth) {
@@ -91,13 +111,10 @@ static void print_struct_decl(Node* node, int depth) {
     print_visibility(depth + 1, node->as.struct_decl.is_public);
     if (node->as.struct_decl.type_param_count > 0) {
         print_indent(depth + 1);
-        printf("TypeParams: <");
-        for (int i = 0; i < node->as.struct_decl.type_param_count; i++) {
-            if (i > 0)
-                printf(", ");
-            printf("%s", node->as.struct_decl.type_params[i]);
-        }
-        printf(">\n");
+        printf("TypeParams: ");
+        print_inline_type_params(node->as.struct_decl.type_params,
+                                 node->as.struct_decl.type_param_count);
+        printf("\n");
     }
     print_node_list(NULL, &node->as.struct_decl.fields, depth);
 }
@@ -136,24 +153,16 @@ static void print_var_decl(Node* node, int depth) {
                node->as.var_decl.is_const ? " (const)" : "");
     }
     if (node->as.var_decl.type) {
-        print_indent(depth + 1);
-        printf("Type:\n");
-        print_ast(node->as.var_decl.type, depth + 2);
+        print_labeled_child("Type", node->as.var_decl.type, depth + 1);
     }
     if (node->as.var_decl.init) {
-        print_indent(depth + 1);
-        printf("Init:\n");
-        print_ast(node->as.var_decl.init, depth + 2);
+        print_labeled_child("Init", node->as.var_decl.init, depth + 1);
     }
 }
 
 static void print_param(Node* node, int depth) {
     printf("Param: %.*s\n", node->as.param.name_length, node->as.param.name);
-    if (node->as.param.type) {
-        print_indent(depth + 1);
-        printf("Type:\n");
-        print_ast(node->as.param.type, depth + 2);
-    }
+    print_optional_labeled_child("Type", node->as.param.type, depth + 1);
 }
 
 static void print_trait_decl(Node* node, int depth) {
@@ -163,26 +172,20 @@ static void print_trait_decl(Node* node, int depth) {
 
 static void print_type_alias(Node* node, int depth) {
     printf("TypeAlias: %.*s", node->as.type_alias.name_length, node->as.type_alias.name);
-    if (node->as.type_alias.type_param_count > 0) {
-        printf("<");
-        for (int i = 0; i < node->as.type_alias.type_param_count; i++) {
-            if (i > 0)
-                printf(", ");
-            printf("%s", node->as.type_alias.type_params[i]);
-        }
-        printf(">");
-    }
+    print_inline_type_params(node->as.type_alias.type_params, node->as.type_alias.type_param_count);
     printf("\n");
     print_visibility(depth + 1, node->as.type_alias.is_public);
-    print_indent(depth + 1);
-    printf("Target:\n");
-    print_ast(node->as.type_alias.target_type, depth + 2);
+    print_labeled_child("Target", node->as.type_alias.target_type, depth + 1);
 }
 
 static void print_impl_decl(Node* node, int depth) {
-    printf("ImplDecl: %.*s for %.*s", node->as.impl_decl.trait_name_length,
-           node->as.impl_decl.trait_name, node->as.impl_decl.type_name_length,
-           node->as.impl_decl.type_name);
+    if (node->as.impl_decl.trait_name) {
+        printf("ImplDecl: %.*s for %.*s", node->as.impl_decl.trait_name_length,
+               node->as.impl_decl.trait_name, node->as.impl_decl.type_name_length,
+               node->as.impl_decl.type_name);
+    } else {
+        printf("ImplDecl: %.*s", node->as.impl_decl.type_name_length, node->as.impl_decl.type_name);
+    }
     if (node->as.impl_decl.type_args.count > 0) {
         printf("<");
         for (int i = 0; i < node->as.impl_decl.type_args.count; i++) {
@@ -222,49 +225,25 @@ static void print_use_decl(Node* node) {
 
 static void print_if_stmt(Node* node, int depth) {
     printf("If\n");
-    print_indent(depth + 1);
-    printf("Cond:\n");
-    print_ast(node->as.if_stmt.cond, depth + 2);
-    print_indent(depth + 1);
-    printf("Then:\n");
-    print_ast(node->as.if_stmt.then_block, depth + 2);
+    print_labeled_child("Cond", node->as.if_stmt.cond, depth + 1);
+    print_labeled_child("Then", node->as.if_stmt.then_block, depth + 1);
     if (node->as.if_stmt.else_block) {
-        print_indent(depth + 1);
-        printf("Else:\n");
-        print_ast(node->as.if_stmt.else_block, depth + 2);
+        print_labeled_child("Else", node->as.if_stmt.else_block, depth + 1);
     }
 }
 
 static void print_while_stmt(Node* node, int depth) {
     printf("While\n");
-    print_indent(depth + 1);
-    printf("Cond:\n");
-    print_ast(node->as.while_stmt.cond, depth + 2);
-    print_indent(depth + 1);
-    printf("Body:\n");
-    print_ast(node->as.while_stmt.body, depth + 2);
+    print_labeled_child("Cond", node->as.while_stmt.cond, depth + 1);
+    print_labeled_child("Body", node->as.while_stmt.body, depth + 1);
 }
 
 static void print_for_stmt(Node* node, int depth) {
     printf("For\n");
-    if (node->as.for_stmt.init) {
-        print_indent(depth + 1);
-        printf("Init:\n");
-        print_ast(node->as.for_stmt.init, depth + 2);
-    }
-    if (node->as.for_stmt.cond) {
-        print_indent(depth + 1);
-        printf("Cond:\n");
-        print_ast(node->as.for_stmt.cond, depth + 2);
-    }
-    if (node->as.for_stmt.post) {
-        print_indent(depth + 1);
-        printf("Post:\n");
-        print_ast(node->as.for_stmt.post, depth + 2);
-    }
-    print_indent(depth + 1);
-    printf("Body:\n");
-    print_ast(node->as.for_stmt.body, depth + 2);
+    print_optional_labeled_child("Init", node->as.for_stmt.init, depth + 1);
+    print_optional_labeled_child("Cond", node->as.for_stmt.cond, depth + 1);
+    print_optional_labeled_child("Post", node->as.for_stmt.post, depth + 1);
+    print_labeled_child("Body", node->as.for_stmt.body, depth + 1);
 }
 
 static void print_match_stmt(Node* node, int depth) {
@@ -295,18 +274,14 @@ static void print_match_arm(Node* node, int depth) {
         }
         printf("\n");
     }
-    print_indent(depth + 1);
-    printf("Body:\n");
-    print_ast(node->as.match_arm.body, depth + 2);
+    print_labeled_child("Body", node->as.match_arm.body, depth + 1);
 }
 
 // --- Expression helpers ---
 
 static void print_call_expr(Node* node, int depth) {
     printf("Call\n");
-    print_indent(depth + 1);
-    printf("Func:\n");
-    print_ast(node->as.call.func, depth + 2);
+    print_labeled_child("Func", node->as.call.func, depth + 1);
     if (node->as.call.args.count > 0) {
         print_node_list("Args", &node->as.call.args, depth + 1);
     }
@@ -323,35 +298,23 @@ static void print_enum_value(Node* node, int depth) {
 
 static void print_new_expr(Node* node, int depth) {
     printf("NewExpr\n");
-    print_indent(depth + 1);
-    printf("Type:\n");
-    print_ast(node->as.new_expr.type_node, depth + 2);
-    print_indent(depth + 1);
-    printf("Init:\n");
-    print_ast(node->as.new_expr.init, depth + 2);
+    print_labeled_child("Type", node->as.new_expr.type_node, depth + 1);
+    print_labeled_child("Init", node->as.new_expr.init, depth + 1);
 }
 
 static void print_cast_expr(Node* node, int depth) {
     printf("Cast\n");
-    print_indent(depth + 1);
-    printf("Expr:\n");
-    print_ast(node->as.cast_expr.expr, depth + 2);
-    print_indent(depth + 1);
-    printf("TargetType:\n");
-    print_ast(node->as.cast_expr.type_node, depth + 2);
+    print_labeled_child("Expr", node->as.cast_expr.expr, depth + 1);
+    print_labeled_child("TargetType", node->as.cast_expr.type_node, depth + 1);
 }
 
 // --- Type helpers ---
 
 static void print_array_type(Node* node, int depth) {
     printf("ArrayType\n");
-    print_indent(depth + 1);
-    printf("ElemType:\n");
-    print_ast(node->as.array_type.elem_type, depth + 2);
+    print_labeled_child("ElemType", node->as.array_type.elem_type, depth + 1);
     if (node->as.array_type.size) {
-        print_indent(depth + 1);
-        printf("Size:\n");
-        print_ast(node->as.array_type.size, depth + 2);
+        print_labeled_child("Size", node->as.array_type.size, depth + 1);
     }
 }
 
@@ -423,9 +386,7 @@ void print_ast(Node* node, int depth) {
         break;
     case NODE_TEST_DECL:
         printf("TestDecl: \"%.*s\"\n", node->as.test_decl.name_length, node->as.test_decl.name);
-        print_indent(depth + 1);
-        printf("Body:\n");
-        print_ast(node->as.test_decl.body, depth + 2);
+        print_labeled_child("Body", node->as.test_decl.body, depth + 1);
         break;
 
     // Statements
@@ -561,11 +522,7 @@ void print_ast(Node* node, int depth) {
         if (node->as.func_type.param_types.count > 0) {
             print_node_list("Params", &node->as.func_type.param_types, depth + 1);
         }
-        if (node->as.func_type.return_type) {
-            print_indent(depth + 1);
-            printf("ReturnType:\n");
-            print_ast(node->as.func_type.return_type, depth + 2);
-        }
+        print_optional_labeled_child("ReturnType", node->as.func_type.return_type, depth + 1);
         break;
     case NODE_TUPLE_LIT:
         printf("TupleLit\n");
