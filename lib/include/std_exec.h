@@ -62,22 +62,46 @@ static inline void* std__exec(const char* cmd) {
         r->err = strdup("failed to create temp files");
         return r;
     }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(out_fd);
+        close(err_fd);
+        unlink(stdout_tmpl);
+        unlink(stderr_tmpl);
+        __ExecResult* r = (__ExecResult*)malloc(sizeof(__ExecResult));
+        r->exit_code = -1;
+        r->out = strdup("");
+        r->err = strdup("fork failed");
+        return r;
+    }
+
+    if (pid == 0) {
+        /* Child: redirect stdout/stderr to temp files, then exec.
+         * Using dup2 instead of shell redirection avoids the extra
+         * subshell layer that system() would create. */
+        dup2(out_fd, STDOUT_FILENO);
+        dup2(err_fd, STDERR_FILENO);
+        close(out_fd);
+        close(err_fd);
+        execl("/bin/sh", "sh", "-c", cmd, (char*)NULL);
+        _exit(127);
+    }
+
+    /* Parent: close our copies of the temp file descriptors and wait.
+     * SIGINT is NOT ignored here (unlike system()), so Ctrl+C will
+     * kill both the child and the calling Whist program. */
     close(out_fd);
     close(err_fd);
 
-    /* Build: (cmd) > stdout_tmp 2> stderr_tmp
-     * The subshell ensures internal redirections (e.g. >&2)
-     * resolve before our outer capture redirections. */
-    size_t cmdlen = strlen(cmd) + strlen(stdout_tmpl) + strlen(stderr_tmpl) + 16;
-    char* full_cmd = (char*)malloc(cmdlen);
-    snprintf(full_cmd, cmdlen, "(%s) > %s 2> %s", cmd, stdout_tmpl, stderr_tmpl);
-
-    int status = system(full_cmd);
-    free(full_cmd);
+    int status;
+    waitpid(pid, &status, 0);
 
     __ExecResult* r = (__ExecResult*)malloc(sizeof(__ExecResult));
     if (WIFEXITED(status)) {
         r->exit_code = WEXITSTATUS(status);
+    } else if (WIFSIGNALED(status)) {
+        r->exit_code = 128 + WTERMSIG(status);
     } else {
         r->exit_code = -1;
     }
