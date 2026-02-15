@@ -33,20 +33,6 @@ func collect_files(dir: string, files: Vec<string>): void {
     }
 }
 
-func sort_strings(v: Vec<string>): void {
-    // Simple insertion sort using string comparison
-    var i: i64 = 1;
-    while (i < v.count) {
-        var key = v[i];
-        var j = i - 1;
-        while (j >= 0 && key < v[j]) {
-            v[j + 1] = v[j];
-            j = j - 1;
-        }
-        v[j + 1] = key;
-        i = i + 1;
-    }
-}
 
 func read_expected_lines(path: string, prefix: string): Vec<string> {
     var lines = new Vec<string>{};
@@ -276,7 +262,7 @@ func main(): i32 {
 
         var files = new Vec<string>{};
         collect_files("test/run", files);
-        sort_strings(files);
+        files.sort();
 
         var j: i64 = 0;
         while (j < files.count) {
@@ -323,7 +309,7 @@ func main(): i32 {
 
         var files = new Vec<string>{};
         collect_files("test/errors", files);
-        sort_strings(files);
+        files.sort();
 
         var j: i64 = 0;
         while (j < files.count) {
