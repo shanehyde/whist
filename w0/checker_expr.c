@@ -1059,177 +1059,186 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
 
 // --- Expression case helpers ---
 
-// Type-check an enum variant constructor, including generic enum type inference
-static Type* check_enum_value_expr(Checker* checker, Node* node) {
-    const char* enum_name = node->as.enum_value.enum_name;
-    Symbol*     sym       = checker_lookup(checker, enum_name);
-    Type*       enum_type = NULL;
-
-    if (sym && sym->kind == SYM_TYPE && sym->type->kind == TYPE_ENUM) {
-        // Non-generic enum or already-instantiated generic enum
-        enum_type = sym->type;
-    } else {
-        // Try as a generic enum definition
-        GenericDef* def = lookup_generic_def(checker, enum_name);
-        if (!def || def->decl->type != NODE_ENUM_DECL) {
-            check_error(checker, node->line, node->column, "Unknown enum '%s'", enum_name);
-            return type_error;
+static int find_template_enum_variant(Node* enum_decl, const char* value_name) {
+    for (int i = 0; i < enum_decl->as.enum_decl.values.count; i++) {
+        Node* variant = enum_decl->as.enum_decl.values.nodes[i];
+        if (strcmp(variant->as.enum_variant.name, value_name) == 0) {
+            return i;
         }
+    }
+    return -1;
+}
 
-        // Find the variant by name in the template
-        Node* template_decl = def->decl;
-        int   variant_idx   = -1;
-        for (int i = 0; i < template_decl->as.enum_decl.values.count; i++) {
-            Node* v = template_decl->as.enum_decl.values.nodes[i];
-            if (strcmp(v->as.enum_variant.name, node->as.enum_value.value_name) == 0) {
-                variant_idx = i;
-                break;
-            }
+static int find_resolved_enum_variant(Type* enum_type, const char* value_name) {
+    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
+        if (strcmp(enum_type->as.enm.value_names[i], value_name) == 0) {
+            return i;
         }
-        if (variant_idx < 0) {
-            check_error(checker, node->line, node->column, "'%s' is not a value of enum '%s'",
-                        node->as.enum_value.value_name, enum_name);
-            return type_error;
+    }
+    return -1;
+}
+
+static int all_type_args_inferred(Type** inferred, int type_param_count) {
+    for (int i = 0; i < type_param_count; i++) {
+        if (!inferred[i]) {
+            return 0;
         }
+    }
+    return 1;
+}
 
-        Node* variant    = template_decl->as.enum_decl.values.nodes[variant_idx];
-        int   type_count = variant->as.enum_variant.types.count;
-        int   arg_count  = node->as.enum_value.args.count;
+static void fill_missing_inferred_from_enum_target_hint(Checker* checker, const char* enum_name,
+                                                        Type** inferred, int type_param_count) {
+    if (!checker->enum_target_hint || checker->enum_target_hint->kind != TYPE_ENUM) {
+        return;
+    }
 
-        if (arg_count != type_count) {
-            check_error(checker, node->line, node->column,
-                        "Enum variant '%s::%s' expects %d argument(s), got %d", enum_name,
-                        node->as.enum_value.value_name, type_count, arg_count);
-            return type_error;
-        }
-
-        // Type-check args and infer type params
-        Type** inferred     = xcalloc(def->type_param_count, sizeof(Type*));
-        int    all_inferred = 1;
-
-        // First, type-check all args
-        Type** arg_types = NULL;
-        if (arg_count > 0) {
-            arg_types = xmalloc(arg_count * sizeof(Type*));
-            for (int i = 0; i < arg_count; i++) {
-                arg_types[i] = check_expression(checker, node->as.enum_value.args.nodes[i]);
-            }
-        }
-
-        // Infer type params from args
-        for (int i = 0; i < arg_count; i++) {
-            Node* vtype_node = variant->as.enum_variant.types.nodes[i];
-            if (vtype_node->type == NODE_IDENT) {
-                // Check if this ident is a type param
-                for (int p = 0; p < def->type_param_count; p++) {
-                    if (strcmp(vtype_node->as.ident.name, def->type_params[p]) == 0) {
-                        if (!inferred[p]) {
-                            inferred[p] = arg_types[i];
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Check if all type params were inferred
-        for (int p = 0; p < def->type_param_count; p++) {
-            if (!inferred[p]) {
-                all_inferred = 0;
-                break;
-            }
-        }
-
-        // If not all inferred, try the target hint
-        if (!all_inferred && checker->enum_target_hint &&
-            checker->enum_target_hint->kind == TYPE_ENUM) {
-            // The target hint is an already-instantiated generic enum
-            // Find the instance to get the type args
-            for (int gi = 0; gi < checker->generics.instance_count; gi++) {
-                GenericInstance* inst = &checker->generics.instances[gi];
-                if (inst->type == checker->enum_target_hint &&
-                    strcmp(inst->base_name, enum_name) == 0) {
-                    // Use instance type args for any missing inferred params
-                    for (int p = 0; p < def->type_param_count && p < inst->type_arg_count; p++) {
-                        if (!inferred[p]) {
-                            inferred[p] = inst->type_args[p];
-                        }
-                    }
-                    break;
-                }
-            }
-            // Recheck
-            all_inferred = 1;
-            for (int p = 0; p < def->type_param_count; p++) {
+    // The target hint is an already-instantiated generic enum.
+    for (int gi = 0; gi < checker->generics.instance_count; gi++) {
+        GenericInstance* inst = &checker->generics.instances[gi];
+        if (inst->type == checker->enum_target_hint && strcmp(inst->base_name, enum_name) == 0) {
+            // Use instance type args for any missing inferred params.
+            for (int p = 0; p < type_param_count && p < inst->type_arg_count; p++) {
                 if (!inferred[p]) {
-                    all_inferred = 0;
-                    break;
+                    inferred[p] = inst->type_args[p];
                 }
             }
+            return;
         }
+    }
+}
 
-        if (!all_inferred) {
-            check_error(checker, node->line, node->column,
-                        "Cannot infer type parameters for generic enum '%s'; add explicit type "
-                        "annotation",
-                        enum_name);
-            free(inferred);
-            free(arg_types);
-            return type_error;
+static Type* resolve_generic_enum_value_type(Checker* checker, Node* node, const char* enum_name) {
+    const char* value_name = node->as.enum_value.value_name;
+    int         arg_count  = node->as.enum_value.args.count;
+    GenericDef* def        = lookup_generic_def(checker, enum_name);
+    Type*       enum_type  = type_error;
+
+    if (!def || def->decl->type != NODE_ENUM_DECL) {
+        check_error(checker, node->line, node->column, "Unknown enum '%s'", enum_name);
+        return type_error;
+    }
+
+    Node* template_decl = def->decl;
+    int   variant_idx   = find_template_enum_variant(template_decl, value_name);
+    if (variant_idx < 0) {
+        check_error(checker, node->line, node->column, "'%s' is not a value of enum '%s'",
+                    value_name, enum_name);
+        return type_error;
+    }
+
+    Node* variant    = template_decl->as.enum_decl.values.nodes[variant_idx];
+    int   type_count = variant->as.enum_variant.types.count;
+    if (arg_count != type_count) {
+        check_error(checker, node->line, node->column,
+                    "Enum variant '%s::%s' expects %d argument(s), got %d", enum_name, value_name,
+                    type_count, arg_count);
+        return type_error;
+    }
+
+    Type** inferred  = xcalloc(def->type_param_count, sizeof(Type*));
+    Type** arg_types = NULL;
+    if (arg_count > 0) {
+        arg_types = xmalloc(arg_count * sizeof(Type*));
+        for (int i = 0; i < arg_count; i++) {
+            arg_types[i] = check_expression(checker, node->as.enum_value.args.nodes[i]);
         }
+    }
 
-        // Generate mangled name and instantiate
-        char* mangled = type_mangle_generic(enum_name, inferred, def->type_param_count);
-
-        GenericInstance* existing = lookup_generic_instance(checker, mangled);
-        if (existing) {
-            enum_type = existing->type;
-            free(mangled);
-        } else {
-            // Make a copy of inferred for instantiate (it takes ownership)
-            Type** args_copy = xmalloc(def->type_param_count * sizeof(Type*));
-            for (int p = 0; p < def->type_param_count; p++) {
-                args_copy[p] = inferred[p];
+    // Infer from constructor argument types first.
+    for (int i = 0; i < arg_count; i++) {
+        Node* vtype_node = variant->as.enum_variant.types.nodes[i];
+        if (vtype_node->type != NODE_IDENT) {
+            continue;
+        }
+        for (int p = 0; p < def->type_param_count; p++) {
+            if (strcmp(vtype_node->as.ident.name, def->type_params[p]) == 0) {
+                if (!inferred[p]) {
+                    inferred[p] = arg_types[i];
+                }
+                break;
             }
-            enum_type =
-                instantiate_generic_enum(checker, def, mangled, args_copy, def->type_param_count);
         }
+    }
 
+    if (!all_type_args_inferred(inferred, def->type_param_count)) {
+        fill_missing_inferred_from_enum_target_hint(checker, enum_name, inferred,
+                                                    def->type_param_count);
+    }
+
+    if (!all_type_args_inferred(inferred, def->type_param_count)) {
+        check_error(checker, node->line, node->column,
+                    "Cannot infer type parameters for generic enum '%s'; add explicit type "
+                    "annotation",
+                    enum_name);
         free(inferred);
         free(arg_types);
+        return type_error;
+    }
+
+    char* mangled = type_mangle_generic(enum_name, inferred, def->type_param_count);
+
+    GenericInstance* existing = lookup_generic_instance(checker, mangled);
+    if (existing) {
+        enum_type = existing->type;
+        free(mangled);
+    } else {
+        // instantiate_generic_enum takes ownership of args_copy.
+        Type** args_copy = xmalloc(def->type_param_count * sizeof(Type*));
+        for (int p = 0; p < def->type_param_count; p++) {
+            args_copy[p] = inferred[p];
+        }
+        enum_type =
+            instantiate_generic_enum(checker, def, mangled, args_copy, def->type_param_count);
+    }
+
+    free(inferred);
+    free(arg_types);
+    return enum_type;
+}
+
+// Type-check an enum variant constructor, including generic enum type inference
+static Type* check_enum_value_expr(Checker* checker, Node* node) {
+    const char* enum_name  = node->as.enum_value.enum_name;
+    const char* value_name = node->as.enum_value.value_name;
+    Symbol*     sym        = checker_lookup(checker, enum_name);
+    Type*       enum_type  = NULL;
+
+    if (sym && sym->kind == SYM_TYPE && sym->type->kind == TYPE_ENUM) {
+        // Non-generic enum or already-instantiated generic enum.
+        enum_type = sym->type;
+    } else {
+        enum_type = resolve_generic_enum_value_type(checker, node, enum_name);
+        if (enum_type == type_error) {
+            return type_error;
+        }
     }
 
     sem_info_set_enum_value_resolved_name(checker->sem, node, enum_type->as.enm.name);
 
-    // Check that the value exists in the (possibly instantiated) enum
-    int variant_idx = -1;
-    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
-        if (strcmp(enum_type->as.enm.value_names[i], node->as.enum_value.value_name) == 0) {
-            variant_idx = i;
-            break;
-        }
-    }
+    // Check that the value exists in the (possibly instantiated) enum.
+    int variant_idx = find_resolved_enum_variant(enum_type, value_name);
     if (variant_idx < 0) {
         check_error(checker, node->line, node->column, "'%s' is not a value of enum '%s'",
-                    node->as.enum_value.value_name, enum_type->as.enm.name);
+                    value_name, enum_type->as.enm.name);
         return type_error;
     }
 
-    // Set is_data_enum flag for codegen
+    // Set is_data_enum flag for codegen.
     sem_info_set_enum_value_is_data_enum(checker->sem, node, enum_type->as.enm.has_data);
 
-    // Validate constructor args for data enums
+    // Validate constructor args for data enums.
     int expected_args = enum_type->as.enm.variant_type_counts[variant_idx];
     int actual_args   = node->as.enum_value.args.count;
 
     if (actual_args != expected_args) {
         check_error(checker, node->line, node->column,
                     "Enum variant '%s::%s' expects %d argument(s), got %d", enum_type->as.enm.name,
-                    node->as.enum_value.value_name, expected_args, actual_args);
+                    value_name, expected_args, actual_args);
         return type_error;
     }
 
-    // Type-check each constructor arg
+    // Type-check each constructor arg.
     for (int i = 0; i < actual_args; i++) {
         Type* arg_type = check_expression(checker, node->as.enum_value.args.nodes[i]);
         Type* expected = enum_type->as.enm.variant_types[variant_idx][i];
@@ -1237,8 +1246,8 @@ static Type* check_enum_value_expr(Checker* checker, Node* node) {
             check_error(checker, node->as.enum_value.args.nodes[i]->line,
                         node->as.enum_value.args.nodes[i]->column,
                         "Enum variant '%s::%s' argument %d: expected '%s', got '%s'",
-                        enum_type->as.enm.name, node->as.enum_value.value_name, i + 1,
-                        type_name(expected), type_name(arg_type));
+                        enum_type->as.enm.name, value_name, i + 1, type_name(expected),
+                        type_name(arg_type));
         }
     }
 
