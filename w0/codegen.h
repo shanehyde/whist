@@ -112,6 +112,13 @@ typedef struct {
     Type** tuple_types;
     int    tuple_type_count;
     int    tuple_type_capacity;
+    // RC string literal table (immortal static structs)
+    struct {
+        char** values;  // String values (owned copies)
+        int*   lengths; // String lengths
+        int    count;
+        int    capacity;
+    } string_lits;
     // Current module name (NULL for "main")
     const char* current_module;
     // 1 if currently emitting an enum method body

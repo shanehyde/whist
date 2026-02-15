@@ -74,6 +74,8 @@ static void emit_rc_dec_var(CodeGen* gen, RcVar* var) {
     Type* t = var->type;
     if (t && t->kind == TYPE_ENUM && t->as.enm.has_rc_fields) {
         emit(gen, "__rc_dec_%s(%s)", t->as.enm.name, var->name);
+    } else if (t && t->kind == TYPE_STRING) {
+        emit(gen, "__rc_dec((void*)%s)", var->name);
     } else {
         emit(gen, "__rc_dec(%s)", var->name);
     }
@@ -169,6 +171,9 @@ static void emit_enum_rc_func(CodeGen* gen, const char* ename, Node* enum_decl, 
             }
             if (enum_nm) {
                 emit(gen, "        __rc_%s_%s(v.%.*s.f%d);\n", op, enum_nm,
+                     var->as.enum_variant.name_length, var->as.enum_variant.name, t);
+            } else if (tnode->type == NODE_IDENT && strcmp(tnode->as.ident.name, "string") == 0) {
+                emit(gen, "        __rc_%s((void*)v.%.*s.f%d);\n", op,
                      var->as.enum_variant.name_length, var->as.enum_variant.name, t);
             } else {
                 emit(gen, "        __rc_%s(v.%.*s.f%d);\n", op, var->as.enum_variant.name_length,
@@ -321,7 +326,8 @@ void emit_vec_methods(CodeGen* gen) {
         VecInstance* inst        = &gen->checker.vecs[i];
         Type*        elem_type   = inst->elem_type;
         const char*  elem_tname  = type_mangle_name(elem_type);
-        int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC);
+        int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC ||
+                           elem_type->kind == TYPE_STRING);
 
         // Push (Vec<string> push is provided by whist_runtime.h)
         if (elem_type->kind != TYPE_STRING) {
@@ -363,6 +369,9 @@ void emit_vec_methods(CodeGen* gen) {
         emit_resolved_type(gen, elem_type);
         emit(gen, "));\n");
         emit(gen, "    }\n");
+        if (elem_type->kind == TYPE_STRING) {
+            emit(gen, "    __rc_inc((void*)value);\n");
+        }
         emit(gen, "    self->data[index] = value;\n");
         emit(gen, "    self->count++;\n");
         emit(gen, "}\n\n");
@@ -499,7 +508,11 @@ void emit_vec_methods(CodeGen* gen) {
         emit(gen, "static inline void __Vec_%s_clear(__Vec_%s* self) {\n", elem_tname, elem_tname);
         if (elem_is_ptr) {
             emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
-            emit(gen, "        __rc_dec(self->data[i]);\n");
+            if (elem_type->kind == TYPE_STRING) {
+                emit(gen, "        __rc_dec((void*)self->data[i]);\n");
+            } else {
+                emit(gen, "        __rc_dec(self->data[i]);\n");
+            }
             emit(gen, "    }\n");
         }
         emit(gen, "    self->count = 0;\n");
@@ -542,7 +555,11 @@ void emit_vec_methods(CodeGen* gen) {
                  option_tname);
             emit(gen, "    }\n");
             if (elem_is_ptr) {
-                emit(gen, "    __rc_inc(self->data[0]);\n");
+                if (elem_type->kind == TYPE_STRING) {
+                    emit(gen, "    __rc_inc((void*)self->data[0]);\n");
+                } else {
+                    emit(gen, "    __rc_inc(self->data[0]);\n");
+                }
             }
             emit(gen,
                  "    return (Option_%s){.tag = Option_%s_Some, .Some = {.f0 = "
@@ -558,7 +575,11 @@ void emit_vec_methods(CodeGen* gen) {
                  option_tname);
             emit(gen, "    }\n");
             if (elem_is_ptr) {
-                emit(gen, "    __rc_inc(self->data[self->count - 1]);\n");
+                if (elem_type->kind == TYPE_STRING) {
+                    emit(gen, "    __rc_inc((void*)self->data[self->count - 1]);\n");
+                } else {
+                    emit(gen, "    __rc_inc(self->data[self->count - 1]);\n");
+                }
             }
             emit(gen,
                  "    return (Option_%s){.tag = Option_%s_Some, "
@@ -663,6 +684,9 @@ void emit_struct_cleanup(CodeGen* gen, Node* ast) {
                 if (rc_fields[f].is_enum) {
                     emit(gen, "    __rc_dec_%s(ptr->%s);\n", rc_fields[f].type_name,
                          rc_fields[f].field_name);
+                } else if (rc_fields[f].type_name &&
+                           strcmp(rc_fields[f].type_name, "string") == 0) {
+                    emit(gen, "    __rc_dec((void*)ptr->%s);\n", rc_fields[f].field_name);
                 } else {
                     emit(gen, "    __rc_dec(ptr->%s);\n", rc_fields[f].field_name);
                 }
@@ -698,10 +722,10 @@ void emit_struct_cleanup(CodeGen* gen, Node* ast) {
         }
         for (int f = 0; f < t->as.struc.field_count; f++) {
             Type* ft = t->as.struc.field_types[f];
-            if (ft && ft->kind == TYPE_STRUCT) {
+            if (ft && (ft->kind == TYPE_STRUCT || ft->kind == TYPE_VEC)) {
                 emit(gen, "    __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
-            } else if (ft && ft->kind == TYPE_VEC) {
-                emit(gen, "    __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
+            } else if (ft && ft->kind == TYPE_STRING) {
+                emit(gen, "    __rc_dec((void*)ptr->%s);\n", t->as.struc.field_names[f]);
             }
         }
         emit(gen, "}\n\n");

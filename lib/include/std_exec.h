@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <whist_runtime.h>
 
 typedef struct {
     int32_t exit_code;
@@ -119,11 +120,11 @@ static inline int32_t std__exec_exit_code(void* handle) {
 }
 
 static inline const char* std__exec_output(void* handle) {
-    return strdup(((__ExecResult*)handle)->out);
+    return __rc_strdup(((__ExecResult*)handle)->out);
 }
 
 static inline const char* std__exec_error_output(void* handle) {
-    return strdup(((__ExecResult*)handle)->err);
+    return __rc_strdup(((__ExecResult*)handle)->err);
 }
 
 static inline void std__exec_free(void* handle) {

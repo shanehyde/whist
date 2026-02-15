@@ -25,6 +25,7 @@
 #include <dirent.h>
 #include <limits.h>
 #include <errno.h>
+#include <whist_runtime.h>
 
 /* ---------- Convenience API (no handles) ---------- */
 
@@ -41,7 +42,7 @@ static inline const char* fs__read_file(const char* path) {
         return NULL;
     }
 
-    char* buf = (char*)malloc((size_t)size + 1);
+    char* buf = __rc_strmalloc((size_t)size + 1);
     if (!buf) {
         fclose(fp);
         return NULL;
@@ -132,7 +133,9 @@ static inline const char* fs__read_line(void* handle) {
     }
 
     buf[len] = '\0';
-    return buf;
+    const char* result = __rc_strdup(buf);
+    free(buf);
+    return result;
 }
 
 static inline int32_t fs__write_string(void* handle, const char* content) {
@@ -217,8 +220,10 @@ static inline bool fs__is_file(const char* path) {
 }
 
 static inline const char* fs__cwd(void) {
-    char* result = getcwd(NULL, 0);
-    if (!result) return strdup("");
+    char* tmp = getcwd(NULL, 0);
+    if (!tmp) return __rc_strdup("");
+    const char* result = __rc_strdup(tmp);
+    free(tmp);
     return result;
 }
 
@@ -235,14 +240,14 @@ static inline void* fs__open_dir(const char* path) {
 
 static inline const char* fs__read_dir(void* handle) {
     DIR* d = (DIR*)handle;
-    if (!d) return strdup("");
+    if (!d) return __rc_strdup("");
     struct dirent* entry;
     while ((entry = readdir(d)) != NULL) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
             continue;
-        return strdup(entry->d_name);
+        return __rc_strdup(entry->d_name);
     }
-    return strdup("");
+    return __rc_strdup("");
 }
 
 static inline int32_t fs__close_dir(void* handle) {
@@ -261,7 +266,7 @@ static inline const char* fs__join_path(const char* a, const char* b) {
     /* Strip leading slash from b */
     while (blen > 0 && *b == '/') { b++; blen--; }
 
-    char* result = (char*)malloc(alen + 1 + blen + 1);
+    char* result = __rc_strmalloc(alen + 1 + blen + 1);
     if (!result) return NULL;
     memcpy(result, a, alen);
     result[alen] = '/';
@@ -277,10 +282,10 @@ static inline const char* fs__dirname(const char* path) {
     /* Find last slash */
     size_t i = len;
     while (i > 0 && path[i - 1] != '/') i--;
-    if (i == 0) return strdup(".");
+    if (i == 0) return __rc_strdup(".");
     /* Strip trailing slashes from parent */
     while (i > 1 && path[i - 1] == '/') i--;
-    char* result = (char*)malloc(i + 1);
+    char* result = __rc_strmalloc(i + 1);
     if (!result) return NULL;
     memcpy(result, path, i);
     result[i] = '\0';
@@ -295,7 +300,7 @@ static inline const char* fs__basename(const char* path) {
     size_t i = len;
     while (i > 0 && path[i - 1] != '/') i--;
     size_t name_len = len - i;
-    char* result = (char*)malloc(name_len + 1);
+    char* result = __rc_strmalloc(name_len + 1);
     if (!result) return NULL;
     memcpy(result, path + i, name_len);
     result[name_len] = '\0';
@@ -314,14 +319,16 @@ static inline const char* fs__extension(const char* path) {
     for (size_t i = last_slash; i < len; i++) {
         if (path[i] == '.') dot = path + i;
     }
-    if (!dot || dot == path + len - 1) return strdup("");
-    return strdup(dot);
+    if (!dot || dot == path + len - 1) return __rc_strdup("");
+    return __rc_strdup(dot);
 }
 
 static inline const char* fs__abs_path(const char* path) {
     char* resolved = realpath(path, NULL);
-    if (!resolved) return strdup("");
-    return resolved;
+    if (!resolved) return __rc_strdup("");
+    const char* result = __rc_strdup(resolved);
+    free(resolved);
+    return result;
 }
 
 /* ---------- Metadata & temp ---------- */
@@ -334,8 +341,8 @@ static inline int64_t fs__modified_time(const char* path) {
 
 static inline const char* fs__temp_dir(void) {
     const char* tmp = getenv("TMPDIR");
-    if (tmp && tmp[0] != '\0') return strdup(tmp);
-    return strdup("/tmp");
+    if (tmp && tmp[0] != '\0') return __rc_strdup(tmp);
+    return __rc_strdup("/tmp");
 }
 
 #endif /* WHIST_FS_H */

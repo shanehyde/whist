@@ -82,7 +82,11 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
         emit_indent(gen);
         emit(gen, "__rc_inc(__rc_tmp%d);\n", temp_id);
         emit_indent(gen);
-        emit(gen, "__rc_dec(%s);\n", var_name);
+        if (var_type && var_type->kind == TYPE_STRING) {
+            emit(gen, "__rc_dec((void*)%s);\n", var_name);
+        } else {
+            emit(gen, "__rc_dec(%s);\n", var_name);
+        }
         emit_indent(gen);
         emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
         return;
@@ -132,7 +136,12 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
             int value_is_rc = (expr->as.assign.value->type == NODE_IDENT &&
                                rc_is_tracked(gen, expr->as.assign.value->as.ident.name)) ||
                               expr->as.assign.value->type == NODE_NEW_EXPR;
-            if (value_is_rc && field_ty && field_ty->kind == TYPE_STRUCT) {
+            // For string fields, any value assignment needs RC handling
+            if (field_ty && field_ty->kind == TYPE_STRING) {
+                value_is_rc = 1;
+            }
+            if (value_is_rc && field_ty &&
+                (field_ty->kind == TYPE_STRUCT || field_ty->kind == TYPE_STRING)) {
                 int tmp = gen->out.temp_count++;
                 emit_indent(gen);
                 emit(gen, "void* __rc_tmp%d = (void*)", tmp);
@@ -141,7 +150,11 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
                 emit_indent(gen);
                 emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
                 emit_indent(gen);
-                emit(gen, "__rc_dec(");
+                if (field_ty->kind == TYPE_STRING) {
+                    emit(gen, "__rc_dec((void*)");
+                } else {
+                    emit(gen, "__rc_dec(");
+                }
                 emit_expr(gen, member);
                 emit(gen, ");\n");
                 emit_indent(gen);
@@ -318,15 +331,22 @@ static void emit_var_decl_rc_copy(CodeGen* gen, Node* node) {
     emit(gen, " = ");
     emit_expr(gen, node->as.var_decl.init);
     emit(gen, ";\n");
-    // Function calls transfer ownership (rc already 1), no inc needed
-    Type* rc_type = node->as.var_decl.resolved_type;
-    int   skip_inc =
-        node->as.var_decl.init->type == NODE_CALL ||
-        (rc_type && rc_type->kind == TYPE_ENUM && node->as.var_decl.init->type == NODE_ENUM_VALUE);
+    // Function calls and string operations transfer ownership (rc already 1), no inc needed
+    Type* rc_type  = node->as.var_decl.resolved_type;
+    Node* init     = node->as.var_decl.init;
+    int   skip_inc = init->type == NODE_CALL || init->type == NODE_STRING_LIT ||
+                   init->type == NODE_STRING_INTERP ||
+                   (init->type == NODE_BINARY && init->as.binary.is_string_op) ||
+                   (init->type == NODE_SLICE && init->as.slice.is_string) ||
+                   (rc_type && rc_type->kind == TYPE_ENUM && init->type == NODE_ENUM_VALUE);
     if (!skip_inc && rc_type) {
         const char* inc_fn = get_inc_func_for_type(rc_type);
         emit_indent(gen);
-        emit(gen, "%s(%s);\n", inc_fn, node->as.var_decl.name);
+        if (rc_type->kind == TYPE_STRING) {
+            emit(gen, "%s((void*)%s);\n", inc_fn, node->as.var_decl.name);
+        } else {
+            emit(gen, "%s(%s);\n", inc_fn, node->as.var_decl.name);
+        }
         free((char*)inc_fn);
     }
     rc_push_var(gen, node->as.var_decl.name, rc_type);
