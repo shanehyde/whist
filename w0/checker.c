@@ -1213,6 +1213,159 @@ static void check_extern_module_decl(Checker* checker, Node* node) {
     }
 }
 
+static int try_register_generic_func_or_method(Checker* checker, Node* node) {
+    func_decl_node* fdn         = &node->as.func_decl;
+    const char*     name        = fdn->name;
+    const char*     receiver    = fdn->receiver_type;
+    int             is_method   = (receiver != NULL);
+    int             has_typearg = fdn->receiver_type_args.count > 0;
+
+    // Generic free function: func identity<T>(x: T): T
+    if (!is_method && fdn->type_param_count > 0) {
+        register_generic_func_def(checker, name, fdn->type_params, fdn->type_param_bounds,
+                                  fdn->type_param_count, node);
+        return 1;
+    }
+
+    // Generic receiver method: func (Box<T>) get(): T
+    if (is_method && has_typearg) {
+        GenericDef* def = lookup_generic_def(checker, receiver);
+        if (!def) {
+            check_error(checker, node->line, node->column, "Unknown generic type '%s'", receiver);
+            return 1;
+        }
+        if (fdn->receiver_type_args.count != def->type_param_count) {
+            check_error(checker, node->line, node->column,
+                        "Generic type '%s' expects %d type parameters, got %d", receiver,
+                        def->type_param_count, fdn->receiver_type_args.count);
+            return 1;
+        }
+        register_generic_method(def, node);
+        return 1;
+    }
+
+    return 0;
+}
+
+static char* get_mangled_func_name(const char* name, const char* receiver_type) {
+    if (!receiver_type) {
+        return xstrdup(name);
+    }
+
+    size_t len = strlen(receiver_type) + 1 + strlen(name) + 1;
+    char*  out = xmalloc(len);
+    snprintf(out, len, "%s_%s", receiver_type, name);
+    return out;
+}
+
+static void check_main_func_signature(Checker* checker, Node* node) {
+    func_decl_node* fdn = &node->as.func_decl;
+    if (fdn->params.count != 0) {
+        check_error(checker, node->line, node->column, "main function must not have parameters");
+    }
+
+    if (!fdn->return_type) {
+        check_error(checker, node->line, node->column, "main function must have return type i32");
+        return;
+    }
+
+    Type* ret_type = resolve_type(checker, fdn->return_type);
+    if (ret_type->kind != TYPE_INT32) {
+        check_error(checker, node->line, node->column, "main function must have return type i32");
+    }
+}
+
+static int check_function_redefinition(Checker* checker, Node* node, const char* mangled_name) {
+    Symbol* existing = checker_lookup(checker, mangled_name);
+    if (existing && !is_prelude_symbol(existing)) {
+        check_error(checker, node->line, node->column, "Redefinition of '%s'", mangled_name);
+        return 0;
+    }
+    return 1;
+}
+
+static void add_struct_method(Type* st, const char* name, Type* func_type, int is_const) {
+    int n = st->as.struc.method_count;
+
+    st->as.struc.method_names    = xrealloc(st->as.struc.method_names, (n + 1) * sizeof(char*));
+    st->as.struc.method_types    = xrealloc(st->as.struc.method_types, (n + 1) * sizeof(Type*));
+    st->as.struc.method_is_const = xrealloc(st->as.struc.method_is_const, (n + 1) * sizeof(int));
+
+    st->as.struc.method_names[n]    = xstrdup(name);
+    st->as.struc.method_types[n]    = func_type;
+    st->as.struc.method_is_const[n] = is_const;
+    st->as.struc.method_count       = n + 1;
+}
+
+static void add_enum_method(Type* et, const char* name, Type* func_type, int is_const) {
+    int n = et->as.enm.method_count;
+
+    et->as.enm.method_names    = xrealloc(et->as.enm.method_names, (n + 1) * sizeof(char*));
+    et->as.enm.method_types    = xrealloc(et->as.enm.method_types, (n + 1) * sizeof(Type*));
+    et->as.enm.method_is_const = xrealloc(et->as.enm.method_is_const, (n + 1) * sizeof(int));
+
+    et->as.enm.method_names[n]    = xstrdup(name);
+    et->as.enm.method_types[n]    = func_type;
+    et->as.enm.method_is_const[n] = is_const;
+    et->as.enm.method_count       = n + 1;
+}
+
+static void register_method_on_receiver(Checker* checker, Node* node, const char* receiver_type,
+                                        const char* name, Type* func_type, int is_const) {
+    Symbol* sym = checker_lookup(checker, receiver_type);
+    if (sym && sym->kind == SYM_TYPE && sym->type->kind == TYPE_STRUCT) {
+        add_struct_method(sym->type, name, func_type, is_const);
+    } else if (sym && sym->kind == SYM_TYPE && sym->type->kind == TYPE_ENUM) {
+        add_enum_method(sym->type, name, func_type, is_const);
+    } else if (type_builtin_from_name(receiver_type)) {
+        // Register method on a primitive type.
+        VEC_GROW(checker->traits.primitive_methods, checker->traits.primitive_method_count,
+                 checker->traits.primitive_method_capacity);
+        PrimitiveMethod* pm =
+            &checker->traits.primitive_methods[checker->traits.primitive_method_count++];
+        pm->type_name   = xstrdup(receiver_type);
+        pm->method_name = xstrdup(name);
+        pm->method_type = func_type;
+        pm->is_const    = is_const;
+    } else {
+        check_error(checker, node->line, node->column, "Unknown receiver type '%s'", receiver_type);
+    }
+}
+
+static void define_method_self_symbol(Checker* checker, const char* receiver_type, int is_const) {
+    Symbol* sym = checker_lookup(checker, receiver_type);
+    if (sym && sym->kind == SYM_TYPE) {
+        checker_define(checker, "self", SYM_VAR, sym->type, is_const, 0, NULL);
+        return;
+    }
+
+    Type* builtin = type_builtin_from_name(receiver_type);
+    if (builtin) {
+        checker_define(checker, "self", SYM_VAR, builtin, is_const, 0, NULL);
+    }
+}
+
+static void define_func_params_in_scope(Checker* checker, func_decl_node* fdn, Type* func_type) {
+    for (int i = 0; i < func_type->as.func.param_count; i++) {
+        Node* param = fdn->params.nodes[i];
+        Type* ptype = func_type->as.func.param_types[i];
+        if (!checker_define(checker, param->as.param.name, SYM_VAR, ptype, param->as.param.is_const,
+                            0, NULL)) {
+            check_error(checker, param->line, param->column, "Duplicate parameter name '%s'",
+                        param->as.param.name);
+        }
+    }
+}
+
+static void check_function_body(Checker* checker, Node* body) {
+    if (!body) {
+        return;
+    }
+    for (int i = 0; i < body->as.block.stmts.count; i++) {
+        check_statement(checker, body->as.block.stmts.nodes[i]);
+    }
+}
+
 // Type-check a function declaration: signature, parameters, body, and method registration
 static void check_func_decl(Checker* checker, Node* node) {
     func_decl_node* fdn = &node->as.func_decl;
@@ -1221,67 +1374,18 @@ static void check_func_decl(Checker* checker, Node* node) {
     const char* receiver_type = fdn->receiver_type;
     int         is_method     = (receiver_type != NULL);
 
-    // Generic free function: func identity<T>(x: T): T — register template, skip body
-    if (!is_method && fdn->type_param_count > 0) {
-        register_generic_func_def(checker, name, fdn->type_params, fdn->type_param_bounds,
-                                  fdn->type_param_count, node);
+    if (try_register_generic_func_or_method(checker, node)) {
         return;
     }
 
-    // Check if this is a method on a generic struct: func (Box<T>) get(): T
-    // or func (Pair<i32, Box<T>>) set(): void
-    if (is_method && fdn->receiver_type_args.count > 0) {
-        // Look up the generic definition
-        GenericDef* def = lookup_generic_def(checker, receiver_type);
-        if (!def) {
-            check_error(checker, node->line, node->column, "Unknown generic type '%s'",
-                        receiver_type);
-            return;
-        }
-        // Verify type arg arity matches
-        if (fdn->receiver_type_args.count != def->type_param_count) {
-            check_error(checker, node->line, node->column,
-                        "Generic type '%s' expects %d type parameters, got %d", receiver_type,
-                        def->type_param_count, fdn->receiver_type_args.count);
-            return;
-        }
-        // Store the method on the generic definition - will be instantiated later
-        register_generic_method(def, node);
-        return;
-    }
-
-    // For methods, use mangled name: StructName_methodName
-    char* mangled_name = NULL;
-    if (is_method) {
-        size_t len   = strlen(receiver_type) + 1 + strlen(name) + 1;
-        mangled_name = xmalloc(len);
-        snprintf(mangled_name, len, "%s_%s", receiver_type, name);
-    } else {
-        mangled_name = xstrdup(name);
-    }
+    char* mangled_name = get_mangled_func_name(name, receiver_type);
 
     // if main function, ensure correct signature
     if (!is_method && strcmp(name, "main") == 0) {
-        if (fdn->params.count != 0) {
-            check_error(checker, node->line, node->column,
-                        "main function must not have parameters");
-        }
-        if (fdn->return_type) {
-            Type* ret_type = resolve_type(checker, fdn->return_type);
-            if (ret_type->kind != TYPE_INT32) {
-                check_error(checker, node->line, node->column,
-                            "main function must have return type i32");
-            }
-        } else {
-            check_error(checker, node->line, node->column,
-                        "main function must have return type i32");
-        }
+        check_main_func_signature(checker, node);
     }
 
-    // Check for redefinition (allow shadowing prelude symbols)
-    Symbol* existing = checker_lookup(checker, mangled_name);
-    if (existing && !is_prelude_symbol(existing)) {
-        check_error(checker, node->line, node->column, "Redefinition of '%s'", mangled_name);
+    if (!check_function_redefinition(checker, node, mangled_name)) {
         free(mangled_name);
         return;
     }
@@ -1294,50 +1398,8 @@ static void check_func_decl(Checker* checker, Node* node) {
 
     // For methods, also register the method on the struct type (or primitive)
     if (is_method) {
-        Symbol* struct_sym = checker_lookup(checker, receiver_type);
-        if (struct_sym && struct_sym->kind == SYM_TYPE && struct_sym->type->kind == TYPE_STRUCT) {
-            Type* st = struct_sym->type;
-            int   n  = st->as.struc.method_count;
-
-            st->as.struc.method_names =
-                xrealloc(st->as.struc.method_names, (n + 1) * sizeof(char*));
-            st->as.struc.method_types =
-                xrealloc(st->as.struc.method_types, (n + 1) * sizeof(Type*));
-            st->as.struc.method_is_const =
-                xrealloc(st->as.struc.method_is_const, (n + 1) * sizeof(int));
-
-            st->as.struc.method_names[n]    = xstrdup(name);
-            st->as.struc.method_types[n]    = func_type;
-            st->as.struc.method_is_const[n] = fdn->receiver_is_const;
-            st->as.struc.method_count       = n + 1;
-        } else if (struct_sym && struct_sym->kind == SYM_TYPE &&
-                   struct_sym->type->kind == TYPE_ENUM) {
-            Type* et = struct_sym->type;
-            int   n  = et->as.enm.method_count;
-
-            et->as.enm.method_names = xrealloc(et->as.enm.method_names, (n + 1) * sizeof(char*));
-            et->as.enm.method_types = xrealloc(et->as.enm.method_types, (n + 1) * sizeof(Type*));
-            et->as.enm.method_is_const =
-                xrealloc(et->as.enm.method_is_const, (n + 1) * sizeof(int));
-
-            et->as.enm.method_names[n]    = xstrdup(name);
-            et->as.enm.method_types[n]    = func_type;
-            et->as.enm.method_is_const[n] = fdn->receiver_is_const;
-            et->as.enm.method_count       = n + 1;
-        } else if (type_builtin_from_name(receiver_type)) {
-            // Register method on a primitive type
-            VEC_GROW(checker->traits.primitive_methods, checker->traits.primitive_method_count,
-                     checker->traits.primitive_method_capacity);
-            PrimitiveMethod* pm =
-                &checker->traits.primitive_methods[checker->traits.primitive_method_count++];
-            pm->type_name   = xstrdup(receiver_type);
-            pm->method_name = xstrdup(name);
-            pm->method_type = func_type;
-            pm->is_const    = fdn->receiver_is_const;
-        } else {
-            check_error(checker, node->line, node->column, "Unknown receiver type '%s'",
-                        receiver_type);
-        }
+        register_method_on_receiver(checker, node, receiver_type, name, func_type,
+                                    fdn->receiver_is_const);
     }
 
     // Enter function scope
@@ -1351,43 +1413,13 @@ static void check_func_decl(Checker* checker, Node* node) {
     checker->modules.current_accessible_modules = fdn->accessible_modules;
     checker->modules.current_accessible_modules_count = fdn->accessible_modules_count;
 
-    // For methods, inject 'self' into scope
-    // self is a struct reference (the struct type itself, with reference semantics)
-    // For primitive receivers, self is a value type
+    // For methods, inject 'self' into scope.
     if (is_method) {
-        Symbol* struct_sym = checker_lookup(checker, receiver_type);
-        if (struct_sym && struct_sym->kind == SYM_TYPE) {
-            Type* self_type = struct_sym->type;
-            checker_define(checker, "self", SYM_VAR, self_type, fdn->receiver_is_const, 0, NULL);
-        } else {
-            Type* builtin = type_builtin_from_name(receiver_type);
-            if (builtin) {
-                checker_define(checker, "self", SYM_VAR, builtin, fdn->receiver_is_const, 0, NULL);
-            }
-        }
+        define_method_self_symbol(checker, receiver_type, fdn->receiver_is_const);
     }
 
-    // Define parameters
-    for (int i = 0; i < func_type->as.func.param_count; i++) {
-        Node* param = fdn->params.nodes[i];
-        Type* ptype = func_type->as.func.param_types[i];
-
-        if (!checker_define(checker, param->as.param.name, SYM_VAR, ptype, param->as.param.is_const,
-                            0, NULL)) {
-            check_error(checker, param->line, param->column, "Duplicate parameter name '%s'",
-                        param->as.param.name);
-        }
-    }
-
-    // Check body
-    if (fdn->body) {
-        // Body is a block, but we already pushed scope for params
-        // So just check the statements directly
-        Node* body = fdn->body;
-        for (int i = 0; i < body->as.block.stmts.count; i++) {
-            check_statement(checker, body->as.block.stmts.nodes[i]);
-        }
-    }
+    define_func_params_in_scope(checker, fdn, func_type);
+    check_function_body(checker, fdn->body);
 
     // Restore previous accessible modules context
     checker->modules.current_accessible_modules       = old_accessible_modules;
