@@ -14,6 +14,16 @@
 #include "print_ast.h"
 #include "util.h"
 
+typedef struct {
+    int         lex_only;
+    int         parse_only;
+    int         check_only;
+    int         print_ast_flag;
+    int         rc_debug;
+    const char* output_file;
+    const char* lib_path;
+} MainOptions;
+
 // Run a program directly via fork/exec, bypassing the shell.
 // Parent ignores SIGINT/SIGQUIT while waiting so it can clean up afterward.
 // Returns the raw wait status, or -1 on fork failure.
@@ -52,6 +62,22 @@ static int fork_exec_wait(char* const argv[]) {
 
 // Compile source to C code, writing to the given output file.
 // Returns 0 on success, 1 on error.
+static CodeGenChecker make_codegen_checker(Checker* checker) {
+    return (CodeGenChecker){
+        .instances           = checker->generics.instances,
+        .instance_count      = checker->generics.instance_count,
+        .spans               = checker->containers.spans,
+        .span_count          = checker->containers.span_count,
+        .vecs                = checker->containers.vecs,
+        .vec_count           = checker->containers.vec_count,
+        .traits              = checker->traits.impls,
+        .trait_count         = checker->traits.impl_count,
+        .func_instances      = checker->generics.func_instances,
+        .func_instance_count = checker->generics.func_instance_count,
+        .sem                 = checker->sem,
+    };
+}
+
 static int compile_to_c(const char* source, const char* source_path, const char* lib_path,
                         int rc_debug, int test_mode, FILE* out) {
     ModuleLoader loader;
@@ -84,21 +110,7 @@ static int compile_to_c(const char* source, const char* source_path, const char*
     }
 
     CodeGen gen;
-    codegen_init(&gen, out,
-                 (CodeGenChecker){
-                     .instances           = checker.generics.instances,
-                     .instance_count      = checker.generics.instance_count,
-                     .spans               = checker.containers.spans,
-                     .span_count          = checker.containers.span_count,
-                     .vecs                = checker.containers.vecs,
-                     .vec_count           = checker.containers.vec_count,
-                     .traits              = checker.traits.impls,
-                     .trait_count         = checker.traits.impl_count,
-                     .func_instances      = checker.generics.func_instances,
-                     .func_instance_count = checker.generics.func_instance_count,
-                     .sem                 = checker.sem,
-                 },
-                 rc_debug, test_mode, source_path);
+    codegen_init(&gen, out, make_codegen_checker(&checker), rc_debug, test_mode, source_path);
     codegen_emit(&gen, ast);
     codegen_free(&gen);
 
@@ -300,284 +312,271 @@ static int compile_and_test(const char* source_path, const char* lib_path, int r
     return 1;
 }
 
-int main(int argc, char** argv) {
-    char*       source;
-    int         free_source    = 0;
-    int         lex_only       = 0;
-    int         parse_only     = 0;
-    int         check_only     = 0;
-    int         print_ast_flag = 0;
-    int         rc_debug       = 0;
-    const char* output_file    = NULL;
-    const char* lib_path       = NULL;
+static void print_usage(const char* program) {
+    fprintf(stderr, "Usage: %s [options] <source-file>\n", program);
+    fprintf(stderr, "       %s run [options] <source-file> [args...]\n", program);
+    fprintf(stderr, "       %s test [options] <source-file>\n", program);
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  --lex     Lex only (print tokens)\n");
+    fprintf(stderr, "  --parse   Parse only (no type checking)\n");
+    fprintf(stderr, "  --check   Type check only (no code generation)\n");
+    fprintf(stderr, "  --ast     Print AST\n");
+    fprintf(stderr, "  --lib-path <dir>\n");
+    fprintf(stderr, "            Library search path for module imports\n");
+    fprintf(stderr, "  --rc-debug\n");
+    fprintf(stderr, "            Emit RC tracking debug output to stderr\n");
+    fprintf(stderr, "  -o <file> Output file\n");
+    fprintf(stderr, "Commands:\n");
+    fprintf(stderr, "  run       Compile and run the program\n");
+    fprintf(stderr, "  test      Compile and run tests\n");
+}
 
-    // Pre-scan for --lib-path and --rc-debug (needed before 'run' subcommand)
+static int is_option_with_value(const char* arg) {
+    return strcmp(arg, "--lib-path") == 0 || strcmp(arg, "-o") == 0;
+}
+
+static void prescan_global_options(int argc, char** argv, MainOptions* opts) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--lib-path") == 0 && i + 1 < argc) {
-            lib_path = argv[i + 1];
+            opts->lib_path = argv[i + 1];
         } else if (strcmp(argv[i], "--rc-debug") == 0) {
-            rc_debug = 1;
+            opts->rc_debug = 1;
         }
     }
+}
 
-    // Check for 'run' subcommand (may appear after flags like --lib-path)
-    int run_idx = -1;
+static int find_subcommand_index(int argc, char** argv, const char* subcommand) {
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "run") == 0) {
-            run_idx = i;
-            break;
+        if (strcmp(argv[i], subcommand) == 0) {
+            return i;
         }
-        // Skip the value argument of --lib-path and -o
-        if ((strcmp(argv[i], "--lib-path") == 0 || strcmp(argv[i], "-o") == 0) && i + 1 < argc) {
+        if (is_option_with_value(argv[i]) && i + 1 < argc) {
             i++;
         }
     }
-    if (run_idx >= 0) {
-        // Find the source file: first non-flag argument after 'run'
-        const char* run_source     = NULL;
-        int         run_args_start = 0;
-        for (int i = run_idx + 1; i < argc; i++) {
-            if (strcmp(argv[i], "--lib-path") == 0 && i + 1 < argc) {
-                i++; // skip value
-            } else if (strcmp(argv[i], "--rc-debug") == 0) {
-                // skip flag
-            } else {
-                run_source     = argv[i];
-                run_args_start = i;
-                break;
+    return -1;
+}
+
+static const char* find_subcommand_source(int argc, char** argv, int subcommand_idx,
+                                          int* arg_start) {
+    for (int i = subcommand_idx + 1; i < argc; i++) {
+        if (strcmp(argv[i], "--lib-path") == 0 && i + 1 < argc) {
+            i++;
+        } else if (strcmp(argv[i], "--rc-debug") == 0) {
+            // Skip flag.
+        } else {
+            if (arg_start) {
+                *arg_start = i;
             }
+            return argv[i];
         }
+    }
+    return NULL;
+}
+
+static int try_handle_subcommand(int argc, char** argv, const MainOptions* opts) {
+    int run_idx = find_subcommand_index(argc, argv, "run");
+    if (run_idx >= 0) {
+        int         run_args_start = 0;
+        const char* run_source     = find_subcommand_source(argc, argv, run_idx, &run_args_start);
         if (!run_source) {
             fprintf(stderr, "Usage: %s run [options] <source-file> [args...]\n", argv[0]);
             return 1;
         }
-        return compile_and_run(run_source, argc - run_args_start, argv + run_args_start, lib_path,
-                               rc_debug);
+        return compile_and_run(run_source, argc - run_args_start, argv + run_args_start,
+                               opts->lib_path, opts->rc_debug);
     }
 
-    // Check for 'test' subcommand (same pattern as 'run')
-    int test_idx = -1;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "test") == 0) {
-            test_idx = i;
-            break;
-        }
-        if ((strcmp(argv[i], "--lib-path") == 0 || strcmp(argv[i], "-o") == 0) && i + 1 < argc) {
-            i++;
-        }
-    }
+    int test_idx = find_subcommand_index(argc, argv, "test");
     if (test_idx >= 0) {
-        const char* test_source = NULL;
-        for (int i = test_idx + 1; i < argc; i++) {
-            if (strcmp(argv[i], "--lib-path") == 0 && i + 1 < argc) {
-                i++;
-            } else if (strcmp(argv[i], "--rc-debug") == 0) {
-                // skip flag
-            } else {
-                test_source = argv[i];
-                break;
-            }
-        }
+        const char* test_source = find_subcommand_source(argc, argv, test_idx, NULL);
         if (!test_source) {
             fprintf(stderr, "Usage: %s test [options] <source-file>\n", argv[0]);
             return 1;
         }
-        return compile_and_test(test_source, lib_path, rc_debug);
+        return compile_and_test(test_source, opts->lib_path, opts->rc_debug);
     }
 
-    // Parse args
-    int arg_idx = 1;
-    while (arg_idx < argc && argv[arg_idx][0] == '-') {
-        if (strcmp(argv[arg_idx], "--lex") == 0) {
-            lex_only = 1;
-        } else if (strcmp(argv[arg_idx], "--parse") == 0) {
-            parse_only = 1;
-        } else if (strcmp(argv[arg_idx], "--check") == 0) {
-            check_only = 1;
-        } else if (strcmp(argv[arg_idx], "--ast") == 0) {
-            print_ast_flag = 1;
-        } else if (strcmp(argv[arg_idx], "--lib-path") == 0 && arg_idx + 1 < argc) {
-            arg_idx++;
-            lib_path = argv[arg_idx];
-        } else if (strcmp(argv[arg_idx], "--rc-debug") == 0) {
-            rc_debug = 1;
-        } else if (strcmp(argv[arg_idx], "-o") == 0 && arg_idx + 1 < argc) {
-            arg_idx++;
-            output_file = argv[arg_idx];
+    return -1;
+}
+
+static void parse_main_options(int argc, char** argv, MainOptions* opts, int* arg_idx) {
+    *arg_idx = 1;
+    while (*arg_idx < argc && argv[*arg_idx][0] == '-') {
+        if (strcmp(argv[*arg_idx], "--lex") == 0) {
+            opts->lex_only = 1;
+        } else if (strcmp(argv[*arg_idx], "--parse") == 0) {
+            opts->parse_only = 1;
+        } else if (strcmp(argv[*arg_idx], "--check") == 0) {
+            opts->check_only = 1;
+        } else if (strcmp(argv[*arg_idx], "--ast") == 0) {
+            opts->print_ast_flag = 1;
+        } else if (strcmp(argv[*arg_idx], "--lib-path") == 0 && *arg_idx + 1 < argc) {
+            (*arg_idx)++;
+            opts->lib_path = argv[*arg_idx];
+        } else if (strcmp(argv[*arg_idx], "--rc-debug") == 0) {
+            opts->rc_debug = 1;
+        } else if (strcmp(argv[*arg_idx], "-o") == 0 && *arg_idx + 1 < argc) {
+            (*arg_idx)++;
+            opts->output_file = argv[*arg_idx];
         }
-        arg_idx++;
+        (*arg_idx)++;
     }
+}
 
-    const char* source_file = NULL;
-    if (arg_idx < argc) {
-        source_file = argv[arg_idx];
-        source      = read_file(source_file);
-        if (!source) {
-            fprintf(stderr, "Could not open file: %s\n", source_file);
+static void run_lex_mode(const char* source) {
+    printf("Source:\n%s\n", source);
+    printf("Tokens:\n");
+    printf("%-4s  %-12s  %s\n", "LINE", "TYPE", "VALUE");
+    printf("----  ------------  -----\n");
+
+    Lexer lexer;
+    lexer_init(&lexer, source);
+
+    Token token;
+    do {
+        token = lexer_next(&lexer);
+        printf("%3d:%-2d  %-12s  ", token.line, token.column, token_type_name(token.type));
+
+        if (token.type == TOK_ERROR) {
+            printf("%s", token.start);
+        } else if (token.type != TOK_EOF) {
+            printf("%.*s", (int)token.length, token.start);
+        }
+        printf("\n");
+    } while (token.type != TOK_EOF);
+}
+
+static int run_normal_compile(const MainOptions* opts, const char* source,
+                              const char* source_file) {
+    FILE* out = stdout;
+    if (opts->output_file) {
+        out = fopen(opts->output_file, "w");
+        if (!out) {
+            fprintf(stderr, "Could not open output file: %s\n", opts->output_file);
             return 1;
         }
-        free_source = 1;
-    } else {
-        fprintf(stderr, "Usage: %s [options] <source-file>\n", argv[0]);
-        fprintf(stderr, "       %s run <source-file> [args...]\n", argv[0]);
-        fprintf(stderr, "       %s test <source-file>\n", argv[0]);
-        fprintf(stderr, "Options:\n");
-        fprintf(stderr, "  --lex     Lex only (print tokens)\n");
-        fprintf(stderr, "  --parse   Parse only (no type checking)\n");
-        fprintf(stderr, "  --check   Type check only (no code generation)\n");
-        fprintf(stderr, "  --ast     Print AST\n");
-        fprintf(stderr, "  --lib-path <dir>\n");
-        fprintf(stderr, "            Library search path for module imports\n");
-        fprintf(stderr, "  --rc-debug\n");
-        fprintf(stderr, "            Emit RC tracking debug output to stderr\n");
-        fprintf(stderr, "  -o <file> Output file\n");
-        fprintf(stderr, "Commands:\n");
-        fprintf(stderr, "  run       Compile and run the program\n");
-        fprintf(stderr, "  test      Compile and run tests\n");
-        return 1;
     }
 
-    if (lex_only) {
-        printf("Source:\n%s\n", source);
-        printf("Tokens:\n");
-        printf("%-4s  %-12s  %s\n", "LINE", "TYPE", "VALUE");
-        printf("----  ------------  -----\n");
+    int result = compile_to_c(source, source_file, opts->lib_path, opts->rc_debug, 0, out);
 
-        Lexer lexer;
-        lexer_init(&lexer, source);
-
-        Token token;
-        do {
-            token = lexer_next(&lexer);
-            printf("%3d:%-2d  %-12s  ", token.line, token.column, token_type_name(token.type));
-
-            if (token.type == TOK_ERROR) {
-                printf("%s", token.start);
-            } else if (token.type != TOK_EOF) {
-                printf("%.*s", (int)token.length, token.start);
-            }
-            printf("\n");
-        } while (token.type != TOK_EOF);
-    } else if (!parse_only && !check_only && !print_ast_flag) {
-        // Normal compilation
-        FILE* out = stdout;
-        if (output_file) {
-            out = fopen(output_file, "w");
-            if (!out) {
-                fprintf(stderr, "Could not open output file: %s\n", output_file);
-                if (free_source)
-                    free(source);
-                return 1;
-            }
+    if (opts->output_file) {
+        fclose(out);
+        if (result == 0) {
+            fprintf(stderr, "Generated: %s\n", opts->output_file);
         }
+    }
+    return result;
+}
 
-        int result = compile_to_c(source, source_file, lib_path, rc_debug, 0, out);
+static int run_debug_pipeline(const MainOptions* opts, const char* source,
+                              const char* source_file) {
+    ModuleLoader loader;
+    module_loader_init(&loader, opts->lib_path);
 
-        if (output_file) {
-            fclose(out);
-            if (result == 0)
-                fprintf(stderr, "Generated: %s\n", output_file);
-        }
-        if (free_source)
-            free(source);
-        return result;
-    } else {
-        // Debug modes: --parse, --check, --ast
-        ModuleLoader loader;
-        module_loader_init(&loader, lib_path);
+    Parser parser;
+    parser_init_with_loader(&parser, source, source_file, &loader);
+    Node* ast = parser_parse(&parser);
 
-        Parser parser;
-        parser_init_with_loader(&parser, source, source_file, &loader);
-        Node* ast = parser_parse(&parser);
-
-        if (parser.had_error) {
-            fprintf(stderr, "Parse failed\n");
-            node_free(ast);
-            parser_free(&parser);
-            module_loader_free(&loader);
-            if (free_source)
-                free(source);
-            return 1;
-        }
-
-        if (print_ast_flag) {
-            printf("AST:\n");
-            printf("----\n");
-            print_ast(ast, 0);
-            printf("\n");
-        }
-
-        if (!parse_only) {
-            Checker checker;
-            checker_init(&checker);
-            checker_set_direct_imports(&checker, loader.direct_imports,
-                                       loader.direct_imports_count);
-            int ok = checker_check(&checker, ast);
-
-            if (!ok) {
-                checker_free(&checker);
-                fprintf(stderr, "Type check failed\n");
-                node_free(ast);
-                parser_free(&parser);
-                module_loader_free(&loader);
-                if (free_source)
-                    free(source);
-                return 1;
-            }
-
-            if (!check_only) {
-                // --ast with full codegen
-                FILE* out = stdout;
-                if (output_file) {
-                    out = fopen(output_file, "w");
-                    if (!out) {
-                        checker_free(&checker);
-                        fprintf(stderr, "Could not open output file: %s\n", output_file);
-                        node_free(ast);
-                        parser_free(&parser);
-                        module_loader_free(&loader);
-                        if (free_source)
-                            free(source);
-                        return 1;
-                    }
-                }
-
-                CodeGen gen;
-                codegen_init(&gen, out,
-                             (CodeGenChecker){
-                                 .instances           = checker.generics.instances,
-                                 .instance_count      = checker.generics.instance_count,
-                                 .spans               = checker.containers.spans,
-                                 .span_count          = checker.containers.span_count,
-                                 .vecs                = checker.containers.vecs,
-                                 .vec_count           = checker.containers.vec_count,
-                                 .traits              = checker.traits.impls,
-                                 .trait_count         = checker.traits.impl_count,
-                                 .func_instances      = checker.generics.func_instances,
-                                 .func_instance_count = checker.generics.func_instance_count,
-                                 .sem                 = checker.sem,
-                             },
-                             rc_debug, 0, source_file);
-                codegen_emit(&gen, ast);
-                codegen_free(&gen);
-                checker_free(&checker);
-
-                if (output_file) {
-                    fclose(out);
-                    fprintf(stderr, "Generated: %s\n", output_file);
-                }
-            } else {
-                checker_free(&checker);
-                fprintf(stderr, "Type check passed!\n");
-            }
-        }
-
+    if (parser.had_error) {
+        fprintf(stderr, "Parse failed\n");
         node_free(ast);
         parser_free(&parser);
         module_loader_free(&loader);
+        return 1;
     }
 
-    if (free_source)
-        free(source);
+    if (opts->print_ast_flag) {
+        printf("AST:\n");
+        printf("----\n");
+        print_ast(ast, 0);
+        printf("\n");
+    }
+
+    if (!opts->parse_only) {
+        Checker checker;
+        checker_init(&checker);
+        checker_set_direct_imports(&checker, loader.direct_imports, loader.direct_imports_count);
+        int ok = checker_check(&checker, ast);
+
+        if (!ok) {
+            checker_free(&checker);
+            fprintf(stderr, "Type check failed\n");
+            node_free(ast);
+            parser_free(&parser);
+            module_loader_free(&loader);
+            return 1;
+        }
+
+        if (!opts->check_only) {
+            FILE* out = stdout;
+            if (opts->output_file) {
+                out = fopen(opts->output_file, "w");
+                if (!out) {
+                    checker_free(&checker);
+                    fprintf(stderr, "Could not open output file: %s\n", opts->output_file);
+                    node_free(ast);
+                    parser_free(&parser);
+                    module_loader_free(&loader);
+                    return 1;
+                }
+            }
+
+            CodeGen gen;
+            codegen_init(&gen, out, make_codegen_checker(&checker), opts->rc_debug, 0, source_file);
+            codegen_emit(&gen, ast);
+            codegen_free(&gen);
+            checker_free(&checker);
+
+            if (opts->output_file) {
+                fclose(out);
+                fprintf(stderr, "Generated: %s\n", opts->output_file);
+            }
+        } else {
+            checker_free(&checker);
+            fprintf(stderr, "Type check passed!\n");
+        }
+    }
+
+    node_free(ast);
+    parser_free(&parser);
+    module_loader_free(&loader);
     return 0;
+}
+
+int main(int argc, char** argv) {
+    MainOptions opts = {0};
+    prescan_global_options(argc, argv, &opts);
+
+    int subcommand_result = try_handle_subcommand(argc, argv, &opts);
+    if (subcommand_result >= 0) {
+        return subcommand_result;
+    }
+
+    int arg_idx = 1;
+    parse_main_options(argc, argv, &opts, &arg_idx);
+
+    if (arg_idx >= argc) {
+        print_usage(argv[0]);
+        return 1;
+    }
+
+    const char* source_file = argv[arg_idx];
+    char*       source      = read_file(source_file);
+    if (!source) {
+        fprintf(stderr, "Could not open file: %s\n", source_file);
+        return 1;
+    }
+
+    int result = 0;
+    if (opts.lex_only) {
+        run_lex_mode(source);
+    } else if (!opts.parse_only && !opts.check_only && !opts.print_ast_flag) {
+        result = run_normal_compile(&opts, source, source_file);
+    } else {
+        result = run_debug_pipeline(&opts, source, source_file);
+    }
+
+    free(source);
+    return result;
 }
