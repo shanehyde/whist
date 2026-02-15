@@ -133,6 +133,73 @@ void emit_function_name(CodeGen* gen, const char* func_name, const char* receive
     }
 }
 
+static Node* find_alias_target(CodeGen* gen, const char* name) {
+    for (int i = 0; i < gen->aliases.type_count; i++) {
+        if (strcmp(gen->aliases.types[i], name) == 0) {
+            return gen->aliases.type_targets[i];
+        }
+    }
+    return NULL;
+}
+
+static void emit_ident_type(CodeGen* gen, Node* type_node) {
+    const char* name = type_node->as.ident.name;
+
+    Type* resolved = subst_lookup(gen, name);
+    if (resolved) {
+        emit_resolved_type(gen, resolved);
+        return;
+    }
+
+    const char* c_type = type_c_name(name);
+    if (c_type) {
+        emit(gen, "%s", c_type);
+        return;
+    }
+
+    if (is_enum_type_name(gen, name)) {
+        emit(gen, "%s", name);
+        return;
+    }
+
+    Node* alias_target = find_alias_target(gen, name);
+    if (alias_target) {
+        emit_type(gen, alias_target);
+        return;
+    }
+
+    emit(gen, "%s*", name);
+}
+
+static void emit_vec_or_span_type_arg(CodeGen* gen, Node* arg) {
+    if (arg->type == NODE_IDENT) {
+        const char* arg_name = arg->as.ident.name;
+        Type*       resolved = subst_lookup(gen, arg_name);
+        if (resolved) {
+            emit(gen, "%s", type_mangle_name(resolved));
+        } else {
+            emit(gen, "%s", arg_name);
+        }
+        return;
+    }
+
+    if (arg->type == NODE_GENERIC_TYPE) {
+        // Nested generic like Vec<HashEntry<V>>.
+        char* mangled = build_mangled_name_from_generic_node(gen, arg);
+        emit(gen, "%s", mangled);
+        free(mangled);
+    }
+}
+
+static void emit_regular_generic_type(CodeGen* gen, Node* type_node) {
+    char* mangled = build_mangled_name_from_generic_node(gen, type_node);
+    emit(gen, "%s", mangled);
+    if (!is_enum_type_name(gen, mangled)) {
+        emit(gen, "*");
+    }
+    free(mangled);
+}
+
 // Emit a type from a type annotation node
 void emit_type(CodeGen* gen, Node* type_node) {
     if (!type_node) {
@@ -141,39 +208,9 @@ void emit_type(CodeGen* gen, Node* type_node) {
     }
 
     switch (type_node->type) {
-    case NODE_IDENT: {
-        const char* name = type_node->as.ident.name;
-
-        // Check for type parameter substitution (for generic methods)
-        Type* resolved = subst_lookup(gen, name);
-        if (resolved) {
-            emit_resolved_type(gen, resolved);
-            return;
-        }
-
-        const char* c_type = type_c_name(name);
-        if (c_type) {
-            emit(gen, "%s", c_type);
-        } else if (is_enum_type_name(gen, name)) {
-            // Enum type - value type, no pointer
-            emit(gen, "%s", name);
-        } else {
-            // Check if this is a type alias — resolve to target type
-            int alias_found = 0;
-            for (int i = 0; i < gen->aliases.type_count; i++) {
-                if (strcmp(gen->aliases.types[i], name) == 0) {
-                    emit_type(gen, gen->aliases.type_targets[i]);
-                    alias_found = 1;
-                    break;
-                }
-            }
-            if (!alias_found) {
-                // User-defined struct type - emit as pointer (struct references)
-                emit(gen, "%s*", name);
-            }
-        }
+    case NODE_IDENT:
+        emit_ident_type(gen, type_node);
         break;
-    }
     case NODE_UNARY:
         // Pointer types no longer supported in the language
         emit(gen, "/* pointer types not supported */");
@@ -223,65 +260,14 @@ void emit_type(CodeGen* gen, Node* type_node) {
 
         if (is_vec || is_span) {
             emit(gen, "%s", is_vec ? "__Vec_" : "__Span_");
-            Node* arg = type_node->as.generic_type.type_args.nodes[0];
-            if (arg->type == NODE_IDENT) {
-                const char* arg_name = arg->as.ident.name;
-                Type*       resolved = subst_lookup(gen, arg_name);
-                if (resolved) {
-                    emit(gen, "%s", type_mangle_name(resolved));
-                } else {
-                    emit(gen, "%s", arg_name);
-                }
-            } else if (arg->type == NODE_GENERIC_TYPE) {
-                // Nested generic like Vec<HashEntry<V>> — build substituted mangled name
-                char* mangled = build_mangled_name_from_generic_node(gen, arg);
-                emit(gen, "%s", mangled);
-                free(mangled);
-            }
+            emit_vec_or_span_type_arg(gen, type_node->as.generic_type.type_args.nodes[0]);
             if (is_vec)
                 emit(gen, "*"); // Vec is RC-managed pointer
             break;
         }
 
-        // Regular generic struct (Box, Pair, etc.) - emit as pointer
-        emit(gen, "%s", base);
-        for (int i = 0; i < type_node->as.generic_type.type_args.count; i++) {
-            emit(gen, "_");
-            Node* arg = type_node->as.generic_type.type_args.nodes[i];
-            if (arg->type == NODE_IDENT) {
-                const char* arg_name = arg->as.ident.name;
-                Type*       resolved = subst_lookup(gen, arg_name);
-                if (resolved) {
-                    emit(gen, "%s", type_name(resolved));
-                } else {
-                    emit(gen, "%s", arg_name);
-                }
-            } else if (arg->type == NODE_GENERIC_TYPE) {
-                // Nested generic - recurse to get mangled name
-                emit(gen, "%s", arg->as.generic_type.base_name);
-                for (int j = 0; j < arg->as.generic_type.type_args.count; j++) {
-                    emit(gen, "_");
-                    Node* nested = arg->as.generic_type.type_args.nodes[j];
-                    if (nested->type == NODE_IDENT) {
-                        const char* nested_name = nested->as.ident.name;
-                        Type*       resolved_n  = subst_lookup(gen, nested_name);
-                        if (resolved_n) {
-                            emit(gen, "%s", type_name(resolved_n));
-                        } else {
-                            emit(gen, "%s", nested_name);
-                        }
-                    }
-                }
-            }
-        }
-        // Only emit * for struct types, not for generic enums
-        {
-            char* mangled = build_mangled_name_from_generic_node(gen, type_node);
-            if (!is_enum_type_name(gen, mangled)) {
-                emit(gen, "*"); // Struct reference
-            }
-            free(mangled);
-        }
+        // Regular generic struct/enum type.
+        emit_regular_generic_type(gen, type_node);
         break;
     }
     case NODE_FUNC_TYPE: {
