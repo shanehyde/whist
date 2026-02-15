@@ -10,6 +10,8 @@
 // Expected: PASS: vec_string_sort
 // Expected: PASS: vec_user_method
 
+import collections;
+
 func (Vec<T>) beep(value: T): bool {
     for (var i: i64 = 0; i < self.count; i += 1) {
         if (self[i] == value) {
@@ -42,8 +44,6 @@ test "vec_basic" {
     assert(nums[0] == 10);
     assert(nums[1] == 20);
     assert(nums[2] == 30);
-
-    nums.beep(20);
 }
 
 test "vec_clear" {
@@ -291,4 +291,13 @@ test "vec_user_method" {
     var words = new Vec<string>{"hello", "world"};
     assert(words.beep("hello"));
     assert(!words.beep("missing"));
+}
+
+func a10(f:i64): bool {
+    return f % 2 == 0;
+}
+
+test "vec_user_method_nested" {
+    var v = new Vec<i64>{2,4,6,8,10};
+    assert(v.all(a10));
 }
