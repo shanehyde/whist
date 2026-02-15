@@ -2,7 +2,7 @@ CC = cc
 CFLAGS = -Wall -Wextra -std=c11 -g -D_POSIX_C_SOURCE=200809L -MMD -MP
 LDFLAGS =
 
-SRC = main.c lexer.c parser.c module_loader.c ast.c types.c sem_info.c checker.c checker_types.c checker_expr.c codegen.c codegen_types.c codegen_emit.c codegen_rc.c codegen_expr.c codegen_stmt.c print_ast.c
+SRC = main.c lexer.c parser.c parser_core.c parser_types.c parser_expr.c parser_stmt.c parser_decl.c module_loader.c ast.c types.c sem_info.c checker.c checker_types.c checker_expr.c codegen.c codegen_types.c codegen_emit.c codegen_rc.c codegen_expr.c codegen_stmt.c print_ast.c
 OBJ = $(SRC:.c=.o)
 DEPS = $(SRC:.c=.d)
 BIN = bin
