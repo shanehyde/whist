@@ -1155,6 +1155,198 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
     return struct_type;
 }
 
+static Type* resolve_ident_type(Checker* checker, Node* type_node) {
+    const char* name = type_node->as.ident.name;
+
+    // Check for builtin type.
+    Type* builtin = type_builtin_from_name(name);
+    if (builtin)
+        return builtin;
+
+    // Check for Self type (in trait definitions and impl blocks).
+    if (strcmp(name, "Self") == 0) {
+        if (checker->self_type)
+            return checker->self_type;
+        check_error(checker, type_node->line, type_node->column,
+                    "'Self' can only be used inside trait definitions and impl blocks");
+        return type_error;
+    }
+
+    // Check for type parameter substitution (when instantiating generics).
+    if (checker->generics.current_type_params) {
+        for (int i = 0; i < checker->generics.current_type_param_count; i++) {
+            if (strcmp(checker->generics.current_type_params[i], name) == 0) {
+                return checker->generics.current_type_args[i];
+            }
+        }
+    }
+
+    // Look up user-defined type.
+    Symbol* sym = checker_lookup(checker, name);
+    if (sym && sym->kind == SYM_TYPE) {
+        return sym->type;
+    }
+
+    check_error(checker, type_node->line, type_node->column, "Unknown type '%s'", name);
+    return type_error;
+}
+
+static int resolve_generic_type_args(Checker* checker, Node* type_node, int arg_count,
+                                     Type*** out_resolved_args) {
+    Type** resolved_args = xmalloc(arg_count * sizeof(Type*));
+    for (int i = 0; i < arg_count; i++) {
+        resolved_args[i] = resolve_type(checker, type_node->as.generic_type.type_args.nodes[i]);
+        if (resolved_args[i] == type_error) {
+            free(resolved_args);
+            return 0;
+        }
+    }
+    *out_resolved_args = resolved_args;
+    return 1;
+}
+
+static int check_generic_trait_bounds(Checker* checker, Node* type_node, GenericDef* def,
+                                      Type** resolved_args, int arg_count) {
+    for (int i = 0; i < arg_count; i++) {
+        if (!def->type_param_bounds[i]) {
+            continue;
+        }
+
+        const char* bound             = def->type_param_bounds[i];
+        const char* arg_type_name_str = NULL;
+        if (resolved_args[i]->kind == TYPE_STRUCT) {
+            arg_type_name_str = resolved_args[i]->as.struc.name;
+        } else {
+            arg_type_name_str = type_name(resolved_args[i]);
+        }
+
+        int satisfied = 0;
+        if (arg_type_name_str) {
+            for (int t = 0; t < checker->traits.impl_count; t++) {
+                if (strcmp(checker->traits.impls[t].trait_name, bound) == 0 &&
+                    strcmp(checker->traits.impls[t].type_name, arg_type_name_str) == 0) {
+                    satisfied = 1;
+                    break;
+                }
+            }
+        }
+
+        if (!satisfied) {
+            check_error(checker, type_node->line, type_node->column,
+                        "Type '%s' does not implement trait '%s'", type_name(resolved_args[i]),
+                        bound);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static Type* resolve_generic_type_node(Checker* checker, Node* type_node) {
+    const char* base_name = type_node->as.generic_type.base_name;
+    int         arg_count = type_node->as.generic_type.type_args.count;
+
+    // Handle builtin Vec<T> type.
+    if (strcmp(base_name, "Vec") == 0) {
+        return resolve_vec_type(checker, type_node);
+    }
+
+    // Handle builtin Span<T> type.
+    if (strcmp(base_name, "Span") == 0) {
+        return resolve_span_type(checker, type_node);
+    }
+
+    // Look up the generic definition.
+    GenericDef* def = lookup_generic_def(checker, base_name);
+    if (!def) {
+        check_error(checker, type_node->line, type_node->column, "Unknown generic type '%s'",
+                    base_name);
+        return type_error;
+    }
+
+    // Check arity.
+    if (arg_count != def->type_param_count) {
+        check_error(checker, type_node->line, type_node->column,
+                    "Generic type '%s' expects %d type arguments, got %d", base_name,
+                    def->type_param_count, arg_count);
+        return type_error;
+    }
+
+    Type** resolved_args = NULL;
+    if (!resolve_generic_type_args(checker, type_node, arg_count, &resolved_args)) {
+        return type_error;
+    }
+
+    if (!check_generic_trait_bounds(checker, type_node, def, resolved_args, arg_count)) {
+        free(resolved_args);
+        return type_error;
+    }
+
+    // Handle generic type alias: substitute type params and resolve target.
+    if (def->is_type_alias) {
+        return resolve_generic_type_alias(checker, type_node, def, resolved_args);
+    }
+
+    // Generate mangled name.
+    char* mangled = type_mangle_generic(base_name, resolved_args, arg_count);
+
+    // Check if already instantiated.
+    GenericInstance* existing = lookup_generic_instance(checker, mangled);
+    if (existing) {
+        free(mangled);
+        free(resolved_args);
+        return existing->type;
+    }
+
+    // Branch on enum vs struct.
+    if (def->decl->type == NODE_ENUM_DECL) {
+        return instantiate_generic_enum(checker, def, mangled, resolved_args, arg_count);
+    }
+
+    return instantiate_generic_struct(checker, type_node, def, mangled, resolved_args, arg_count);
+}
+
+static Type* resolve_array_type_node(Checker* checker, Node* type_node) {
+    Type* elem = resolve_type(checker, type_node->as.array_type.elem_type);
+    int   size = -1;
+    if (type_node->as.array_type.size) {
+        // For now, only support constant integer sizes.
+        if (type_node->as.array_type.size->type == NODE_INT_LIT) {
+            size = (int)type_node->as.array_type.size->as.int_lit.value;
+        }
+    }
+    return type_array(elem, size);
+}
+
+static Type* resolve_tuple_type_node(Checker* checker, Node* type_node) {
+    int    count = type_node->as.tuple_type.elem_types.count;
+    Type** elems = xmalloc(count * sizeof(Type*));
+    for (int i = 0; i < count; i++) {
+        elems[i] = resolve_type(checker, type_node->as.tuple_type.elem_types.nodes[i]);
+    }
+    return type_tuple(elems, count);
+}
+
+static Type* resolve_func_type_node(Checker* checker, Node* type_node) {
+    int    count  = type_node->as.func_type.param_types.count;
+    Type** params = count > 0 ? xmalloc(count * sizeof(Type*)) : NULL;
+    for (int i = 0; i < count; i++) {
+        params[i] = resolve_type(checker, type_node->as.func_type.param_types.nodes[i]);
+        if (params[i] == type_error) {
+            free(params);
+            return type_error;
+        }
+    }
+    Type* ret = type_node->as.func_type.return_type
+                    ? resolve_type(checker, type_node->as.func_type.return_type)
+                    : type_void;
+    if (ret == type_error) {
+        free(params);
+        return type_error;
+    }
+    return type_func(params, count, ret, 0);
+}
+
 // Resolve a type annotation node to a concrete Type*, handling builtins,
 // user-defined types, generics, arrays, tuples, and type parameter substitution
 Type* resolve_type(Checker* checker, Node* type_node) {
@@ -1162,179 +1354,21 @@ Type* resolve_type(Checker* checker, Node* type_node) {
         return type_void;
 
     switch (type_node->type) {
-    case NODE_IDENT: {
-        const char* name = type_node->as.ident.name;
-
-        // Check for builtin type
-        Type* builtin = type_builtin_from_name(name);
-        if (builtin)
-            return builtin;
-
-        // Check for Self type (in trait definitions and impl blocks)
-        if (strcmp(name, "Self") == 0) {
-            if (checker->self_type)
-                return checker->self_type;
-            check_error(checker, type_node->line, type_node->column,
-                        "'Self' can only be used inside trait definitions and impl blocks");
-            return type_error;
-        }
-
-        // Check for type parameter substitution (when instantiating generics)
-        if (checker->generics.current_type_params) {
-            for (int i = 0; i < checker->generics.current_type_param_count; i++) {
-                if (strcmp(checker->generics.current_type_params[i], name) == 0) {
-                    return checker->generics.current_type_args[i];
-                }
-            }
-        }
-
-        // Look up user-defined type
-        Symbol* sym = checker_lookup(checker, name);
-        if (sym && sym->kind == SYM_TYPE) {
-            return sym->type;
-        }
-        check_error(checker, type_node->line, type_node->column, "Unknown type '%s'", name);
-        return type_error;
-    }
-    case NODE_GENERIC_TYPE: {
-        // Generic type instantiation: Box<i64>, Pair<K, V>, Span<T>
-        const char* base_name = type_node->as.generic_type.base_name;
-        int         arg_count = type_node->as.generic_type.type_args.count;
-
-        // Handle builtin Vec<T> type
-        if (strcmp(base_name, "Vec") == 0) {
-            return resolve_vec_type(checker, type_node);
-        }
-
-        // Handle builtin Span<T> type
-        if (strcmp(base_name, "Span") == 0) {
-            return resolve_span_type(checker, type_node);
-        }
-
-        // Look up the generic definition
-        GenericDef* def = lookup_generic_def(checker, base_name);
-        if (!def) {
-            // Maybe it's not a generic - error
-            check_error(checker, type_node->line, type_node->column, "Unknown generic type '%s'",
-                        base_name);
-            return type_error;
-        }
-
-        // Check arity
-        if (arg_count != def->type_param_count) {
-            check_error(checker, type_node->line, type_node->column,
-                        "Generic type '%s' expects %d type arguments, got %d", base_name,
-                        def->type_param_count, arg_count);
-            return type_error;
-        }
-
-        // Resolve all type arguments
-        Type** resolved_args = xmalloc(arg_count * sizeof(Type*));
-        for (int i = 0; i < arg_count; i++) {
-            resolved_args[i] = resolve_type(checker, type_node->as.generic_type.type_args.nodes[i]);
-            if (resolved_args[i] == type_error) {
-                free(resolved_args);
-                return type_error;
-            }
-        }
-
-        // Check trait bounds on type arguments
-        for (int i = 0; i < arg_count; i++) {
-            if (def->type_param_bounds[i]) {
-                const char* bound             = def->type_param_bounds[i];
-                const char* arg_type_name_str = NULL;
-                if (resolved_args[i]->kind == TYPE_STRUCT) {
-                    arg_type_name_str = resolved_args[i]->as.struc.name;
-                } else {
-                    arg_type_name_str = type_name(resolved_args[i]);
-                }
-                int satisfied = 0;
-                if (arg_type_name_str) {
-                    for (int t = 0; t < checker->traits.impl_count; t++) {
-                        if (strcmp(checker->traits.impls[t].trait_name, bound) == 0 &&
-                            strcmp(checker->traits.impls[t].type_name, arg_type_name_str) == 0) {
-                            satisfied = 1;
-                            break;
-                        }
-                    }
-                }
-                if (!satisfied) {
-                    check_error(checker, type_node->line, type_node->column,
-                                "Type '%s' does not implement trait '%s'",
-                                type_name(resolved_args[i]), bound);
-                    free(resolved_args);
-                    return type_error;
-                }
-            }
-        }
-
-        // Handle generic type alias: substitute type params and resolve target
-        if (def->is_type_alias) {
-            return resolve_generic_type_alias(checker, type_node, def, resolved_args);
-        }
-
-        // Generate mangled name
-        char* mangled = type_mangle_generic(base_name, resolved_args, arg_count);
-
-        // Check if already instantiated
-        GenericInstance* existing = lookup_generic_instance(checker, mangled);
-        if (existing) {
-            free(mangled);
-            free(resolved_args);
-            return existing->type;
-        }
-
-        // Branch on enum vs struct
-        if (def->decl->type == NODE_ENUM_DECL) {
-            return instantiate_generic_enum(checker, def, mangled, resolved_args, arg_count);
-        }
-
-        return instantiate_generic_struct(checker, type_node, def, mangled, resolved_args,
-                                          arg_count);
-    }
+    case NODE_IDENT:
+        return resolve_ident_type(checker, type_node);
+    case NODE_GENERIC_TYPE:
+        return resolve_generic_type_node(checker, type_node);
     case NODE_UNARY:
-        // Pointer types no longer supported
+        // Pointer types no longer supported.
         check_error(checker, type_node->line, type_node->column,
                     "Pointer types are no longer supported");
         return type_error;
-    case NODE_ARRAY_TYPE: {
-        Type* elem = resolve_type(checker, type_node->as.array_type.elem_type);
-        int   size = -1;
-        if (type_node->as.array_type.size) {
-            // For now, only support constant integer sizes
-            if (type_node->as.array_type.size->type == NODE_INT_LIT) {
-                size = (int)type_node->as.array_type.size->as.int_lit.value;
-            }
-        }
-        return type_array(elem, size);
-    }
-    case NODE_TUPLE_TYPE: {
-        int    count = type_node->as.tuple_type.elem_types.count;
-        Type** elems = xmalloc(count * sizeof(Type*));
-        for (int i = 0; i < count; i++) {
-            elems[i] = resolve_type(checker, type_node->as.tuple_type.elem_types.nodes[i]);
-        }
-        return type_tuple(elems, count);
-    }
-    case NODE_FUNC_TYPE: {
-        int    count  = type_node->as.func_type.param_types.count;
-        Type** params = count > 0 ? xmalloc(count * sizeof(Type*)) : NULL;
-        for (int i = 0; i < count; i++) {
-            params[i] = resolve_type(checker, type_node->as.func_type.param_types.nodes[i]);
-            if (params[i] == type_error) {
-                free(params);
-                return type_error;
-            }
-        }
-        Type* ret = type_node->as.func_type.return_type
-                        ? resolve_type(checker, type_node->as.func_type.return_type)
-                        : type_void;
-        if (ret == type_error) {
-            free(params);
-            return type_error;
-        }
-        return type_func(params, count, ret, 0);
-    }
+    case NODE_ARRAY_TYPE:
+        return resolve_array_type_node(checker, type_node);
+    case NODE_TUPLE_TYPE:
+        return resolve_tuple_type_node(checker, type_node);
+    case NODE_FUNC_TYPE:
+        return resolve_func_type_node(checker, type_node);
     default:
         break;
     }
