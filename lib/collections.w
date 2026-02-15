@@ -173,3 +173,21 @@ func (HashMap<K, V>) keys(): Vec<K> {
     }
     return result;
 }
+
+func (Vec<T>) any(pred: func(T) :bool): bool {
+    foreach (const elem in self) {
+        if (pred(elem)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+func (Vec<T>) all(pred: func(T) :bool): bool {
+    foreach (const elem in self) {
+        if (!pred(elem)) {
+            return false;
+        }
+    }
+    return true;
+}

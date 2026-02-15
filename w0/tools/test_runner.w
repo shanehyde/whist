@@ -3,6 +3,7 @@
 
 import std;
 import fs;
+import collections;
 
 // --- Helpers ---
 
