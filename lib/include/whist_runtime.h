@@ -160,6 +160,47 @@ static inline bool __String_ends_with(const char* s, const char* suffix) {
     return ls >= lsuf && strcmp(s + ls - lsuf, suffix) == 0;
 }
 
+/* --- Vec<string> helpers (needed by __String_split) --- */
+typedef struct {
+    const char** data;
+    int64_t      count;
+    int64_t      capacity;
+} __Vec_string;
+
+static inline void __Vec_string_cleanup(void* raw) {
+    __Vec_string* ptr = (__Vec_string*)raw;
+    free(ptr->data);
+}
+
+static inline void __Vec_string_push(__Vec_string* self, const char* value) {
+    if (self->count == self->capacity) {
+        int64_t new_cap = self->capacity == 0 ? 4 : self->capacity * 2;
+        self->data      = (const char**)realloc(self->data, new_cap * sizeof(const char*));
+        self->capacity  = new_cap;
+    }
+    self->data[self->count++] = value;
+}
+
+static inline __Vec_string* __String_split(const char* s, const char* delim) {
+    __Vec_string* vec =
+        (__Vec_string*)__rc_alloc(sizeof(__Vec_string), __Vec_string_cleanup);
+    vec->data     = NULL;
+    vec->count    = 0;
+    vec->capacity = 0;
+    size_t      dlen = strlen(delim);
+    const char* p    = s;
+    for (;;) {
+        const char* found = strstr(p, delim);
+        if (!found) {
+            __Vec_string_push(vec, __String_substr(p, 0, (int64_t)strlen(p)));
+            break;
+        }
+        __Vec_string_push(vec, __String_substr(p, 0, (int64_t)(found - p)));
+        p = found + dlen;
+    }
+    return vec;
+}
+
 static inline const char* __std_format(const char* fmt, ...) {
     va_list args1, args2;
     va_start(args1, fmt);

@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'w0/**'
+      - 'lib/**'
 
 jobs:
   build-and-test:
@@ -13,10 +14,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build
+      - name: Build compiler
         working-directory: w0
         run: make
 
+      - name: Build test runner
+        working-directory: w0
+        run: bin/w0 --lib-path ../lib tools/test_runner.w | cc -x c -I../lib/include -o bin/test_runner - ../lib/whist_runtime.c
+
       - name: Run tests
         working-directory: w0
-        run: make test
+        run: bin/test_runner --verbose

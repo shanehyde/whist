@@ -722,6 +722,31 @@ static Type* resolve_vec_type(Checker* checker, Node* type_node) {
     return vec_type;
 }
 
+// Ensure a Vec<elem_type> exists (look up or create + register)
+// Used by checker_expr.c when a builtin method returns Vec<T>
+Type* ensure_vec_type(Checker* checker, Type* elem_type) {
+    char mangled[256];
+    snprintf(mangled, sizeof(mangled), "Vec_%s", type_mangle_name(elem_type));
+
+    VecInstance* existing = lookup_vec_instance(checker, mangled);
+    if (existing) {
+        return existing->type;
+    }
+
+    Type* vec_type = type_vec(elem_type);
+    register_vec_instance(checker, mangled, elem_type, vec_type);
+
+    // Also ensure a Span instance for the same element type exists (for slicing)
+    char span_mangled[256];
+    snprintf(span_mangled, sizeof(span_mangled), "Span_%s", type_mangle_name(elem_type));
+    if (!lookup_span_instance(checker, span_mangled)) {
+        Type* span_type = type_span(elem_type);
+        register_span_instance(checker, span_mangled, elem_type, span_type);
+    }
+
+    return vec_type;
+}
+
 // Resolve Span<T> type: validate single arg and create span type
 static Type* resolve_span_type(Checker* checker, Node* type_node) {
     int arg_count = type_node->as.generic_type.type_args.count;

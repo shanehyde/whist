@@ -323,20 +323,22 @@ void emit_vec_methods(CodeGen* gen) {
         const char*  elem_tname  = type_mangle_name(elem_type);
         int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC);
 
-        // Push
-        emit(gen, "static inline void __Vec_%s_push(__Vec_%s* self, ", elem_tname, elem_tname);
-        emit_resolved_type(gen, elem_type);
-        emit(gen, " value) {\n");
-        emit(gen, "    if (self->count == self->capacity) {\n");
-        emit(gen, "        int64_t new_cap = self->capacity == 0 ? 4 : self->capacity * 2;\n");
-        emit(gen, "        self->data = realloc(self->data, new_cap * sizeof(");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, "));\n");
-        emit(gen, "        self->capacity = new_cap;\n");
-        emit(gen, "    }\n");
-        emit(gen, "    self->data[self->count] = value;\n");
-        emit(gen, "    self->count++;\n");
-        emit(gen, "}\n\n");
+        // Push (Vec<string> push is provided by whist_runtime.h)
+        if (elem_type->kind != TYPE_STRING) {
+            emit(gen, "static inline void __Vec_%s_push(__Vec_%s* self, ", elem_tname, elem_tname);
+            emit_resolved_type(gen, elem_type);
+            emit(gen, " value) {\n");
+            emit(gen, "    if (self->count == self->capacity) {\n");
+            emit(gen, "        int64_t new_cap = self->capacity == 0 ? 4 : self->capacity * 2;\n");
+            emit(gen, "        self->data = realloc(self->data, new_cap * sizeof(");
+            emit_resolved_type(gen, elem_type);
+            emit(gen, "));\n");
+            emit(gen, "        self->capacity = new_cap;\n");
+            emit(gen, "    }\n");
+            emit(gen, "    self->data[self->count] = value;\n");
+            emit(gen, "    self->count++;\n");
+            emit(gen, "}\n\n");
+        }
 
         // Insert
         emit(gen, "static inline void __Vec_%s_insert(__Vec_%s* self, int64_t index, ", elem_tname,
@@ -612,6 +614,10 @@ void emit_vec_cleanup(CodeGen* gen) {
         Type*        elem_type   = inst->elem_type;
         const char*  elem_tname  = type_mangle_name(elem_type);
         int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC);
+
+        // Vec<string> cleanup is provided by whist_runtime.h
+        if (elem_type->kind == TYPE_STRING)
+            continue;
 
         emit(gen, "static inline void __Vec_%s_cleanup(void* raw) {\n", elem_tname);
         emit(gen, "    __Vec_%s* ptr = (__Vec_%s*)raw;\n", elem_tname, elem_tname);
