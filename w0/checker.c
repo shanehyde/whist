@@ -490,6 +490,31 @@ static int check_destruct_pattern_redefinitions_internal(Checker* checker, Destr
             }
         }
         return 0;
+
+    case PATTERN_STRUCT:
+        for (int i = 0; i < pattern->as.struc.count; i++) {
+            const char* name = pattern->as.struc.field_names[i];
+
+            if (checker_lookup_local(checker, name)) {
+                check_error(checker, line, col, "Redefinition of '%s'", name);
+                return 1;
+            }
+
+            for (int j = 0; j < *count; j++) {
+                if (strcmp((*names)[j], name) == 0) {
+                    check_error(checker, line, col, "Redefinition of '%s'", name);
+                    return 1;
+                }
+            }
+
+            if (*count >= *capacity) {
+                *capacity *= 2;
+                *names = xrealloc(*names, (*capacity) * sizeof(char*));
+            }
+            (*names)[*count] = xstrdup(name);
+            (*count)++;
+        }
+        return 0;
     }
     return 0;
 }
@@ -542,6 +567,34 @@ static int check_destruct_pattern_against_type(Checker* checker, DestructPattern
             }
         }
         return 0;
+
+    case PATTERN_STRUCT:
+        if (type->kind != TYPE_STRUCT && type->kind != TYPE_ERROR) {
+            check_error(checker, line, col, "Struct destructuring requires a struct type, got '%s'",
+                        type_name(type));
+            return 1;
+        }
+        if (type->kind == TYPE_ERROR) {
+            for (int i = 0; i < pattern->as.struc.count; i++)
+                pattern->as.struc.field_types[i] = type_error;
+            return 0;
+        }
+        for (int i = 0; i < pattern->as.struc.count; i++) {
+            int found = 0;
+            for (int j = 0; j < type->as.struc.field_count; j++) {
+                if (strcmp(pattern->as.struc.field_names[i], type->as.struc.field_names[j]) == 0) {
+                    pattern->as.struc.field_types[i] = type->as.struc.field_types[j];
+                    found                            = 1;
+                    break;
+                }
+            }
+            if (!found) {
+                check_error(checker, line, col, "Struct '%s' has no field '%s'",
+                            type->as.struc.name, pattern->as.struc.field_names[i]);
+                return 1;
+            }
+        }
+        return 0;
     }
     return 0;
 }
@@ -570,6 +623,14 @@ static void define_destruct_pattern_vars(Checker* checker, DestructPattern* patt
                 define_destruct_pattern_vars(checker, pattern->as.tuple.elements[i], type_error,
                                              is_const, is_public);
             }
+        }
+        break;
+
+    case PATTERN_STRUCT:
+        for (int i = 0; i < pattern->as.struc.count; i++) {
+            checker_define(checker, pattern->as.struc.field_names[i], SYM_VAR,
+                           pattern->as.struc.field_types[i], is_const, is_public,
+                           checker->modules.current_module);
         }
         break;
     }
@@ -601,6 +662,24 @@ static void check_var_decl_stmt(Checker* checker, Node* node) {
         // Define all variables in the pattern
         define_destruct_pattern_vars(checker, pattern, init_type, node->as.var_decl.is_const,
                                      node->as.var_decl.is_public);
+
+        // RC tracking for struct destructuring (the temp struct must stay alive)
+        if (pattern->kind == PATTERN_STRUCT && init_type->kind == TYPE_STRUCT) {
+            Node* init = node->as.var_decl.init;
+            if (init->type == NODE_NEW_EXPR) {
+                node->as.var_decl.is_rc         = 1;
+                node->as.var_decl.resolved_type = init->as.new_expr.resolved_type;
+            } else if (init->type == NODE_IDENT) {
+                Symbol* src = checker_lookup(checker, init->as.ident.name);
+                if (src && src->is_rc) {
+                    node->as.var_decl.is_rc         = 1;
+                    node->as.var_decl.resolved_type = src->type;
+                }
+            } else if (init->type == NODE_CALL) {
+                node->as.var_decl.is_rc         = 1;
+                node->as.var_decl.resolved_type = init_type;
+            }
+        }
         return;
     }
 

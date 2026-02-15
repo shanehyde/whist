@@ -444,9 +444,34 @@ static void emit_var_decl_inferred_type(CodeGen* gen, Node* node) {
 // Emit a variable declaration statement (NODE_VAR_DECL).
 // Handles destructuring, RC-managed declarations, type inference, and struct init.
 static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
-    // Handle destructuring: var (a, b) = tuple; or var (a, (b, c)) = nested;
+    // Handle destructuring: var (a, b) = tuple; or var {x, y} = struct_expr;
     DestructPattern* pattern = node->as.var_decl.destruct_pattern;
     if (pattern) {
+        if (pattern->kind == PATTERN_STRUCT) {
+            // Struct destructuring: var {a, b} = expr;
+            Type* struct_type = pattern->resolved_type;
+            int   temp_id     = gen->out.temp_count++;
+
+            // Emit temp: StructName* __destruct0 = expr;
+            // emit_resolved_type already adds * for struct types
+            emit_indent(gen);
+            emit_resolved_type(gen, struct_type);
+            emit(gen, " __destruct%d = ", temp_id);
+            emit_expr(gen, node->as.var_decl.init);
+            emit(gen, ";\n");
+
+            // Emit field extractions
+            char temp_name[64];
+            snprintf(temp_name, sizeof(temp_name), "__destruct%d", temp_id);
+            emit_destruct_pattern(gen, pattern, temp_name, node->as.var_decl.is_const);
+
+            // RC-track the temp (struct stays alive for scope)
+            if (node->as.var_decl.is_rc) {
+                rc_push_var(gen, temp_name, struct_type);
+            }
+            return;
+        }
+        // Tuple destructuring
         Type* tuple_type = pattern->resolved_type;
         emit_indent(gen);
         emit_resolved_type(gen, tuple_type);

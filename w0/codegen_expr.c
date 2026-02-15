@@ -1289,5 +1289,18 @@ void emit_destruct_pattern(CodeGen* gen, DestructPattern* pattern, const char* t
             }
         }
         break;
+
+    case PATTERN_STRUCT:
+        // Struct patterns: extract fields via pointer access (->)
+        for (int i = 0; i < pattern->as.struc.count; i++) {
+            emit_indent(gen);
+            if (is_const) {
+                emit(gen, "const ");
+            }
+            emit_resolved_type(gen, pattern->as.struc.field_types[i]);
+            emit(gen, " %s = %s->%s;\n", pattern->as.struc.field_names[i], temp_prefix,
+                 pattern->as.struc.field_names[i]);
+        }
+        break;
     }
 }
