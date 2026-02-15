@@ -1,3 +1,4 @@
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,42 @@
 #include "parser.h"
 #include "print_ast.h"
 #include "util.h"
+
+// Run a program directly via fork/exec, bypassing the shell.
+// Parent ignores SIGINT/SIGQUIT while waiting so it can clean up afterward.
+// Returns the raw wait status, or -1 on fork failure.
+static int fork_exec_wait(char* const argv[]) {
+    struct sigaction sa_ign, old_int, old_quit;
+    memset(&sa_ign, 0, sizeof(sa_ign));
+    sa_ign.sa_handler = SIG_IGN;
+    sigemptyset(&sa_ign.sa_mask);
+    sigaction(SIGINT, &sa_ign, &old_int);
+    sigaction(SIGQUIT, &sa_ign, &old_quit);
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        sigaction(SIGINT, &old_int, NULL);
+        sigaction(SIGQUIT, &old_quit, NULL);
+        return -1;
+    }
+    if (pid == 0) {
+        // Child: restore signal handling from before we ignored
+        sigaction(SIGINT, &old_int, NULL);
+        sigaction(SIGQUIT, &old_quit, NULL);
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+
+    // Parent: wait for child
+    int status;
+    waitpid(pid, &status, 0);
+
+    // Restore original signal handlers
+    sigaction(SIGINT, &old_int, NULL);
+    sigaction(SIGQUIT, &old_quit, NULL);
+
+    return status;
+}
 
 // Compile source to C code, writing to the given output file.
 // Returns 0 on success, 1 on error.
@@ -147,31 +184,29 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
         return 1;
     }
 
-    // Build command with args
-    size_t cmd_len = strlen(exe_path) + 1;
+    // Build argv for child process
+    char** child_argv = xmalloc((argc + 1) * sizeof(char*));
+    child_argv[0]     = exe_path;
     for (int i = 1; i < argc; i++) {
-        cmd_len += strlen(argv[i]) + 3; // space + quotes + arg
+        child_argv[i] = argv[i];
     }
+    child_argv[argc] = NULL;
 
-    char* run_cmd = xmalloc(cmd_len + 1);
-    strcpy(run_cmd, exe_path);
-    for (int i = 1; i < argc; i++) {
-        strcat(run_cmd, " ");
-        strcat(run_cmd, argv[i]);
-    }
-
-    // Run the executable
-    int run_result = system(run_cmd);
-    free(run_cmd);
+    // Run the executable directly via fork/exec
+    int run_result = fork_exec_wait(child_argv);
+    free(child_argv);
 
     // Cleanup
     unlink(exe_path);
 
-    // Extract exit code from system() return value
     if (WIFEXITED(run_result)) {
         return WEXITSTATUS(run_result);
     }
-    return run_result != 0 ? 1 : 0;
+    if (WIFSIGNALED(run_result)) {
+        raise(WTERMSIG(run_result));
+        return 128 + WTERMSIG(run_result);
+    }
+    return 1;
 }
 
 static int compile_and_test(const char* source_path, const char* lib_path, int rc_debug) {
@@ -248,17 +283,21 @@ static int compile_and_test(const char* source_path, const char* lib_path, int r
         return 1;
     }
 
-    // Run the test executable
-    int run_result = system(exe_path);
+    // Run the test executable directly via fork/exec
+    char* test_argv[] = {exe_path, NULL};
+    int   run_result  = fork_exec_wait(test_argv);
 
     // Cleanup
     unlink(exe_path);
 
-    // Extract exit code from system() return value
     if (WIFEXITED(run_result)) {
         return WEXITSTATUS(run_result);
     }
-    return run_result != 0 ? 1 : 0;
+    if (WIFSIGNALED(run_result)) {
+        raise(WTERMSIG(run_result));
+        return 128 + WTERMSIG(run_result);
+    }
+    return 1;
 }
 
 int main(int argc, char** argv) {
