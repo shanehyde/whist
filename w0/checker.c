@@ -762,8 +762,8 @@ static void check_var_decl_stmt(Checker* checker, Node* node) {
         } else if (node->as.var_decl.init->type == NODE_CALL && var_type) {
             // Store resolved type for codegen type inference
             node->as.var_decl.resolved_type = var_type;
-            if (var_type->kind == TYPE_STRUCT || var_type->kind == TYPE_STRING) {
-                // Function call returning a struct/string transfers RC ownership
+            if (type_is_rc_managed(var_type)) {
+                // Function call returning an RC-managed type transfers ownership
                 node->as.var_decl.is_rc = 1;
                 sym->is_rc              = 1;
             }
