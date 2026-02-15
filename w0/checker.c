@@ -1665,6 +1665,142 @@ static int check_trait_method_signature(Checker* checker, Node* method, const ch
     return 1;
 }
 
+static int resolve_trait_impl_target(Checker* checker, Node* node, const char* type_name_str,
+                                     Symbol** out_type_sym, int* out_is_generic,
+                                     int* out_is_primitive) {
+    Symbol* type_sym     = checker_lookup(checker, type_name_str);
+    int     is_generic   = 0;
+    int     is_primitive = 0;
+
+    if (!type_sym || type_sym->kind != SYM_TYPE ||
+        (type_sym->type->kind != TYPE_STRUCT && type_sym->type->kind != TYPE_ENUM)) {
+        if (lookup_generic_def(checker, type_name_str)) {
+            is_generic = 1;
+        } else if (type_builtin_from_name(type_name_str)) {
+            is_primitive = 1;
+        } else {
+            check_error(checker, node->line, node->column,
+                        "Cannot implement trait for unknown type '%s'", type_name_str);
+            return 0;
+        }
+    }
+
+    *out_type_sym     = type_sym;
+    *out_is_generic   = is_generic;
+    *out_is_primitive = is_primitive;
+    return 1;
+}
+
+static void set_self_type_for_trait_impl(Checker* checker, const char* type_name_str,
+                                         Symbol* type_sym, int is_generic, int is_primitive) {
+    if (is_primitive) {
+        checker->self_type = type_builtin_from_name(type_name_str);
+    } else if (!is_generic) {
+        checker->self_type = type_sym->type;
+    }
+}
+
+static void check_trait_impl_method(Checker* checker, Node* method, Type* trait_type,
+                                    const char* trait_name, const char* type_name_str,
+                                    int is_generic) {
+    const char* method_name      = method->as.func_decl.name;
+    int         trait_method_idx = find_trait_method_index(trait_type, method_name);
+
+    if (trait_method_idx < 0) {
+        check_error(checker, method->line, method->column,
+                    "Method '%s' is not declared in trait '%s'", method_name, trait_name);
+        return;
+    }
+
+    int trait_is_const = trait_type->as.trait.method_is_const[trait_method_idx];
+    int impl_is_const  = method->as.func_decl.receiver_is_const;
+    if (impl_is_const != trait_is_const) {
+        check_error(checker, method->line, method->column,
+                    "Method '%s' receiver mutability mismatch: trait '%s' declares '%s', "
+                    "impl provides '%s'",
+                    method_name, trait_name, trait_is_const ? "const func" : "func",
+                    impl_is_const ? "const func" : "func");
+        return;
+    }
+
+    if (is_generic) {
+        if (method->as.func_decl.body == NULL) {
+            // Full signature validation is deferred to concrete instantiations.
+            add_deferred_trait_check(checker, type_name_str, method_name, NULL, impl_is_const, 1,
+                                     method->line, method->column);
+            return;
+        }
+        // For generic structs, receiver methods register through the generic method path.
+        check_decl(checker, method);
+        return;
+    }
+
+    Type* impl_func_type = get_function_type(checker, method);
+    if (!check_trait_method_signature(checker, method, trait_name, trait_type, trait_method_idx,
+                                      impl_func_type)) {
+        return;
+    }
+
+    if (method->as.func_decl.body == NULL) {
+        add_deferred_trait_check(checker, type_name_str, method_name, impl_func_type, impl_is_const,
+                                 0, method->line, method->column);
+        return;
+    }
+
+    // Process the method as a regular func_decl (registers on struct/primitive, checks body).
+    check_decl(checker, method);
+}
+
+static int impl_decl_has_method(Node* impl_decl, const char* method_name) {
+    for (int i = 0; i < impl_decl->as.impl_decl.methods.count; i++) {
+        if (strcmp(impl_decl->as.impl_decl.methods.nodes[i]->as.func_decl.name, method_name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void check_required_trait_methods(Checker* checker, Node* impl_decl, Type* trait_type,
+                                         const char* trait_name) {
+    for (int i = 0; i < trait_type->as.trait.method_count; i++) {
+        const char* required = trait_type->as.trait.method_names[i];
+        if (!impl_decl_has_method(impl_decl, required)) {
+            check_error(checker, impl_decl->line, impl_decl->column,
+                        "Missing required method '%s' from trait '%s'", required, trait_name);
+        }
+    }
+}
+
+static void record_trait_impl(Checker* checker, const char* trait_name, const char* type_name_str) {
+    VEC_GROW(checker->traits.impls, checker->traits.impl_count, checker->traits.impl_capacity);
+    TraitImpl* impl  = &checker->traits.impls[checker->traits.impl_count++];
+    impl->trait_name = xstrdup(trait_name);
+    impl->type_name  = xstrdup(type_name_str);
+}
+
+static void apply_trait_impl_flags(Checker* checker, Node* node, const char* trait_name,
+                                   const char* type_name_str, Symbol* type_sym, int is_generic,
+                                   int is_primitive) {
+    if (strcmp(trait_name, "Drop") == 0 && !is_generic && !is_primitive) {
+        type_sym->type->as.struc.has_drop = 1;
+    }
+
+    if (strcmp(trait_name, "Eq") == 0 && !is_generic && !is_primitive) {
+        type_sym->type->as.struc.has_eq = 1;
+        // All struct-typed fields must also implement Eq.
+        Type* stype = type_sym->type;
+        for (int i = 0; i < stype->as.struc.field_count; i++) {
+            Type* ft = stype->as.struc.field_types[i];
+            if (ft->kind == TYPE_STRUCT && !ft->as.struc.has_eq) {
+                check_error(
+                    checker, node->line, node->column,
+                    "Cannot implement Eq for '%s': field '%s' of type '%s' does not implement Eq",
+                    type_name_str, stype->as.struc.field_names[i], ft->as.struc.name);
+            }
+        }
+    }
+}
+
 // Type-check an inherent impl block (no trait): impl Type { methods }
 static void check_inherent_impl_decl(Checker* checker, Node* node) {
     const char* type_name_str = node->as.impl_decl.type_name;
@@ -1749,126 +1885,29 @@ static void check_impl_decl(Checker* checker, Node* node) {
     }
     Type* trait_type = trait_sym->type;
 
-    // Look up the target type
-    Symbol*     type_sym     = checker_lookup(checker, type_name_str);
-    GenericDef* generic_def  = NULL;
-    int         is_generic   = 0;
-    int         is_primitive = 0;
-    if (!type_sym || type_sym->kind != SYM_TYPE ||
-        (type_sym->type->kind != TYPE_STRUCT && type_sym->type->kind != TYPE_ENUM)) {
-        // Fallback: check if it's a generic struct template
-        generic_def = lookup_generic_def(checker, type_name_str);
-        if (generic_def) {
-            is_generic = 1;
-        } else if (type_builtin_from_name(type_name_str)) {
-            is_primitive = 1;
-        } else {
-            check_error(checker, node->line, node->column,
-                        "Cannot implement trait for unknown type '%s'", type_name_str);
-            return;
-        }
+    // Look up the target type.
+    Symbol* type_sym     = NULL;
+    int     is_generic   = 0;
+    int     is_primitive = 0;
+    if (!resolve_trait_impl_target(checker, node, type_name_str, &type_sym, &is_generic,
+                                   &is_primitive)) {
+        return;
     }
 
-    // Set Self to the concrete implementing type for method body checking
-    if (is_primitive)
-        checker->self_type = type_builtin_from_name(type_name_str);
-    else if (!is_generic)
-        checker->self_type = type_sym->type;
+    // Set Self to the concrete implementing type for method body checking.
+    set_self_type_for_trait_impl(checker, type_name_str, type_sym, is_generic, is_primitive);
 
-    // Process each method in the impl block
+    // Process each method in the impl block.
     for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
-        Node*       method           = node->as.impl_decl.methods.nodes[i];
-        const char* method_name      = method->as.func_decl.name;
-        int         trait_method_idx = find_trait_method_index(trait_type, method_name);
-
-        if (trait_method_idx < 0) {
-            check_error(checker, method->line, method->column,
-                        "Method '%s' is not declared in trait '%s'", method_name, trait_name);
-            continue;
-        }
-
-        // Check receiver const-ness matches trait declaration
-        int trait_is_const = trait_type->as.trait.method_is_const[trait_method_idx];
-        int impl_is_const  = method->as.func_decl.receiver_is_const;
-        if (impl_is_const != trait_is_const) {
-            check_error(checker, method->line, method->column,
-                        "Method '%s' receiver mutability mismatch: trait '%s' declares '%s', "
-                        "impl provides '%s'",
-                        method_name, trait_name, trait_is_const ? "const func" : "func",
-                        impl_is_const ? "const func" : "func");
-            continue;
-        }
-
-        if (is_generic) {
-            if (method->as.func_decl.body == NULL) {
-                // Full signature validation is deferred to concrete instantiations.
-                add_deferred_trait_check(checker, type_name_str, method_name, NULL, impl_is_const,
-                                         1, method->line, method->column);
-                continue;
-            }
-            // For generic structs, receiver methods register through the generic method path.
-            check_decl(checker, method);
-            continue;
-        }
-
-        Type* impl_func_type = get_function_type(checker, method);
-        if (!check_trait_method_signature(checker, method, trait_name, trait_type, trait_method_idx,
-                                          impl_func_type)) {
-            continue;
-        }
-
-        if (method->as.func_decl.body == NULL) {
-            add_deferred_trait_check(checker, type_name_str, method_name, impl_func_type,
-                                     impl_is_const, 0, method->line, method->column);
-            continue;
-        }
-
-        // Process the method as a regular func_decl (registers on struct/primitive, checks body)
-        check_decl(checker, method);
+        check_trait_impl_method(checker, node->as.impl_decl.methods.nodes[i], trait_type,
+                                trait_name, type_name_str, is_generic);
     }
 
-    // Verify all required trait methods are implemented
-    for (int j = 0; j < trait_type->as.trait.method_count; j++) {
-        const char* required    = trait_type->as.trait.method_names[j];
-        int         implemented = 0;
-        for (int i = 0; i < node->as.impl_decl.methods.count; i++) {
-            if (strcmp(node->as.impl_decl.methods.nodes[i]->as.func_decl.name, required) == 0) {
-                implemented = 1;
-                break;
-            }
-        }
-        if (!implemented) {
-            check_error(checker, node->line, node->column,
-                        "Missing required method '%s' from trait '%s'", required, trait_name);
-        }
-    }
+    check_required_trait_methods(checker, node, trait_type, trait_name);
 
-    // Record the trait implementation
-    VEC_GROW(checker->traits.impls, checker->traits.impl_count, checker->traits.impl_capacity);
-    TraitImpl* impl  = &checker->traits.impls[checker->traits.impl_count++];
-    impl->trait_name = xstrdup(trait_name);
-    impl->type_name  = xstrdup(type_name_str);
-
-    // If implementing Drop, set the flag on the struct type
-    if (strcmp(trait_name, "Drop") == 0 && !is_generic && !is_primitive) {
-        type_sym->type->as.struc.has_drop = 1;
-    }
-
-    // If implementing Eq, set the flag and validate field transitivity
-    if (strcmp(trait_name, "Eq") == 0 && !is_generic && !is_primitive) {
-        type_sym->type->as.struc.has_eq = 1;
-        // All struct-typed fields must also implement Eq
-        Type* stype = type_sym->type;
-        for (int i = 0; i < stype->as.struc.field_count; i++) {
-            Type* ft = stype->as.struc.field_types[i];
-            if (ft->kind == TYPE_STRUCT && !ft->as.struc.has_eq) {
-                check_error(
-                    checker, node->line, node->column,
-                    "Cannot implement Eq for '%s': field '%s' of type '%s' does not implement Eq",
-                    type_name_str, stype->as.struc.field_names[i], ft->as.struc.name);
-            }
-        }
-    }
+    record_trait_impl(checker, trait_name, type_name_str);
+    apply_trait_impl_flags(checker, node, trait_name, type_name_str, type_sym, is_generic,
+                           is_primitive);
 
     checker->self_type = NULL;
 }
