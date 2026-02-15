@@ -233,6 +233,14 @@ void checker_free(Checker* checker) {
     // Free vec instances
     for (int i = 0; i < checker->containers.vec_count; i++) {
         free(checker->containers.vecs[i].mangled_name);
+        for (int j = 0; j < checker->containers.vecs[i].method_count; j++) {
+            free(checker->containers.vecs[i].method_names[j]);
+        }
+        free(checker->containers.vecs[i].method_names);
+        free(checker->containers.vecs[i].method_types);
+        free(checker->containers.vecs[i].method_is_const);
+        // method_bodies are AST nodes — freed by node_free on cloned bodies
+        free(checker->containers.vecs[i].method_bodies);
     }
     free(checker->containers.vecs);
     // Free trait implementations
@@ -2236,6 +2244,15 @@ int checker_check(Checker* checker, Node* ast) {
     }
 
     checker_push_scope(checker); // Global scope
+
+    // Register builtin Vec<T> as a GenericDef so user methods can be attached
+    {
+        char** vec_params = xmalloc(sizeof(char*));
+        vec_params[0]     = xstrdup("T");
+        register_generic_def(checker, "Vec", vec_params, NULL, 1, NULL);
+        free(vec_params[0]);
+        free(vec_params);
+    }
 
     for (size_t i = 0; i < sizeof(k_checker_pass_specs) / sizeof(k_checker_pass_specs[0]); i++) {
         run_checker_pass(checker, ast, &k_checker_pass_specs[i]);

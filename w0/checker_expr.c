@@ -680,6 +680,32 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
         // clear
         return type_func(NULL, 0, type_void, 0);
     }
+    // Look up user-defined methods on VecInstance
+    {
+        char lookup_mangled[256];
+        snprintf(lookup_mangled, sizeof(lookup_mangled), "Vec_%s", type_mangle_name(elem_type));
+        VecInstance* inst = lookup_vec_instance_pub(checker, lookup_mangled);
+        if (inst) {
+            for (int i = 0; i < inst->method_count; i++) {
+                if (strcmp(inst->method_names[i], member_name) == 0) {
+                    if (!inst->method_is_const[i]) {
+                        const char* const_name =
+                            get_const_binding_name(checker, node->as.member.object);
+                        if (const_name) {
+                            check_error(checker, node->line, node->column,
+                                        "Cannot call mutating method '%s' on const '%s'",
+                                        member_name, const_name);
+                            return type_error;
+                        }
+                    }
+                    char mangled[256];
+                    snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
+                    sem_info_set_member_struct_name(checker->sem, node, mangled);
+                    return inst->method_types[i];
+                }
+            }
+        }
+    }
     check_error(checker, node->line, node->column, "Vec has no member '%s'", member_name);
     return type_error;
 }

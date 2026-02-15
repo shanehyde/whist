@@ -1544,6 +1544,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit_enum_eq_helpers(gen, ast);
     emit_vec_cleanup(gen);
     emit_vec_methods(gen);
+    emit_vec_user_methods(gen, ast);
     emit_struct_cleanup(gen, ast);
     emit_declarations(gen, ast);
     emit_generic_method_impls(gen, ast);

@@ -8,6 +8,16 @@
 // Expected: PASS: vec_nested
 // Expected: PASS: vec_contains_sort
 // Expected: PASS: vec_string_sort
+// Expected: PASS: vec_user_method
+
+func (Vec<T>) beep(value: T): bool {
+    for (var i: i64 = 0; i < self.count; i += 1) {
+        if (self[i] == value) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // Shared definitions
 
@@ -32,6 +42,8 @@ test "vec_basic" {
     assert(nums[0] == 10);
     assert(nums[1] == 20);
     assert(nums[2] == 30);
+
+    nums.beep(20);
 }
 
 test "vec_clear" {
@@ -263,4 +275,20 @@ test "vec_string_sort" {
     var rev = new Vec<string>{"z", "m", "a"};
     rev.sort();
     assert(rev[0] == "a" && rev[1] == "m" && rev[2] == "z");
+}
+
+test "vec_user_method" {
+    var nums = new Vec<i64>{10, 20, 30};
+
+    assert(nums.beep(20));
+    assert(!nums.beep(99));
+
+    // Empty vec
+    var empty = new Vec<i64>{};
+    assert(!empty.beep(1));
+
+    // String vec with same user method
+    var words = new Vec<string>{"hello", "world"};
+    assert(words.beep("hello"));
+    assert(!words.beep("missing"));
 }

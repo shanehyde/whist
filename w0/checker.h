@@ -87,6 +87,15 @@ typedef struct {
     char* mangled_name; // "Vec_i64"
     Type* elem_type;    // The element type
     Type* type;         // The TYPE_VEC instance
+    // User-defined methods (instantiated per Vec<T>)
+    char** method_names;
+    Type** method_types;
+    int*   method_is_const;
+    int    method_count;
+    int    method_capacity;
+    // Cloned method bodies for codegen (parallel to GenericDef.methods ordering)
+    Node** method_bodies;
+    int    method_body_count;
 } VecInstance;
 
 // Generic free function definition (template)
