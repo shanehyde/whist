@@ -155,6 +155,11 @@ static inline bool __String_starts_with(const char* s, const char* prefix) {
     return strncmp(s, prefix, strlen(prefix)) == 0;
 }
 
+static inline int64_t __String_index_of(const char* s, const char* pattern) {
+    const char* p = strstr(s, pattern);
+    return p ? (int64_t)(p - s) : -1;
+}
+
 static inline bool __String_ends_with(const char* s, const char* suffix) {
     size_t ls = strlen(s), lsuf = strlen(suffix);
     return ls >= lsuf && strcmp(s + ls - lsuf, suffix) == 0;
