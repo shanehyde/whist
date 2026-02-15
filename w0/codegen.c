@@ -605,161 +605,184 @@ static int register_string_lit(CodeGen* gen, const char* value, int length) {
 }
 
 // Recursively walk AST to collect all string literals
-static void collect_string_literals_node(CodeGen* gen, Node* node) {
-    if (!node)
+static void collect_string_literals_node(CodeGen* gen, Node* node);
+
+static void collect_string_literals_nodelist(CodeGen* gen, NodeList* list) {
+    if (!list)
         return;
+    for (int i = 0; i < list->count; i++) {
+        collect_string_literals_node(gen, list->nodes[i]);
+    }
+}
+
+static void collect_string_interp_literal(CodeGen* gen, Node* node) {
+    // Check if all parts are text — if so, register the concatenation
+    int all_text = 1;
+    for (int i = 0; i < node->as.string_interp.part_count; i++) {
+        if (node->as.string_interp.parts.nodes[i]->type != NODE_STRING_LIT) {
+            all_text = 0;
+            break;
+        }
+    }
+    if (all_text && node->as.string_interp.part_count > 0) {
+        int total = 0;
+        for (int i = 0; i < node->as.string_interp.part_count; i++) {
+            total += node->as.string_interp.parts.nodes[i]->as.string_lit.length;
+        }
+        char* concat = xmalloc(total + 1);
+        int   pos    = 0;
+        for (int i = 0; i < node->as.string_interp.part_count; i++) {
+            Node* p = node->as.string_interp.parts.nodes[i];
+            memcpy(concat + pos, p->as.string_lit.value, p->as.string_lit.length);
+            pos += p->as.string_lit.length;
+        }
+        concat[total] = '\0';
+        register_string_lit(gen, concat, total);
+        free(concat);
+    }
+    collect_string_literals_nodelist(gen, &node->as.string_interp.parts);
+}
+
+static int collect_string_literals_expr_node(CodeGen* gen, Node* node) {
     switch (node->type) {
     case NODE_STRING_LIT:
         register_string_lit(gen, node->as.string_lit.value, node->as.string_lit.length);
-        break;
-    case NODE_STRING_INTERP: {
-        // Check if all parts are text — if so, register the concatenation
-        int all_text = 1;
-        for (int i = 0; i < node->as.string_interp.part_count; i++) {
-            if (node->as.string_interp.parts.nodes[i]->type != NODE_STRING_LIT) {
-                all_text = 0;
-                break;
-            }
-        }
-        if (all_text && node->as.string_interp.part_count > 0) {
-            // Calculate total length
-            int total = 0;
-            for (int i = 0; i < node->as.string_interp.part_count; i++) {
-                total += node->as.string_interp.parts.nodes[i]->as.string_lit.length;
-            }
-            char* concat = xmalloc(total + 1);
-            int   pos    = 0;
-            for (int i = 0; i < node->as.string_interp.part_count; i++) {
-                Node* p = node->as.string_interp.parts.nodes[i];
-                memcpy(concat + pos, p->as.string_lit.value, p->as.string_lit.length);
-                pos += p->as.string_lit.length;
-            }
-            concat[total] = '\0';
-            register_string_lit(gen, concat, total);
-            free(concat);
-        }
-        // Recurse into parts regardless
-        for (int i = 0; i < node->as.string_interp.part_count; i++) {
-            collect_string_literals_node(gen, node->as.string_interp.parts.nodes[i]);
-        }
-        break;
+        return 1;
+    case NODE_STRING_INTERP:
+        collect_string_interp_literal(gen, node);
+        return 1;
+    case NODE_BINARY:
+        collect_string_literals_node(gen, node->as.binary.left);
+        collect_string_literals_node(gen, node->as.binary.right);
+        return 1;
+    case NODE_UNARY:
+        collect_string_literals_node(gen, node->as.unary.operand);
+        return 1;
+    case NODE_CALL:
+        collect_string_literals_node(gen, node->as.call.func);
+        collect_string_literals_nodelist(gen, &node->as.call.args);
+        return 1;
+    case NODE_MEMBER:
+        collect_string_literals_node(gen, node->as.member.object);
+        return 1;
+    case NODE_INDEX:
+        collect_string_literals_node(gen, node->as.index.object);
+        collect_string_literals_node(gen, node->as.index.index);
+        return 1;
+    case NODE_SLICE:
+        collect_string_literals_node(gen, node->as.slice.object);
+        collect_string_literals_node(gen, node->as.slice.start);
+        collect_string_literals_node(gen, node->as.slice.end);
+        return 1;
+    case NODE_ASSIGN:
+        collect_string_literals_node(gen, node->as.assign.target);
+        collect_string_literals_node(gen, node->as.assign.value);
+        return 1;
+    case NODE_CAST:
+        collect_string_literals_node(gen, node->as.cast_expr.expr);
+        return 1;
+    case NODE_NEW_EXPR:
+        collect_string_literals_node(gen, node->as.new_expr.init);
+        collect_string_literals_nodelist(gen, &node->as.new_expr.args);
+        return 1;
+    case NODE_STRUCT_INIT:
+        collect_string_literals_nodelist(gen, &node->as.struct_init.fields);
+        return 1;
+    case NODE_FIELD_INIT:
+        collect_string_literals_node(gen, node->as.field_init.value);
+        return 1;
+    case NODE_ENUM_VALUE:
+        collect_string_literals_nodelist(gen, &node->as.enum_value.args);
+        return 1;
+    case NODE_TUPLE_LIT:
+        collect_string_literals_nodelist(gen, &node->as.tuple_lit.elements);
+        return 1;
+    default:
+        return 0;
     }
-    case NODE_PROGRAM:
-        for (int i = 0; i < node->as.program.modules.count; i++)
-            collect_string_literals_node(gen, node->as.program.modules.nodes[i]);
-        break;
-    case NODE_MODULE:
-        for (int i = 0; i < node->as.module.decls.count; i++)
-            collect_string_literals_node(gen, node->as.module.decls.nodes[i]);
-        break;
-    case NODE_FUNC_DECL:
-        if (node->as.func_decl.body)
-            collect_string_literals_node(gen, node->as.func_decl.body);
-        break;
+}
+
+static int collect_string_literals_stmt_node(CodeGen* gen, Node* node) {
+    switch (node->type) {
     case NODE_BLOCK:
-        for (int i = 0; i < node->as.block.stmts.count; i++)
-            collect_string_literals_node(gen, node->as.block.stmts.nodes[i]);
-        break;
+        collect_string_literals_nodelist(gen, &node->as.block.stmts);
+        return 1;
     case NODE_VAR_DECL:
         collect_string_literals_node(gen, node->as.var_decl.init);
-        break;
+        return 1;
     case NODE_RETURN:
         collect_string_literals_node(gen, node->as.return_stmt.value);
-        break;
+        return 1;
     case NODE_IF:
         collect_string_literals_node(gen, node->as.if_stmt.cond);
         collect_string_literals_node(gen, node->as.if_stmt.then_block);
         collect_string_literals_node(gen, node->as.if_stmt.else_block);
-        break;
+        return 1;
     case NODE_FOR:
         collect_string_literals_node(gen, node->as.for_stmt.init);
         collect_string_literals_node(gen, node->as.for_stmt.cond);
         collect_string_literals_node(gen, node->as.for_stmt.post);
         collect_string_literals_node(gen, node->as.for_stmt.body);
-        break;
+        return 1;
     case NODE_FOREACH:
         collect_string_literals_node(gen, node->as.foreach_stmt.collection);
         collect_string_literals_node(gen, node->as.foreach_stmt.start);
         collect_string_literals_node(gen, node->as.foreach_stmt.end);
         collect_string_literals_node(gen, node->as.foreach_stmt.body);
-        break;
+        return 1;
     case NODE_WHILE:
         collect_string_literals_node(gen, node->as.while_stmt.cond);
         collect_string_literals_node(gen, node->as.while_stmt.body);
-        break;
+        return 1;
     case NODE_EXPR_STMT:
         collect_string_literals_node(gen, node->as.expr_stmt.expr);
-        break;
-    case NODE_BINARY:
-        collect_string_literals_node(gen, node->as.binary.left);
-        collect_string_literals_node(gen, node->as.binary.right);
-        break;
-    case NODE_UNARY:
-        collect_string_literals_node(gen, node->as.unary.operand);
-        break;
-    case NODE_CALL:
-        collect_string_literals_node(gen, node->as.call.func);
-        for (int i = 0; i < node->as.call.args.count; i++)
-            collect_string_literals_node(gen, node->as.call.args.nodes[i]);
-        break;
-    case NODE_MEMBER:
-        collect_string_literals_node(gen, node->as.member.object);
-        break;
-    case NODE_INDEX:
-        collect_string_literals_node(gen, node->as.index.object);
-        collect_string_literals_node(gen, node->as.index.index);
-        break;
-    case NODE_SLICE:
-        collect_string_literals_node(gen, node->as.slice.object);
-        collect_string_literals_node(gen, node->as.slice.start);
-        collect_string_literals_node(gen, node->as.slice.end);
-        break;
-    case NODE_ASSIGN:
-        collect_string_literals_node(gen, node->as.assign.target);
-        collect_string_literals_node(gen, node->as.assign.value);
-        break;
-    case NODE_CAST:
-        collect_string_literals_node(gen, node->as.cast_expr.expr);
-        break;
-    case NODE_NEW_EXPR:
-        collect_string_literals_node(gen, node->as.new_expr.init);
-        for (int i = 0; i < node->as.new_expr.args.count; i++)
-            collect_string_literals_node(gen, node->as.new_expr.args.nodes[i]);
-        break;
-    case NODE_STRUCT_INIT:
-        for (int i = 0; i < node->as.struct_init.fields.count; i++)
-            collect_string_literals_node(gen, node->as.struct_init.fields.nodes[i]);
-        break;
-    case NODE_FIELD_INIT:
-        collect_string_literals_node(gen, node->as.field_init.value);
-        break;
+        return 1;
     case NODE_MATCH:
         collect_string_literals_node(gen, node->as.match_stmt.expr);
-        for (int i = 0; i < node->as.match_stmt.arms.count; i++) {
-            collect_string_literals_node(gen, node->as.match_stmt.arms.nodes[i]);
-        }
-        break;
+        collect_string_literals_nodelist(gen, &node->as.match_stmt.arms);
+        return 1;
     case NODE_MATCH_ARM:
         collect_string_literals_node(gen, node->as.match_arm.body);
-        break;
+        return 1;
     case NODE_DEFER:
         collect_string_literals_node(gen, node->as.defer_stmt.stmt);
-        break;
-    case NODE_ENUM_VALUE:
-        for (int i = 0; i < node->as.enum_value.args.count; i++)
-            collect_string_literals_node(gen, node->as.enum_value.args.nodes[i]);
-        break;
-    case NODE_TUPLE_LIT:
-        for (int i = 0; i < node->as.tuple_lit.elements.count; i++)
-            collect_string_literals_node(gen, node->as.tuple_lit.elements.nodes[i]);
-        break;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int collect_string_literals_decl_node(CodeGen* gen, Node* node) {
+    switch (node->type) {
+    case NODE_PROGRAM:
+        collect_string_literals_nodelist(gen, &node->as.program.modules);
+        return 1;
+    case NODE_MODULE:
+        collect_string_literals_nodelist(gen, &node->as.module.decls);
+        return 1;
+    case NODE_FUNC_DECL:
+        collect_string_literals_node(gen, node->as.func_decl.body);
+        return 1;
     case NODE_IMPL_DECL:
-        for (int i = 0; i < node->as.impl_decl.methods.count; i++)
-            collect_string_literals_node(gen, node->as.impl_decl.methods.nodes[i]);
-        break;
+        collect_string_literals_nodelist(gen, &node->as.impl_decl.methods);
+        return 1;
     case NODE_TEST_DECL:
         collect_string_literals_node(gen, node->as.test_decl.body);
-        break;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static void collect_string_literals_node(CodeGen* gen, Node* node) {
+    if (!node)
+        return;
+    if (collect_string_literals_expr_node(gen, node) ||
+        collect_string_literals_stmt_node(gen, node) ||
+        collect_string_literals_decl_node(gen, node)) {
+        return;
+    }
+    switch (node->type) {
     case NODE_STRUCT_DECL:
     case NODE_ENUM_DECL:
     case NODE_TRAIT_DECL:
