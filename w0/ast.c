@@ -406,6 +406,7 @@ static void node_reset_checker_flags(Node* node) {
         node->as.index.is_tuple_index = 0;
         node->as.index.is_span_index  = 0;
         node->as.index.is_vec_index   = 0;
+        node->as.index.is_rc_elem     = 0;
         break;
     case NODE_SLICE:
         node->as.slice.resolved_type = NULL;

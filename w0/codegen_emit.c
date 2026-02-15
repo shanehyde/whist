@@ -697,6 +697,16 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
 
     gen->in_enum_method = was_in_enum_method;
 
+    // RC cleanup for implicit void return (no explicit return statement at end)
+    if (gen->rc.count > 0 && node->as.func_decl.body) {
+        int   stmt_count = node->as.func_decl.body->as.block.stmts.count;
+        Node* last =
+            stmt_count > 0 ? node->as.func_decl.body->as.block.stmts.nodes[stmt_count - 1] : NULL;
+        if (!last || last->type != NODE_RETURN) {
+            rc_cleanup_all(gen, NULL);
+        }
+    }
+
     // Emit cleanup section if there are defers
     if (gen->defer.count > 0) {
         emit(gen, "__cleanup:;\n");

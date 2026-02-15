@@ -234,6 +234,7 @@ struct Node {
             int   is_tuple_index; // Set by checker if indexing a tuple
             int   is_span_index;  // Set by checker if indexing a span
             int   is_vec_index;   // Set by checker if indexing a vec
+            int   is_rc_elem;     // Set by checker if vec element type is RC-managed
         } index;
 
         // Slice expression: arr[start:end]
