@@ -294,58 +294,93 @@ void emit_type(CodeGen* gen, Node* type_node) {
 }
 
 // Emit a resolved Type* (used for inferred types like tuples)
+static const char* resolved_builtin_c_type(TypeKind kind) {
+    switch (kind) {
+    case TYPE_VOID:
+        return "void";
+    case TYPE_BOOL:
+        return "bool";
+    case TYPE_INT64:
+        return "int64_t";
+    case TYPE_INT8:
+        return "int8_t";
+    case TYPE_INT16:
+        return "int16_t";
+    case TYPE_INT32:
+        return "int32_t";
+    case TYPE_UINT64:
+        return "uint64_t";
+    case TYPE_UINT8:
+        return "uint8_t";
+    case TYPE_UINT16:
+        return "uint16_t";
+    case TYPE_UINT32:
+        return "uint32_t";
+    case TYPE_F32:
+        return "float";
+    case TYPE_F64:
+        return "double";
+    case TYPE_CHAR:
+        return "char";
+    case TYPE_STRING:
+        return "const char*";
+    case TYPE_VOIDPTR:
+        return "void*";
+    case TYPE_STRINGBUILDER:
+        return "__StringBuilder*";
+    default:
+        return NULL;
+    }
+}
+
+static void emit_resolved_tuple_type(CodeGen* gen, Type* type) {
+    int idx = -1;
+    for (int i = 0; i < gen->tuple_type_count; i++) {
+        if (tuple_types_equal(gen->tuple_types[i], type)) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx >= 0) {
+        emit(gen, "__tuple_t%d", idx);
+        return;
+    }
+
+    // Fallback to inline struct (shouldn't happen if collection is correct)
+    emit(gen, "struct { ");
+    for (int i = 0; i < type->as.tuple.elem_count; i++) {
+        emit_resolved_type(gen, type->as.tuple.elem_types[i]);
+        emit(gen, " _%d; ", i);
+    }
+    emit(gen, "}");
+}
+
+static void emit_resolved_func_type(CodeGen* gen, Type* type) {
+    emit_resolved_type(gen, type->as.func.return_type);
+    emit(gen, " (*)(");
+    for (int i = 0; i < type->as.func.param_count; i++) {
+        if (i > 0)
+            emit(gen, ", ");
+        emit_resolved_type(gen, type->as.func.param_types[i]);
+    }
+    if (type->as.func.param_count == 0)
+        emit(gen, "void");
+    emit(gen, ")");
+}
+
 void emit_resolved_type(CodeGen* gen, Type* type) {
     if (!type) {
         emit(gen, "void");
         return;
     }
 
+    const char* builtin = resolved_builtin_c_type(type->kind);
+    if (builtin) {
+        emit(gen, "%s", builtin);
+        return;
+    }
+
     switch (type->kind) {
-    case TYPE_VOID:
-        emit(gen, "void");
-        break;
-    case TYPE_BOOL:
-        emit(gen, "bool");
-        break;
-    case TYPE_INT64:
-        emit(gen, "int64_t");
-        break;
-    case TYPE_INT8:
-        emit(gen, "int8_t");
-        break;
-    case TYPE_INT16:
-        emit(gen, "int16_t");
-        break;
-    case TYPE_INT32:
-        emit(gen, "int32_t");
-        break;
-    case TYPE_UINT64:
-        emit(gen, "uint64_t");
-        break;
-    case TYPE_UINT8:
-        emit(gen, "uint8_t");
-        break;
-    case TYPE_UINT16:
-        emit(gen, "uint16_t");
-        break;
-    case TYPE_UINT32:
-        emit(gen, "uint32_t");
-        break;
-    case TYPE_F32:
-        emit(gen, "float");
-        break;
-    case TYPE_F64:
-        emit(gen, "double");
-        break;
-    case TYPE_CHAR:
-        emit(gen, "char");
-        break;
-    case TYPE_STRING:
-        emit(gen, "const char*");
-        break;
-    case TYPE_VOIDPTR:
-        emit(gen, "void*");
-        break;
     case TYPE_ARRAY:
         emit_resolved_type(gen, type->as.array.elem);
         if (type->as.array.size >= 0) {
@@ -363,45 +398,14 @@ void emit_resolved_type(CodeGen* gen, Type* type) {
     case TYPE_VEC:
         emit(gen, "__Vec_%s*", type_mangle_name(type->as.vec.elem));
         break;
-    case TYPE_STRINGBUILDER:
-        emit(gen, "__StringBuilder*");
-        break;
     case TYPE_ENUM:
         emit(gen, "%s", type->as.enm.name);
         break;
-    case TYPE_TUPLE: {
-        // Find the typedef index for this tuple type
-        int idx = -1;
-        for (int i = 0; i < gen->tuple_type_count; i++) {
-            if (tuple_types_equal(gen->tuple_types[i], type)) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx >= 0) {
-            emit(gen, "__tuple_t%d", idx);
-        } else {
-            // Fallback to inline struct (shouldn't happen if collection is correct)
-            emit(gen, "struct { ");
-            for (int i = 0; i < type->as.tuple.elem_count; i++) {
-                emit_resolved_type(gen, type->as.tuple.elem_types[i]);
-                emit(gen, " _%d; ", i);
-            }
-            emit(gen, "}");
-        }
+    case TYPE_TUPLE:
+        emit_resolved_tuple_type(gen, type);
         break;
-    }
     case TYPE_FUNC:
-        emit_resolved_type(gen, type->as.func.return_type);
-        emit(gen, " (*)(");
-        for (int i = 0; i < type->as.func.param_count; i++) {
-            if (i > 0)
-                emit(gen, ", ");
-            emit_resolved_type(gen, type->as.func.param_types[i]);
-        }
-        if (type->as.func.param_count == 0)
-            emit(gen, "void");
-        emit(gen, ")");
+        emit_resolved_func_type(gen, type);
         break;
     default:
         emit(gen, "/* unknown type */");
