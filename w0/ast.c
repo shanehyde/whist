@@ -91,6 +91,41 @@ void pattern_free(DestructPattern* pattern) {
     free(pattern);
 }
 
+DestructPattern* pattern_clone(DestructPattern* pattern) {
+    if (!pattern)
+        return NULL;
+
+    DestructPattern* c = xmalloc(sizeof(DestructPattern));
+    c->kind            = pattern->kind;
+    c->resolved_type   = NULL; // checker-set, will be re-populated
+
+    switch (pattern->kind) {
+    case PATTERN_IDENT:
+        c->as.ident.name        = xstrdup(pattern->as.ident.name);
+        c->as.ident.name_length = pattern->as.ident.name_length;
+        break;
+    case PATTERN_TUPLE:
+        c->as.tuple.count    = pattern->as.tuple.count;
+        c->as.tuple.elements = xmalloc(sizeof(DestructPattern*) * pattern->as.tuple.count);
+        for (int i = 0; i < pattern->as.tuple.count; i++) {
+            c->as.tuple.elements[i] = pattern_clone(pattern->as.tuple.elements[i]);
+        }
+        break;
+    case PATTERN_STRUCT:
+        c->as.struc.count              = pattern->as.struc.count;
+        c->as.struc.capacity           = pattern->as.struc.count;
+        c->as.struc.field_names        = xmalloc(sizeof(char*) * pattern->as.struc.count);
+        c->as.struc.field_name_lengths = xmalloc(sizeof(int) * pattern->as.struc.count);
+        c->as.struc.field_types        = NULL; // checker-set, will be re-populated
+        for (int i = 0; i < pattern->as.struc.count; i++) {
+            c->as.struc.field_names[i]        = xstrdup(pattern->as.struc.field_names[i]);
+            c->as.struc.field_name_lengths[i] = pattern->as.struc.field_name_lengths[i];
+        }
+        break;
+    }
+    return c;
+}
+
 // ============================================================================
 // Node functions
 // ============================================================================
@@ -446,7 +481,6 @@ static void node_reset_checker_flags(Node* node) {
     case NODE_VAR_DECL:
         node->as.var_decl.is_rc            = 0;
         node->as.var_decl.resolved_type    = NULL;
-        node->as.var_decl.destruct_pattern = NULL;
         break;
     case NODE_CALL:
         free(node->as.call.resolved_name);
@@ -598,7 +632,8 @@ Node* node_clone(Node* node) {
         c->as.var_decl.name_length = node->as.var_decl.name_length;
         c->as.var_decl.type        = node_clone(node->as.var_decl.type);
         c->as.var_decl.init        = node_clone(node->as.var_decl.init);
-        c->as.var_decl.is_const    = node->as.var_decl.is_const;
+        c->as.var_decl.is_const          = node->as.var_decl.is_const;
+        c->as.var_decl.destruct_pattern  = pattern_clone(node->as.var_decl.destruct_pattern);
         break;
     case NODE_BLOCK:
         c->as.block.stmts = nodelist_clone(&node->as.block.stmts);
