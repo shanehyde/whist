@@ -33,47 +33,13 @@ func collect_files(dir: string, files: Vec<string>): void {
     }
 }
 
-func str_less_than(a: string, b: string): bool {
-    var len_a = a.length();
-    var len_b = b.length();
-    var min_len = len_a;
-    if (len_b < min_len) {
-        min_len = len_b;
-    }
-    // Compare character by character using char -> i32 cast
-    var ia: i64 = 0;
-    var ib: i64 = 0;
-    foreach (const ca in a) {
-        if (ia >= min_len) {
-            break;
-        }
-        var jb: i64 = 0;
-        foreach (const cb in b) {
-            if (jb == ia) {
-                var va = ca as i32;
-                var vb = cb as i32;
-                if (va < vb) {
-                    return true;
-                }
-                if (va > vb) {
-                    return false;
-                }
-                break;
-            }
-            jb = jb + 1;
-        }
-        ia = ia + 1;
-    }
-    return len_a < len_b;
-}
-
 func sort_strings(v: Vec<string>): void {
     // Simple insertion sort using string comparison
     var i: i64 = 1;
     while (i < v.count) {
         var key = v[i];
         var j = i - 1;
-        while (j >= 0 && str_less_than(key, v[j])) {
+        while (j >= 0 && key < v[j]) {
             v[j + 1] = v[j];
             j = j - 1;
         }
