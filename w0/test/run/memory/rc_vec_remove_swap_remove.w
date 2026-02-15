@@ -7,9 +7,12 @@ struct Item {
 
 func main(): i32 {
     var items = new Vec<Item>{};
-    items.push(new Item { value: 10 });
-    items.push(new Item { value: 20 });
-    items.push(new Item { value: 30 });
+    var item1 = new Item { value: 10 };
+    var item2 = new Item { value: 20 };
+    var item3 = new Item { value: 30 };
+    items.push(item1);
+    items.push(item2);
+    items.push(item3);
 
     var removed = items.remove(1);
     if (removed.value != 20) {

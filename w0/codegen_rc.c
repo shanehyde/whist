@@ -341,6 +341,9 @@ void emit_vec_methods(CodeGen* gen) {
             emit(gen, "));\n");
             emit(gen, "        self->capacity = new_cap;\n");
             emit(gen, "    }\n");
+            if (elem_is_ptr) {
+                emit(gen, "    __rc_inc(value);\n");
+            }
             emit(gen, "    self->data[self->count] = value;\n");
             emit(gen, "    self->count++;\n");
             emit(gen, "}\n\n");
@@ -369,8 +372,12 @@ void emit_vec_methods(CodeGen* gen) {
         emit_resolved_type(gen, elem_type);
         emit(gen, "));\n");
         emit(gen, "    }\n");
-        if (elem_type->kind == TYPE_STRING) {
-            emit(gen, "    __rc_inc((void*)value);\n");
+        if (elem_is_ptr) {
+            if (elem_type->kind == TYPE_STRING) {
+                emit(gen, "    __rc_inc((void*)value);\n");
+            } else {
+                emit(gen, "    __rc_inc(value);\n");
+            }
         }
         emit(gen, "    self->data[index] = value;\n");
         emit(gen, "    self->count++;\n");
