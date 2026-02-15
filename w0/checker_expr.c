@@ -678,7 +678,7 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
     return type_error;
 }
 
-// Check string member access (length, contains, starts_with, ends_with, split)
+// Check string member access (length, contains, starts_with, ends_with, index_of, split)
 // Returns NULL if member_name is not a built-in string method (falls through to primitive methods)
 static Type* check_member_string(Checker* checker, Node* node) {
     const char* member_name = node->as.member.name;
@@ -693,6 +693,12 @@ static Type* check_member_string(Checker* checker, Node* node) {
         Type** params = xmalloc(1 * sizeof(Type*));
         params[0]     = type_string;
         return type_func(params, 1, type_bool, 0);
+    }
+    if (strcmp(member_name, "index_of") == 0) {
+        sem_info_set_member_struct_name(checker->sem, node, "__String");
+        Type** params = xmalloc(1 * sizeof(Type*));
+        params[0]     = type_string;
+        return type_func(params, 1, type_int64, 0);
     }
     if (strcmp(member_name, "split") == 0) {
         sem_info_set_member_struct_name(checker->sem, node, "__String");
