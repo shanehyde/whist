@@ -848,71 +848,112 @@ void emit_hoisted_new_expr(CodeGen* gen, Node* node, const char* temp_name) {
     }
 }
 
+static int string_interp_has_expr(Node* node) {
+    int count = node->as.string_interp.part_count;
+    for (int i = 0; i < count; i++) {
+        if (node->as.string_interp.parts.nodes[i]->type != NODE_STRING_LIT) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void emit_interp_escaped_text(CodeGen* gen, const char* s, int n, int escape_percent) {
+    for (int i = 0; i < n; i++) {
+        switch (s[i]) {
+        case '\n':
+            emit(gen, "\\n");
+            break;
+        case '\t':
+            emit(gen, "\\t");
+            break;
+        case '\r':
+            emit(gen, "\\r");
+            break;
+        case '\\':
+            emit(gen, "\\\\");
+            break;
+        case '"':
+            emit(gen, "\\\"");
+            break;
+        case '\0':
+            emit(gen, "\\0");
+            break;
+        case '%':
+            if (escape_percent) {
+                emit(gen, "%%%%");
+                break;
+            }
+            // Fall through when percent escaping is disabled.
+        default:
+            emit(gen, "%c", s[i]);
+            break;
+        }
+    }
+}
+
+static void emit_string_interp_plain(CodeGen* gen, Node* node) {
+    int count = node->as.string_interp.part_count;
+    int total = 0;
+    for (int i = 0; i < count; i++) {
+        total += node->as.string_interp.parts.nodes[i]->as.string_lit.length;
+    }
+
+    char* concat = (char*)malloc(total + 1);
+    int   pos    = 0;
+    for (int i = 0; i < count; i++) {
+        Node* p = node->as.string_interp.parts.nodes[i];
+        memcpy(concat + pos, p->as.string_lit.value, p->as.string_lit.length);
+        pos += p->as.string_lit.length;
+    }
+    concat[total] = '\0';
+
+    int idx = lookup_string_lit(gen, concat, total);
+    free(concat);
+    if (idx >= 0) {
+        emit(gen, "((const char*)__rc_str_%d.data)", idx);
+        return;
+    }
+
+    emit(gen, "\"");
+    for (int i = 0; i < count; i++) {
+        Node*       part = node->as.string_interp.parts.nodes[i];
+        const char* s    = part->as.string_lit.value;
+        int         n    = part->as.string_lit.length;
+        emit_interp_escaped_text(gen, s, n, 0);
+    }
+    emit(gen, "\"");
+}
+
+static const char* string_interp_format_spec(Type* t) {
+    if (!t)
+        return NULL;
+
+    switch (t->kind) {
+    case TYPE_STRING:
+    case TYPE_BOOL:
+        return "%s";
+    case TYPE_CHAR:
+        return "%c";
+    case TYPE_F32:
+    case TYPE_F64:
+        return "%g";
+    case TYPE_INT64:
+        return "%lld";
+    case TYPE_UINT64:
+        return "%llu";
+    default:
+        return "%d";
+    }
+}
+
 // Emit string interpolation: $"text {expr} text" -> __std_format("fmt", args...)
 static void emit_string_interp(CodeGen* gen, Node* node) {
     int count = node->as.string_interp.part_count;
 
     // Optimization: if no expression parts, emit as a plain C string literal
-    int has_expr = 0;
-    for (int i = 0; i < count; i++) {
-        if (node->as.string_interp.parts.nodes[i]->type != NODE_STRING_LIT) {
-            has_expr = 1;
-            break;
-        }
-    }
-
-    if (!has_expr) {
-        // All parts are text — concatenate and look up in string literal table
-        int total = 0;
-        for (int i = 0; i < count; i++)
-            total += node->as.string_interp.parts.nodes[i]->as.string_lit.length;
-        char* concat = (char*)malloc(total + 1);
-        int   pos    = 0;
-        for (int i = 0; i < count; i++) {
-            Node* p = node->as.string_interp.parts.nodes[i];
-            memcpy(concat + pos, p->as.string_lit.value, p->as.string_lit.length);
-            pos += p->as.string_lit.length;
-        }
-        concat[total] = '\0';
-        int idx       = lookup_string_lit(gen, concat, total);
-        free(concat);
-        if (idx >= 0) {
-            emit(gen, "((const char*)__rc_str_%d.data)", idx);
-        } else {
-            // Fallback: inline C string literal
-            emit(gen, "\"");
-            for (int i = 0; i < count; i++) {
-                Node*       part = node->as.string_interp.parts.nodes[i];
-                const char* s    = part->as.string_lit.value;
-                int         n    = part->as.string_lit.length;
-                for (int j = 0; j < n; j++) {
-                    switch (s[j]) {
-                    case '\n':
-                        emit(gen, "\\n");
-                        break;
-                    case '\t':
-                        emit(gen, "\\t");
-                        break;
-                    case '\r':
-                        emit(gen, "\\r");
-                        break;
-                    case '\\':
-                        emit(gen, "\\\\");
-                        break;
-                    case '"':
-                        emit(gen, "\\\"");
-                        break;
-                    case '\0':
-                        emit(gen, "\\0");
-                        break;
-                    default:
-                        emit(gen, "%c", s[j]);
-                        break;
-                    }
-                }
-            }
-            emit(gen, "\"");
-        }
+    if (!string_interp_has_expr(node)) {
+        emit_string_interp_plain(gen, node);
         return;
     }
 
@@ -927,62 +968,12 @@ static void emit_string_interp(CodeGen* gen, Node* node) {
             // Text segment: emit with C escaping, and escape % as %%
             const char* s = part->as.string_lit.value;
             int         n = part->as.string_lit.length;
-            for (int j = 0; j < n; j++) {
-                switch (s[j]) {
-                case '\n':
-                    emit(gen, "\\n");
-                    break;
-                case '\t':
-                    emit(gen, "\\t");
-                    break;
-                case '\r':
-                    emit(gen, "\\r");
-                    break;
-                case '\\':
-                    emit(gen, "\\\\");
-                    break;
-                case '"':
-                    emit(gen, "\\\"");
-                    break;
-                case '\0':
-                    emit(gen, "\\0");
-                    break;
-                case '%':
-                    emit(gen, "%%%%");
-                    break;
-                default:
-                    emit(gen, "%c", s[j]);
-                    break;
-                }
-            }
+            emit_interp_escaped_text(gen, s, n, 1);
         } else {
             // Expression: emit format specifier based on type
-            if (!t)
-                continue;
-            switch (t->kind) {
-            case TYPE_STRING:
-                emit(gen, "%%s");
-                break;
-            case TYPE_BOOL:
-                emit(gen, "%%s");
-                break;
-            case TYPE_CHAR:
-                emit(gen, "%%c");
-                break;
-            case TYPE_F32:
-            case TYPE_F64:
-                emit(gen, "%%g");
-                break;
-            case TYPE_INT64:
-                emit(gen, "%%lld");
-                break;
-            case TYPE_UINT64:
-                emit(gen, "%%llu");
-                break;
-            default:
-                // Other integer types
-                emit(gen, "%%d");
-                break;
+            const char* spec = string_interp_format_spec(t);
+            if (spec) {
+                emit(gen, "%s", spec);
             }
         }
     }
