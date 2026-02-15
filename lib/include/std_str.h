@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <whist_runtime.h>
 
 static inline int64_t std__parse_i64(const char* s) {
     return (int64_t)strtoll(s, NULL, 10);
@@ -23,7 +24,7 @@ static inline int64_t std__parse_i64(const char* s) {
 static inline const char* std__to_string(int64_t n) {
     char buf[32];
     int len = snprintf(buf, sizeof(buf), "%lld", (long long)n);
-    char* r = (char*)malloc(len + 1);
+    char* r = __rc_strmalloc(len + 1);
     snprintf(r, len + 1, "%lld", (long long)n);
     return r;
 }

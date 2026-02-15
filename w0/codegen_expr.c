@@ -106,32 +106,37 @@ static char* resolve_generic_method_target(CodeGen* gen, Node* member) {
 
 // Emit a string literal with C escape sequences
 static void emit_string_lit(CodeGen* gen, Node* node) {
-    emit(gen, "\"");
-    // Escape special characters
-    for (int i = 0; i < node->as.string_lit.length; i++) {
-        char c = node->as.string_lit.value[i];
-        switch (c) {
-        case '\n':
-            emit(gen, "\\n");
-            break;
-        case '\t':
-            emit(gen, "\\t");
-            break;
-        case '\r':
-            emit(gen, "\\r");
-            break;
-        case '\\':
-            emit(gen, "\\\\");
-            break;
-        case '"':
-            emit(gen, "\\\"");
-            break;
-        default:
-            emit(gen, "%c", c);
-            break;
+    int idx = lookup_string_lit(gen, node->as.string_lit.value, node->as.string_lit.length);
+    if (idx >= 0) {
+        emit(gen, "((const char*)__rc_str_%d.data)", idx);
+    } else {
+        // Fallback: inline C string literal (should not happen for well-collected AST)
+        emit(gen, "\"");
+        for (int i = 0; i < node->as.string_lit.length; i++) {
+            char c = node->as.string_lit.value[i];
+            switch (c) {
+            case '\n':
+                emit(gen, "\\n");
+                break;
+            case '\t':
+                emit(gen, "\\t");
+                break;
+            case '\r':
+                emit(gen, "\\r");
+                break;
+            case '\\':
+                emit(gen, "\\\\");
+                break;
+            case '"':
+                emit(gen, "\\\"");
+                break;
+            default:
+                emit(gen, "%c", c);
+                break;
+            }
         }
+        emit(gen, "\"");
     }
-    emit(gen, "\"");
 }
 
 // Emit a character literal with C escape sequences
@@ -745,40 +750,57 @@ static void emit_string_interp(CodeGen* gen, Node* node) {
     }
 
     if (!has_expr) {
-        // All parts are text — concatenate into a single string literal
-        emit(gen, "\"");
+        // All parts are text — concatenate and look up in string literal table
+        int total = 0;
+        for (int i = 0; i < count; i++)
+            total += node->as.string_interp.parts.nodes[i]->as.string_lit.length;
+        char* concat = (char*)malloc(total + 1);
+        int   pos    = 0;
         for (int i = 0; i < count; i++) {
-            Node* part = node->as.string_interp.parts.nodes[i];
-            // Emit with C escaping
-            const char* s = part->as.string_lit.value;
-            int         n = part->as.string_lit.length;
-            for (int j = 0; j < n; j++) {
-                switch (s[j]) {
-                case '\n':
-                    emit(gen, "\\n");
-                    break;
-                case '\t':
-                    emit(gen, "\\t");
-                    break;
-                case '\r':
-                    emit(gen, "\\r");
-                    break;
-                case '\\':
-                    emit(gen, "\\\\");
-                    break;
-                case '"':
-                    emit(gen, "\\\"");
-                    break;
-                case '\0':
-                    emit(gen, "\\0");
-                    break;
-                default:
-                    emit(gen, "%c", s[j]);
-                    break;
+            Node* p = node->as.string_interp.parts.nodes[i];
+            memcpy(concat + pos, p->as.string_lit.value, p->as.string_lit.length);
+            pos += p->as.string_lit.length;
+        }
+        concat[total] = '\0';
+        int idx       = lookup_string_lit(gen, concat, total);
+        free(concat);
+        if (idx >= 0) {
+            emit(gen, "((const char*)__rc_str_%d.data)", idx);
+        } else {
+            // Fallback: inline C string literal
+            emit(gen, "\"");
+            for (int i = 0; i < count; i++) {
+                Node*       part = node->as.string_interp.parts.nodes[i];
+                const char* s    = part->as.string_lit.value;
+                int         n    = part->as.string_lit.length;
+                for (int j = 0; j < n; j++) {
+                    switch (s[j]) {
+                    case '\n':
+                        emit(gen, "\\n");
+                        break;
+                    case '\t':
+                        emit(gen, "\\t");
+                        break;
+                    case '\r':
+                        emit(gen, "\\r");
+                        break;
+                    case '\\':
+                        emit(gen, "\\\\");
+                        break;
+                    case '"':
+                        emit(gen, "\\\"");
+                        break;
+                    case '\0':
+                        emit(gen, "\\0");
+                        break;
+                    default:
+                        emit(gen, "%c", s[j]);
+                        break;
+                    }
                 }
             }
+            emit(gen, "\"");
         }
-        emit(gen, "\"");
         return;
     }
 

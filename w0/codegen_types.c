@@ -116,6 +116,8 @@ int type_node_has_rc(CodeGen* gen, Node* type_node) {
         return 0;     // Primitives, etc.
     }
 
+    if (strcmp(name, "string") == 0)
+        return 1;
     if (type_is_builtin_name(name))
         return 0;
     if (is_enum_type_name(gen, name))

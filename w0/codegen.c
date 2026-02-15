@@ -507,6 +507,11 @@ void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_d
     gen->aliases.use_count            = 0;
     gen->aliases.use_capacity         = 0;
 
+    gen->string_lits.values   = NULL;
+    gen->string_lits.lengths  = NULL;
+    gen->string_lits.count    = 0;
+    gen->string_lits.capacity = 0;
+
     gen->tuple_types         = NULL;
     gen->tuple_type_count    = 0;
     gen->tuple_type_capacity = 0;
@@ -523,6 +528,11 @@ void codegen_free(CodeGen* gen) {
         free(gen->rc.vars[i].name);
     }
     free(gen->rc.vars);
+    for (int i = 0; i < gen->string_lits.count; i++) {
+        free(gen->string_lits.values[i]);
+    }
+    free(gen->string_lits.values);
+    free(gen->string_lits.lengths);
     for (int i = 0; i < gen->enums.count; i++) {
         free(gen->enums.names[i]);
     }
@@ -563,6 +573,251 @@ static void collect_types_and_aliases(CodeGen* gen, Node* ast) {
             }
         }
     }
+}
+
+// Register a string literal in the table, deduplicating by value. Returns the index.
+static int register_string_lit(CodeGen* gen, const char* value, int length) {
+    for (int i = 0; i < gen->string_lits.count; i++) {
+        if (gen->string_lits.lengths[i] == length &&
+            memcmp(gen->string_lits.values[i], value, length) == 0)
+            return i;
+    }
+    VEC_GROW(gen->string_lits.values, gen->string_lits.count, gen->string_lits.capacity);
+    gen->string_lits.lengths =
+        xrealloc(gen->string_lits.lengths, gen->string_lits.capacity * sizeof(int));
+    char* copy = xmalloc(length + 1);
+    memcpy(copy, value, length);
+    copy[length]                                     = '\0';
+    gen->string_lits.values[gen->string_lits.count]  = copy;
+    gen->string_lits.lengths[gen->string_lits.count] = length;
+    return gen->string_lits.count++;
+}
+
+// Recursively walk AST to collect all string literals
+static void collect_string_literals_node(CodeGen* gen, Node* node) {
+    if (!node)
+        return;
+    switch (node->type) {
+    case NODE_STRING_LIT:
+        register_string_lit(gen, node->as.string_lit.value, node->as.string_lit.length);
+        break;
+    case NODE_STRING_INTERP: {
+        // Check if all parts are text — if so, register the concatenation
+        int all_text = 1;
+        for (int i = 0; i < node->as.string_interp.part_count; i++) {
+            if (node->as.string_interp.parts.nodes[i]->type != NODE_STRING_LIT) {
+                all_text = 0;
+                break;
+            }
+        }
+        if (all_text && node->as.string_interp.part_count > 0) {
+            // Calculate total length
+            int total = 0;
+            for (int i = 0; i < node->as.string_interp.part_count; i++) {
+                total += node->as.string_interp.parts.nodes[i]->as.string_lit.length;
+            }
+            char* concat = xmalloc(total + 1);
+            int   pos    = 0;
+            for (int i = 0; i < node->as.string_interp.part_count; i++) {
+                Node* p = node->as.string_interp.parts.nodes[i];
+                memcpy(concat + pos, p->as.string_lit.value, p->as.string_lit.length);
+                pos += p->as.string_lit.length;
+            }
+            concat[total] = '\0';
+            register_string_lit(gen, concat, total);
+            free(concat);
+        }
+        // Recurse into parts regardless
+        for (int i = 0; i < node->as.string_interp.part_count; i++) {
+            collect_string_literals_node(gen, node->as.string_interp.parts.nodes[i]);
+        }
+        break;
+    }
+    case NODE_PROGRAM:
+        for (int i = 0; i < node->as.program.modules.count; i++)
+            collect_string_literals_node(gen, node->as.program.modules.nodes[i]);
+        break;
+    case NODE_MODULE:
+        for (int i = 0; i < node->as.module.decls.count; i++)
+            collect_string_literals_node(gen, node->as.module.decls.nodes[i]);
+        break;
+    case NODE_FUNC_DECL:
+        if (node->as.func_decl.body)
+            collect_string_literals_node(gen, node->as.func_decl.body);
+        break;
+    case NODE_BLOCK:
+        for (int i = 0; i < node->as.block.stmts.count; i++)
+            collect_string_literals_node(gen, node->as.block.stmts.nodes[i]);
+        break;
+    case NODE_VAR_DECL:
+        collect_string_literals_node(gen, node->as.var_decl.init);
+        break;
+    case NODE_RETURN:
+        collect_string_literals_node(gen, node->as.return_stmt.value);
+        break;
+    case NODE_IF:
+        collect_string_literals_node(gen, node->as.if_stmt.cond);
+        collect_string_literals_node(gen, node->as.if_stmt.then_block);
+        collect_string_literals_node(gen, node->as.if_stmt.else_block);
+        break;
+    case NODE_FOR:
+        collect_string_literals_node(gen, node->as.for_stmt.init);
+        collect_string_literals_node(gen, node->as.for_stmt.cond);
+        collect_string_literals_node(gen, node->as.for_stmt.post);
+        collect_string_literals_node(gen, node->as.for_stmt.body);
+        break;
+    case NODE_FOREACH:
+        collect_string_literals_node(gen, node->as.foreach_stmt.collection);
+        collect_string_literals_node(gen, node->as.foreach_stmt.start);
+        collect_string_literals_node(gen, node->as.foreach_stmt.end);
+        collect_string_literals_node(gen, node->as.foreach_stmt.body);
+        break;
+    case NODE_WHILE:
+        collect_string_literals_node(gen, node->as.while_stmt.cond);
+        collect_string_literals_node(gen, node->as.while_stmt.body);
+        break;
+    case NODE_EXPR_STMT:
+        collect_string_literals_node(gen, node->as.expr_stmt.expr);
+        break;
+    case NODE_BINARY:
+        collect_string_literals_node(gen, node->as.binary.left);
+        collect_string_literals_node(gen, node->as.binary.right);
+        break;
+    case NODE_UNARY:
+        collect_string_literals_node(gen, node->as.unary.operand);
+        break;
+    case NODE_CALL:
+        collect_string_literals_node(gen, node->as.call.func);
+        for (int i = 0; i < node->as.call.args.count; i++)
+            collect_string_literals_node(gen, node->as.call.args.nodes[i]);
+        break;
+    case NODE_MEMBER:
+        collect_string_literals_node(gen, node->as.member.object);
+        break;
+    case NODE_INDEX:
+        collect_string_literals_node(gen, node->as.index.object);
+        collect_string_literals_node(gen, node->as.index.index);
+        break;
+    case NODE_SLICE:
+        collect_string_literals_node(gen, node->as.slice.object);
+        collect_string_literals_node(gen, node->as.slice.start);
+        collect_string_literals_node(gen, node->as.slice.end);
+        break;
+    case NODE_ASSIGN:
+        collect_string_literals_node(gen, node->as.assign.target);
+        collect_string_literals_node(gen, node->as.assign.value);
+        break;
+    case NODE_CAST:
+        collect_string_literals_node(gen, node->as.cast_expr.expr);
+        break;
+    case NODE_NEW_EXPR:
+        collect_string_literals_node(gen, node->as.new_expr.init);
+        for (int i = 0; i < node->as.new_expr.args.count; i++)
+            collect_string_literals_node(gen, node->as.new_expr.args.nodes[i]);
+        break;
+    case NODE_STRUCT_INIT:
+        for (int i = 0; i < node->as.struct_init.fields.count; i++)
+            collect_string_literals_node(gen, node->as.struct_init.fields.nodes[i]);
+        break;
+    case NODE_FIELD_INIT:
+        collect_string_literals_node(gen, node->as.field_init.value);
+        break;
+    case NODE_MATCH:
+        collect_string_literals_node(gen, node->as.match_stmt.expr);
+        for (int i = 0; i < node->as.match_stmt.arms.count; i++) {
+            collect_string_literals_node(gen, node->as.match_stmt.arms.nodes[i]);
+        }
+        break;
+    case NODE_MATCH_ARM:
+        collect_string_literals_node(gen, node->as.match_arm.body);
+        break;
+    case NODE_DEFER:
+        collect_string_literals_node(gen, node->as.defer_stmt.stmt);
+        break;
+    case NODE_ENUM_VALUE:
+        for (int i = 0; i < node->as.enum_value.args.count; i++)
+            collect_string_literals_node(gen, node->as.enum_value.args.nodes[i]);
+        break;
+    case NODE_TUPLE_LIT:
+        for (int i = 0; i < node->as.tuple_lit.elements.count; i++)
+            collect_string_literals_node(gen, node->as.tuple_lit.elements.nodes[i]);
+        break;
+    case NODE_IMPL_DECL:
+        for (int i = 0; i < node->as.impl_decl.methods.count; i++)
+            collect_string_literals_node(gen, node->as.impl_decl.methods.nodes[i]);
+        break;
+    case NODE_TEST_DECL:
+        collect_string_literals_node(gen, node->as.test_decl.body);
+        break;
+    case NODE_STRUCT_DECL:
+    case NODE_ENUM_DECL:
+    case NODE_TRAIT_DECL:
+    case NODE_TYPE_ALIAS:
+    case NODE_EXTERN_MODULE:
+    case NODE_USE_DECL:
+        break;
+    default:
+        break;
+    }
+}
+
+static void collect_string_literals(CodeGen* gen, Node* ast) {
+    collect_string_literals_node(gen, ast);
+}
+
+// Emit escaped string content (shared helper for string literal table)
+static void emit_escaped_string(CodeGen* gen, const char* value, int length) {
+    for (int i = 0; i < length; i++) {
+        char c = value[i];
+        switch (c) {
+        case '\n':
+            emit(gen, "\\n");
+            break;
+        case '\t':
+            emit(gen, "\\t");
+            break;
+        case '\r':
+            emit(gen, "\\r");
+            break;
+        case '\\':
+            emit(gen, "\\\\");
+            break;
+        case '"':
+            emit(gen, "\\\"");
+            break;
+        case '\0':
+            emit(gen, "\\0");
+            break;
+        default:
+            emit(gen, "%c", c);
+            break;
+        }
+    }
+}
+
+// Emit static RC string literal structs with immortal (SIZE_MAX) refcount
+static void emit_string_literals(CodeGen* gen) {
+    if (gen->string_lits.count == 0)
+        return;
+    for (int i = 0; i < gen->string_lits.count; i++) {
+        emit(gen,
+             "static struct { __RcHeader hdr; char data[%d]; } __rc_str_%d = "
+             "{ {SIZE_MAX, NULL}, \"",
+             gen->string_lits.lengths[i] + 1, i);
+        emit_escaped_string(gen, gen->string_lits.values[i], gen->string_lits.lengths[i]);
+        emit(gen, "\" };\n");
+    }
+    emit(gen, "\n");
+}
+
+// Look up a string literal's index in the table. Returns -1 if not found.
+int lookup_string_lit(CodeGen* gen, const char* value, int length) {
+    for (int i = 0; i < gen->string_lits.count; i++) {
+        if (gen->string_lits.lengths[i] == length &&
+            memcmp(gen->string_lits.values[i], value, length) == 0)
+            return i;
+    }
+    return -1;
 }
 
 // Emit the standard C header includes for the generated output
@@ -1249,10 +1504,12 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     int has_user_main = program_has_user_main(ast);
 
     collect_types_and_aliases(gen, ast);
+    collect_string_literals(gen, ast);
     emit_c_headers(gen);
     emit_rc_runtime(gen);
     emit_bounds_checks(gen);
     emit_string_helpers(gen);
+    emit_string_literals(gen);
     emit_tuple_typedefs(gen);
     register_enum_names(gen, ast);
     compute_enum_rc_flags(gen, ast);

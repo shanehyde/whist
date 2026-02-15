@@ -762,12 +762,19 @@ static void check_var_decl_stmt(Checker* checker, Node* node) {
         } else if (node->as.var_decl.init->type == NODE_CALL && var_type) {
             // Store resolved type for codegen type inference
             node->as.var_decl.resolved_type = var_type;
-            if (var_type->kind == TYPE_STRUCT) {
-                // Function call returning a struct transfers RC ownership
+            if (var_type->kind == TYPE_STRUCT || var_type->kind == TYPE_STRING) {
+                // Function call returning a struct/string transfers RC ownership
                 node->as.var_decl.is_rc = 1;
                 sym->is_rc              = 1;
             }
         }
+    }
+
+    // All string variables are RC-managed (immortal literals are no-ops for inc/dec)
+    if (sym && var_type && var_type->kind == TYPE_STRING && !node->as.var_decl.is_rc) {
+        node->as.var_decl.is_rc         = 1;
+        node->as.var_decl.resolved_type = type_string;
+        sym->is_rc                      = 1;
     }
 }
 

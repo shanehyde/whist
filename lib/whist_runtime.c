@@ -9,6 +9,6 @@ int64_t std__argc(void) {
 
 const char* std__argv(int64_t i) {
     if (i < 0 || i >= (int64_t)__w0_argc)
-        return "";
-    return (const char*)__w0_argv[i];
+        return __rc_strdup("");
+    return __rc_strdup((const char*)__w0_argv[i]);
 }

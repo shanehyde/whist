@@ -389,7 +389,8 @@ int type_supports_equality(Type* type) {
 int type_is_rc_managed(Type* type) {
     if (!type)
         return 0;
-    if (type->kind == TYPE_STRUCT || type->kind == TYPE_VEC || type->kind == TYPE_STRINGBUILDER)
+    if (type->kind == TYPE_STRUCT || type->kind == TYPE_VEC || type->kind == TYPE_STRINGBUILDER ||
+        type->kind == TYPE_STRING)
         return 1;
     if (type->kind == TYPE_ENUM && type->as.enm.has_rc_fields)
         return 1;
