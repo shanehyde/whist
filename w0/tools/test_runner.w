@@ -50,31 +50,11 @@ func sort_strings(v: Vec<string>): void {
 
 func read_expected_lines(path: string, prefix: string): Vec<string> {
     var lines = new Vec<string>{};
-    var content = fs.read_file(path);
     var marker = "// " + prefix + ": ";
-    var marker_len = marker.length();
-
-    // Scan line by line through the content
-    var start: i64 = 0;
-    var i: i64 = 0;
-    while (i < content.length()) {
-        // Find end of line
-        var ch = content[i:i + 1];
-        if (ch == "\n" || i == content.length() - 1) {
-            var end = i;
-            if (ch == "\n") {
-                end = i;
-            } else {
-                end = i + 1;
-            }
-            var line = content[start:end];
-            if (line.starts_with(marker)) {
-                var text = line[marker_len:line.length()];
-                lines.push(text);
-            }
-            start = i + 1;
+    foreach (const line in fs.read_file(path).split("\n")) {
+        if (line.starts_with(marker)) {
+            lines.push(line[marker.length():line.length()]);
         }
-        i = i + 1;
     }
     return lines;
 }
