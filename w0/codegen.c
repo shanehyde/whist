@@ -1246,179 +1246,216 @@ static void emit_declarations(CodeGen* gen, Node* ast) {
     gen->current_module = NULL;
 }
 
+typedef struct {
+    Node* node;
+    int   is_struct;
+    int   param_count;
+} GenericTypeTemplateInfo;
+
+typedef struct {
+    char**           method_params;
+    Type**           method_args;
+    int              method_bind_count;
+    char**           combined_params;
+    Type**           combined_args;
+    TypeSubstContext subst_ctx;
+} GenericMethodSubst;
+
+static int resolve_generic_type_template(Node* ast, const char* base_name,
+                                         GenericTypeTemplateInfo* out) {
+    out->node        = find_generic_struct_decl(ast, base_name);
+    out->is_struct   = 0;
+    out->param_count = 0;
+
+    if (out->node) {
+        out->is_struct   = 1;
+        out->param_count = out->node->as.struct_decl.type_param_count;
+        return 1;
+    }
+
+    out->node = find_generic_enum_decl(ast, base_name);
+    if (!out->node) {
+        return 0;
+    }
+
+    out->param_count = out->node->as.enum_decl.type_param_count;
+    return 1;
+}
+
+static int block_has_top_level_defer(Node* body) {
+    if (!body || body->type != NODE_BLOCK) {
+        return 0;
+    }
+    for (int i = 0; i < body->as.block.stmts.count; i++) {
+        Node* stmt = body->as.block.stmts.nodes[i];
+        if (stmt && stmt->type == NODE_DEFER) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void emit_block_stmts(CodeGen* gen, Node* body) {
+    if (!body || body->type != NODE_BLOCK) {
+        return;
+    }
+    for (int i = 0; i < body->as.block.stmts.count; i++) {
+        emit_stmt(gen, body->as.block.stmts.nodes[i]);
+    }
+}
+
+static Node* method_body_for_instance(GenericInstance* info, int method_index,
+                                      Node* fallback_body) {
+    if (info->method_bodies && method_index < info->method_body_count &&
+        info->method_bodies[method_index]) {
+        return info->method_bodies[method_index];
+    }
+    return fallback_body;
+}
+
+static void free_generic_method_subst(GenericMethodSubst* subst) {
+    for (int i = 0; i < subst->method_bind_count; i++) {
+        free(subst->method_params[i]);
+    }
+    free(subst->method_params);
+    free(subst->method_args);
+    free(subst->combined_params);
+    free(subst->combined_args);
+}
+
+static void setup_generic_method_subst(CodeGen* gen, GenericInstance* info,
+                                       GenericTypeTemplateInfo* tinfo, func_decl_node* fdn,
+                                       GenericMethodSubst* subst) {
+    memset(subst, 0, sizeof(*subst));
+
+    codegen_extract_method_bindings(&fdn->receiver_type_args, info->type_args, info->type_arg_count,
+                                    &subst->method_params, &subst->method_args,
+                                    &subst->method_bind_count);
+
+    int combined_count     = tinfo->param_count + subst->method_bind_count;
+    subst->combined_params = xmalloc(combined_count * sizeof(char*));
+    subst->combined_args   = xmalloc(combined_count * sizeof(Type*));
+
+    for (int i = 0; i < tinfo->param_count; i++) {
+        if (tinfo->is_struct) {
+            subst->combined_params[i] = tinfo->node->as.struct_decl.type_params[i];
+        } else {
+            subst->combined_params[i] = tinfo->node->as.enum_decl.type_params[i];
+        }
+        subst->combined_args[i] = info->type_args[i];
+    }
+    for (int i = 0; i < subst->method_bind_count; i++) {
+        int idx                     = tinfo->param_count + i;
+        subst->combined_params[idx] = subst->method_params[i];
+        subst->combined_args[idx]   = subst->method_args[i];
+    }
+
+    subst->subst_ctx.type_params = subst->combined_params;
+    subst->subst_ctx.type_args   = subst->combined_args;
+    subst->subst_ctx.count       = combined_count;
+    gen->generics.subst          = &subst->subst_ctx;
+}
+
+static void emit_generic_method_signature(CodeGen* gen, GenericInstance* info,
+                                          func_decl_node* fdn) {
+    emit_func_return_type(gen, fdn);
+    emit(gen, " %s_%s(", info->mangled_name, fdn->name);
+
+    if (fdn->receiver_is_const) {
+        emit(gen, "const ");
+    }
+    emit(gen, "%s* self", info->mangled_name);
+
+    for (int i = 0; i < fdn->params.count; i++) {
+        emit(gen, ", ");
+        Node* param = fdn->params.nodes[i];
+        if (param->as.param.is_const) {
+            emit(gen, "const ");
+        }
+        emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+    }
+
+    emit(gen, ") {\n");
+}
+
+static void emit_generic_method_impl(CodeGen* gen, GenericInstance* info,
+                                     GenericTypeTemplateInfo* tinfo, Node* method,
+                                     int method_index) {
+    func_decl_node*    fdn = &method->as.func_decl;
+    GenericMethodSubst subst;
+    setup_generic_method_subst(gen, info, tinfo, fdn, &subst);
+
+    int is_void = return_type_is_void(fdn->return_type);
+    emit_generic_method_signature(gen, info, fdn);
+
+    defer_clear(gen);
+    gen->defer.return_type     = fdn->return_type;
+    gen->generics.tmpl         = tinfo->is_struct ? tinfo->node : NULL;
+    gen->generics.modules      = fdn->accessible_modules;
+    gen->generics.module_count = fdn->accessible_modules_count;
+
+    int was_in_enum_method = gen->in_enum_method;
+    if (info->type->kind == TYPE_ENUM) {
+        gen->in_enum_method = 1;
+    }
+
+    Node* method_body = method_body_for_instance(info, method_index, fdn->body);
+    int   has_defers  = block_has_top_level_defer(method_body);
+
+    gen->out.indent++;
+
+    if (has_defers && !is_void) {
+        emit_indent(gen);
+        emit_type(gen, fdn->return_type);
+        emit(gen, " __ret;\n");
+    }
+
+    emit_block_stmts(gen, method_body);
+
+    gen->in_enum_method = was_in_enum_method;
+
+    if (gen->rc.count > 0 && method_body && method_body->type == NODE_BLOCK) {
+        int   sc   = method_body->as.block.stmts.count;
+        Node* last = sc > 0 ? method_body->as.block.stmts.nodes[sc - 1] : NULL;
+        if (!last || last->type != NODE_RETURN) {
+            rc_cleanup_all(gen, NULL);
+        }
+    }
+
+    if (has_defers) {
+        for (int d = gen->defer.count - 1; d >= 0; d--) {
+            emit_stmt(gen, gen->defer.stack[d]);
+        }
+    }
+
+    gen->out.indent--;
+    emit(gen, "}\n\n");
+
+    rc_clear_all(gen);
+
+    gen->generics.subst        = NULL;
+    gen->generics.tmpl         = NULL;
+    gen->generics.modules      = NULL;
+    gen->generics.module_count = 0;
+    free_generic_method_subst(&subst);
+}
+
 // Emit implementations for all instantiated generic type methods
 static void emit_generic_method_impls(CodeGen* gen, Node* ast) {
     for (int i = 0; i < gen->checker.instance_count; i++) {
-        GenericInstance* info = &gen->checker.instances[i];
+        GenericInstance*        info = &gen->checker.instances[i];
+        GenericTypeTemplateInfo tinfo;
+        Node**                  methods      = NULL;
+        int                     method_count = 0;
 
-        // Find the generic type template to get type params
-        Node* template    = find_generic_struct_decl(ast, info->base_name);
-        int   is_struct   = 0;
-        int   param_count = 0;
-        if (template) {
-            is_struct   = 1;
-            param_count = template->as.struct_decl.type_param_count;
-        } else {
-            template = find_generic_enum_decl(ast, info->base_name);
-            if (template) {
-                param_count = template->as.enum_decl.type_param_count;
-            }
-        }
-        if (!template)
+        if (!resolve_generic_type_template(ast, info->base_name, &tinfo)) {
             continue;
+        }
 
-        // Find all methods for this generic type
-        Node** methods      = NULL;
-        int    method_count = 0;
         collect_generic_methods(ast, info->base_name, &methods, &method_count);
 
-        // Emit implementation for each method
         for (int j = 0; j < method_count; j++) {
-            Node*           method = methods[j];
-            func_decl_node* fdn    = &method->as.func_decl;
-
-            // Extract method-specific type bindings
-            char** method_params     = NULL;
-            Type** method_args       = NULL;
-            int    method_bind_count = 0;
-            codegen_extract_method_bindings(&fdn->receiver_type_args, info->type_args,
-                                            info->type_arg_count, &method_params, &method_args,
-                                            &method_bind_count);
-
-            // Build combined substitution context
-            int    combined_count  = param_count + method_bind_count;
-            char** combined_params = xmalloc(combined_count * sizeof(char*));
-            Type** combined_args   = xmalloc(combined_count * sizeof(Type*));
-
-            for (int k = 0; k < param_count; k++) {
-                if (is_struct) {
-                    combined_params[k] = template->as.struct_decl.type_params[k];
-                } else {
-                    combined_params[k] = template->as.enum_decl.type_params[k];
-                }
-                combined_args[k] = info->type_args[k];
-            }
-            for (int k = 0; k < method_bind_count; k++) {
-                combined_params[param_count + k] = method_params[k];
-                combined_args[param_count + k]   = method_args[k];
-            }
-
-            TypeSubstContext subst_ctx;
-            subst_ctx.type_params = combined_params;
-            subst_ctx.type_args   = combined_args;
-            subst_ctx.count       = combined_count;
-            gen->generics.subst   = &subst_ctx;
-
-            // Check if function is void
-            int is_void = return_type_is_void(fdn->return_type);
-
-            // Return type (with substitution)
-            emit_func_return_type(gen, fdn);
-
-            // Method name: MangledStruct_methodname(
-            emit(gen, " %s_%s(", info->mangled_name, fdn->name);
-
-            // Self parameter
-            if (fdn->receiver_is_const) {
-                emit(gen, "const ");
-            }
-            emit(gen, "%s* self", info->mangled_name);
-
-            // Other parameters
-            for (int p = 0; p < fdn->params.count; p++) {
-                emit(gen, ", ");
-                Node* param = fdn->params.nodes[p];
-                if (param->as.param.is_const) {
-                    emit(gen, "const ");
-                }
-                emit_type_with_name(gen, param->as.param.type, param->as.param.name);
-            }
-            emit(gen, ") {\n");
-
-            // Clear defer stack for this function
-            defer_clear(gen);
-            gen->defer.return_type     = fdn->return_type;
-            gen->generics.tmpl         = is_struct ? template : NULL;
-            gen->generics.modules      = fdn->accessible_modules;
-            gen->generics.module_count = fdn->accessible_modules_count;
-
-            // Track if we're inside an enum method body (for match(self) dereference)
-            int was_in_enum_method = gen->in_enum_method;
-            if (info->type->kind == TYPE_ENUM) {
-                gen->in_enum_method = 1;
-            }
-
-            // Use per-instantiation cloned body if available, otherwise fall back
-            // to the shared template body
-            Node* method_body = fdn->body;
-            if (info->method_bodies && j < info->method_body_count && info->method_bodies[j]) {
-                method_body = info->method_bodies[j];
-            }
-
-            // First pass: count defers to know if we need __ret
-            int has_defers = 0;
-            if (method_body) {
-                for (int s = 0; s < method_body->as.block.stmts.count; s++) {
-                    Node* stmt = method_body->as.block.stmts.nodes[s];
-                    if (stmt && stmt->type == NODE_DEFER) {
-                        has_defers = 1;
-                        break;
-                    }
-                }
-            }
-
-            // Body
-            gen->out.indent++;
-
-            // Declare __ret if function has defers and is non-void
-            if (has_defers && !is_void) {
-                emit_indent(gen);
-                emit_type(gen, fdn->return_type);
-                emit(gen, " __ret;\n");
-            }
-
-            // Emit function body
-            if (method_body) {
-                for (int s = 0; s < method_body->as.block.stmts.count; s++) {
-                    emit_stmt(gen, method_body->as.block.stmts.nodes[s]);
-                }
-            }
-
-            gen->in_enum_method = was_in_enum_method;
-
-            // RC cleanup for implicit void return
-            if (gen->rc.count > 0 && method_body) {
-                int   sc   = method_body->as.block.stmts.count;
-                Node* last = sc > 0 ? method_body->as.block.stmts.nodes[sc - 1] : NULL;
-                if (!last || last->type != NODE_RETURN) {
-                    rc_cleanup_all(gen, NULL);
-                }
-            }
-
-            // Emit any remaining defers at function end (for void functions or fallthrough)
-            if (has_defers) {
-                for (int d = gen->defer.count - 1; d >= 0; d--) {
-                    emit_stmt(gen, gen->defer.stack[d]);
-                }
-            }
-
-            gen->out.indent--;
-            emit(gen, "}\n\n");
-
-            // Clear RC tracking for generic method
-            rc_clear_all(gen);
-
-            gen->generics.subst        = NULL;
-            gen->generics.tmpl         = NULL;
-            gen->generics.modules      = NULL;
-            gen->generics.module_count = 0;
-            free(combined_params);
-            free(combined_args);
-            for (int k = 0; k < method_bind_count; k++) {
-                free(method_params[k]);
-            }
-            free(method_params);
-            free(method_args);
+            emit_generic_method_impl(gen, info, &tinfo, methods[j], j);
         }
 
         free(methods);
