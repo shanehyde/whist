@@ -644,13 +644,6 @@ static Type* resolve_new_expr_type(CodeGen* gen, Node* node) {
 
 // Emit a `new` expression as a GCC statement expression: __rc_alloc + field init
 static void emit_new_expr(CodeGen* gen, Node* node) {
-    // Check if this node was hoisted — if so, emit just the temp name
-    for (int i = 0; i < gen->hoist.count; i++) {
-        if (gen->hoist.nodes[i] == node) {
-            emit(gen, "%s", gen->hoist.names[i]);
-            return;
-        }
-    }
     Type* rtype = resolve_new_expr_type(gen, node);
     if (!rtype) {
         fprintf(stderr,
@@ -846,6 +839,21 @@ void emit_hoisted_new_expr(CodeGen* gen, Node* node, const char* temp_name) {
             free((char*)inc_fn);
         }
     }
+}
+
+// Emit an owned temporary as standalone statements with a given temp name.
+// For NODE_NEW_EXPR, delegates to emit_hoisted_new_expr.
+// For other expressions (calls, string ops), emits: Type temp = expr;
+void emit_hoisted_owned_temp(CodeGen* gen, Node* node, const char* temp_name) {
+    if (node->type == NODE_NEW_EXPR) {
+        emit_hoisted_new_expr(gen, node, temp_name);
+        return;
+    }
+    emit_indent(gen);
+    emit_resolved_type(gen, node->owned_temp_type);
+    emit(gen, " %s = ", temp_name);
+    emit_expr(gen, node);
+    emit(gen, ";\n");
 }
 
 static int string_interp_has_expr(Node* node) {
@@ -1261,6 +1269,14 @@ static void emit_compound_literal_from_list(CodeGen* gen, NodeList* elements) {
 void emit_expr(CodeGen* gen, Node* node) {
     if (!node)
         return;
+
+    // Check if this node was hoisted — if so, emit just the temp name
+    for (int i = 0; i < gen->hoist.count; i++) {
+        if (gen->hoist.nodes[i] == node) {
+            emit(gen, "%s", gen->hoist.names[i]);
+            return;
+        }
+    }
 
     switch (node->type) {
     case NODE_INT_LIT:

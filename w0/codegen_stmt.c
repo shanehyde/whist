@@ -62,6 +62,119 @@ static void hoist_push_new_arg(CodeGen* gen, Node* arg, const char* temp_name) {
     gen->hoist.count++;
 }
 
+// Recursively collect all is_owned_temp nodes in an expression tree (depth-first).
+// Children are collected before parents so inner temps are evaluated first.
+static void collect_owned_temps(Node* node, Node*** temps, int* count, int* cap) {
+    if (!node)
+        return;
+
+    // Walk children first (evaluation order: inner before outer)
+    switch (node->type) {
+    case NODE_CALL:
+        collect_owned_temps(node->as.call.func, temps, count, cap);
+        for (int i = 0; i < node->as.call.args.count; i++) {
+            collect_owned_temps(node->as.call.args.nodes[i], temps, count, cap);
+        }
+        break;
+    case NODE_BINARY:
+        collect_owned_temps(node->as.binary.left, temps, count, cap);
+        collect_owned_temps(node->as.binary.right, temps, count, cap);
+        break;
+    case NODE_UNARY:
+        collect_owned_temps(node->as.unary.operand, temps, count, cap);
+        break;
+    case NODE_MEMBER:
+        collect_owned_temps(node->as.member.object, temps, count, cap);
+        break;
+    case NODE_INDEX:
+        collect_owned_temps(node->as.index.object, temps, count, cap);
+        collect_owned_temps(node->as.index.index, temps, count, cap);
+        break;
+    case NODE_SLICE:
+        collect_owned_temps(node->as.slice.object, temps, count, cap);
+        collect_owned_temps(node->as.slice.start, temps, count, cap);
+        collect_owned_temps(node->as.slice.end, temps, count, cap);
+        break;
+    case NODE_NEW_EXPR:
+        // Walk new expr args and field init values
+        if (node->as.new_expr.init) {
+            for (int i = 0; i < node->as.new_expr.init->as.struct_init.fields.count; i++) {
+                Node* field = node->as.new_expr.init->as.struct_init.fields.nodes[i];
+                if (field && field->type == NODE_FIELD_INIT) {
+                    collect_owned_temps(field->as.field_init.value, temps, count, cap);
+                }
+            }
+        }
+        for (int i = 0; i < node->as.new_expr.args.count; i++) {
+            collect_owned_temps(node->as.new_expr.args.nodes[i], temps, count, cap);
+        }
+        break;
+    case NODE_CAST:
+        collect_owned_temps(node->as.cast_expr.expr, temps, count, cap);
+        break;
+    case NODE_STRING_INTERP:
+        for (int i = 0; i < node->as.string_interp.part_count; i++) {
+            collect_owned_temps(node->as.string_interp.parts.nodes[i], temps, count, cap);
+        }
+        break;
+    case NODE_ASSIGN:
+        collect_owned_temps(node->as.assign.target, temps, count, cap);
+        collect_owned_temps(node->as.assign.value, temps, count, cap);
+        break;
+    default:
+        break;
+    }
+
+    // Then collect this node if it's an owned temp
+    if (node->is_owned_temp) {
+        VEC_GROW(*temps, *count, *cap);
+        (*temps)[(*count)++] = node;
+    }
+}
+
+// Emit __rc_dec for a hoisted owned temp, using the appropriate dec function for its type.
+static void emit_owned_temp_dec(CodeGen* gen, Node* node, const char* name) {
+    Type* t = node->owned_temp_type;
+    if (t && t->kind == TYPE_ENUM && t->as.enm.has_rc_fields) {
+        emit_indent(gen);
+        emit(gen, "__rc_dec_%s(%s);\n", t->as.enm.name, name);
+    } else if (t && t->kind == TYPE_STRING) {
+        emit_indent(gen);
+        emit(gen, "__rc_dec((void*)%s);\n", name);
+    } else {
+        emit_indent(gen);
+        emit(gen, "__rc_dec(%s);\n", name);
+    }
+}
+
+// Hoist all owned temps in an expression tree. Returns the saved hoist count.
+static int hoist_owned_temps(CodeGen* gen, Node* expr) {
+    Node** temps = NULL;
+    int    count = 0;
+    int    cap   = 0;
+    collect_owned_temps(expr, &temps, &count, &cap);
+
+    int saved = gen->hoist.count;
+    for (int i = 0; i < count; i++) {
+        int  id = gen->out.temp_count++;
+        char name[32];
+        snprintf(name, sizeof(name), "__rc_tmp%d", id);
+        emit_hoisted_owned_temp(gen, temps[i], name);
+        hoist_push_new_arg(gen, temps[i], name);
+    }
+    free(temps);
+    return saved;
+}
+
+// Emit __rc_dec for all owned temps hoisted since saved_count, then restore hoist state.
+static void cleanup_owned_temps(CodeGen* gen, int saved_count) {
+    for (int i = saved_count; i < gen->hoist.count; i++) {
+        emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
+        free(gen->hoist.names[i]);
+    }
+    gen->hoist.count = saved_count;
+}
+
 static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
     if (expr->type != NODE_ASSIGN || expr->as.assign.op != TOK_EQ ||
         expr->as.assign.target->type != NODE_IDENT ||
@@ -250,53 +363,80 @@ static int emit_vec_index_assign_stmt(CodeGen* gen, Node* expr) {
     return 1;
 }
 
-static int emit_call_with_hoisted_new_args_stmt(CodeGen* gen, Node* expr) {
-    if (expr->type != NODE_CALL) {
+// Check if an expression tree contains any owned temps.
+static int has_owned_temps(Node* node) {
+    if (!node)
+        return 0;
+    if (node->is_owned_temp)
+        return 1;
+
+    switch (node->type) {
+    case NODE_CALL:
+        if (has_owned_temps(node->as.call.func))
+            return 1;
+        for (int i = 0; i < node->as.call.args.count; i++) {
+            if (has_owned_temps(node->as.call.args.nodes[i]))
+                return 1;
+        }
+        return 0;
+    case NODE_BINARY:
+        return has_owned_temps(node->as.binary.left) || has_owned_temps(node->as.binary.right);
+    case NODE_UNARY:
+        return has_owned_temps(node->as.unary.operand);
+    case NODE_MEMBER:
+        return has_owned_temps(node->as.member.object);
+    case NODE_INDEX:
+        return has_owned_temps(node->as.index.object) || has_owned_temps(node->as.index.index);
+    case NODE_SLICE:
+        return has_owned_temps(node->as.slice.object) || has_owned_temps(node->as.slice.start) ||
+               has_owned_temps(node->as.slice.end);
+    case NODE_NEW_EXPR:
+        if (node->as.new_expr.init) {
+            for (int i = 0; i < node->as.new_expr.init->as.struct_init.fields.count; i++) {
+                Node* field = node->as.new_expr.init->as.struct_init.fields.nodes[i];
+                if (field && field->type == NODE_FIELD_INIT &&
+                    has_owned_temps(field->as.field_init.value))
+                    return 1;
+            }
+        }
+        for (int i = 0; i < node->as.new_expr.args.count; i++) {
+            if (has_owned_temps(node->as.new_expr.args.nodes[i]))
+                return 1;
+        }
+        return 0;
+    case NODE_CAST:
+        return has_owned_temps(node->as.cast_expr.expr);
+    case NODE_STRING_INTERP:
+        for (int i = 0; i < node->as.string_interp.part_count; i++) {
+            if (has_owned_temps(node->as.string_interp.parts.nodes[i]))
+                return 1;
+        }
+        return 0;
+    case NODE_ASSIGN:
+        return has_owned_temps(node->as.assign.target) || has_owned_temps(node->as.assign.value);
+    default:
         return 0;
     }
-
-    int has_new_args = 0;
-    for (int i = 0; i < expr->as.call.args.count; i++) {
-        if (expr->as.call.args.nodes[i]->type == NODE_NEW_EXPR) {
-            has_new_args = 1;
-            break;
-        }
-    }
-    if (!has_new_args) {
-        return 0;
-    }
-
-    int saved_count = gen->hoist.count;
-    for (int i = 0; i < expr->as.call.args.count; i++) {
-        Node* arg = expr->as.call.args.nodes[i];
-        if (arg->type == NODE_NEW_EXPR) {
-            int  id = gen->out.temp_count++;
-            char name[32];
-            snprintf(name, sizeof(name), "__rc_tmp%d", id);
-            emit_hoisted_new_expr(gen, arg, name);
-            hoist_push_new_arg(gen, arg, name);
-        }
-    }
-    emit_indent(gen);
-    emit_expr(gen, expr);
-    emit(gen, ";\n");
-    for (int i = saved_count; i < gen->hoist.count; i++) {
-        emit_indent(gen);
-        emit(gen, "__rc_dec(%s);\n", gen->hoist.names[i]);
-        free(gen->hoist.names[i]);
-    }
-    gen->hoist.count = saved_count;
-    return 1;
 }
 
 // Emit an expression statement (NODE_EXPR_STMT).
 // Handles RC var reassignment, RC member assignment, Vec index assignment,
-// and simple expression statements.
+// and owned temporaries that need cleanup.
 static void emit_expr_stmt(CodeGen* gen, Node* node) {
     Node* expr = node->as.expr_stmt.expr;
 
     if (emit_rc_ident_assign_stmt(gen, expr) || emit_rc_member_assign_stmt(gen, expr) ||
-        emit_vec_index_assign_stmt(gen, expr) || emit_call_with_hoisted_new_args_stmt(gen, expr)) {
+        emit_vec_index_assign_stmt(gen, expr)) {
+        return;
+    }
+
+    // Check for owned temps in the expression tree
+    if (has_owned_temps(expr)) {
+        int saved = hoist_owned_temps(gen, expr);
+        emit_indent(gen);
+        emit_expr(gen, expr);
+        emit(gen, ";\n");
+        cleanup_owned_temps(gen, saved);
         return;
     }
 
@@ -611,6 +751,8 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
 
     // Handle RC-managed variable declarations
     if (node->as.var_decl.is_rc && node->as.var_decl.init) {
+        // Direct RC assignment: ownership transfers to the variable, don't hoist the init itself
+        node->as.var_decl.init->is_owned_temp = 0;
         if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
             Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
             if (rtype && rtype->kind == TYPE_VEC) {
@@ -626,6 +768,13 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
             emit_var_decl_rc_copy(gen, node);
         }
         return;
+    }
+
+    // Hoist owned temps in init expression (e.g., var count = std.args().length)
+    int saved     = 0;
+    int has_temps = node->as.var_decl.init && has_owned_temps(node->as.var_decl.init);
+    if (has_temps) {
+        saved = hoist_owned_temps(gen, node->as.var_decl.init);
     }
 
     emit_indent(gen);
@@ -650,6 +799,11 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
         }
     }
     emit(gen, ";\n");
+
+    // Cleanup owned temps after the var decl
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
 }
 
 // Emit a return statement (NODE_RETURN).
@@ -937,6 +1091,12 @@ static void emit_for_stmt(CodeGen* gen, Node* node) {
 }
 
 static void emit_foreach_collection_stmt(CodeGen* gen, Node* node) {
+    // Hoist owned temps in collection expression (evaluated once before the loop)
+    int saved = 0;
+    if (has_owned_temps(node->as.foreach_stmt.collection)) {
+        saved = hoist_owned_temps(gen, node->as.foreach_stmt.collection);
+    }
+
     int idx_id = gen->out.temp_count++;
     if (node->as.foreach_stmt.is_string) {
         emit_indent(gen);
@@ -968,6 +1128,11 @@ static void emit_foreach_collection_stmt(CodeGen* gen, Node* node) {
     gen->out.indent--;
     emit_indent(gen);
     emit(gen, "}\n");
+
+    // Cleanup owned temps after the loop
+    if (saved != gen->hoist.count) {
+        cleanup_owned_temps(gen, saved);
+    }
 }
 
 static void emit_foreach_range_stmt(CodeGen* gen, Node* node) {

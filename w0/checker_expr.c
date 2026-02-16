@@ -257,6 +257,8 @@ static Type* check_arithmetic_op(Checker* checker, Node* node, Type* left, Type*
     // String concatenation: string + string
     if (op == TOK_PLUS && left->kind == TYPE_STRING && right->kind == TYPE_STRING) {
         node->as.binary.is_string_op = 1;
+        node->is_owned_temp          = 1;
+        node->owned_temp_type        = type_string;
         return type_string;
     }
     if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
@@ -455,6 +457,8 @@ static Type* check_slice_expr(Checker* checker, Node* node) {
                             "Slice end index must be an integer, got '%s'", type_name(t));
             }
         }
+        node->is_owned_temp   = 1;
+        node->owned_temp_type = type_string;
         return type_string;
     } else {
         check_error(checker, node->line, node->column, "Cannot slice type '%s'", type_name(object));
@@ -1404,7 +1408,12 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
     }
 
     node->as.call.resolved_name = xstrdup(inst->mangled_name);
-    return inst->func_type->as.func.return_type;
+    Type* ret                   = inst->func_type->as.func.return_type;
+    if (type_is_rc_managed(ret)) {
+        node->is_owned_temp   = 1;
+        node->owned_temp_type = ret;
+    }
+    return ret;
 }
 
 static int check_call_arg_count(Checker* checker, Node* node, Type* func_type) {
@@ -1471,7 +1480,12 @@ static Type* check_call_expr(Checker* checker, Node* node) {
 
     check_call_named_args(checker, node, func_type);
     check_call_variadic_tail_args(checker, node, func_type);
-    return func_type->as.func.return_type;
+    Type* ret = func_type->as.func.return_type;
+    if (type_is_rc_managed(ret)) {
+        node->is_owned_temp   = 1;
+        node->owned_temp_type = ret;
+    }
+    return ret;
 }
 
 // Type-check a `new` expression: resolve type, validate struct init, Vec elements, or init call
@@ -1527,6 +1541,8 @@ static Type* check_new_expr(Checker* checker, Node* node) {
             }
         }
         node->as.new_expr.resolved_type = resolved;
+        node->is_owned_temp             = 1;
+        node->owned_temp_type           = resolved;
         return resolved;
     }
 
@@ -1547,6 +1563,8 @@ static Type* check_new_expr(Checker* checker, Node* node) {
             }
         }
         node->as.new_expr.resolved_type = resolved;
+        node->is_owned_temp             = 1;
+        node->owned_temp_type           = resolved;
         return resolved;
     }
     if (resolved->kind == TYPE_STRINGBUILDER) {
@@ -1558,6 +1576,8 @@ static Type* check_new_expr(Checker* checker, Node* node) {
             return type_error;
         }
         node->as.new_expr.resolved_type = resolved;
+        node->is_owned_temp             = 1;
+        node->owned_temp_type           = resolved;
         return resolved;
     }
     if (resolved->kind != TYPE_STRUCT) {
@@ -1576,6 +1596,8 @@ static Type* check_new_expr(Checker* checker, Node* node) {
     if (init_type == type_error)
         return type_error;
     node->as.new_expr.resolved_type = resolved;
+    node->is_owned_temp             = 1;
+    node->owned_temp_type           = resolved;
     return resolved;
 }
 
@@ -1689,6 +1711,18 @@ static Type* check_string_interp_expr(Checker* checker, Node* node) {
             }
             node->as.string_interp.part_types[i] = t;
         }
+    }
+    // String interp with expressions produces an owned string (via __std_format)
+    int has_expr = 0;
+    for (int i = 0; i < count; i++) {
+        if (node->as.string_interp.parts.nodes[i]->type != NODE_STRING_LIT) {
+            has_expr = 1;
+            break;
+        }
+    }
+    if (has_expr) {
+        node->is_owned_temp   = 1;
+        node->owned_temp_type = type_string;
     }
     return type_string;
 }
