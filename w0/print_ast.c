@@ -481,6 +481,19 @@ void print_ast(Node* node, int depth) {
         printf("TryExpr\n");
         print_ast(node->as.try_expr.expr, depth + 1);
         break;
+    case NODE_LAMBDA:
+        printf("Lambda (%d params%s)\n", node->as.lambda.params.count,
+               node->as.lambda.is_expr_body ? ", expr" : "");
+        print_node_list("Params", &node->as.lambda.params, depth);
+        if (node->as.lambda.return_type) {
+            print_indent(depth + 1);
+            printf("ReturnType: ");
+            print_ast(node->as.lambda.return_type, depth + 2);
+        }
+        print_indent(depth + 1);
+        printf("Body: ");
+        print_ast(node->as.lambda.body, depth + 2);
+        break;
     case NODE_STRING_INTERP:
         printf("StringInterp (%d parts)\n", node->as.string_interp.parts.count);
         print_node_list(NULL, &node->as.string_interp.parts, depth);

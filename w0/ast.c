@@ -197,6 +197,11 @@ void node_free(Node* node) {
         free(node->as.try_expr.enum_name);
         free(node->as.try_expr.ret_enum_name);
         break;
+    case NODE_LAMBDA:
+        nodelist_free(&node->as.lambda.params);
+        node_free(node->as.lambda.return_type);
+        node_free(node->as.lambda.body);
+        break;
     case NODE_BINARY:
         node_free(node->as.binary.left);
         node_free(node->as.binary.right);
@@ -501,6 +506,10 @@ static void node_reset_checker_flags(Node* node) {
         node->as.match_stmt.resolved_value_type = NULL;
         node->as.match_stmt.is_value_match      = 0;
         break;
+    case NODE_LAMBDA:
+        node->as.lambda.lambda_id     = 0;
+        node->as.lambda.resolved_type = NULL;
+        break;
     default:
         break; // Node types without checker flags need no reset
     }
@@ -607,6 +616,12 @@ Node* node_clone(Node* node) {
         break;
     case NODE_TRY_EXPR:
         c->as.try_expr.expr = node_clone(node->as.try_expr.expr);
+        break;
+    case NODE_LAMBDA:
+        c->as.lambda.params       = nodelist_clone(&node->as.lambda.params);
+        c->as.lambda.return_type  = node_clone(node->as.lambda.return_type);
+        c->as.lambda.body         = node_clone(node->as.lambda.body);
+        c->as.lambda.is_expr_body = node->as.lambda.is_expr_body;
         break;
     case NODE_TUPLE_TYPE:
         c->as.tuple_type.elem_types = nodelist_clone(&node->as.tuple_type.elem_types);

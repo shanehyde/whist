@@ -518,6 +518,10 @@ void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_d
     gen->hoist.count    = 0;
     gen->hoist.capacity = 0;
 
+    gen->lambdas.nodes    = NULL;
+    gen->lambdas.count    = 0;
+    gen->lambdas.capacity = 0;
+
     gen->tuple_types         = NULL;
     gen->tuple_type_count    = 0;
     gen->tuple_type_capacity = 0;
@@ -560,6 +564,7 @@ void codegen_free(CodeGen* gen) {
     }
     free(gen->hoist.nodes);
     free(gen->hoist.names);
+    free(gen->lambdas.nodes);
 }
 
 // Collect tuple types from all declarations and register non-generic type aliases
@@ -697,6 +702,10 @@ static int collect_string_literals_expr_node(CodeGen* gen, Node* node) {
     case NODE_TUPLE_LIT:
         collect_string_literals_nodelist(gen, &node->as.tuple_lit.elements);
         return 1;
+    case NODE_LAMBDA:
+        collect_string_literals_nodelist(gen, &node->as.lambda.params);
+        collect_string_literals_node(gen, node->as.lambda.body);
+        return 1;
     default:
         return 0;
     }
@@ -798,6 +807,225 @@ static void collect_string_literals_node(CodeGen* gen, Node* node) {
 
 static void collect_string_literals(CodeGen* gen, Node* ast) {
     collect_string_literals_node(gen, ast);
+}
+
+// ============================================================================
+// Lambda collection and emission
+// ============================================================================
+
+static void collect_lambdas_node(CodeGen* gen, Node* node);
+
+static void collect_lambdas_nodelist(CodeGen* gen, NodeList* list) {
+    for (int i = 0; i < list->count; i++) {
+        collect_lambdas_node(gen, list->nodes[i]);
+    }
+}
+
+static void collect_lambdas_node(CodeGen* gen, Node* node) {
+    if (!node)
+        return;
+
+    if (node->type == NODE_LAMBDA) {
+        VEC_GROW(gen->lambdas.nodes, gen->lambdas.count, gen->lambdas.capacity);
+        gen->lambdas.nodes[gen->lambdas.count++] = node;
+        // Recurse into lambda body for nested lambdas
+        collect_lambdas_node(gen, node->as.lambda.body);
+        return;
+    }
+
+    switch (node->type) {
+    // Expressions
+    case NODE_BINARY:
+        collect_lambdas_node(gen, node->as.binary.left);
+        collect_lambdas_node(gen, node->as.binary.right);
+        break;
+    case NODE_UNARY:
+        collect_lambdas_node(gen, node->as.unary.operand);
+        break;
+    case NODE_CALL:
+        collect_lambdas_node(gen, node->as.call.func);
+        collect_lambdas_nodelist(gen, &node->as.call.args);
+        break;
+    case NODE_MEMBER:
+        collect_lambdas_node(gen, node->as.member.object);
+        break;
+    case NODE_INDEX:
+        collect_lambdas_node(gen, node->as.index.object);
+        collect_lambdas_node(gen, node->as.index.index);
+        break;
+    case NODE_SLICE:
+        collect_lambdas_node(gen, node->as.slice.object);
+        collect_lambdas_node(gen, node->as.slice.start);
+        collect_lambdas_node(gen, node->as.slice.end);
+        break;
+    case NODE_ASSIGN:
+        collect_lambdas_node(gen, node->as.assign.target);
+        collect_lambdas_node(gen, node->as.assign.value);
+        break;
+    case NODE_CAST:
+        collect_lambdas_node(gen, node->as.cast_expr.expr);
+        break;
+    case NODE_TRY_EXPR:
+        collect_lambdas_node(gen, node->as.try_expr.expr);
+        break;
+    case NODE_NEW_EXPR:
+        collect_lambdas_node(gen, node->as.new_expr.init);
+        collect_lambdas_nodelist(gen, &node->as.new_expr.args);
+        break;
+    case NODE_STRUCT_INIT:
+        collect_lambdas_nodelist(gen, &node->as.struct_init.fields);
+        break;
+    case NODE_FIELD_INIT:
+        collect_lambdas_node(gen, node->as.field_init.value);
+        break;
+    case NODE_ENUM_VALUE:
+        collect_lambdas_nodelist(gen, &node->as.enum_value.args);
+        break;
+    case NODE_TUPLE_LIT:
+        collect_lambdas_nodelist(gen, &node->as.tuple_lit.elements);
+        break;
+    case NODE_ARRAY_LIT:
+        collect_lambdas_nodelist(gen, &node->as.array_lit.elements);
+        break;
+    case NODE_STRING_INTERP:
+        collect_lambdas_nodelist(gen, &node->as.string_interp.parts);
+        break;
+
+    // Statements
+    case NODE_BLOCK:
+        collect_lambdas_nodelist(gen, &node->as.block.stmts);
+        break;
+    case NODE_VAR_DECL:
+        collect_lambdas_node(gen, node->as.var_decl.init);
+        break;
+    case NODE_RETURN:
+        collect_lambdas_node(gen, node->as.return_stmt.value);
+        break;
+    case NODE_IF:
+        collect_lambdas_node(gen, node->as.if_stmt.cond);
+        collect_lambdas_node(gen, node->as.if_stmt.then_block);
+        collect_lambdas_node(gen, node->as.if_stmt.else_block);
+        break;
+    case NODE_FOR:
+        collect_lambdas_node(gen, node->as.for_stmt.init);
+        collect_lambdas_node(gen, node->as.for_stmt.cond);
+        collect_lambdas_node(gen, node->as.for_stmt.post);
+        collect_lambdas_node(gen, node->as.for_stmt.body);
+        break;
+    case NODE_FOREACH:
+        collect_lambdas_node(gen, node->as.foreach_stmt.collection);
+        collect_lambdas_node(gen, node->as.foreach_stmt.start);
+        collect_lambdas_node(gen, node->as.foreach_stmt.end);
+        collect_lambdas_node(gen, node->as.foreach_stmt.body);
+        break;
+    case NODE_WHILE:
+        collect_lambdas_node(gen, node->as.while_stmt.cond);
+        collect_lambdas_node(gen, node->as.while_stmt.body);
+        break;
+    case NODE_EXPR_STMT:
+        collect_lambdas_node(gen, node->as.expr_stmt.expr);
+        break;
+    case NODE_MATCH:
+        collect_lambdas_node(gen, node->as.match_stmt.expr);
+        collect_lambdas_nodelist(gen, &node->as.match_stmt.arms);
+        break;
+    case NODE_MATCH_ARM:
+        collect_lambdas_node(gen, node->as.match_arm.pattern_expr);
+        collect_lambdas_node(gen, node->as.match_arm.body);
+        break;
+    case NODE_DEFER:
+        collect_lambdas_node(gen, node->as.defer_stmt.stmt);
+        break;
+
+    // Declarations
+    case NODE_PROGRAM:
+        collect_lambdas_nodelist(gen, &node->as.program.modules);
+        break;
+    case NODE_MODULE:
+        collect_lambdas_nodelist(gen, &node->as.module.decls);
+        break;
+    case NODE_FUNC_DECL:
+        collect_lambdas_node(gen, node->as.func_decl.body);
+        break;
+    case NODE_IMPL_DECL:
+        collect_lambdas_nodelist(gen, &node->as.impl_decl.methods);
+        break;
+    case NODE_TEST_DECL:
+        collect_lambdas_node(gen, node->as.test_decl.body);
+        break;
+
+    default:
+        break;
+    }
+}
+
+static void collect_lambdas(CodeGen* gen, Node* ast) {
+    collect_lambdas_node(gen, ast);
+}
+
+static void emit_lambda_forward_decls(CodeGen* gen) {
+    for (int i = 0; i < gen->lambdas.count; i++) {
+        Node* lam       = gen->lambdas.nodes[i];
+        Type* func_type = lam->as.lambda.resolved_type;
+        if (!func_type)
+            continue;
+
+        emit(gen, "static ");
+        emit_resolved_type(gen, func_type->as.func.return_type);
+        emit(gen, " __lambda_%d(", lam->as.lambda.lambda_id);
+        for (int p = 0; p < func_type->as.func.param_count; p++) {
+            if (p > 0)
+                emit(gen, ", ");
+            emit_resolved_type(gen, func_type->as.func.param_types[p]);
+            emit(gen, " %s", lam->as.lambda.params.nodes[p]->as.param.name);
+        }
+        if (func_type->as.func.param_count == 0)
+            emit(gen, "void");
+        emit(gen, ");\n");
+    }
+    if (gen->lambdas.count > 0)
+        emit(gen, "\n");
+}
+
+static void emit_lambda_definitions(CodeGen* gen) {
+    for (int i = 0; i < gen->lambdas.count; i++) {
+        Node* lam       = gen->lambdas.nodes[i];
+        Type* func_type = lam->as.lambda.resolved_type;
+        if (!func_type)
+            continue;
+
+        emit(gen, "static ");
+        emit_resolved_type(gen, func_type->as.func.return_type);
+        emit(gen, " __lambda_%d(", lam->as.lambda.lambda_id);
+        for (int p = 0; p < func_type->as.func.param_count; p++) {
+            if (p > 0)
+                emit(gen, ", ");
+            emit_resolved_type(gen, func_type->as.func.param_types[p]);
+            emit(gen, " %s", lam->as.lambda.params.nodes[p]->as.param.name);
+        }
+        if (func_type->as.func.param_count == 0)
+            emit(gen, "void");
+        emit(gen, ") {\n");
+
+        gen->out.indent++;
+        if (lam->as.lambda.is_expr_body) {
+            // Expression body: return expr;
+            emit_indent(gen);
+            emit(gen, "return ");
+            emit_expr(gen, lam->as.lambda.body);
+            emit(gen, ";\n");
+        } else {
+            // Block body
+            emit_block_contents(gen, lam->as.lambda.body);
+            // Implicit void return cleanup
+            if (func_type->as.func.return_type == type_void) {
+                rc_cleanup_all(gen, NULL);
+            }
+        }
+        gen->out.indent--;
+        emit(gen, "}\n\n");
+        rc_clear_all(gen);
+    }
 }
 
 // Emit escaped string content (shared helper for string literal table)
@@ -1612,12 +1840,15 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit_enum_rc_helpers(gen, ast);
     emit_struct_body_typedefs(gen, ast);
     emit_function_forward_decls(gen, ast);
+    collect_lambdas(gen, ast);
+    emit_lambda_forward_decls(gen);
     emit_enum_eq_helpers(gen, ast);
     emit_vec_cleanup(gen);
     emit_vec_methods(gen);
     emit_vec_user_methods(gen, ast);
     emit_struct_cleanup(gen, ast);
     emit_declarations(gen, ast);
+    emit_lambda_definitions(gen);
     emit_generic_method_impls(gen, ast);
     emit_generic_func_impls(gen, ast);
     if (gen->test_mode) {
