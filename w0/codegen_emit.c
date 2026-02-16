@@ -1523,6 +1523,38 @@ static void emit_generic_method_forward_decls(CodeGen* gen, Node* ast) {
     }
 }
 
+// Find a method-level generic function declaration in the AST by receiver type and method name
+static Node* find_generic_method_func_decl_in_ast(Node* ast, const char* receiver_type,
+                                                  const char* method_name) {
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int d = 0; d < mod->as.module.decls.count; d++) {
+            Node* decl = mod->as.module.decls.nodes[d];
+            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type != NULL &&
+                decl->as.func_decl.type_param_count > 0 &&
+                strcmp(decl->as.func_decl.receiver_type, receiver_type) == 0 &&
+                strcmp(decl->as.func_decl.name, method_name) == 0) {
+                return decl;
+            }
+            if (decl->type == NODE_IMPL_DECL) {
+                for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
+                    Node* method = decl->as.impl_decl.methods.nodes[j];
+                    if (method->type == NODE_FUNC_DECL &&
+                        method->as.func_decl.receiver_type != NULL &&
+                        method->as.func_decl.type_param_count > 0 &&
+                        strcmp(method->as.func_decl.receiver_type, receiver_type) == 0 &&
+                        strcmp(method->as.func_decl.name, method_name) == 0) {
+                        return method;
+                    }
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
 static Node* find_generic_func_decl_in_ast(Node* ast, const char* name) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
@@ -1568,10 +1600,83 @@ static void emit_single_generic_func_forward_decl(CodeGen* gen, GenericFuncInsta
     gen->generics.subst = old_subst;
 }
 
+static void emit_single_generic_method_func_forward_decl(CodeGen* gen, GenericFuncInstance* inst,
+                                                         func_decl_node* fdn) {
+    // Build combined substitution from receiver_type_args + type_params
+    int    recv_param_count   = fdn->receiver_type_args.count;
+    int    method_param_count = fdn->type_param_count;
+    int    combined_count     = recv_param_count + method_param_count;
+    char** combined_params    = xmalloc(combined_count * sizeof(char*));
+
+    for (int p = 0; p < recv_param_count; p++) {
+        Node* arg          = fdn->receiver_type_args.nodes[p];
+        combined_params[p] = arg->as.ident.name;
+    }
+    for (int p = 0; p < method_param_count; p++) {
+        combined_params[recv_param_count + p] = fdn->type_params[p];
+    }
+
+    TypeSubstContext  subst_ctx;
+    TypeSubstContext* old_subst = gen->generics.subst;
+    subst_ctx.type_params       = combined_params;
+    subst_ctx.type_args         = inst->type_args;
+    subst_ctx.count             = combined_count;
+    gen->generics.subst         = &subst_ctx;
+
+    emit_func_return_type(gen, fdn);
+    emit(gen, " %s(", inst->mangled_name);
+
+    // Self parameter
+    if (fdn->receiver_is_const) {
+        emit(gen, "const ");
+    }
+    emit_resolved_type(gen, inst->receiver_concrete);
+    emit(gen, " self");
+
+    // Other parameters
+    for (int p = 0; p < fdn->params.count; p++) {
+        emit(gen, ", ");
+        Node* param = fdn->params.nodes[p];
+        if (param->as.param.is_const) {
+            emit(gen, "const ");
+        }
+        emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+    }
+    emit(gen, ");\n");
+
+    gen->generics.subst = old_subst;
+    free(combined_params);
+}
+
 static void emit_generic_func_forward_decls(CodeGen* gen, Node* ast) {
     for (int i = 0; i < gen->checker.func_instance_count; i++) {
         GenericFuncInstance* inst = &gen->checker.func_instances[i];
-        Node*                tmpl = find_generic_func_decl_in_ast(ast, inst->base_name);
+
+        if (inst->is_method) {
+            // Method-level generic: parse "Vec.map" key
+            const char* dot = strchr(inst->base_name, '.');
+            if (!dot)
+                continue;
+            char recv_name[128], method_name_buf[128];
+            int  recv_len = (int)(dot - inst->base_name);
+            if (recv_len >= (int)sizeof(recv_name))
+                recv_len = (int)sizeof(recv_name) - 1;
+            memcpy(recv_name, inst->base_name, recv_len);
+            recv_name[recv_len] = '\0';
+            int method_len      = (int)strlen(dot + 1);
+            if (method_len >= (int)sizeof(method_name_buf))
+                method_len = (int)sizeof(method_name_buf) - 1;
+            memcpy(method_name_buf, dot + 1, method_len);
+            method_name_buf[method_len] = '\0';
+
+            Node* tmpl = find_generic_method_func_decl_in_ast(ast, recv_name, method_name_buf);
+            if (!tmpl)
+                continue;
+            emit_single_generic_method_func_forward_decl(gen, inst, &tmpl->as.func_decl);
+            continue;
+        }
+
+        Node* tmpl = find_generic_func_decl_in_ast(ast, inst->base_name);
         if (!tmpl) {
             continue;
         }

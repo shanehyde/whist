@@ -35,6 +35,17 @@ GenericFuncInstance* instantiate_generic_func(Checker* checker, GenericFuncDef* 
                                               Type** type_args, int type_arg_count, int line,
                                               int col);
 
+// --- From checker_types.c: method-level generic function management ---
+void                 register_generic_method_func_def(Checker* checker, const char* receiver_type,
+                                                      const char* method_name, char** combined_params,
+                                                      char** combined_bounds, int combined_count,
+                                                      int receiver_param_count, Node* decl);
+GenericFuncDef*      lookup_generic_method_func_def(Checker* checker, const char* receiver_type,
+                                                    const char* method_name);
+GenericFuncInstance* instantiate_generic_method_func(Checker* checker, GenericFuncDef* def,
+                                                     Type** combined_args, int combined_count,
+                                                     Type* receiver_concrete, int line, int col);
+
 // --- From checker_expr.c: expression checking ---
 Type* check_expression(Checker* checker, Node* node);
 

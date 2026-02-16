@@ -390,9 +390,12 @@ void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
             // Direct generic methods: func (Box<T>) get(): T
+            // Exclude method-level generics (type_param_count > 0) — those go through
+            // GenericFuncInstance
             if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.body != NULL &&
                 decl->as.func_decl.receiver_type != NULL &&
                 decl->as.func_decl.receiver_type_args.count > 0 &&
+                decl->as.func_decl.type_param_count == 0 &&
                 strcmp(decl->as.func_decl.receiver_type, struct_name) == 0) {
                 VEC_GROW(methods, count, capacity);
                 methods[count++] = decl;
@@ -404,6 +407,7 @@ void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods
                     if (method->type == NODE_FUNC_DECL && method->as.func_decl.body != NULL &&
                         method->as.func_decl.receiver_type != NULL &&
                         method->as.func_decl.receiver_type_args.count > 0 &&
+                        method->as.func_decl.type_param_count == 0 &&
                         strcmp(method->as.func_decl.receiver_type, struct_name) == 0) {
                         VEC_GROW(methods, count, capacity);
                         methods[count++] = method;
@@ -1691,6 +1695,41 @@ static void emit_generic_method_impls(CodeGen* gen, Node* ast) {
     }
 }
 
+// Find a method-level generic function declaration in the AST.
+// Matches func (ReceiverType<...>) MethodName<...>(...): ...
+static Node* find_generic_method_func_decl(Node* ast, const char* receiver_type,
+                                           const char* method_name) {
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int d = 0; d < mod->as.module.decls.count; d++) {
+            Node* decl = mod->as.module.decls.nodes[d];
+            // Direct method: func (Vec<T>) map<K>(...): Vec<K>
+            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type != NULL &&
+                decl->as.func_decl.type_param_count > 0 &&
+                strcmp(decl->as.func_decl.receiver_type, receiver_type) == 0 &&
+                strcmp(decl->as.func_decl.name, method_name) == 0) {
+                return decl;
+            }
+            // Inside impl blocks
+            if (decl->type == NODE_IMPL_DECL) {
+                for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
+                    Node* method = decl->as.impl_decl.methods.nodes[j];
+                    if (method->type == NODE_FUNC_DECL &&
+                        method->as.func_decl.receiver_type != NULL &&
+                        method->as.func_decl.type_param_count > 0 &&
+                        strcmp(method->as.func_decl.receiver_type, receiver_type) == 0 &&
+                        strcmp(method->as.func_decl.name, method_name) == 0) {
+                        return method;
+                    }
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
 // Find a generic free function declaration in the AST by name
 static Node* find_generic_func_decl(Node* ast, const char* name) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
@@ -1708,10 +1747,153 @@ static Node* find_generic_func_decl(Node* ast, const char* name) {
     return NULL;
 }
 
+// Parse a "Type.method" base_name to extract receiver_type and method_name.
+// Returns 1 if found, 0 if not a method key.
+static int parse_method_key(const char* base_name, char* recv_out, int recv_size, char* method_out,
+                            int method_size) {
+    const char* dot = strchr(base_name, '.');
+    if (!dot)
+        return 0;
+    int recv_len = (int)(dot - base_name);
+    if (recv_len >= recv_size)
+        recv_len = recv_size - 1;
+    memcpy(recv_out, base_name, recv_len);
+    recv_out[recv_len] = '\0';
+    int method_len     = (int)strlen(dot + 1);
+    if (method_len >= method_size)
+        method_len = method_size - 1;
+    memcpy(method_out, dot + 1, method_len);
+    method_out[method_len] = '\0';
+    return 1;
+}
+
+// Emit a method-level generic function implementation
+static void emit_generic_method_func_impl(CodeGen* gen, Node* ast, GenericFuncInstance* inst) {
+    char recv_name[128], method_name[128];
+    if (!parse_method_key(inst->base_name, recv_name, sizeof(recv_name), method_name,
+                          sizeof(method_name))) {
+        return;
+    }
+
+    Node* tmpl = find_generic_method_func_decl(ast, recv_name, method_name);
+    if (!tmpl)
+        return;
+
+    func_decl_node* fdn = &tmpl->as.func_decl;
+
+    // Build combined substitution: receiver params (from GenericDef) + method params
+    // The GenericFuncDef stores the combined param names; instance stores combined args.
+    // But we need to get the combined param names from the definition.
+    // Reconstruct them from receiver_type_args + type_params.
+    int    recv_param_count   = fdn->receiver_type_args.count;
+    int    method_param_count = fdn->type_param_count;
+    int    combined_count     = recv_param_count + method_param_count;
+    char** combined_params    = xmalloc(combined_count * sizeof(char*));
+
+    for (int p = 0; p < recv_param_count; p++) {
+        Node* arg          = fdn->receiver_type_args.nodes[p];
+        combined_params[p] = arg->as.ident.name;
+    }
+    for (int p = 0; p < method_param_count; p++) {
+        combined_params[recv_param_count + p] = fdn->type_params[p];
+    }
+
+    TypeSubstContext subst_ctx;
+    subst_ctx.type_params = combined_params;
+    subst_ctx.type_args   = inst->type_args;
+    subst_ctx.count       = combined_count;
+    gen->generics.subst   = &subst_ctx;
+
+    int is_void = return_type_is_void(fdn->return_type);
+
+    // Return type
+    emit_func_return_type(gen, fdn);
+
+    // Function name + self parameter
+    emit(gen, " %s(", inst->mangled_name);
+    if (fdn->receiver_is_const) {
+        emit(gen, "const ");
+    }
+    emit_resolved_type(gen, inst->receiver_concrete);
+    emit(gen, " self");
+
+    // Other parameters
+    for (int p = 0; p < fdn->params.count; p++) {
+        emit(gen, ", ");
+        Node* param = fdn->params.nodes[p];
+        if (param->as.param.is_const) {
+            emit(gen, "const ");
+        }
+        emit_type_with_name(gen, param->as.param.type, param->as.param.name);
+    }
+    emit(gen, ") {\n");
+
+    // Clear defer stack for this function
+    defer_clear(gen);
+    gen->defer.return_type     = fdn->return_type;
+    gen->generics.modules      = fdn->accessible_modules;
+    gen->generics.module_count = fdn->accessible_modules_count;
+
+    int has_defers = 0;
+    if (inst->body) {
+        for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
+            Node* stmt = inst->body->as.block.stmts.nodes[s];
+            if (stmt && stmt->type == NODE_DEFER) {
+                has_defers = 1;
+                break;
+            }
+        }
+    }
+
+    gen->out.indent++;
+
+    if (has_defers && !is_void) {
+        emit_indent(gen);
+        emit_type(gen, fdn->return_type);
+        emit(gen, " __ret;\n");
+    }
+
+    if (inst->body) {
+        for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
+            emit_stmt(gen, inst->body->as.block.stmts.nodes[s]);
+        }
+    }
+
+    if (gen->rc.count > 0 && inst->body) {
+        int   sc   = inst->body->as.block.stmts.count;
+        Node* last = sc > 0 ? inst->body->as.block.stmts.nodes[sc - 1] : NULL;
+        if (!last || last->type != NODE_RETURN) {
+            rc_cleanup_all(gen, NULL);
+        }
+    }
+
+    if (has_defers) {
+        for (int d = gen->defer.count - 1; d >= 0; d--) {
+            emit_stmt(gen, gen->defer.stack[d]);
+        }
+    }
+
+    gen->out.indent--;
+    emit(gen, "}\n\n");
+
+    rc_clear_all(gen);
+
+    gen->generics.subst        = NULL;
+    gen->generics.modules      = NULL;
+    gen->generics.module_count = 0;
+    free(combined_params);
+}
+
 // Emit implementations for all instantiated generic free functions
 static void emit_generic_func_impls(CodeGen* gen, Node* ast) {
     for (int i = 0; i < gen->checker.func_instance_count; i++) {
         GenericFuncInstance* inst = &gen->checker.func_instances[i];
+
+        // Method-level generics: use separate handler
+        if (inst->is_method) {
+            emit_generic_method_func_impl(gen, ast, inst);
+            continue;
+        }
 
         // Find template
         Node* tmpl = find_generic_func_decl(ast, inst->base_name);

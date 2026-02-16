@@ -125,6 +125,8 @@ void register_generic_func_def(Checker* checker, const char* name, char** type_p
     def->decl             = decl;
     def->source_module =
         checker->modules.current_module ? xstrdup(checker->modules.current_module) : NULL;
+    def->receiver_type        = NULL;
+    def->receiver_param_count = 0;
 }
 
 // Look up a generic free function definition by name
@@ -237,8 +239,188 @@ GenericFuncInstance* instantiate_generic_func(Checker* checker, GenericFuncDef* 
     for (int i = 0; i < type_arg_count; i++) {
         inst->type_args[i] = type_args[i];
     }
-    inst->type_arg_count = type_arg_count;
-    inst->body           = body;
+    inst->type_arg_count    = type_arg_count;
+    inst->body              = body;
+    inst->is_method         = 0;
+    inst->receiver_type     = NULL;
+    inst->receiver_concrete = NULL;
+
+    free(mangled);
+    return inst;
+}
+
+// =============================================================================
+// Generic method-level function helpers (func (Vec<T>) map<K>(...): Vec<K>)
+// =============================================================================
+
+// Register a method-level generic function definition.
+// Combined type_params = receiver params (from GenericDef) + method's own type_params.
+// Keyed as "ReceiverType.method_name" to avoid collision with free functions.
+void register_generic_method_func_def(Checker* checker, const char* receiver_type,
+                                      const char* method_name, char** combined_params,
+                                      char** combined_bounds, int combined_count,
+                                      int receiver_param_count, Node* decl) {
+    // Build key: "Vec.map"
+    size_t key_len = strlen(receiver_type) + 1 + strlen(method_name) + 1;
+    char*  key     = xmalloc(key_len);
+    snprintf(key, key_len, "%s.%s", receiver_type, method_name);
+
+    // Check for duplicate
+    for (int i = 0; i < checker->generics.func_def_count; i++) {
+        if (strcmp(checker->generics.func_defs[i].name, key) == 0) {
+            free(key);
+            return;
+        }
+    }
+
+    VEC_GROW(checker->generics.func_defs, checker->generics.func_def_count,
+             checker->generics.func_def_capacity);
+    GenericFuncDef* def    = &checker->generics.func_defs[checker->generics.func_def_count++];
+    def->name              = key;
+    def->type_params       = xmalloc(combined_count * sizeof(char*));
+    def->type_param_bounds = xmalloc(combined_count * sizeof(char*));
+    for (int i = 0; i < combined_count; i++) {
+        def->type_params[i] = xstrdup(combined_params[i]);
+        def->type_param_bounds[i] =
+            (combined_bounds && combined_bounds[i]) ? xstrdup(combined_bounds[i]) : NULL;
+    }
+    def->type_param_count = combined_count;
+    def->decl             = decl;
+    def->source_module =
+        checker->modules.current_module ? xstrdup(checker->modules.current_module) : NULL;
+    def->receiver_type        = xstrdup(receiver_type);
+    def->receiver_param_count = receiver_param_count;
+}
+
+// Look up a method-level generic function definition by receiver type and method name.
+GenericFuncDef* lookup_generic_method_func_def(Checker* checker, const char* receiver_type,
+                                               const char* method_name) {
+    char key[256];
+    snprintf(key, sizeof(key), "%s.%s", receiver_type, method_name);
+    for (int i = 0; i < checker->generics.func_def_count; i++) {
+        if (strcmp(checker->generics.func_defs[i].name, key) == 0) {
+            return &checker->generics.func_defs[i];
+        }
+    }
+    return NULL;
+}
+
+// Instantiate a method-level generic function with concrete type arguments.
+// combined_args = receiver type args (T→i64) + method type args (K→string).
+GenericFuncInstance* instantiate_generic_method_func(Checker* checker, GenericFuncDef* def,
+                                                     Type** combined_args, int combined_count,
+                                                     Type* receiver_concrete, int line, int col) {
+    (void)line;
+    (void)col;
+
+    // Build mangled name: receiver mangled + "_" + method_name + "_" + method args mangled
+    // e.g. "Vec_i64_map_string"
+    func_decl_node* fdn = &def->decl->as.func_decl;
+
+    // Build receiver part: "Vec_i64"
+    char* recv_mangled =
+        type_mangle_generic(def->receiver_type, combined_args, def->receiver_param_count);
+
+    // Build method args part (the params after receiver params)
+    int    method_arg_count = combined_count - def->receiver_param_count;
+    Type** method_args      = combined_args + def->receiver_param_count;
+    char*  method_mangled   = type_mangle_generic(fdn->name, method_args, method_arg_count);
+
+    // Combine: "Vec_i64_map_string"
+    size_t mangled_len = strlen(recv_mangled) + 1 + strlen(method_mangled) + 1;
+    char*  mangled     = xmalloc(mangled_len);
+    snprintf(mangled, mangled_len, "%s_%s", recv_mangled, method_mangled);
+    free(recv_mangled);
+    free(method_mangled);
+
+    // Check cache
+    GenericFuncInstance* existing = lookup_generic_func_instance(checker, mangled);
+    if (existing) {
+        free(mangled);
+        return existing;
+    }
+
+    // Save and set up substitution context (combined params + args)
+    char** old_params = checker->generics.current_type_params;
+    Type** old_args   = checker->generics.current_type_args;
+    int    old_count  = checker->generics.current_type_param_count;
+
+    checker->generics.current_type_params      = def->type_params;
+    checker->generics.current_type_args        = combined_args;
+    checker->generics.current_type_param_count = def->type_param_count;
+
+    // Resolve concrete parameter types and return type
+    int    param_count = fdn->params.count;
+    Type** param_types = NULL;
+    if (param_count > 0) {
+        param_types = xmalloc(param_count * sizeof(Type*));
+    }
+    for (int i = 0; i < param_count; i++) {
+        Node* param    = fdn->params.nodes[i];
+        param_types[i] = resolve_type(checker, param->as.param.type);
+    }
+    Type* return_type = type_void;
+    if (fdn->return_type) {
+        return_type = resolve_type(checker, fdn->return_type);
+    }
+
+    Type* func_type = type_func(param_types, param_count, return_type, fdn->is_varargs);
+
+    // Pre-declare the mangled function in the symbol table for recursion
+    checker_define(checker, mangled, SYM_FUNC, func_type, 1, fdn->is_public,
+                   checker->modules.current_module);
+
+    // Clone and type-check the body
+    Node* body = node_clone(fdn->body);
+
+    // Push scope for self + params
+    checker_push_scope(checker);
+
+    // Define 'self' with the concrete receiver type
+    checker_define(checker, "self", SYM_VAR, receiver_concrete, fdn->receiver_is_const, 0, NULL);
+
+    for (int i = 0; i < param_count; i++) {
+        Node* param = fdn->params.nodes[i];
+        checker_define(checker, param->as.param.name, SYM_VAR, param_types[i],
+                       param->as.param.is_const, 0, NULL);
+    }
+
+    // Set function return type context
+    Type* old_return             = checker->current_func_return;
+    checker->current_func_return = return_type;
+
+    // Type-check body statements
+    if (body && body->type == NODE_BLOCK) {
+        for (int s = 0; s < body->as.block.stmts.count; s++) {
+            check_statement(checker, body->as.block.stmts.nodes[s]);
+        }
+    }
+
+    checker->current_func_return = old_return;
+    checker_pop_scope(checker);
+
+    // Restore substitution context
+    checker->generics.current_type_params      = old_params;
+    checker->generics.current_type_args        = old_args;
+    checker->generics.current_type_param_count = old_count;
+
+    // Store the instance
+    VEC_GROW(checker->generics.func_instances, checker->generics.func_instance_count,
+             checker->generics.func_instance_capacity);
+    GenericFuncInstance* inst =
+        &checker->generics.func_instances[checker->generics.func_instance_count++];
+    inst->mangled_name = xstrdup(mangled);
+    inst->base_name    = xstrdup(def->name);
+    inst->func_type    = func_type;
+    inst->type_args    = xmalloc(combined_count * sizeof(Type*));
+    for (int i = 0; i < combined_count; i++) {
+        inst->type_args[i] = combined_args[i];
+    }
+    inst->type_arg_count    = combined_count;
+    inst->body              = body;
+    inst->is_method         = 1;
+    inst->receiver_type     = xstrdup(def->receiver_type);
+    inst->receiver_concrete = receiver_concrete;
 
     free(mangled);
     return inst;

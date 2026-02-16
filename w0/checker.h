@@ -100,6 +100,9 @@ typedef struct {
 } VecInstance;
 
 // Generic free function definition (template)
+// Also used for method-level generics: func (Vec<T>) map<K>(...): Vec<K>
+// For methods: type_params = combined receiver + method params ["T", "K"],
+//   receiver_param_count = 1 (count of receiver's params)
 typedef struct {
     char*       name;
     char**      type_params;       // ["T"] or ["T", "U"]
@@ -107,16 +110,23 @@ typedef struct {
     int         type_param_count;
     Node*       decl; // Original AST node (NODE_FUNC_DECL)
     const char* source_module;
+    // Method-level generics (NULL/0 for free functions)
+    char* receiver_type;        // "Vec" for methods, NULL for free funcs
+    int   receiver_param_count; // Count of receiver type params (e.g., 1 for Vec<T>)
 } GenericFuncDef;
 
-// Instantiated generic free function
+// Instantiated generic free function (also used for method-level generics)
 typedef struct {
-    char*  mangled_name; // "identity_i64"
-    char*  base_name;    // "identity"
+    char*  mangled_name; // "identity_i64" or "Vec_i64_map_string"
+    char*  base_name;    // "identity" or "Vec.map"
     Type*  func_type;    // Concrete TYPE_FUNC
     Type** type_args;
     int    type_arg_count;
     Node*  body; // Cloned + type-checked body
+    // Method-level generic fields (0/NULL for free functions)
+    int   is_method;         // 1 if method instance, 0 for free func
+    char* receiver_type;     // "Vec" for methods, NULL for free funcs
+    Type* receiver_concrete; // Concrete receiver type (e.g., TYPE_VEC with elem=i64)
 } GenericFuncInstance;
 
 // Module import tracking

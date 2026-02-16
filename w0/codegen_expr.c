@@ -406,6 +406,15 @@ static void emit_call_expr(CodeGen* gen, Node* node) {
         return;
     }
 
+    // Method-level generic call: resolved_name set by checker, callee is NODE_MEMBER
+    if (node->as.call.resolved_name && func->type == NODE_MEMBER) {
+        emit(gen, "%s(", node->as.call.resolved_name);
+        emit_expr(gen, func->as.member.object); // self
+        emit_call_args(gen, node, 1);           // leading comma + remaining args
+        emit(gen, ")");
+        return;
+    }
+
     const char* callee_module_name = NULL;
     const char* callee_struct_name = NULL;
     if (func->type == NODE_MEMBER) {
