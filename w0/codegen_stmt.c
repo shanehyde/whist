@@ -822,8 +822,25 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
         }
     }
 
+    // Handle owned temps in return expression.
+    // If the return value itself is an owned temp (e.g., return new Box{...}),
+    // ownership transfers to the caller — exclude it from hoisting.
+    int has_temps    = 0;
+    int saved        = 0;
+    int ret_is_owned = 0;
+    if (node->as.return_stmt.value) {
+        ret_is_owned = node->as.return_stmt.value->is_owned_temp;
+        if (ret_is_owned)
+            node->as.return_stmt.value->is_owned_temp = 0;
+        has_temps = has_owned_temps(node->as.return_stmt.value);
+        if (has_temps)
+            saved = hoist_owned_temps(gen, node->as.return_stmt.value);
+        if (ret_is_owned)
+            node->as.return_stmt.value->is_owned_temp = 1; // restore AST
+    }
+
     if (gen->defer.count > 0) {
-        // With defers: store value in __ret, cleanup RC, goto cleanup
+        // With defers: store value in __ret, cleanup RC + owned temps, goto cleanup
         emit_indent(gen);
         if (node->as.return_stmt.value) {
             emit(gen, "__ret = ");
@@ -833,11 +850,14 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
         if (gen->rc.count > 0) {
             rc_cleanup_all(gen, skip_name);
         }
+        if (has_temps) {
+            cleanup_owned_temps(gen, saved);
+        }
         emit_indent(gen);
         emit(gen, "goto __cleanup;\n");
     } else {
-        // No defers: cleanup RC, then return
-        if (gen->rc.count > 0) {
+        // No defers: cleanup RC + owned temps, then return
+        if (gen->rc.count > 0 || has_temps) {
             if (node->as.return_stmt.value && !skip_name) {
                 // Complex expression: evaluate to temp first
                 emit_indent(gen);
@@ -846,11 +866,21 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
                 emit(gen, ") __rc_ret = ");
                 emit_expr(gen, node->as.return_stmt.value);
                 emit(gen, ";\n");
-                rc_cleanup_all(gen, NULL);
+                if (gen->rc.count > 0) {
+                    rc_cleanup_all(gen, NULL);
+                }
+                if (has_temps) {
+                    cleanup_owned_temps(gen, saved);
+                }
                 emit_indent(gen);
                 emit(gen, "return __rc_ret;\n");
             } else {
-                rc_cleanup_all(gen, skip_name);
+                if (gen->rc.count > 0) {
+                    rc_cleanup_all(gen, skip_name);
+                }
+                if (has_temps) {
+                    cleanup_owned_temps(gen, saved);
+                }
                 emit_indent(gen);
                 emit(gen, "return");
                 if (node->as.return_stmt.value) {
@@ -888,6 +918,19 @@ static void emit_value_match_stmt(CodeGen* gen, Node* node) {
     Type* expr_type = node->as.match_stmt.resolved_type;
     if (!expr_type)
         return;
+
+    // Handle owned temps in subject expression
+    Node* subject          = node->as.match_stmt.expr;
+    int   subject_is_owned = subject->is_owned_temp;
+    if (subject_is_owned)
+        subject->is_owned_temp =
+            0; // exclude subject from hoisting (ownership transfers to __matchN)
+
+    int saved     = 0;
+    int has_temps = has_owned_temps(subject);
+    if (has_temps) {
+        saved = hoist_owned_temps(gen, subject);
+    }
 
     int match_id = gen->out.temp_count++;
     emit_indent(gen);
@@ -930,6 +973,18 @@ static void emit_value_match_stmt(CodeGen* gen, Node* node) {
         emit_indent(gen);
         emit(gen, "}\n");
     }
+
+    // Cleanup sub-expression owned temps
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+    // Cleanup subject if it was an owned temp (ownership was transferred to __matchN)
+    if (subject_is_owned) {
+        subject->is_owned_temp = 1; // restore AST
+        char match_name[32];
+        snprintf(match_name, sizeof(match_name), "__match%d", match_id);
+        emit_owned_temp_dec(gen, subject, match_name);
+    }
 }
 
 // Emit a match statement as an if/else-if chain over the enum tag
@@ -945,6 +1000,19 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
 
     int         is_data   = enum_type->as.enm.has_data;
     const char* enum_name = enum_type->as.enm.name;
+
+    // Handle owned temps in subject expression
+    Node* subject          = node->as.match_stmt.expr;
+    int   subject_is_owned = subject->is_owned_temp;
+    if (subject_is_owned)
+        subject->is_owned_temp =
+            0; // exclude subject from hoisting (ownership transfers to __matchN)
+
+    int saved     = 0;
+    int has_temps = has_owned_temps(subject);
+    if (has_temps) {
+        saved = hoist_owned_temps(gen, subject);
+    }
 
     // Emit temp variable: EnumType __matchN = <expr>;
     int match_id = gen->out.temp_count++;
@@ -1029,6 +1097,18 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
         emit_indent(gen);
         emit(gen, "}\n");
     }
+
+    // Cleanup sub-expression owned temps
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+    // Cleanup subject if it was an owned temp (ownership was transferred to __matchN)
+    if (subject_is_owned) {
+        subject->is_owned_temp = 1; // restore AST
+        char match_name[32];
+        snprintf(match_name, sizeof(match_name), "__match%d", match_id);
+        emit_owned_temp_dec(gen, subject, match_name);
+    }
 }
 
 static int stmt_cond_has_outer_parens(Node* cond) {
@@ -1061,6 +1141,13 @@ static void emit_block_stmt(CodeGen* gen, Node* node) {
 }
 
 static void emit_if_stmt(CodeGen* gen, Node* node) {
+    // Hoist owned temps in condition before the if statement
+    int has_temps = has_owned_temps(node->as.if_stmt.cond);
+    int saved     = 0;
+    if (has_temps) {
+        saved = hoist_owned_temps(gen, node->as.if_stmt.cond);
+    }
+
     emit_indent(gen);
     if (stmt_cond_has_outer_parens(node->as.if_stmt.cond)) {
         emit(gen, "if ");
@@ -1081,25 +1168,78 @@ static void emit_if_stmt(CodeGen* gen, Node* node) {
 
     if (node->as.if_stmt.else_block) {
         if (node->as.if_stmt.else_block->type == NODE_IF) {
-            emit(gen, " else ");
-            gen->out.indent--;
-            emit_stmt(gen, node->as.if_stmt.else_block);
+            // Check if the else-if's condition has owned temps — if so, wrap in
+            // braces so the hoist statements have a valid location
+            int else_if_has_temps = has_owned_temps(node->as.if_stmt.else_block->as.if_stmt.cond);
+            if (else_if_has_temps) {
+                emit(gen, " else {\n");
+                gen->out.indent++;
+                emit_stmt(gen, node->as.if_stmt.else_block);
+                gen->out.indent--;
+                emit_indent(gen);
+                emit(gen, "}\n");
+            } else {
+                emit(gen, " else ");
+                gen->out.indent--;
+                emit_stmt(gen, node->as.if_stmt.else_block);
+                gen->out.indent++;
+            }
+        } else {
+            emit(gen, " else {\n");
             gen->out.indent++;
-            return;
+            emit_stmt_body(gen, node->as.if_stmt.else_block);
+            gen->out.indent--;
+            emit_indent(gen);
+            emit(gen, "}\n");
         }
-        emit(gen, " else {\n");
+    } else {
+        emit(gen, "\n");
+    }
+
+    // Cleanup owned temps after the entire if/else chain
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+}
+
+static void emit_while_stmt(CodeGen* gen, Node* node) {
+    // If condition has owned temps, transform to for(;;) with hoist/cleanup each iteration
+    if (has_owned_temps(node->as.while_stmt.cond)) {
+        int cond_id = gen->out.temp_count++;
+        emit_indent(gen);
+        emit(gen, "for (;;) {\n");
         gen->out.indent++;
-        emit_stmt_body(gen, node->as.if_stmt.else_block);
+
+        // Hoist owned temps in condition
+        int saved = hoist_owned_temps(gen, node->as.while_stmt.cond);
+
+        // Evaluate condition to a bool temp
+        emit_indent(gen);
+        emit(gen, "bool __while_cond%d = ", cond_id);
+        if (stmt_cond_has_outer_parens(node->as.while_stmt.cond)) {
+            emit_expr(gen, node->as.while_stmt.cond);
+        } else {
+            emit(gen, "(");
+            emit_expr(gen, node->as.while_stmt.cond);
+            emit(gen, ")");
+        }
+        emit(gen, ";\n");
+
+        // Cleanup owned temps
+        cleanup_owned_temps(gen, saved);
+
+        // Break if condition is false
+        emit_indent(gen);
+        emit(gen, "if (!__while_cond%d) break;\n", cond_id);
+
+        // Emit loop body
+        emit_stmt_body(gen, node->as.while_stmt.body);
         gen->out.indent--;
         emit_indent(gen);
         emit(gen, "}\n");
         return;
     }
 
-    emit(gen, "\n");
-}
-
-static void emit_while_stmt(CodeGen* gen, Node* node) {
     emit_indent(gen);
     if (stmt_cond_has_outer_parens(node->as.while_stmt.cond)) {
         emit(gen, "while ");
