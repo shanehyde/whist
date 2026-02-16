@@ -1862,6 +1862,128 @@ static Type* check_try_expr(Checker* checker, Node* node) {
 }
 
 // =============================================================================
+// Lambda expression checking
+// =============================================================================
+
+// Check if a variable name is captured across a lambda boundary
+static int is_captured_variable(Checker* checker, const char* name) {
+    int    crossed_boundary = 0;
+    Scope* scope            = checker->scope;
+    while (scope) {
+        // Check this scope for the variable
+        unsigned hash = 5381;
+        for (const char* p = name; *p; p++)
+            hash = ((hash << 5) + hash) + (unsigned char)*p;
+        int idx = hash % scope->size;
+        for (Symbol* sym = scope->symbols[idx]; sym; sym = sym->next) {
+            if (strcmp(sym->name, name) == 0 && sym->kind == SYM_VAR) {
+                return crossed_boundary;
+            }
+        }
+        if (scope->is_lambda_boundary)
+            crossed_boundary = 1;
+        scope = scope->parent;
+    }
+    return 0;
+}
+
+static Type* check_lambda_expr(Checker* checker, Node* node) {
+    // Assign unique ID
+    node->as.lambda.lambda_id = checker->lambda_next_id++;
+
+    NodeList* params      = &node->as.lambda.params;
+    int       param_count = params->count;
+
+    // Resolve parameter types
+    Type** param_types = NULL;
+    if (param_count > 0) {
+        param_types = xmalloc(param_count * sizeof(Type*));
+    }
+    for (int i = 0; i < param_count; i++) {
+        Node* p = params->nodes[i];
+        if (!p->as.param.type) {
+            check_error(checker, p->line, p->column,
+                        "Lambda parameter '%s' requires a type annotation", p->as.param.name);
+            free(param_types);
+            return type_error;
+        }
+        param_types[i] = resolve_type(checker, p->as.param.type);
+        if (param_types[i]->kind == TYPE_ERROR) {
+            free(param_types);
+            return type_error;
+        }
+    }
+
+    // Resolve explicit return type
+    Type* return_type = NULL;
+    if (node->as.lambda.return_type) {
+        return_type = resolve_type(checker, node->as.lambda.return_type);
+        if (return_type->kind == TYPE_ERROR) {
+            free(param_types);
+            return type_error;
+        }
+    }
+
+    // Push lambda scope
+    checker_push_scope(checker);
+    checker->scope->is_lambda_boundary = 1;
+
+    // Save and set function return context
+    Type* old_return = checker->current_func_return;
+    checker->lambda_depth++;
+
+    // Define params in lambda scope
+    for (int i = 0; i < param_count; i++) {
+        Node* p = params->nodes[i];
+        checker_define(checker, p->as.param.name, SYM_VAR, param_types[i], p->as.param.is_const, 0,
+                       NULL);
+    }
+
+    if (node->as.lambda.is_expr_body) {
+        // Expression body: infer return type
+        if (!return_type) {
+            // Set return type temporarily to NULL to allow checking
+            checker->current_func_return = type_void;
+        } else {
+            checker->current_func_return = return_type;
+        }
+        Type* body_type = check_expression(checker, node->as.lambda.body);
+        if (!return_type) {
+            return_type = body_type;
+        } else if (!type_assignable(return_type, body_type)) {
+            check_error(checker, node->as.lambda.body->line, node->as.lambda.body->column,
+                        "Lambda body type '%s' doesn't match return type '%s'",
+                        type_name(body_type), type_name(return_type));
+        }
+    } else {
+        // Block body
+        if (!return_type) {
+            return_type = type_void;
+        }
+        checker->current_func_return = return_type;
+        // Check block statements (like check_function_body)
+        Node* body = node->as.lambda.body;
+        if (body && body->type == NODE_BLOCK) {
+            for (int i = 0; i < body->as.block.stmts.count; i++) {
+                check_statement(checker, body->as.block.stmts.nodes[i]);
+            }
+        }
+    }
+
+    // Restore state
+    checker->lambda_depth--;
+    checker->current_func_return = old_return;
+    checker_pop_scope(checker);
+
+    // Build TYPE_FUNC
+    Type* func_type               = type_func(param_types, param_count, return_type, 0);
+    node->as.lambda.resolved_type = func_type;
+    // param_types ownership transferred to type_func
+
+    return func_type;
+}
+
+// =============================================================================
 // Expression checking
 // =============================================================================
 
@@ -1890,6 +2012,12 @@ Type* check_expression(Checker* checker, Node* node) {
         return type_null; // null reference
 
     case NODE_IDENT: {
+        if (checker->lambda_depth > 0 && is_captured_variable(checker, node->as.ident.name)) {
+            check_error(checker, node->line, node->column,
+                        "Cannot capture variable '%s' — closures not yet supported",
+                        node->as.ident.name);
+            return type_error;
+        }
         Symbol* sym = checker_lookup(checker, node->as.ident.name);
         if (!sym) {
             check_error(checker, node->line, node->column, "Undefined identifier '%s'",
@@ -1948,6 +2076,9 @@ Type* check_expression(Checker* checker, Node* node) {
 
     case NODE_STRING_INTERP:
         return check_string_interp_expr(checker, node);
+
+    case NODE_LAMBDA:
+        return check_lambda_expr(checker, node);
 
     default:
         check_error(checker, node->line, node->column, "Unknown expression type %d", node->type);

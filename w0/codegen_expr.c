@@ -1444,6 +1444,10 @@ void emit_expr(CodeGen* gen, Node* node) {
         emit_match_expr(gen, node);
         break;
 
+    case NODE_LAMBDA:
+        emit(gen, "__lambda_%d", node->as.lambda.lambda_id);
+        break;
+
     default:
         emit(gen, "/* unknown expr %d */", node->type);
         break;

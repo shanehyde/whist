@@ -69,6 +69,7 @@ typedef enum {
     NODE_STRING_INTERP,
     NODE_CAST,
     NODE_TRY_EXPR,
+    NODE_LAMBDA,
 
     // Statements
     NODE_EXPR_STMT,
@@ -323,6 +324,17 @@ struct Node {
             char* enum_name;      // Set by checker: operand's mangled enum name
             char* ret_enum_name;  // Set by checker: function return's mangled enum name
         } try_expr;
+
+        // Lambda expression: |params| body
+        struct {
+            NodeList params;       // NODE_PARAM nodes
+            Node*    return_type;  // Explicit return type (NULL = inferred)
+            Node*    body;         // Block or expression node
+            int      is_expr_body; // 1 if body is expression (not block)
+            // Set by checker:
+            int   lambda_id;     // Unique ID for codegen (__lambda_N)
+            Type* resolved_type; // TYPE_FUNC
+        } lambda;
 
         // Tuple type: (T1, T2, ...)
         struct {

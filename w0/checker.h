@@ -31,6 +31,7 @@ struct Scope {
     Symbol** symbols; // Hash table
     int      size;
     Scope*   parent;
+    int      is_lambda_boundary; // 1 = marks lambda scope boundary
 };
 
 // Trait implementation record
@@ -202,6 +203,10 @@ struct Checker {
     // Self type: set to TYPE_GENERIC_PARAM("Self") in trait decls,
     // concrete implementing type in impl blocks; NULL otherwise.
     Type* self_type;
+
+    // Lambda tracking
+    int lambda_next_id; // Next lambda ID (monotonically increasing)
+    int lambda_depth;   // >0 when inside a lambda body
 
     // Sidecar semantic metadata used by checker/codegen; owned by checker.
     SemInfo* sem;

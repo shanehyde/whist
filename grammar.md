@@ -421,6 +421,7 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
                 | <tuple-literal>
                 | <array-literal>
                 | <match-expr>
+                | <lambda-expr>
 
 <new-expr> ::= 'new' <type> '{' [ <init-list> ] '}'
             | 'new' <type> '(' [ <arg-list> ] ')'
@@ -443,9 +444,18 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
 <match-expr> ::= 'match' '(' <expression> ')' '{' { <match-expr-arm> } '}'
 
 <match-expr-arm> ::= <match-pattern> '=>' <expression> [ ',' ]
+
+<lambda-expr> ::= '|' [ <lambda-params> ] '|' [ '->' <type> ] ( <block> | <expression> )
+               | '||' [ '->' <type> ] ( <block> | <expression> )
+
+<lambda-params> ::= <lambda-param> { ',' <lambda-param> }
+
+<lambda-param> ::= <identifier> ':' <type>
 ```
 
 `match` can be used as a statement or expression. In expression form, each arm body must be an expression (block bodies are not allowed).
+
+**Lambda expressions:** `|x: i64| x * 2` creates an anonymous function (non-capturing). Lambdas compile to plain C function pointers and have type `func(T1, T2, ...): R`. Parameter type annotations are required. The return type is inferred from the body for expression lambdas, or defaults to `void` for block lambdas (use `-> T` to specify explicitly). Empty-parameter lambdas use `||`: `|| 42`. Lambdas can be assigned to `func(...)` typed variables, passed as function arguments, or called directly: `(|x: i64| x + 1)(42)`. Variable capture (closures) is not yet supported — referencing variables from an enclosing scope is a compile error.
 
 **Tuple literals:** `(1, "hello")` creates a tuple value. Tuples must have at least two elements. Access elements by index: `t[0]`, `t[1]`.
 

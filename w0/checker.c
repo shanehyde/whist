@@ -138,6 +138,8 @@ void checker_init(Checker* checker) {
     checker->alias_depth                    = 0;
     checker->enum_target_hint               = NULL;
     checker->self_type                      = NULL;
+    checker->lambda_next_id                 = 0;
+    checker->lambda_depth                   = 0;
     checker->sem                            = sem_info_new();
     types_init();
 }
@@ -150,11 +152,12 @@ void checker_set_direct_imports(Checker* checker, char** direct_imports, int cou
 
 // Push a new scope onto the scope chain for block-level symbol resolution
 void checker_push_scope(Checker* checker) {
-    Scope* scope   = xcalloc(1, sizeof(Scope));
-    scope->symbols = xcalloc(SCOPE_SIZE, sizeof(Symbol*));
-    scope->size    = SCOPE_SIZE;
-    scope->parent  = checker->scope;
-    checker->scope = scope;
+    Scope* scope              = xcalloc(1, sizeof(Scope));
+    scope->symbols            = xcalloc(SCOPE_SIZE, sizeof(Symbol*));
+    scope->size               = SCOPE_SIZE;
+    scope->parent             = checker->scope;
+    scope->is_lambda_boundary = 0;
+    checker->scope            = scope;
 }
 
 // Pop the current scope and free all its symbols

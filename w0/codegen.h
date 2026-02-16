@@ -126,6 +126,12 @@ typedef struct {
         int    count;
         int    capacity;
     } hoist;
+    // Lambda functions collected for top-level emission
+    struct {
+        Node** nodes; // NODE_LAMBDA AST nodes (not owned)
+        int    count;
+        int    capacity;
+    } lambdas;
     // Current module name (NULL for "main")
     const char* current_module;
     // 1 if currently emitting an enum method body

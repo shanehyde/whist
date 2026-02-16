@@ -532,6 +532,54 @@ static Node* parse_new_expr(Parser* parser, Token new_token) {
     return node;
 }
 
+static Node* parse_lambda_expr(Parser* parser, Token start) {
+    Node* node = node_new(NODE_LAMBDA, start.line, start.column);
+    nodelist_init(&node->as.lambda.params);
+    node->as.lambda.return_type   = NULL;
+    node->as.lambda.body          = NULL;
+    node->as.lambda.is_expr_body  = 0;
+    node->as.lambda.lambda_id     = 0;
+    node->as.lambda.resolved_type = NULL;
+
+    // Parse params: |x: T, y: U| or ||
+    if (!check_token(parser, TOK_PIPE)) {
+        for (;;) {
+            Token param_name = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected parameter name in lambda");
+
+            Node* param                 = node_new(NODE_PARAM, param_name.line, param_name.column);
+            param->as.param.name        = copy_token_string(&param_name);
+            param->as.param.name_length = param_name.length;
+            param->as.param.is_const    = 0;
+
+            consume_token(parser, TOK_COLON, "Expected ':' after lambda parameter name");
+            param->as.param.type = parse_type(parser);
+
+            nodelist_push(&node->as.lambda.params, param);
+
+            if (!match_token(parser, TOK_COMMA))
+                break;
+        }
+    }
+    consume_token(parser, TOK_PIPE, "Expected '|' after lambda parameters");
+
+    // Optional return type: -> Type
+    if (match_token(parser, TOK_ARROW)) {
+        node->as.lambda.return_type = parse_type(parser);
+    }
+
+    // Body: block or expression
+    if (match_token(parser, TOK_LBRACE)) {
+        node->as.lambda.body         = parse_block(parser);
+        node->as.lambda.is_expr_body = 0;
+    } else {
+        node->as.lambda.body         = parse_expression(parser);
+        node->as.lambda.is_expr_body = 1;
+    }
+
+    return node;
+}
+
 static Node* parse_array_lit(Parser* parser, Token token) {
     Node* node = node_new(NODE_ARRAY_LIT, token.line, token.column);
     nodelist_init(&node->as.array_lit.elements);
@@ -606,6 +654,29 @@ static Node* parse_primary_expression(Parser* parser) {
     case TOK_LBRACKET:
         advance_token(parser);
         return parse_array_lit(parser, token);
+    case TOK_PIPE:
+        advance_token(parser);
+        return parse_lambda_expr(parser, token);
+    case TOK_PIPE_PIPE: {
+        // || is lexed as a single token; treat as empty-param lambda
+        advance_token(parser);
+        Node* lam = node_new(NODE_LAMBDA, token.line, token.column);
+        nodelist_init(&lam->as.lambda.params);
+        lam->as.lambda.return_type   = NULL;
+        lam->as.lambda.lambda_id     = 0;
+        lam->as.lambda.resolved_type = NULL;
+        if (match_token(parser, TOK_ARROW)) {
+            lam->as.lambda.return_type = parse_type(parser);
+        }
+        if (match_token(parser, TOK_LBRACE)) {
+            lam->as.lambda.body         = parse_block(parser);
+            lam->as.lambda.is_expr_body = 0;
+        } else {
+            lam->as.lambda.body         = parse_expression(parser);
+            lam->as.lambda.is_expr_body = 1;
+        }
+        return lam;
+    }
     default:
         parse_error(parser, "Expected expression");
         return NULL;
