@@ -66,6 +66,8 @@ typedef struct {
     int                  vec_count;
     TraitImpl*           traits;
     int                  trait_count;
+    GenericFuncDef*      func_defs;
+    int                  func_def_count;
     GenericFuncInstance* func_instances;
     int                  func_instance_count;
     SemInfo*             sem;

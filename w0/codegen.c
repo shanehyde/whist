@@ -1747,6 +1747,16 @@ static Node* find_generic_func_decl(Node* ast, const char* name) {
     return NULL;
 }
 
+GenericFuncDef* lookup_generic_func_def_for_instance(CodeGen* gen, const char* base_name) {
+    for (int i = 0; i < gen->checker.func_def_count; i++) {
+        GenericFuncDef* def = &gen->checker.func_defs[i];
+        if (strcmp(def->name, base_name) == 0) {
+            return def;
+        }
+    }
+    return NULL;
+}
+
 // Parse a "Type.method" base_name to extract receiver_type and method_name.
 // Returns 1 if found, 0 if not a method key.
 static int parse_method_key(const char* base_name, char* recv_out, int recv_size, char* method_out,
@@ -1780,28 +1790,15 @@ static void emit_generic_method_func_impl(CodeGen* gen, Node* ast, GenericFuncIn
         return;
 
     func_decl_node* fdn = &tmpl->as.func_decl;
-
-    // Build combined substitution: receiver params (from GenericDef) + method params
-    // The GenericFuncDef stores the combined param names; instance stores combined args.
-    // But we need to get the combined param names from the definition.
-    // Reconstruct them from receiver_type_args + type_params.
-    int    recv_param_count   = fdn->receiver_type_args.count;
-    int    method_param_count = fdn->type_param_count;
-    int    combined_count     = recv_param_count + method_param_count;
-    char** combined_params    = xmalloc(combined_count * sizeof(char*));
-
-    for (int p = 0; p < recv_param_count; p++) {
-        Node* arg          = fdn->receiver_type_args.nodes[p];
-        combined_params[p] = arg->as.ident.name;
-    }
-    for (int p = 0; p < method_param_count; p++) {
-        combined_params[recv_param_count + p] = fdn->type_params[p];
+    GenericFuncDef* def = lookup_generic_func_def_for_instance(gen, inst->base_name);
+    if (!def || def->type_param_count != inst->type_arg_count) {
+        return;
     }
 
     TypeSubstContext subst_ctx;
-    subst_ctx.type_params = combined_params;
+    subst_ctx.type_params = def->type_params;
     subst_ctx.type_args   = inst->type_args;
-    subst_ctx.count       = combined_count;
+    subst_ctx.count       = def->type_param_count;
     gen->generics.subst   = &subst_ctx;
 
     int is_void = return_type_is_void(fdn->return_type);
@@ -1881,7 +1878,6 @@ static void emit_generic_method_func_impl(CodeGen* gen, Node* ast, GenericFuncIn
     gen->generics.subst        = NULL;
     gen->generics.modules      = NULL;
     gen->generics.module_count = 0;
-    free(combined_params);
 }
 
 // Emit implementations for all instantiated generic free functions

@@ -1375,6 +1375,70 @@ static void check_extern_module_decl(Checker* checker, Node* node) {
     }
 }
 
+static int has_receiver_type_var(char** names, int count, const char* name) {
+    for (int i = 0; i < count; i++) {
+        if (strcmp(names[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int is_receiver_type_variable(Checker* checker, const char* name) {
+    if (type_builtin_from_name(name)) {
+        return 0;
+    }
+    Symbol* sym = checker_lookup_any(checker, name);
+    return !(sym && sym->kind == SYM_TYPE);
+}
+
+static void collect_receiver_type_vars(Checker* checker, Node* node, char*** names, int* count,
+                                       int* capacity) {
+    if (!node) {
+        return;
+    }
+
+    switch (node->type) {
+    case NODE_IDENT: {
+        const char* name = node->as.ident.name;
+        if (!is_receiver_type_variable(checker, name) ||
+            has_receiver_type_var(*names, *count, name)) {
+            return;
+        }
+        if (*count >= *capacity) {
+            *capacity = (*capacity == 0) ? 4 : (*capacity * 2);
+            *names    = xrealloc(*names, (*capacity) * sizeof(char*));
+        }
+        (*names)[(*count)++] = xstrdup(name);
+        return;
+    }
+    case NODE_GENERIC_TYPE:
+        for (int i = 0; i < node->as.generic_type.type_args.count; i++) {
+            collect_receiver_type_vars(checker, node->as.generic_type.type_args.nodes[i], names,
+                                       count, capacity);
+        }
+        return;
+    case NODE_ARRAY_TYPE:
+        collect_receiver_type_vars(checker, node->as.array_type.elem_type, names, count, capacity);
+        return;
+    case NODE_FUNC_TYPE:
+        for (int i = 0; i < node->as.func_type.param_types.count; i++) {
+            collect_receiver_type_vars(checker, node->as.func_type.param_types.nodes[i], names,
+                                       count, capacity);
+        }
+        collect_receiver_type_vars(checker, node->as.func_type.return_type, names, count, capacity);
+        return;
+    case NODE_TUPLE_TYPE:
+        for (int i = 0; i < node->as.tuple_type.elem_types.count; i++) {
+            collect_receiver_type_vars(checker, node->as.tuple_type.elem_types.nodes[i], names,
+                                       count, capacity);
+        }
+        return;
+    default:
+        return;
+    }
+}
+
 static int try_register_generic_func_or_method(Checker* checker, Node* node) {
     func_decl_node* fdn         = &node->as.func_decl;
     const char*     name        = fdn->name;
@@ -1403,15 +1467,24 @@ static int try_register_generic_func_or_method(Checker* checker, Node* node) {
                         def->type_param_count, fdn->receiver_type_args.count);
             return 1;
         }
-        // Build combined type params: receiver's params + method's own type_params
-        int    recv_count   = def->type_param_count;
+        // Build combined type params: receiver pattern bindings + method's own type params.
+        // Example: func (Pair<i32, Box<T>>) map<U>(...) => ["T", "U"].
+        char** recv_params   = NULL;
+        int    recv_count    = 0;
+        int    recv_capacity = 0;
+        for (int i = 0; i < fdn->receiver_type_args.count; i++) {
+            collect_receiver_type_vars(checker, fdn->receiver_type_args.nodes[i], &recv_params,
+                                       &recv_count, &recv_capacity);
+        }
+
         int    method_count = fdn->type_param_count;
         int    combined     = recv_count + method_count;
         char** params       = xmalloc(combined * sizeof(char*));
         char** bounds       = xmalloc(combined * sizeof(char*));
         for (int i = 0; i < recv_count; i++) {
-            params[i] = def->type_params[i];
-            bounds[i] = def->type_param_bounds[i];
+            params[i] = recv_params[i];
+            // Receiver generic bounds are enforced when the receiver type is instantiated.
+            bounds[i] = NULL;
         }
         for (int i = 0; i < method_count; i++) {
             params[recv_count + i] = fdn->type_params[i];
@@ -1419,6 +1492,10 @@ static int try_register_generic_func_or_method(Checker* checker, Node* node) {
         }
         register_generic_method_func_def(checker, receiver, name, params, bounds, combined,
                                          recv_count, node);
+        for (int i = 0; i < recv_count; i++) {
+            free(recv_params[i]);
+        }
+        free(recv_params);
         free(params);
         free(bounds);
         return 1;

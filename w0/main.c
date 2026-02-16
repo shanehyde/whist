@@ -72,6 +72,8 @@ static CodeGenChecker make_codegen_checker(Checker* checker) {
         .vec_count           = checker->containers.vec_count,
         .traits              = checker->traits.impls,
         .trait_count         = checker->traits.impl_count,
+        .func_defs           = checker->generics.func_defs,
+        .func_def_count      = checker->generics.func_def_count,
         .func_instances      = checker->generics.func_instances,
         .func_instance_count = checker->generics.func_instance_count,
         .sem                 = checker->sem,
