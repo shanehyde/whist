@@ -914,21 +914,74 @@ static void check_return_stmt(Checker* checker, Node* node) {
 // Match statement checking
 // =============================================================================
 
-static Type* check_match(Checker* checker, Node* node, int is_expr_context) {
-    Type* expr_type = check_expression(checker, node->as.match_stmt.expr);
-
-    if (expr_type->kind != TYPE_ENUM && expr_type->kind != TYPE_ERROR) {
-        check_error(checker, node->line, node->column,
-                    "Match expression must be an enum type, got '%s'", type_name(expr_type));
-        return type_error;
+static int type_is_matchable(Type* t) {
+    switch (t->kind) {
+    case TYPE_INT8:
+    case TYPE_INT16:
+    case TYPE_INT32:
+    case TYPE_INT64:
+    case TYPE_UINT8:
+    case TYPE_UINT16:
+    case TYPE_UINT32:
+    case TYPE_UINT64:
+    case TYPE_F32:
+    case TYPE_F64:
+    case TYPE_CHAR:
+    case TYPE_BOOL:
+    case TYPE_STRING:
+        return 1;
+    default:
+        return 0;
     }
+}
 
-    if (expr_type->kind == TYPE_ERROR)
-        return type_error;
+// Return 1 if node is a literal pattern suitable for value match
+static int is_literal_pattern(Node* node) {
+    if (!node)
+        return 0;
+    switch (node->type) {
+    case NODE_INT_LIT:
+    case NODE_FLOAT_LIT:
+    case NODE_STRING_LIT:
+    case NODE_CHAR_LIT:
+    case NODE_BOOL_LIT:
+        return 1;
+    case NODE_UNARY:
+        // Allow -<numeric_lit>
+        if (node->as.unary.op == TOK_MINUS) {
+            NodeType inner = node->as.unary.operand->type;
+            return inner == NODE_INT_LIT || inner == NODE_FLOAT_LIT;
+        }
+        return 0;
+    default:
+        return 0;
+    }
+}
 
-    node->as.match_stmt.resolved_type       = expr_type;
-    node->as.match_stmt.resolved_value_type = NULL;
+// Check a match arm body in expression or statement context, unifying arm result types
+static int check_match_arm_body(Checker* checker, Node* arm, int is_expr_context,
+                                Type** match_value_type, int* had_expr_error) {
+    if (is_expr_context) {
+        Type* arm_type = check_expression(checker, arm->as.match_arm.body);
+        if (arm_type->kind == TYPE_ERROR) {
+            *had_expr_error = 1;
+            return 0;
+        }
+        if (!*match_value_type) {
+            *match_value_type = arm_type;
+        } else if (!type_assignable(*match_value_type, arm_type) ||
+                   !type_assignable(arm_type, *match_value_type)) {
+            check_error_type(checker, arm->line, arm->column, "Match arm type mismatch",
+                             *match_value_type, arm_type);
+            *had_expr_error = 1;
+        }
+    } else {
+        check_statement(checker, arm->as.match_arm.body);
+    }
+    return 1;
+}
 
+static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int is_expr_context) {
     Type* match_value_type = NULL;
     int   had_expr_error   = 0;
 
@@ -936,24 +989,15 @@ static Type* check_match(Checker* checker, Node* node, int is_expr_context) {
         Node* arm = node->as.match_stmt.arms.nodes[a];
 
         if (arm->as.match_arm.is_wildcard) {
-            if (is_expr_context) {
-                Type* arm_type = check_expression(checker, arm->as.match_arm.body);
-                if (arm_type->kind == TYPE_ERROR) {
-                    had_expr_error = 1;
-                    continue;
-                }
-                if (!match_value_type) {
-                    match_value_type = arm_type;
-                } else if (!type_assignable(match_value_type, arm_type) ||
-                           !type_assignable(arm_type, match_value_type)) {
-                    check_error_type(checker, arm->line, arm->column, "Match arm type mismatch",
-                                     match_value_type, arm_type);
-                    had_expr_error = 1;
-                }
-            } else {
-                // Wildcard: just check body
-                check_statement(checker, arm->as.match_arm.body);
-            }
+            check_match_arm_body(checker, arm, is_expr_context, &match_value_type, &had_expr_error);
+            continue;
+        }
+
+        // Reject value patterns in enum match
+        if (arm->as.match_arm.pattern_expr) {
+            check_error(checker, arm->line, arm->column,
+                        "Literal pattern cannot be used in match on enum type '%s'",
+                        type_name(expr_type));
             continue;
         }
 
@@ -1000,21 +1044,7 @@ static Type* check_match(Checker* checker, Node* node, int is_expr_context) {
             checker_define(checker, arm->as.match_arm.bindings[j], SYM_VAR, binding_type, 0, 0,
                            NULL);
         }
-        if (is_expr_context) {
-            Type* arm_type = check_expression(checker, arm->as.match_arm.body);
-            if (arm_type->kind == TYPE_ERROR) {
-                had_expr_error = 1;
-            } else if (!match_value_type) {
-                match_value_type = arm_type;
-            } else if (!type_assignable(match_value_type, arm_type) ||
-                       !type_assignable(arm_type, match_value_type)) {
-                check_error_type(checker, arm->line, arm->column, "Match arm type mismatch",
-                                 match_value_type, arm_type);
-                had_expr_error = 1;
-            }
-        } else {
-            check_statement(checker, arm->as.match_arm.body);
-        }
+        check_match_arm_body(checker, arm, is_expr_context, &match_value_type, &had_expr_error);
         checker_pop_scope(checker);
     }
 
@@ -1056,6 +1086,133 @@ static Type* check_match(Checker* checker, Node* node, int is_expr_context) {
     }
 
     return type_void;
+}
+
+// Compare two literal pattern nodes for duplicate detection
+static int literal_patterns_equal(Node* a, Node* b) {
+    if (a->type != b->type)
+        return 0;
+    switch (a->type) {
+    case NODE_INT_LIT:
+        return a->as.int_lit.value == b->as.int_lit.value;
+    case NODE_FLOAT_LIT:
+        return a->as.float_lit.value == b->as.float_lit.value;
+    case NODE_STRING_LIT:
+        return a->as.string_lit.length == b->as.string_lit.length &&
+               memcmp(a->as.string_lit.value, b->as.string_lit.value, a->as.string_lit.length) == 0;
+    case NODE_CHAR_LIT:
+        return a->as.char_lit.value == b->as.char_lit.value;
+    case NODE_BOOL_LIT:
+        return a->as.bool_lit.value == b->as.bool_lit.value;
+    case NODE_UNARY:
+        // Both must be negated numeric literals
+        if (a->as.unary.op != b->as.unary.op)
+            return 0;
+        return literal_patterns_equal(a->as.unary.operand, b->as.unary.operand);
+    default:
+        return 0;
+    }
+}
+
+static Type* check_match_value(Checker* checker, Node* node, Type* expr_type, int is_expr_context) {
+    Type* match_value_type = NULL;
+    int   had_expr_error   = 0;
+    int   has_wildcard     = 0;
+
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        Node* arm = node->as.match_stmt.arms.nodes[a];
+
+        if (arm->as.match_arm.is_wildcard) {
+            has_wildcard = 1;
+            check_match_arm_body(checker, arm, is_expr_context, &match_value_type, &had_expr_error);
+            continue;
+        }
+
+        // Reject enum variant patterns in value match
+        if (arm->as.match_arm.variant_name) {
+            check_error(checker, arm->line, arm->column,
+                        "Enum variant pattern cannot be used in match on '%s'",
+                        type_name(expr_type));
+            continue;
+        }
+
+        Node* pat = arm->as.match_arm.pattern_expr;
+        if (!pat) {
+            check_error(checker, arm->line, arm->column, "Expected literal pattern in value match");
+            continue;
+        }
+
+        if (!is_literal_pattern(pat)) {
+            check_error(checker, arm->line, arm->column, "Match pattern must be a literal value");
+            continue;
+        }
+
+        // Type-check the pattern expression and verify compatibility
+        Type* pat_type = check_expression(checker, pat);
+        if (pat_type->kind == TYPE_ERROR)
+            continue;
+
+        if (!type_assignable(expr_type, pat_type)) {
+            check_error(checker, arm->line, arm->column,
+                        "Pattern type '%s' is not compatible with match expression type '%s'",
+                        type_name(pat_type), type_name(expr_type));
+            continue;
+        }
+
+        // Check for duplicate literal patterns
+        for (int b = 0; b < a; b++) {
+            Node* prev = node->as.match_stmt.arms.nodes[b];
+            if (prev->as.match_arm.pattern_expr &&
+                literal_patterns_equal(pat, prev->as.match_arm.pattern_expr)) {
+                check_error(checker, arm->line, arm->column, "Duplicate match pattern");
+                break;
+            }
+        }
+
+        check_match_arm_body(checker, arm, is_expr_context, &match_value_type, &had_expr_error);
+    }
+
+    // Match expressions require a wildcard to guarantee a value is produced
+    if (is_expr_context && !has_wildcard) {
+        check_error(checker, node->line, node->column,
+                    "Match expression requires a wildcard '_' arm");
+        return type_error;
+    }
+
+    if (is_expr_context) {
+        if (!match_value_type || had_expr_error) {
+            node->as.match_stmt.resolved_value_type = type_error;
+            return type_error;
+        }
+        node->as.match_stmt.resolved_value_type = match_value_type;
+        return match_value_type;
+    }
+
+    return type_void;
+}
+
+static Type* check_match(Checker* checker, Node* node, int is_expr_context) {
+    Type* expr_type = check_expression(checker, node->as.match_stmt.expr);
+    if (expr_type->kind == TYPE_ERROR)
+        return type_error;
+
+    node->as.match_stmt.resolved_type       = expr_type;
+    node->as.match_stmt.resolved_value_type = NULL;
+
+    if (expr_type->kind == TYPE_ENUM) {
+        return check_match_enum(checker, node, expr_type, is_expr_context);
+    }
+
+    if (type_is_matchable(expr_type)) {
+        node->as.match_stmt.is_value_match = 1;
+        return check_match_value(checker, node, expr_type, is_expr_context);
+    }
+
+    check_error(checker, node->line, node->column,
+                "Match expression must be an enum, integer, float, string, char, or bool type, "
+                "got '%s'",
+                type_name(expr_type));
+    return type_error;
 }
 
 Type* check_match_expr(Checker* checker, Node* node) {

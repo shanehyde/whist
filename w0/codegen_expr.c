@@ -1075,9 +1075,74 @@ static void emit_try_expr(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a comparison for a value match arm pattern (inline, for expression context)
+static void emit_value_match_cond_expr(CodeGen* gen, int match_id, Node* pattern, Type* expr_type) {
+    if (expr_type->kind == TYPE_STRING) {
+        emit(gen, "strcmp(__match%d, ", match_id);
+        emit_expr(gen, pattern);
+        emit(gen, ") == 0");
+    } else {
+        emit(gen, "__match%d == ", match_id);
+        emit_expr(gen, pattern);
+    }
+}
+
+// Emit value match as expression via GCC statement expression
+static void emit_value_match_expr(CodeGen* gen, Node* node) {
+    Type* expr_type  = node->as.match_stmt.resolved_type;
+    Type* value_type = node->as.match_stmt.resolved_value_type;
+    if (!expr_type || !value_type || value_type->kind == TYPE_ERROR) {
+        emit(gen, "/* invalid value match expr */");
+        return;
+    }
+
+    int match_id = gen->out.temp_count++;
+
+    emit(gen, "({ ");
+    emit_resolved_type(gen, expr_type);
+    emit(gen, " __match%d = ", match_id);
+    emit_expr(gen, node->as.match_stmt.expr);
+    emit(gen, "; ");
+    emit_resolved_type(gen, value_type);
+    emit(gen, " __matchv%d; ", match_id);
+
+    int first = 1;
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        Node* arm = node->as.match_stmt.arms.nodes[a];
+
+        if (arm->as.match_arm.is_wildcard) {
+            if (first) {
+                emit(gen, "{ ");
+            } else {
+                emit(gen, "else { ");
+            }
+        } else {
+            if (first) {
+                emit(gen, "if (");
+            } else {
+                emit(gen, "else if (");
+            }
+            emit_value_match_cond_expr(gen, match_id, arm->as.match_arm.pattern_expr, expr_type);
+            emit(gen, ") { ");
+        }
+        first = 0;
+
+        emit(gen, "__matchv%d = ", match_id);
+        emit_expr(gen, arm->as.match_arm.body);
+        emit(gen, "; } ");
+    }
+
+    emit(gen, "__matchv%d; })", match_id);
+}
+
 // Emit match-as-expression via GCC statement expression:
 // ({ Enum __matchN = <expr>; Result __matchvN; if (...) { __matchvN = ...; } ... __matchvN; })
 static void emit_match_expr(CodeGen* gen, Node* node) {
+    if (node->as.match_stmt.is_value_match) {
+        emit_value_match_expr(gen, node);
+        return;
+    }
+
     Type* enum_type  = node->as.match_stmt.resolved_type;
     Type* value_type = node->as.match_stmt.resolved_value_type;
     if (!enum_type || enum_type->kind != TYPE_ENUM || !value_type ||
