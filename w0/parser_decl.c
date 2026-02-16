@@ -69,9 +69,9 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
     fdn->return_is_const    = 0;
     nodelist_init(&fdn->params);
 
-    // Parse type parameters for generic free functions: func identity<T>(x: T): T
-    // Only for free functions (not methods with receivers)
-    if (!receiver_type && match_token(parser, TOK_LT)) {
+    // Parse type parameters for generic functions: func identity<T>(x: T): T
+    // Also for method-level generics: func (Vec<T>) map<K>(pred: func(T): K): Vec<K>
+    if (match_token(parser, TOK_LT)) {
         int capacity           = 4;
         fdn->type_params       = xmalloc(capacity * sizeof(char*));
         fdn->type_param_bounds = xmalloc(capacity * sizeof(char*));

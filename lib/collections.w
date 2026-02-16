@@ -191,3 +191,21 @@ func (Vec<T>) all(pred: func(T) :bool): bool {
     }
     return true;
 }
+
+func (Vec<T>) map<K>(transform: func(T) :K): Vec<K> {
+    var result = new Vec<K>{};
+    foreach (const elem in self) {
+        result.push(transform(elem));
+    }
+    return result;
+}
+
+func (Vec<T>) filter(pred: func(T) :bool): Vec<T> {
+    var result = new Vec<T>{};
+    foreach (const elem in self) {
+        if (pred(elem)) {
+            result.push(elem);
+        }
+    }
+    return result;
+}

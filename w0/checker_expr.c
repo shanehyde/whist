@@ -1416,6 +1416,173 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
     return ret;
 }
 
+// Determine the base receiver type name and type arguments for method-level generics.
+// For Vec<i64>: base_name = "Vec", recv_args = [i64], count = 1
+// For Box<i64> (generic struct): base_name = "Box", recv_args = [i64], count = 1
+// Returns NULL base_name if the type cannot be a generic method receiver.
+static const char* get_receiver_info(Checker* checker, Type* recv_type, Type*** out_args,
+                                     int* out_count) {
+    *out_args  = NULL;
+    *out_count = 0;
+
+    if (recv_type->kind == TYPE_VEC) {
+        *out_args      = xmalloc(sizeof(Type*));
+        (*out_args)[0] = recv_type->as.vec.elem;
+        *out_count     = 1;
+        return "Vec";
+    }
+
+    if (recv_type->kind == TYPE_STRUCT) {
+        // Look up the GenericInstance to find the base name
+        for (int i = 0; i < checker->generics.instance_count; i++) {
+            GenericInstance* inst = &checker->generics.instances[i];
+            if (strcmp(inst->mangled_name, recv_type->as.struc.name) == 0) {
+                *out_args = xmalloc(inst->type_arg_count * sizeof(Type*));
+                for (int j = 0; j < inst->type_arg_count; j++) {
+                    (*out_args)[j] = inst->type_args[j];
+                }
+                *out_count = inst->type_arg_count;
+                return inst->base_name;
+            }
+        }
+        // Non-generic struct — use struct name as-is (no type args)
+        return recv_type->as.struc.name;
+    }
+
+    return NULL;
+}
+
+// Try to resolve a method-level generic call: items.map(|x| x * 2)
+// Returns the return type if this is a method-level generic call, or NULL if not.
+static Type* try_check_generic_method_call(Checker* checker, Node* node) {
+    Node* callee = node->as.call.func;
+    if (callee->type != NODE_MEMBER) {
+        return NULL;
+    }
+
+    // Skip module-qualified calls (e.g., std.print) and type references (e.g., Point.move)
+    // These are not method calls on a receiver object. We must check this BEFORE calling
+    // check_expression on the object, because module names are not variables in scope.
+    if (callee->as.member.object->type == NODE_IDENT) {
+        const char* name = callee->as.member.object->as.ident.name;
+        if (is_imported_module(checker, name)) {
+            return NULL;
+        }
+        Symbol* sym = checker_lookup(checker, name);
+        if (sym && sym->kind == SYM_TYPE) {
+            return NULL;
+        }
+    }
+
+    // Type-check the receiver object
+    Type* recv_type = check_expression(checker, callee->as.member.object);
+    if (recv_type->kind == TYPE_ERROR) {
+        return NULL;
+    }
+
+    Type**      recv_args      = NULL;
+    int         recv_arg_count = 0;
+    const char* base_name      = get_receiver_info(checker, recv_type, &recv_args, &recv_arg_count);
+    const char* method_name    = callee->as.member.name;
+    if (!base_name) {
+        return NULL;
+    }
+
+    // Look up method-level generic definition
+    GenericFuncDef* gdef = lookup_generic_method_func_def(checker, base_name, method_name);
+    if (!gdef) {
+        free(recv_args);
+        return NULL;
+    }
+
+    func_decl_node* fdn = &gdef->decl->as.func_decl;
+
+    // Validate argument count (method params, not counting self)
+    if (node->as.call.args.count != fdn->params.count) {
+        check_error(checker, node->line, node->column, "Method '%s' expects %d arguments, got %d",
+                    method_name, fdn->params.count, node->as.call.args.count);
+        free(recv_args);
+        return type_error;
+    }
+
+    // Type-check all arguments
+    int    arg_count = node->as.call.args.count;
+    Type** arg_types = xmalloc(arg_count * sizeof(Type*));
+    int    has_error = 0;
+    for (int i = 0; i < arg_count; i++) {
+        arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
+        if (arg_types[i]->kind == TYPE_ERROR) {
+            has_error = 1;
+        }
+    }
+    if (has_error) {
+        free(arg_types);
+        free(recv_args);
+        return type_error;
+    }
+
+    // Pre-fill inference array: receiver type params are known from the receiver type
+    Type** inferred = xcalloc(gdef->type_param_count, sizeof(Type*));
+
+    for (int i = 0; i < recv_arg_count && i < gdef->receiver_param_count; i++) {
+        inferred[i] = recv_args[i];
+    }
+    free(recv_args);
+
+    // Infer remaining type params from arguments
+    for (int i = 0; i < arg_count; i++) {
+        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
+        infer_type_param(checker, gdef, param_type_node, arg_types[i], inferred);
+    }
+
+    // Check all type params were inferred
+    for (int i = 0; i < gdef->type_param_count; i++) {
+        if (!inferred[i]) {
+            check_error(checker, node->line, node->column,
+                        "Cannot infer type parameter '%s' for generic method '%s.%s'",
+                        gdef->type_params[i], base_name, method_name);
+            free(arg_types);
+            free(inferred);
+            return type_error;
+        }
+    }
+
+    // Check trait bounds
+    for (int i = 0; i < gdef->type_param_count; i++) {
+        const char* bound = gdef->type_param_bounds[i];
+        if (!bound) {
+            continue;
+        }
+        if (!type_satisfies_trait_bound(checker, inferred[i], bound)) {
+            check_error(checker, node->line, node->column,
+                        "Type '%s' does not implement trait '%s' required by '%s.%s'",
+                        type_name(inferred[i]), bound, base_name, method_name);
+            free(arg_types);
+            free(inferred);
+            return type_error;
+        }
+    }
+
+    // Instantiate
+    GenericFuncInstance* inst = instantiate_generic_method_func(
+        checker, gdef, inferred, gdef->type_param_count, recv_type, node->line, node->column);
+    free(arg_types);
+    free(inferred);
+
+    if (!inst) {
+        return type_error;
+    }
+
+    // Set resolved_name for codegen dispatch
+    node->as.call.resolved_name = xstrdup(inst->mangled_name);
+    Type* ret                   = inst->func_type->as.func.return_type;
+    if (type_is_rc_managed(ret)) {
+        node->is_owned_temp   = 1;
+        node->owned_temp_type = ret;
+    }
+    return ret;
+}
+
 static int check_call_arg_count(Checker* checker, Node* node, Type* func_type) {
     if (func_type->as.func.is_varargs) {
         if (node->as.call.args.count < func_type->as.func.param_count) {
@@ -1464,6 +1631,11 @@ static Type* check_call_expr(Checker* checker, Node* node) {
     Type* generic_call_type = try_check_generic_free_function_call(checker, node);
     if (generic_call_type) {
         return generic_call_type;
+    }
+
+    Type* generic_method_type = try_check_generic_method_call(checker, node);
+    if (generic_method_type) {
+        return generic_method_type;
     }
 
     Type* func_type = check_expression(checker, node->as.call.func);

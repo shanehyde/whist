@@ -218,6 +218,7 @@ void checker_free(Checker* checker) {
         free(checker->generics.func_defs[i].type_params);
         free(checker->generics.func_defs[i].type_param_bounds);
         free((void*)checker->generics.func_defs[i].source_module);
+        free(checker->generics.func_defs[i].receiver_type);
     }
     free(checker->generics.func_defs);
     // Free generic free function instances
@@ -225,6 +226,7 @@ void checker_free(Checker* checker) {
         free(checker->generics.func_instances[i].mangled_name);
         free(checker->generics.func_instances[i].base_name);
         free(checker->generics.func_instances[i].type_args);
+        free(checker->generics.func_instances[i].receiver_type);
         node_free(checker->generics.func_instances[i].body);
     }
     free(checker->generics.func_instances);
@@ -1384,6 +1386,41 @@ static int try_register_generic_func_or_method(Checker* checker, Node* node) {
     if (!is_method && fdn->type_param_count > 0) {
         register_generic_func_def(checker, name, fdn->type_params, fdn->type_param_bounds,
                                   fdn->type_param_count, node);
+        return 1;
+    }
+
+    // Method-level generic: func (Vec<T>) map<K>(...): Vec<K>
+    // Must be checked BEFORE the plain generic receiver method branch
+    if (is_method && has_typearg && fdn->type_param_count > 0) {
+        GenericDef* def = lookup_generic_def(checker, receiver);
+        if (!def) {
+            check_error(checker, node->line, node->column, "Unknown generic type '%s'", receiver);
+            return 1;
+        }
+        if (fdn->receiver_type_args.count != def->type_param_count) {
+            check_error(checker, node->line, node->column,
+                        "Generic type '%s' expects %d type parameters, got %d", receiver,
+                        def->type_param_count, fdn->receiver_type_args.count);
+            return 1;
+        }
+        // Build combined type params: receiver's params + method's own type_params
+        int    recv_count   = def->type_param_count;
+        int    method_count = fdn->type_param_count;
+        int    combined     = recv_count + method_count;
+        char** params       = xmalloc(combined * sizeof(char*));
+        char** bounds       = xmalloc(combined * sizeof(char*));
+        for (int i = 0; i < recv_count; i++) {
+            params[i] = def->type_params[i];
+            bounds[i] = def->type_param_bounds[i];
+        }
+        for (int i = 0; i < method_count; i++) {
+            params[recv_count + i] = fdn->type_params[i];
+            bounds[recv_count + i] = fdn->type_param_bounds[i];
+        }
+        register_generic_method_func_def(checker, receiver, name, params, bounds, combined,
+                                         recv_count, node);
+        free(params);
+        free(bounds);
         return 1;
     }
 
