@@ -293,6 +293,7 @@ void node_free(Node* node) {
         }
         free(node->as.match_arm.bindings);
         node_free(node->as.match_arm.body);
+        node_free(node->as.match_arm.pattern_expr);
         break;
     case NODE_FUNC_DECL:
         free(node->as.func_decl.receiver_type);
@@ -498,6 +499,7 @@ static void node_reset_checker_flags(Node* node) {
     case NODE_MATCH:
         node->as.match_stmt.resolved_type       = NULL;
         node->as.match_stmt.resolved_value_type = NULL;
+        node->as.match_stmt.is_value_match      = 0;
         break;
     default:
         break; // Node types without checker flags need no reset
@@ -689,6 +691,7 @@ Node* node_clone(Node* node) {
         c->as.match_arm.binding_count       = node->as.match_arm.binding_count;
         c->as.match_arm.is_wildcard         = node->as.match_arm.is_wildcard;
         c->as.match_arm.body                = node_clone(node->as.match_arm.body);
+        c->as.match_arm.pattern_expr        = node_clone(node->as.match_arm.pattern_expr);
         if (node->as.match_arm.binding_count > 0) {
             c->as.match_arm.bindings = xmalloc(node->as.match_arm.binding_count * sizeof(char*));
             for (int i = 0; i < node->as.match_arm.binding_count; i++) {

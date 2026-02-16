@@ -210,6 +210,7 @@ Node* parse_match(Parser* parser, int is_expr) {
         arm->as.match_arm.binding_count       = 0;
         arm->as.match_arm.is_wildcard         = 0;
         arm->as.match_arm.body                = NULL;
+        arm->as.match_arm.pattern_expr        = NULL;
 
         // Parse pattern
         if (parser->current.type == TOK_IDENT && parser->current.length == 1 &&
@@ -257,6 +258,17 @@ Node* parse_match(Parser* parser, int is_expr) {
                 consume_token(parser, TOK_RPAREN, "Expected ')' after bindings");
                 arm->as.match_arm.bindings      = bindings;
                 arm->as.match_arm.binding_count = count;
+            }
+        } else if (check_token(parser, TOK_INT) || check_token(parser, TOK_FLOAT) ||
+                   check_token(parser, TOK_STRING) || check_token(parser, TOK_CHAR) ||
+                   check_token(parser, TOK_TRUE) || check_token(parser, TOK_FALSE) ||
+                   check_token(parser, TOK_MINUS)) {
+            // Value pattern: literal expression (checker validates)
+            arm->as.match_arm.pattern_expr = parse_expression(parser);
+            if (!arm->as.match_arm.pattern_expr) {
+                node_free(arm);
+                node_free(node);
+                return NULL;
             }
         } else {
             parse_error(parser, "Expected match pattern");

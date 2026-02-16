@@ -310,9 +310,14 @@ The second form iterates over a collection. Currently supported: `Vec<T>`, `Span
 <match-pattern> ::= '_'
                   | <identifier> [ '(' <identifier> { ',' <identifier> } ')' ]
                   | <identifier> '::' <identifier> [ '(' <identifier> { ',' <identifier> } ')' ]
+                  | <literal-pattern>
+
+<literal-pattern> ::= <integer-literal> | <float-literal> | <string-literal>
+                    | <char-literal> | 'true' | 'false'
+                    | '-' <integer-literal> | '-' <float-literal>
 ```
 
-Match statements destructure enum values by variant. The expression must be an enum type. Each arm matches a variant pattern and binds payload fields to local variables. Variant names can be unqualified (`Some(v)`) or qualified (`Option::Some(v)`). The wildcard pattern `_` matches any variant. Commas between arms are optional.
+Match statements destructure enum values by variant, or match on scalar/string values using literal patterns. When matching on an enum type, each arm matches a variant pattern and binds payload fields to local variables. Variant names can be unqualified (`Some(v)`) or qualified (`Option::Some(v)`). When matching on integers, floats, strings, chars, or bools, each arm uses a literal pattern. The wildcard pattern `_` matches any value. Match expressions (used as values) require a `_` arm. Commas between arms are optional.
 
 ```bnf
 <expr-stmt> ::= <expression> ';'

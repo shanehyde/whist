@@ -742,6 +742,7 @@ static int collect_string_literals_stmt_node(CodeGen* gen, Node* node) {
         collect_string_literals_nodelist(gen, &node->as.match_stmt.arms);
         return 1;
     case NODE_MATCH_ARM:
+        collect_string_literals_node(gen, node->as.match_arm.pattern_expr);
         collect_string_literals_node(gen, node->as.match_arm.body);
         return 1;
     case NODE_DEFER:

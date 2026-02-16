@@ -423,6 +423,7 @@ struct Node {
             NodeList arms;                // List of NODE_MATCH_ARM nodes
             Type*    resolved_type;       // Set by checker: enum type of expr
             Type*    resolved_value_type; // Set by checker for match-expr result type
+            int      is_value_match;      // Set by checker: 1 if matching on non-enum type
         } match_stmt;
 
         // Match arm
@@ -433,8 +434,9 @@ struct Node {
             int    variant_name_length;
             char** bindings; // Binding names [f0_name, f1_name, ...]
             int    binding_count;
-            int    is_wildcard; // 1 if this is a `_` arm
-            Node*  body;        // Statement/block (match stmt) or expression (match expr)
+            int    is_wildcard;  // 1 if this is a `_` arm
+            Node*  body;         // Statement/block (match stmt) or expression (match expr)
+            Node*  pattern_expr; // Literal pattern for value match (NULL for enum match)
         } match_arm;
 
         // Function declaration

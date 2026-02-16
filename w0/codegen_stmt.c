@@ -871,8 +871,74 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a comparison for a value match arm pattern
+static void emit_value_match_cond(CodeGen* gen, int match_id, Node* pattern, Type* expr_type) {
+    if (expr_type->kind == TYPE_STRING) {
+        emit(gen, "strcmp(__match%d, ", match_id);
+        emit_expr(gen, pattern);
+        emit(gen, ") == 0");
+    } else {
+        emit(gen, "__match%d == ", match_id);
+        emit_expr(gen, pattern);
+    }
+}
+
+// Emit a value match statement (non-enum) as an if/else-if chain
+static void emit_value_match_stmt(CodeGen* gen, Node* node) {
+    Type* expr_type = node->as.match_stmt.resolved_type;
+    if (!expr_type)
+        return;
+
+    int match_id = gen->out.temp_count++;
+    emit_indent(gen);
+    emit_resolved_type(gen, expr_type);
+    emit(gen, " __match%d = ", match_id);
+    emit_expr(gen, node->as.match_stmt.expr);
+    emit(gen, ";\n");
+
+    int first = 1;
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        Node* arm = node->as.match_stmt.arms.nodes[a];
+
+        emit_indent(gen);
+        if (arm->as.match_arm.is_wildcard) {
+            if (first) {
+                emit(gen, "{\n");
+            } else {
+                emit(gen, "else {\n");
+            }
+        } else {
+            if (first) {
+                emit(gen, "if (");
+            } else {
+                emit(gen, "else if (");
+            }
+            emit_value_match_cond(gen, match_id, arm->as.match_arm.pattern_expr, expr_type);
+            emit(gen, ") {\n");
+        }
+        first = 0;
+
+        gen->out.indent++;
+        if (arm->as.match_arm.body) {
+            if (arm->as.match_arm.body->type == NODE_BLOCK) {
+                emit_block_contents(gen, arm->as.match_arm.body);
+            } else {
+                emit_stmt(gen, arm->as.match_arm.body);
+            }
+        }
+        gen->out.indent--;
+        emit_indent(gen);
+        emit(gen, "}\n");
+    }
+}
+
 // Emit a match statement as an if/else-if chain over the enum tag
 static void emit_match_stmt(CodeGen* gen, Node* node) {
+    if (node->as.match_stmt.is_value_match) {
+        emit_value_match_stmt(gen, node);
+        return;
+    }
+
     Type* enum_type = node->as.match_stmt.resolved_type;
     if (!enum_type)
         return;

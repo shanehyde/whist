@@ -257,6 +257,9 @@ static void print_match_stmt(Node* node, int depth) {
 static void print_match_arm(Node* node, int depth) {
     if (node->as.match_arm.is_wildcard) {
         printf("MatchArm: _\n");
+    } else if (node->as.match_arm.pattern_expr) {
+        printf("MatchArm: <value>\n");
+        print_labeled_child("Pattern", node->as.match_arm.pattern_expr, depth + 1);
     } else {
         printf("MatchArm: ");
         if (node->as.match_arm.enum_name) {
