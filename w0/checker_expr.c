@@ -691,6 +691,7 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
         snprintf(lookup_mangled, sizeof(lookup_mangled), "Vec_%s", type_mangle_name(elem_type));
         VecInstance* inst = lookup_vec_instance_pub(checker, lookup_mangled);
         if (inst) {
+            ensure_vec_user_methods(checker, inst);
             for (int i = 0; i < inst->method_count; i++) {
                 if (strcmp(inst->method_names[i], member_name) == 0) {
                     if (!inst->method_is_const[i]) {

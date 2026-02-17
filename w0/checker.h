@@ -97,6 +97,7 @@ typedef struct {
     // Cloned method bodies for codegen (parallel to GenericDef.methods ordering)
     Node** method_bodies;
     int    method_body_count;
+    int    methods_instantiated; // Whether user methods have been populated
 } VecInstance;
 
 // Generic free function definition (template)
