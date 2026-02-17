@@ -765,7 +765,18 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
                 emit_var_decl_rc_new_struct(gen, node);
             }
         } else {
+            // Hoist nested owned temps (e.g., intermediate in nums.map(...).filter(...))
+            int has_temps = has_owned_temps(node->as.var_decl.init);
+            int saved     = 0;
+            if (has_temps) {
+                saved = hoist_owned_temps(gen, node->as.var_decl.init);
+            }
+
             emit_var_decl_rc_copy(gen, node);
+
+            if (has_temps) {
+                cleanup_owned_temps(gen, saved);
+            }
         }
         return;
     }
