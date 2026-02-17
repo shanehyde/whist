@@ -141,6 +141,9 @@ void checker_init(Checker* checker) {
     checker->self_type                      = NULL;
     checker->lambda_next_id                 = 0;
     checker->lambda_depth                   = 0;
+    checker->lambda_stack                   = NULL;
+    checker->lambda_stack_count             = 0;
+    checker->lambda_stack_capacity          = 0;
     checker->sem                            = sem_info_new();
     types_init();
 }
@@ -267,6 +270,7 @@ void checker_free(Checker* checker) {
         free(checker->traits.deferred_checks[i].method_name);
     }
     free(checker->traits.deferred_checks);
+    free(checker->lambda_stack);
     sem_info_free(checker->sem);
     checker->sem = NULL;
     types_cleanup();

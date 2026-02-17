@@ -341,6 +341,14 @@ struct Node {
             // Set by checker:
             int   lambda_id;     // Unique ID for codegen (__lambda_N)
             Type* resolved_type; // TYPE_FUNC
+            // Capture list (set by checker for closures):
+            struct {
+                char** names;    // Captured variable names (owned copies)
+                Type** types;    // Type of each captured variable (not owned)
+                int*   is_rc;    // 1 if captured variable is RC-managed
+                int    count;
+                int    capacity;
+            } captures;
         } lambda;
 
         // Tuple type: (T1, T2, ...)
