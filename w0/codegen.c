@@ -1119,10 +1119,36 @@ static void emit_lambda_definitions(CodeGen* gen) {
         }
         if (lam->as.lambda.is_expr_body) {
             // Expression body: return expr;
-            emit_indent(gen);
-            emit(gen, "return ");
-            emit_expr(gen, lam->as.lambda.body);
-            emit(gen, ";\n");
+            Node* body = lam->as.lambda.body;
+            // Check for intermediate owned temps (e.g., nested string concat).
+            // Temporarily clear the outermost is_owned_temp — its ownership
+            // transfers to the caller, so it must not be hoisted/dec'd.
+            int ret_is_owned = body->is_owned_temp;
+            if (ret_is_owned)
+                body->is_owned_temp = 0;
+            int body_has_temps = has_owned_temps(body);
+            if (body_has_temps) {
+                int saved = hoist_owned_temps(gen, body);
+                if (ret_is_owned)
+                    body->is_owned_temp = 1; // restore before emit_expr
+                int tmp = gen->out.temp_count++;
+                emit_indent(gen);
+                emit(gen, "typeof(");
+                emit_expr(gen, body);
+                emit(gen, ") __rc_ret%d = ", tmp);
+                emit_expr(gen, body);
+                emit(gen, ";\n");
+                cleanup_owned_temps(gen, saved);
+                emit_indent(gen);
+                emit(gen, "return __rc_ret%d;\n", tmp);
+            } else {
+                if (ret_is_owned)
+                    body->is_owned_temp = 1; // restore
+                emit_indent(gen);
+                emit(gen, "return ");
+                emit_expr(gen, body);
+                emit(gen, ";\n");
+            }
         } else {
             // Block body
             emit_block_contents(gen, lam->as.lambda.body);

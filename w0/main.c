@@ -137,8 +137,8 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
 
     // --emit-c: just dump generated C to stdout and exit
     if (emit_c) {
-        int result = compile_to_c(source, source_path, lib_path, rc_debug, 0, line_directives,
-                                  stdout);
+        int result =
+            compile_to_c(source, source_path, lib_path, rc_debug, 0, line_directives, stdout);
         free(source);
         return result;
     }
@@ -235,8 +235,8 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
     return 1;
 }
 
-static int compile_and_test(const char* source_path, const char* lib_path, int rc_debug,
-                            int emit_c, int line_directives) {
+static int compile_and_test(const char* source_path, const char* lib_path, int rc_debug, int emit_c,
+                            int line_directives) {
     char* source = read_file(source_path);
     if (!source) {
         fprintf(stderr, "Could not open file: %s\n", source_path);
@@ -245,8 +245,8 @@ static int compile_and_test(const char* source_path, const char* lib_path, int r
 
     // --emit-c: just dump generated C to stdout and exit
     if (emit_c) {
-        int result = compile_to_c(source, source_path, lib_path, rc_debug, 1, line_directives,
-                                  stdout);
+        int result =
+            compile_to_c(source, source_path, lib_path, rc_debug, 1, line_directives, stdout);
         free(source);
         return result;
     }
@@ -417,8 +417,7 @@ static int try_handle_subcommand(int argc, char** argv, const MainOptions* opts)
             return 1;
         }
         return compile_and_run(run_source, argc - run_args_start, argv + run_args_start,
-                               opts->lib_path, opts->rc_debug, opts->emit_c,
-                               opts->line_directives);
+                               opts->lib_path, opts->rc_debug, opts->emit_c, opts->line_directives);
     }
 
     int test_idx = find_subcommand_index(argc, argv, "test");

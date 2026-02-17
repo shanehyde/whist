@@ -2333,6 +2333,12 @@ static Type* check_lambda_expr(Checker* checker, Node* node) {
     node->as.lambda.resolved_type = func_type;
     // param_types ownership transferred to type_func
 
+    // Lambdas with captures allocate an env via __rc_alloc — mark as owned temp
+    // so the hoist pattern will dec the env after the call site
+    if (node->as.lambda.captures.count > 0) {
+        node->is_owned_temp = 1;
+    }
+
     return func_type;
 }
 

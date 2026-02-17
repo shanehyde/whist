@@ -155,6 +155,12 @@ static void collect_owned_temps(Node* node, Node*** temps, int* count, int* cap)
 
 // Emit __rc_dec for a hoisted owned temp, using the appropriate dec function for its type.
 static void emit_owned_temp_dec(CodeGen* gen, Node* node, const char* name) {
+    if (node->type == NODE_LAMBDA) {
+        // Closure env: dec the env pointer inside the __Closure struct
+        emit_indent(gen);
+        emit(gen, "__rc_dec(%s.env);\n", name);
+        return;
+    }
     Type* t = node->owned_temp_type;
     if (t && t->kind == TYPE_ENUM && t->as.enm.has_rc_fields) {
         emit_indent(gen);
@@ -169,7 +175,7 @@ static void emit_owned_temp_dec(CodeGen* gen, Node* node, const char* name) {
 }
 
 // Hoist all owned temps in an expression tree. Returns the saved hoist count.
-static int hoist_owned_temps(CodeGen* gen, Node* expr) {
+int hoist_owned_temps(CodeGen* gen, Node* expr) {
     Node** temps = NULL;
     int    count = 0;
     int    cap   = 0;
@@ -188,7 +194,7 @@ static int hoist_owned_temps(CodeGen* gen, Node* expr) {
 }
 
 // Emit __rc_dec for all owned temps hoisted since saved_count, then restore hoist state.
-static void cleanup_owned_temps(CodeGen* gen, int saved_count) {
+void cleanup_owned_temps(CodeGen* gen, int saved_count) {
     for (int i = saved_count; i < gen->hoist.count; i++) {
         emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
         free(gen->hoist.names[i]);
@@ -239,8 +245,16 @@ static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
     emit(gen, "void* __rc_tmp%d = (void*)", temp_id);
     emit_expr(gen, expr->as.assign.value);
     emit(gen, ";\n");
-    emit_indent(gen);
-    emit(gen, "__rc_inc(__rc_tmp%d);\n", temp_id);
+    // Only inc when borrowing from an existing reference (ident or vec index).
+    // Fresh allocations (new, call, concat) already have rc=1 — inc would over-count.
+    int needs_inc =
+        (expr->as.assign.value->type == NODE_IDENT &&
+         rc_is_tracked(gen, expr->as.assign.value->as.ident.name)) ||
+        (expr->as.assign.value->type == NODE_INDEX && expr->as.assign.value->as.index.is_rc_elem);
+    if (needs_inc) {
+        emit_indent(gen);
+        emit(gen, "__rc_inc(__rc_tmp%d);\n", temp_id);
+    }
     emit_indent(gen);
     if (var_type && var_type->kind == TYPE_STRING) {
         emit(gen, "__rc_dec((void*)%s);\n", var_name);
@@ -308,8 +322,16 @@ static int emit_rc_member_assign_stmt(CodeGen* gen, Node* expr) {
             emit(gen, "void* __rc_tmp%d = (void*)", tmp);
             emit_expr(gen, expr->as.assign.value);
             emit(gen, ";\n");
-            emit_indent(gen);
-            emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
+            // Only inc when borrowing from an existing reference.
+            // Fresh allocations (new_expr, calls) already have rc=1.
+            int needs_inc = (expr->as.assign.value->type == NODE_IDENT &&
+                             rc_is_tracked(gen, expr->as.assign.value->as.ident.name)) ||
+                            (expr->as.assign.value->type == NODE_INDEX &&
+                             expr->as.assign.value->as.index.is_rc_elem);
+            if (needs_inc) {
+                emit_indent(gen);
+                emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
+            }
             emit_indent(gen);
             if (field_ty->kind == TYPE_STRING) {
                 emit(gen, "__rc_dec((void*)");
@@ -391,7 +413,7 @@ static int emit_vec_index_assign_stmt(CodeGen* gen, Node* expr) {
 }
 
 // Check if an expression tree contains any owned temps.
-static int has_owned_temps(Node* node) {
+int has_owned_temps(Node* node) {
     if (!node)
         return 0;
     if (node->is_owned_temp)
@@ -510,10 +532,26 @@ static void emit_var_decl_rc_new_vec(CodeGen* gen, Node* node) {
     for (int i = 0; i < init->as.struct_init.fields.count; i++) {
         Node* field = init->as.struct_init.fields.nodes[i];
         if (field && field->type == NODE_FIELD_INIT) {
-            emit_indent(gen);
-            emit(gen, "__Vec_%s_push(%s, ", elem_tname, node->as.var_decl.name);
-            emit_expr(gen, field->as.field_init.value);
-            emit(gen, ");\n");
+            Node* val = field->as.field_init.value;
+            if (val->is_owned_temp) {
+                // Owned temp (new expr, call, etc.): hoist to temp, push, then dec.
+                // push() does __rc_inc, so the temp's original ref must be released.
+                int tmp = gen->out.temp_count++;
+                emit_indent(gen);
+                emit(gen, "void* __rc_tmp%d = (void*)", tmp);
+                emit_expr(gen, val);
+                emit(gen, ";\n");
+                emit_indent(gen);
+                emit(gen, "__Vec_%s_push(%s, __rc_tmp%d);\n", elem_tname, node->as.var_decl.name,
+                     tmp);
+                emit_indent(gen);
+                emit(gen, "__rc_dec(__rc_tmp%d);\n", tmp);
+            } else {
+                emit_indent(gen);
+                emit(gen, "__Vec_%s_push(%s, ", elem_tname, node->as.var_decl.name);
+                emit_expr(gen, val);
+                emit(gen, ");\n");
+            }
         }
     }
     rc_push_var(gen, node->as.var_decl.name, rtype);
@@ -825,6 +863,14 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
         return;
     }
 
+    // Direct lambda assignment: ownership transfers to variable's .env tracking, don't hoist
+    int lambda_owned = 0;
+    if (node->as.var_decl.init && node->as.var_decl.init->type == NODE_LAMBDA &&
+        node->as.var_decl.init->is_owned_temp) {
+        lambda_owned                          = 1;
+        node->as.var_decl.init->is_owned_temp = 0;
+    }
+
     // Hoist owned temps in init expression (e.g., var count = std.args().length)
     int saved     = 0;
     int has_temps = node->as.var_decl.init && has_owned_temps(node->as.var_decl.init);
@@ -875,6 +921,11 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
     // Cleanup owned temps after the var decl
     if (has_temps) {
         cleanup_owned_temps(gen, saved);
+    }
+
+    // Restore lambda is_owned_temp flag
+    if (lambda_owned) {
+        node->as.var_decl.init->is_owned_temp = 1;
     }
 
     // Track closure env for scope cleanup: __rc_dec(f.env) at scope exit.

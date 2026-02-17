@@ -998,8 +998,7 @@ void print_ast_checked(Node* node, int depth) {
             if (node->as.match_arm.enum_name) {
                 printf("%.*s::", node->as.match_arm.enum_name_length, node->as.match_arm.enum_name);
             }
-            printf("%.*s", node->as.match_arm.variant_name_length,
-                   node->as.match_arm.variant_name);
+            printf("%.*s", node->as.match_arm.variant_name_length, node->as.match_arm.variant_name);
             if (node->as.match_arm.binding_count > 0) {
                 printf("(");
                 for (int i = 0; i < node->as.match_arm.binding_count; i++) {
