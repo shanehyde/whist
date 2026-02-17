@@ -1271,6 +1271,27 @@ static void emit_match_expr(CodeGen* gen, Node* node) {
     emit(gen, "__matchv%d; })", match_id);
 }
 
+static int capture_ctx_contains(CodeGen* gen, const char* name, int length) {
+    for (int i = 0; i < gen->capture_ctx.count; i++) {
+        if (length == (int)strlen(gen->capture_ctx.names[i]) &&
+            memcmp(name, gen->capture_ctx.names[i], length) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Emit the correct source expression for a capture name while emitting lambda literals.
+// If we're inside another capturing lambda, the source may be __cenv->name.
+static void emit_capture_source_name(CodeGen* gen, const char* name) {
+    int len = (int)strlen(name);
+    if (capture_ctx_contains(gen, name, len)) {
+        emit(gen, "__cenv->%s", name);
+    } else {
+        emit(gen, "%s", name);
+    }
+}
+
 static void emit_ident_expr(CodeGen* gen, Node* node) {
     // In enum methods, self is a pointer but represents a value — dereference it.
     if (gen->in_enum_method && node->as.ident.length == 4 &&
@@ -1282,13 +1303,9 @@ static void emit_ident_expr(CodeGen* gen, Node* node) {
              node->as.ident.name);
     } else {
         // Check if this is a captured variable
-        for (int i = 0; i < gen->capture_ctx.count; i++) {
-            if (node->as.ident.length == (int)strlen(gen->capture_ctx.names[i]) &&
-                memcmp(node->as.ident.name, gen->capture_ctx.names[i], node->as.ident.length) ==
-                    0) {
-                emit(gen, "__cenv->%.*s", node->as.ident.length, node->as.ident.name);
-                return;
-            }
+        if (capture_ctx_contains(gen, node->as.ident.name, node->as.ident.length)) {
+            emit(gen, "__cenv->%.*s", node->as.ident.length, node->as.ident.name);
+            return;
         }
         emit(gen, "%.*s", node->as.ident.length, node->as.ident.name);
     }
@@ -1527,12 +1544,16 @@ void emit_expr(CodeGen* gen, Node* node) {
             (void)cleanup;
             emit(gen, ");\n");
             for (int c = 0; c < node->as.lambda.captures.count; c++) {
-                emit(gen, "    __cenv_%d->%s = %s;\n", id, node->as.lambda.captures.names[c],
-                     node->as.lambda.captures.names[c]);
+                emit(gen, "    __cenv_%d->%s = ", id, node->as.lambda.captures.names[c]);
+                emit_capture_source_name(gen, node->as.lambda.captures.names[c]);
+                emit(gen, ";\n");
                 if (node->as.lambda.captures.is_rc[c]) {
                     Type* ct = node->as.lambda.captures.types[c];
                     if (ct && ct->kind == TYPE_STRING) {
                         emit(gen, "    __rc_inc((void*)__cenv_%d->%s);\n", id,
+                             node->as.lambda.captures.names[c]);
+                    } else if (ct && ct->kind == TYPE_FUNC) {
+                        emit(gen, "    __rc_inc(__cenv_%d->%s.env);\n", id,
                              node->as.lambda.captures.names[c]);
                     } else {
                         emit(gen, "    __rc_inc(__cenv_%d->%s);\n", id,

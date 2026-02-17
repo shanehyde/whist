@@ -1035,6 +1035,8 @@ static void emit_lambda_env_typedefs(CodeGen* gen) {
                     if (ct && ct->kind == TYPE_STRING) {
                         emit(gen, "    __rc_dec((void*)__e->%s);\n",
                              lam->as.lambda.captures.names[c]);
+                    } else if (ct && ct->kind == TYPE_FUNC) {
+                        emit(gen, "    __rc_dec(__e->%s.env);\n", lam->as.lambda.captures.names[c]);
                     } else {
                         emit(gen, "    __rc_dec(__e->%s);\n", lam->as.lambda.captures.names[c]);
                     }

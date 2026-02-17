@@ -2211,8 +2211,9 @@ static void add_capture(Node* lambda, const char* name, Type* type) {
     }
     lambda->as.lambda.captures.names[cnt] = xstrdup(name);
     lambda->as.lambda.captures.types[cnt] = type;
-    lambda->as.lambda.captures.is_rc[cnt] = type_is_rc_managed(type);
-    lambda->as.lambda.captures.count      = cnt + 1;
+    lambda->as.lambda.captures.is_rc[cnt] =
+        type_is_rc_managed(type) || (type && type->kind == TYPE_FUNC);
+    lambda->as.lambda.captures.count = cnt + 1;
 }
 
 // Collect captures for a variable that crosses lambda boundaries.

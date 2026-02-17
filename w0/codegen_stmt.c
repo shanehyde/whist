@@ -175,6 +175,12 @@ static void cleanup_owned_temps(CodeGen* gen, int saved_count) {
     gen->hoist.count = saved_count;
 }
 
+// True when the RHS is a closure variable reference (not a named function symbol).
+// Copying from such an lvalue needs an env retain.
+static int closure_ident_needs_env_inc(Node* expr) {
+    return expr && expr->type == NODE_IDENT && !expr->as.ident.resolved_func_type;
+}
+
 static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
     if (expr->type != NODE_ASSIGN || expr->as.assign.op != TOK_EQ ||
         expr->as.assign.target->type != NODE_IDENT ||
@@ -436,11 +442,20 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
         char env_name[256];
         snprintf(env_name, sizeof(env_name), "%s.env", expr->as.assign.target->as.ident.name);
         if (rc_is_tracked(gen, env_name)) {
+            int temp_id   = gen->out.temp_count++;
+            int needs_inc = closure_ident_needs_env_inc(expr->as.assign.value);
+            emit_indent(gen);
+            emit(gen, "__Closure __cl_tmp%d = ", temp_id);
+            emit_expr(gen, expr->as.assign.value);
+            emit(gen, ";\n");
+            if (needs_inc) {
+                emit_indent(gen);
+                emit(gen, "__rc_inc(__cl_tmp%d.env);\n", temp_id);
+            }
             emit_indent(gen);
             emit(gen, "__rc_dec(%s);\n", env_name);
             emit_indent(gen);
-            emit_expr(gen, expr);
-            emit(gen, ";\n");
+            emit(gen, "%s = __cl_tmp%d;\n", expr->as.assign.target->as.ident.name, temp_id);
             return;
         }
     }
@@ -799,6 +814,9 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
     }
 
     int struct_type = node->as.var_decl.type && is_struct_type(gen, node->as.var_decl.type);
+    int is_func_var =
+        (node->as.var_decl.resolved_type && node->as.var_decl.resolved_type->kind == TYPE_FUNC) ||
+        (node->as.var_decl.type && node->as.var_decl.type->type == NODE_FUNC_TYPE);
 
     if (node->as.var_decl.type) {
         emit_type_with_name(gen, node->as.var_decl.type, node->as.var_decl.name);
@@ -818,8 +836,17 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
             emit(gen, " = ");
             emit_expr(gen, node->as.var_decl.init);
         }
+    } else if (is_func_var) {
+        // Ensure env cleanup sees a deterministic pointer value.
+        emit(gen, " = (__Closure){NULL, NULL}");
     }
     emit(gen, ";\n");
+
+    // Closure copy from another closure variable needs an env retain.
+    if (is_func_var && closure_ident_needs_env_inc(node->as.var_decl.init)) {
+        emit_indent(gen);
+        emit(gen, "__rc_inc(%s.env);\n", node->as.var_decl.name);
+    }
 
     // Cleanup owned temps after the var decl
     if (has_temps) {
@@ -828,9 +855,6 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
 
     // Track closure env for scope cleanup: __rc_dec(f.env) at scope exit.
     // __rc_dec(NULL) is a no-op, so this is safe even for non-capturing closures.
-    int is_func_var =
-        (node->as.var_decl.resolved_type && node->as.var_decl.resolved_type->kind == TYPE_FUNC) ||
-        (node->as.var_decl.type && node->as.var_decl.type->type == NODE_FUNC_TYPE);
     if (is_func_var) {
         char env_name[256];
         snprintf(env_name, sizeof(env_name), "%s.env", node->as.var_decl.name);
