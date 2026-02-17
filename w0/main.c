@@ -20,6 +20,7 @@ typedef struct {
     int         check_only;
     int         print_ast_flag;
     int         rc_debug;
+    int         emit_c;
     const char* output_file;
     const char* lib_path;
 } MainOptions;
@@ -124,11 +125,18 @@ static int compile_to_c(const char* source, const char* source_path, const char*
 }
 
 static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path,
-                           int rc_debug) {
+                           int rc_debug, int emit_c) {
     char* source = read_file(source_path);
     if (!source) {
         fprintf(stderr, "Could not open file: %s\n", source_path);
         return 1;
+    }
+
+    // --emit-c: just dump generated C to stdout and exit
+    if (emit_c) {
+        int result = compile_to_c(source, source_path, lib_path, rc_debug, 0, stdout);
+        free(source);
+        return result;
     }
 
     // Create temp files
@@ -223,11 +231,19 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
     return 1;
 }
 
-static int compile_and_test(const char* source_path, const char* lib_path, int rc_debug) {
+static int compile_and_test(const char* source_path, const char* lib_path, int rc_debug,
+                            int emit_c) {
     char* source = read_file(source_path);
     if (!source) {
         fprintf(stderr, "Could not open file: %s\n", source_path);
         return 1;
+    }
+
+    // --emit-c: just dump generated C to stdout and exit
+    if (emit_c) {
+        int result = compile_to_c(source, source_path, lib_path, rc_debug, 1, stdout);
+        free(source);
+        return result;
     }
 
     // Create temp files
@@ -327,6 +343,7 @@ static void print_usage(const char* program) {
     fprintf(stderr, "            Library search path for module imports\n");
     fprintf(stderr, "  --rc-debug\n");
     fprintf(stderr, "            Emit RC tracking debug output to stderr\n");
+    fprintf(stderr, "  --emit-c  Dump generated C to stdout (works with run/test)\n");
     fprintf(stderr, "  -o <file> Output file\n");
     fprintf(stderr, "Commands:\n");
     fprintf(stderr, "  run       Compile and run the program\n");
@@ -343,6 +360,8 @@ static void prescan_global_options(int argc, char** argv, MainOptions* opts) {
             opts->lib_path = argv[i + 1];
         } else if (strcmp(argv[i], "--rc-debug") == 0) {
             opts->rc_debug = 1;
+        } else if (strcmp(argv[i], "--emit-c") == 0) {
+            opts->emit_c = 1;
         }
     }
 }
@@ -364,7 +383,7 @@ static const char* find_subcommand_source(int argc, char** argv, int subcommand_
     for (int i = subcommand_idx + 1; i < argc; i++) {
         if (strcmp(argv[i], "--lib-path") == 0 && i + 1 < argc) {
             i++;
-        } else if (strcmp(argv[i], "--rc-debug") == 0) {
+        } else if (strcmp(argv[i], "--rc-debug") == 0 || strcmp(argv[i], "--emit-c") == 0) {
             // Skip flag.
         } else {
             if (arg_start) {
@@ -386,7 +405,7 @@ static int try_handle_subcommand(int argc, char** argv, const MainOptions* opts)
             return 1;
         }
         return compile_and_run(run_source, argc - run_args_start, argv + run_args_start,
-                               opts->lib_path, opts->rc_debug);
+                               opts->lib_path, opts->rc_debug, opts->emit_c);
     }
 
     int test_idx = find_subcommand_index(argc, argv, "test");
@@ -396,7 +415,7 @@ static int try_handle_subcommand(int argc, char** argv, const MainOptions* opts)
             fprintf(stderr, "Usage: %s test [options] <source-file>\n", argv[0]);
             return 1;
         }
-        return compile_and_test(test_source, opts->lib_path, opts->rc_debug);
+        return compile_and_test(test_source, opts->lib_path, opts->rc_debug, opts->emit_c);
     }
 
     return -1;
@@ -418,6 +437,8 @@ static void parse_main_options(int argc, char** argv, MainOptions* opts, int* ar
             opts->lib_path = argv[*arg_idx];
         } else if (strcmp(argv[*arg_idx], "--rc-debug") == 0) {
             opts->rc_debug = 1;
+        } else if (strcmp(argv[*arg_idx], "--emit-c") == 0) {
+            opts->emit_c = 1;
         } else if (strcmp(argv[*arg_idx], "-o") == 0 && *arg_idx + 1 < argc) {
             (*arg_idx)++;
             opts->output_file = argv[*arg_idx];

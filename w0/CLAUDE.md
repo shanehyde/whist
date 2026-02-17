@@ -34,6 +34,8 @@ bin/w0 --check <file.w>      # Type check only
 bin/w0 --ast <file.w>        # Print AST
 bin/w0 --lib-path ../lib <file.w>  # Specify library search path
 bin/w0 --rc-debug <file.w>        # Emit RC debug tracing in generated code
+bin/w0 --emit-c --lib-path ../lib test <file.w>  # Dump test-mode C to stdout
+bin/w0 --emit-c --lib-path ../lib run <file.w>   # Dump run-mode C to stdout
 ```
 
 Compile and run:
