@@ -141,6 +141,12 @@ typedef struct {
         int    count;
         int    capacity;
     } thunks;
+    // Capture context: names of captured variables in current lambda body
+    // When set, emit_ident checks this and emits __cenv->name for captures
+    struct {
+        char** names;
+        int    count;
+    } capture_ctx;
     // Current module name (NULL for "main")
     const char* current_module;
     // 1 if currently emitting an enum method body

@@ -532,6 +532,9 @@ void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_d
     gen->thunks.count      = 0;
     gen->thunks.capacity   = 0;
 
+    gen->capture_ctx.names = NULL;
+    gen->capture_ctx.count = 0;
+
     gen->tuple_types         = NULL;
     gen->tuple_type_count    = 0;
     gen->tuple_type_capacity = 0;
@@ -996,6 +999,56 @@ static void collect_lambdas(CodeGen* gen, Node* ast) {
     collect_lambdas_node(gen, ast);
 }
 
+// Emit environment struct typedefs and cleanup functions for capturing lambdas.
+static void emit_lambda_env_typedefs(CodeGen* gen) {
+    int emitted = 0;
+    for (int i = 0; i < gen->lambdas.count; i++) {
+        Node* lam = gen->lambdas.nodes[i];
+        if (lam->as.lambda.captures.count == 0)
+            continue;
+
+        int id = lam->as.lambda.lambda_id;
+
+        // Emit env struct typedef
+        emit(gen, "typedef struct {\n");
+        for (int c = 0; c < lam->as.lambda.captures.count; c++) {
+            emit(gen, "    ");
+            emit_resolved_type(gen, lam->as.lambda.captures.types[c]);
+            emit(gen, " %s;\n", lam->as.lambda.captures.names[c]);
+        }
+        emit(gen, "} __lambda_%d_env;\n", id);
+
+        // Emit cleanup function (only if there are RC captures)
+        int has_rc = 0;
+        for (int c = 0; c < lam->as.lambda.captures.count; c++) {
+            if (lam->as.lambda.captures.is_rc[c]) {
+                has_rc = 1;
+                break;
+            }
+        }
+        if (has_rc) {
+            emit(gen, "static void __lambda_%d_env_cleanup(void* __raw) {\n", id);
+            emit(gen, "    __lambda_%d_env* __e = (__lambda_%d_env*)__raw;\n", id, id);
+            for (int c = 0; c < lam->as.lambda.captures.count; c++) {
+                if (lam->as.lambda.captures.is_rc[c]) {
+                    Type* ct = lam->as.lambda.captures.types[c];
+                    if (ct && ct->kind == TYPE_STRING) {
+                        emit(gen, "    __rc_dec((void*)__e->%s);\n",
+                             lam->as.lambda.captures.names[c]);
+                    } else {
+                        emit(gen, "    __rc_dec(__e->%s);\n", lam->as.lambda.captures.names[c]);
+                    }
+                }
+            }
+            emit(gen, "}\n");
+        }
+        emit(gen, "\n");
+        emitted = 1;
+    }
+    if (emitted)
+        emit(gen, "\n");
+}
+
 static void emit_lambda_forward_decls(CodeGen* gen) {
     for (int i = 0; i < gen->lambdas.count; i++) {
         Node* lam       = gen->lambdas.nodes[i];
@@ -1035,8 +1088,18 @@ static void emit_lambda_definitions(CodeGen* gen) {
         emit(gen, ") {\n");
 
         gen->out.indent++;
-        emit_indent(gen);
-        emit(gen, "(void)__env;\n");
+        int has_captures = lam->as.lambda.captures.count > 0;
+        if (has_captures) {
+            int id = lam->as.lambda.lambda_id;
+            emit_indent(gen);
+            emit(gen, "__lambda_%d_env* __cenv = (__lambda_%d_env*)__env;\n", id, id);
+            // Set capture context for ident substitution
+            gen->capture_ctx.names = lam->as.lambda.captures.names;
+            gen->capture_ctx.count = lam->as.lambda.captures.count;
+        } else {
+            emit_indent(gen);
+            emit(gen, "(void)__env;\n");
+        }
         if (lam->as.lambda.is_expr_body) {
             // Expression body: return expr;
             emit_indent(gen);
@@ -1050,6 +1113,11 @@ static void emit_lambda_definitions(CodeGen* gen) {
             if (func_type->as.func.return_type == type_void) {
                 rc_cleanup_all(gen, NULL);
             }
+        }
+        // Clear capture context
+        if (has_captures) {
+            gen->capture_ctx.names = NULL;
+            gen->capture_ctx.count = 0;
         }
         gen->out.indent--;
         emit(gen, "}\n\n");
@@ -2105,6 +2173,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit_struct_body_typedefs(gen, ast);
     emit_function_forward_decls(gen, ast);
     collect_lambdas(gen, ast);
+    emit_lambda_env_typedefs(gen);
     emit_lambda_forward_decls(gen);
     emit_thunk_forward_decls(gen);
     emit_enum_eq_helpers(gen, ast);

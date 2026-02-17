@@ -1281,6 +1281,15 @@ static void emit_ident_expr(CodeGen* gen, Node* node) {
         emit(gen, "(__Closure){(void*)__%.*s_thunk, NULL}", node->as.ident.length,
              node->as.ident.name);
     } else {
+        // Check if this is a captured variable
+        for (int i = 0; i < gen->capture_ctx.count; i++) {
+            if (node->as.ident.length == (int)strlen(gen->capture_ctx.names[i]) &&
+                memcmp(node->as.ident.name, gen->capture_ctx.names[i], node->as.ident.length) ==
+                    0) {
+                emit(gen, "__cenv->%.*s", node->as.ident.length, node->as.ident.name);
+                return;
+            }
+        }
         emit(gen, "%.*s", node->as.ident.length, node->as.ident.name);
     }
 }
@@ -1496,7 +1505,45 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_LAMBDA:
-        emit(gen, "(__Closure){(void*)__lambda_%d, NULL}", node->as.lambda.lambda_id);
+        if (node->as.lambda.captures.count > 0) {
+            int id     = node->as.lambda.lambda_id;
+            int has_rc = 0;
+            for (int c = 0; c < node->as.lambda.captures.count; c++) {
+                if (node->as.lambda.captures.is_rc[c]) {
+                    has_rc = 1;
+                    break;
+                }
+            }
+            const char* cleanup = has_rc ? "__lambda_%d_env_cleanup" : "NULL";
+            emit(gen,
+                 "({ __lambda_%d_env* __cenv_%d = (__lambda_%d_env*)__rc_alloc("
+                 "sizeof(__lambda_%d_env), ",
+                 id, id, id, id);
+            if (has_rc) {
+                emit(gen, "__lambda_%d_env_cleanup", id);
+            } else {
+                emit(gen, "NULL");
+            }
+            (void)cleanup;
+            emit(gen, ");\n");
+            for (int c = 0; c < node->as.lambda.captures.count; c++) {
+                emit(gen, "    __cenv_%d->%s = %s;\n", id, node->as.lambda.captures.names[c],
+                     node->as.lambda.captures.names[c]);
+                if (node->as.lambda.captures.is_rc[c]) {
+                    Type* ct = node->as.lambda.captures.types[c];
+                    if (ct && ct->kind == TYPE_STRING) {
+                        emit(gen, "    __rc_inc((void*)__cenv_%d->%s);\n", id,
+                             node->as.lambda.captures.names[c]);
+                    } else {
+                        emit(gen, "    __rc_inc(__cenv_%d->%s);\n", id,
+                             node->as.lambda.captures.names[c]);
+                    }
+                }
+            }
+            emit(gen, "    (__Closure){(void*)__lambda_%d, (void*)__cenv_%d}; })", id, id);
+        } else {
+            emit(gen, "(__Closure){(void*)__lambda_%d, NULL}", node->as.lambda.lambda_id);
+        }
         break;
 
     default:

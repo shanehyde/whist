@@ -430,6 +430,21 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
         return;
     }
 
+    // Closure reassignment: f = new_closure — dec old env before assign
+    if (expr->type == NODE_ASSIGN && expr->as.assign.op == TOK_EQ &&
+        expr->as.assign.target->type == NODE_IDENT) {
+        char env_name[256];
+        snprintf(env_name, sizeof(env_name), "%s.env", expr->as.assign.target->as.ident.name);
+        if (rc_is_tracked(gen, env_name)) {
+            emit_indent(gen);
+            emit(gen, "__rc_dec(%s);\n", env_name);
+            emit_indent(gen);
+            emit_expr(gen, expr);
+            emit(gen, ";\n");
+            return;
+        }
+    }
+
     // Check for owned temps in the expression tree
     if (has_owned_temps(expr)) {
         int saved = hoist_owned_temps(gen, expr);
@@ -810,13 +825,25 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
     if (has_temps) {
         cleanup_owned_temps(gen, saved);
     }
+
+    // Track closure env for scope cleanup: __rc_dec(f.env) at scope exit.
+    // __rc_dec(NULL) is a no-op, so this is safe even for non-capturing closures.
+    int is_func_var =
+        (node->as.var_decl.resolved_type && node->as.var_decl.resolved_type->kind == TYPE_FUNC) ||
+        (node->as.var_decl.type && node->as.var_decl.type->type == NODE_FUNC_TYPE);
+    if (is_func_var) {
+        char env_name[256];
+        snprintf(env_name, sizeof(env_name), "%s.env", node->as.var_decl.name);
+        rc_push_var(gen, env_name, NULL);
+    }
 }
 
 // Emit a return statement (NODE_RETURN).
 // Handles RC cleanup, defer integration, and return value evaluation.
 static void emit_return_stmt(CodeGen* gen, Node* node) {
     // Determine if we're returning an RC var (skip it in cleanup)
-    const char* skip_name = NULL;
+    const char* skip_name    = NULL;
+    char        env_buf[256] = {0};
     if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_IDENT) {
         // Check if the returned identifier is an RC var
         const char* ret_name = node->as.return_stmt.value->as.ident.name;
@@ -824,6 +851,13 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
             if (strcmp(gen->rc.vars[i].name, ret_name) == 0) {
                 skip_name = ret_name;
                 break;
+            }
+        }
+        // If returning a closure variable, skip its .env cleanup (ownership transfer)
+        if (!skip_name) {
+            snprintf(env_buf, sizeof(env_buf), "%s.env", ret_name);
+            if (rc_is_tracked(gen, env_buf)) {
+                skip_name = env_buf;
             }
         }
     }

@@ -457,7 +457,9 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
 
 `match` can be used as a statement or expression. In expression form, each arm body must be an expression (block bodies are not allowed).
 
-**Lambda expressions:** `|x: i64| x * 2` creates an anonymous function (non-capturing). Lambdas compile to plain C function pointers and have type `func(T1, T2, ...): R`. Parameter type annotations are required. The return type is inferred from the body for expression lambdas, or defaults to `void` for block lambdas (use `-> T` to specify explicitly). Empty-parameter lambdas use `||`: `|| 42`. Lambdas can be assigned to `func(...)` typed variables, passed as function arguments, or called directly: `(|x: i64| x + 1)(42)`. Variable capture (closures) is not yet supported — referencing variables from an enclosing scope is a compile error.
+**Lambda expressions:** `|x: i64| x * 2` creates an anonymous function. Lambdas have type `func(T1, T2, ...): R` and are represented as fat pointers (`__Closure { fn, env }`). Parameter type annotations are required unless inferred from context. The return type is inferred from the body for expression lambdas, or defaults to `void` for block lambdas (use `-> T` to specify explicitly). Empty-parameter lambdas use `||`: `|| 42`. Lambdas can be assigned to `func(...)` typed variables, passed as function arguments, or called directly: `(|x: i64| x + 1)(42)`.
+
+**Closures:** Lambdas can capture variables from enclosing scopes. Captured variables are copied into a heap-allocated environment struct at lambda creation time. RC-managed captures (strings, structs, vecs) are automatically reference-counted — the environment holds its own reference, which is released when the closure's environment is freed. Non-capturing lambdas have a `NULL` environment (zero overhead). Example: `var offset = 10; var f = |x: i64| -> i64 x + offset;`
 
 **Tuple literals:** `(1, "hello")` creates a tuple value. Tuples must have at least two elements. Access elements by index: `t[0]`, `t[1]`.
 
