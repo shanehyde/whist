@@ -29,6 +29,8 @@ struct DestructPattern {
         struct {
             char** field_names;
             int*   field_name_lengths;
+            char** local_names; // Rename targets (same as field_names if no rename)
+            int*   local_name_lengths;
             int    count;
             int    capacity;
             Type** field_types; // Set by checker (parallel array)
@@ -42,7 +44,8 @@ DestructPattern* pattern_new_ident(const char* name, int length);
 DestructPattern* pattern_new_tuple(int capacity);
 void             pattern_tuple_push(DestructPattern* pattern, DestructPattern* elem);
 DestructPattern* pattern_new_struct(int capacity);
-void             pattern_struct_push(DestructPattern* pattern, const char* name, int length);
+void             pattern_struct_push(DestructPattern* pattern, const char* name, int length,
+                                     const char* local_name, int local_length);
 void             pattern_free(DestructPattern* pattern);
 DestructPattern* pattern_clone(DestructPattern* pattern);
 

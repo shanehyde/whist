@@ -41,6 +41,8 @@ DestructPattern* pattern_new_struct(int capacity) {
     pattern->kind                        = PATTERN_STRUCT;
     pattern->as.struc.field_names        = xmalloc(capacity * sizeof(char*));
     pattern->as.struc.field_name_lengths = xmalloc(capacity * sizeof(int));
+    pattern->as.struc.local_names        = xmalloc(capacity * sizeof(char*));
+    pattern->as.struc.local_name_lengths = xmalloc(capacity * sizeof(int));
     pattern->as.struc.field_types        = xcalloc(capacity, sizeof(Type*));
     pattern->as.struc.count              = 0;
     pattern->as.struc.capacity           = capacity;
@@ -48,12 +50,17 @@ DestructPattern* pattern_new_struct(int capacity) {
     return pattern;
 }
 
-void pattern_struct_push(DestructPattern* pattern, const char* name, int length) {
+void pattern_struct_push(DestructPattern* pattern, const char* name, int length,
+                         const char* local_name, int local_length) {
     if (pattern->as.struc.count >= pattern->as.struc.capacity) {
         pattern->as.struc.capacity *= 2;
         pattern->as.struc.field_names =
             xrealloc(pattern->as.struc.field_names, pattern->as.struc.capacity * sizeof(char*));
         pattern->as.struc.field_name_lengths = xrealloc(pattern->as.struc.field_name_lengths,
+                                                        pattern->as.struc.capacity * sizeof(int));
+        pattern->as.struc.local_names =
+            xrealloc(pattern->as.struc.local_names, pattern->as.struc.capacity * sizeof(char*));
+        pattern->as.struc.local_name_lengths = xrealloc(pattern->as.struc.local_name_lengths,
                                                         pattern->as.struc.capacity * sizeof(int));
         pattern->as.struc.field_types =
             xrealloc(pattern->as.struc.field_types, pattern->as.struc.capacity * sizeof(Type*));
@@ -63,6 +70,11 @@ void pattern_struct_push(DestructPattern* pattern, const char* name, int length)
     memcpy(pattern->as.struc.field_names[i], name, length);
     pattern->as.struc.field_names[i][length] = '\0';
     pattern->as.struc.field_name_lengths[i]  = length;
+
+    pattern->as.struc.local_names[i] = xmalloc(local_length + 1);
+    memcpy(pattern->as.struc.local_names[i], local_name, local_length);
+    pattern->as.struc.local_names[i][local_length] = '\0';
+    pattern->as.struc.local_name_lengths[i]        = local_length;
 }
 
 void pattern_free(DestructPattern* pattern) {
@@ -82,9 +94,12 @@ void pattern_free(DestructPattern* pattern) {
     case PATTERN_STRUCT:
         for (int i = 0; i < pattern->as.struc.count; i++) {
             free(pattern->as.struc.field_names[i]);
+            free(pattern->as.struc.local_names[i]);
         }
         free(pattern->as.struc.field_names);
         free(pattern->as.struc.field_name_lengths);
+        free(pattern->as.struc.local_names);
+        free(pattern->as.struc.local_name_lengths);
         free(pattern->as.struc.field_types);
         break;
     }
@@ -116,10 +131,14 @@ DestructPattern* pattern_clone(DestructPattern* pattern) {
         c->as.struc.capacity           = pattern->as.struc.count;
         c->as.struc.field_names        = xmalloc(sizeof(char*) * pattern->as.struc.count);
         c->as.struc.field_name_lengths = xmalloc(sizeof(int) * pattern->as.struc.count);
+        c->as.struc.local_names        = xmalloc(sizeof(char*) * pattern->as.struc.count);
+        c->as.struc.local_name_lengths = xmalloc(sizeof(int) * pattern->as.struc.count);
         c->as.struc.field_types        = NULL; // checker-set, will be re-populated
         for (int i = 0; i < pattern->as.struc.count; i++) {
             c->as.struc.field_names[i]        = xstrdup(pattern->as.struc.field_names[i]);
             c->as.struc.field_name_lengths[i] = pattern->as.struc.field_name_lengths[i];
+            c->as.struc.local_names[i]        = xstrdup(pattern->as.struc.local_names[i]);
+            c->as.struc.local_name_lengths[i] = pattern->as.struc.local_name_lengths[i];
         }
         break;
     }

@@ -452,16 +452,28 @@ Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
 
         DestructPattern* pattern = pattern_new_struct(4);
 
-        // Parse first field name (required)
+        // Parse first field (required): field_name or field_name: local_name
         Token field = parser->current;
         consume_token(parser, TOK_IDENT, "Expected field name");
-        pattern_struct_push(pattern, field.start, field.length);
+        if (match_token(parser, TOK_COLON)) {
+            Token local = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected local variable name after ':'");
+            pattern_struct_push(pattern, field.start, field.length, local.start, local.length);
+        } else {
+            pattern_struct_push(pattern, field.start, field.length, field.start, field.length);
+        }
 
-        // Parse remaining comma-separated field names
+        // Parse remaining comma-separated fields
         while (match_token(parser, TOK_COMMA)) {
             field = parser->current;
             consume_token(parser, TOK_IDENT, "Expected field name");
-            pattern_struct_push(pattern, field.start, field.length);
+            if (match_token(parser, TOK_COLON)) {
+                Token local = parser->current;
+                consume_token(parser, TOK_IDENT, "Expected local variable name after ':'");
+                pattern_struct_push(pattern, field.start, field.length, local.start, local.length);
+            } else {
+                pattern_struct_push(pattern, field.start, field.length, field.start, field.length);
+            }
         }
 
         consume_token(parser, TOK_RBRACE, "Expected '}'");
