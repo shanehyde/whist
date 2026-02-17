@@ -552,8 +552,10 @@ static Node* parse_lambda_expr(Parser* parser, Token start) {
             param->as.param.name_length = param_name.length;
             param->as.param.is_const    = 0;
 
-            consume_token(parser, TOK_COLON, "Expected ':' after lambda parameter name");
-            param->as.param.type = parse_type(parser);
+            param->as.param.type = NULL;
+            if (match_token(parser, TOK_COLON)) {
+                param->as.param.type = parse_type(parser);
+            }
 
             nodelist_push(&node->as.lambda.params, param);
 

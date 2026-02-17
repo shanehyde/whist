@@ -137,6 +137,7 @@ void checker_init(Checker* checker) {
     checker->traits.deferred_check_capacity = 0;
     checker->alias_depth                    = 0;
     checker->enum_target_hint               = NULL;
+    checker->expected_func_type             = NULL;
     checker->self_type                      = NULL;
     checker->lambda_next_id                 = 0;
     checker->lambda_depth                   = 0;
