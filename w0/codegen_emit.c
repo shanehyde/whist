@@ -786,6 +786,7 @@ void emit_decl(CodeGen* gen, Node* node) {
             emit(gen, "static void __test_%d(void) {\n", gen->test_index++);
             gen->out.indent++;
             emit_block_contents(gen, node->as.test_decl.body);
+            rc_cleanup_all(gen, NULL);
             gen->out.indent--;
             emit(gen, "}\n\n");
             rc_clear_all(gen);

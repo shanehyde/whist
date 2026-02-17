@@ -13,6 +13,27 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node);
 static void emit_return_stmt(CodeGen* gen, Node* node);
 static void emit_match_stmt(CodeGen* gen, Node* node);
 
+// Walk a destructuring pattern and RC-track any identifiers with RC-managed types
+static void rc_track_destruct_pattern(CodeGen* gen, DestructPattern* pattern) {
+    if (!pattern)
+        return;
+    switch (pattern->kind) {
+    case PATTERN_IDENT:
+        if (type_is_rc_managed(pattern->resolved_type)) {
+            rc_push_var(gen, pattern->as.ident.name, pattern->resolved_type);
+        }
+        break;
+    case PATTERN_TUPLE:
+        for (int i = 0; i < pattern->as.tuple.count; i++) {
+            rc_track_destruct_pattern(gen, pattern->as.tuple.elements[i]);
+        }
+        break;
+    case PATTERN_STRUCT:
+        // Struct destructuring is handled separately
+        break;
+    }
+}
+
 static const char* enum_value_resolved_name(CodeGen* gen, Node* enum_value) {
     const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
                                                              enum_value->as.enum_value.enum_name);
@@ -766,6 +787,9 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
         char temp_prefix[64];
         snprintf(temp_prefix, sizeof(temp_prefix), "__tuple%d", temp_id);
         emit_destruct_pattern(gen, pattern, temp_prefix, node->as.var_decl.is_const);
+
+        // RC-track any destructured variables with RC-managed types
+        rc_track_destruct_pattern(gen, pattern);
         return;
     }
 
