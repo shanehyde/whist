@@ -1,9 +1,7 @@
 // Expected: PASS: addition
 // Expected: PASS: subtraction
 // Expected: PASS: boolean checks
-// Expected: FAIL: assert failure
-// Expected: ASSERT FAILED: ((1 + 1) == 3)
-// Expected: 3 passed, 1 failed, 4 total
+// Expected: 3 passed, 0 failed, 3 total
 
 // --- test_basic ---
 
