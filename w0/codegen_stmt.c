@@ -1497,6 +1497,11 @@ void emit_stmt(CodeGen* gen, Node* node) {
         return;
     }
 
+    if (gen->line_directives && node->line > 0) {
+        emit_indent(gen);
+        emit(gen, "#line %d \"%s\"\n", node->line, gen->source_file);
+    }
+
     if ((unsigned)node->type < (sizeof(stmt_emitters) / sizeof(stmt_emitters[0]))) {
         StmtEmitter emit_fn = stmt_emitters[node->type];
         if (emit_fn) {

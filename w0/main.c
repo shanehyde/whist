@@ -19,8 +19,10 @@ typedef struct {
     int         parse_only;
     int         check_only;
     int         print_ast_flag;
+    int         print_ast_checked;
     int         rc_debug;
     int         emit_c;
+    int         line_directives;
     const char* output_file;
     const char* lib_path;
 } MainOptions;
@@ -82,7 +84,7 @@ static CodeGenChecker make_codegen_checker(Checker* checker) {
 }
 
 static int compile_to_c(const char* source, const char* source_path, const char* lib_path,
-                        int rc_debug, int test_mode, FILE* out) {
+                        int rc_debug, int test_mode, int line_directives, FILE* out) {
     ModuleLoader loader;
     module_loader_init(&loader, lib_path);
 
@@ -113,7 +115,8 @@ static int compile_to_c(const char* source, const char* source_path, const char*
     }
 
     CodeGen gen;
-    codegen_init(&gen, out, make_codegen_checker(&checker), rc_debug, test_mode, source_path);
+    codegen_init(&gen, out, make_codegen_checker(&checker), rc_debug, test_mode, source_path,
+                 line_directives);
     codegen_emit(&gen, ast);
     codegen_free(&gen);
 
@@ -125,7 +128,7 @@ static int compile_to_c(const char* source, const char* source_path, const char*
 }
 
 static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path,
-                           int rc_debug, int emit_c) {
+                           int rc_debug, int emit_c, int line_directives) {
     char* source = read_file(source_path);
     if (!source) {
         fprintf(stderr, "Could not open file: %s\n", source_path);
@@ -134,7 +137,8 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
 
     // --emit-c: just dump generated C to stdout and exit
     if (emit_c) {
-        int result = compile_to_c(source, source_path, lib_path, rc_debug, 0, stdout);
+        int result = compile_to_c(source, source_path, lib_path, rc_debug, 0, line_directives,
+                                  stdout);
         free(source);
         return result;
     }
@@ -178,7 +182,7 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
         return 1;
     }
 
-    int result = compile_to_c(source, source_path, lib_path, rc_debug, 0, c_file);
+    int result = compile_to_c(source, source_path, lib_path, rc_debug, 0, line_directives, c_file);
     fclose(c_file);
     free(source);
 
@@ -232,7 +236,7 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
 }
 
 static int compile_and_test(const char* source_path, const char* lib_path, int rc_debug,
-                            int emit_c) {
+                            int emit_c, int line_directives) {
     char* source = read_file(source_path);
     if (!source) {
         fprintf(stderr, "Could not open file: %s\n", source_path);
@@ -241,7 +245,8 @@ static int compile_and_test(const char* source_path, const char* lib_path, int r
 
     // --emit-c: just dump generated C to stdout and exit
     if (emit_c) {
-        int result = compile_to_c(source, source_path, lib_path, rc_debug, 1, stdout);
+        int result = compile_to_c(source, source_path, lib_path, rc_debug, 1, line_directives,
+                                  stdout);
         free(source);
         return result;
     }
@@ -285,7 +290,7 @@ static int compile_and_test(const char* source_path, const char* lib_path, int r
         return 1;
     }
 
-    int result = compile_to_c(source, source_path, lib_path, rc_debug, 1, c_file);
+    int result = compile_to_c(source, source_path, lib_path, rc_debug, 1, line_directives, c_file);
     fclose(c_file);
     free(source);
 
@@ -339,11 +344,15 @@ static void print_usage(const char* program) {
     fprintf(stderr, "  --parse   Parse only (no type checking)\n");
     fprintf(stderr, "  --check   Type check only (no code generation)\n");
     fprintf(stderr, "  --ast     Print AST\n");
+    fprintf(stderr, "  --ast-checked\n");
+    fprintf(stderr, "            Print AST with checker annotations\n");
     fprintf(stderr, "  --lib-path <dir>\n");
     fprintf(stderr, "            Library search path for module imports\n");
     fprintf(stderr, "  --rc-debug\n");
     fprintf(stderr, "            Emit RC tracking debug output to stderr\n");
     fprintf(stderr, "  --emit-c  Dump generated C to stdout (works with run/test)\n");
+    fprintf(stderr, "  --line-directives\n");
+    fprintf(stderr, "            Emit #line directives in generated C\n");
     fprintf(stderr, "  -o <file> Output file\n");
     fprintf(stderr, "Commands:\n");
     fprintf(stderr, "  run       Compile and run the program\n");
@@ -362,6 +371,8 @@ static void prescan_global_options(int argc, char** argv, MainOptions* opts) {
             opts->rc_debug = 1;
         } else if (strcmp(argv[i], "--emit-c") == 0) {
             opts->emit_c = 1;
+        } else if (strcmp(argv[i], "--line-directives") == 0) {
+            opts->line_directives = 1;
         }
     }
 }
@@ -383,7 +394,8 @@ static const char* find_subcommand_source(int argc, char** argv, int subcommand_
     for (int i = subcommand_idx + 1; i < argc; i++) {
         if (strcmp(argv[i], "--lib-path") == 0 && i + 1 < argc) {
             i++;
-        } else if (strcmp(argv[i], "--rc-debug") == 0 || strcmp(argv[i], "--emit-c") == 0) {
+        } else if (strcmp(argv[i], "--rc-debug") == 0 || strcmp(argv[i], "--emit-c") == 0 ||
+                   strcmp(argv[i], "--line-directives") == 0) {
             // Skip flag.
         } else {
             if (arg_start) {
@@ -405,7 +417,8 @@ static int try_handle_subcommand(int argc, char** argv, const MainOptions* opts)
             return 1;
         }
         return compile_and_run(run_source, argc - run_args_start, argv + run_args_start,
-                               opts->lib_path, opts->rc_debug, opts->emit_c);
+                               opts->lib_path, opts->rc_debug, opts->emit_c,
+                               opts->line_directives);
     }
 
     int test_idx = find_subcommand_index(argc, argv, "test");
@@ -415,7 +428,8 @@ static int try_handle_subcommand(int argc, char** argv, const MainOptions* opts)
             fprintf(stderr, "Usage: %s test [options] <source-file>\n", argv[0]);
             return 1;
         }
-        return compile_and_test(test_source, opts->lib_path, opts->rc_debug, opts->emit_c);
+        return compile_and_test(test_source, opts->lib_path, opts->rc_debug, opts->emit_c,
+                                opts->line_directives);
     }
 
     return -1;
@@ -439,6 +453,10 @@ static void parse_main_options(int argc, char** argv, MainOptions* opts, int* ar
             opts->rc_debug = 1;
         } else if (strcmp(argv[*arg_idx], "--emit-c") == 0) {
             opts->emit_c = 1;
+        } else if (strcmp(argv[*arg_idx], "--line-directives") == 0) {
+            opts->line_directives = 1;
+        } else if (strcmp(argv[*arg_idx], "--ast-checked") == 0) {
+            opts->print_ast_checked = 1;
         } else if (strcmp(argv[*arg_idx], "-o") == 0 && *arg_idx + 1 < argc) {
             (*arg_idx)++;
             opts->output_file = argv[*arg_idx];
@@ -481,7 +499,8 @@ static int run_normal_compile(const MainOptions* opts, const char* source,
         }
     }
 
-    int result = compile_to_c(source, source_file, opts->lib_path, opts->rc_debug, 0, out);
+    int result = compile_to_c(source, source_file, opts->lib_path, opts->rc_debug, 0,
+                              opts->line_directives, out);
 
     if (opts->output_file) {
         fclose(out);
@@ -531,6 +550,18 @@ static int run_debug_pipeline(const MainOptions* opts, const char* source,
             return 1;
         }
 
+        if (opts->print_ast_checked) {
+            printf("Checked AST:\n");
+            printf("----\n");
+            print_ast_checked(ast, 0);
+            printf("\n");
+            checker_free(&checker);
+            node_free(ast);
+            parser_free(&parser);
+            module_loader_free(&loader);
+            return 0;
+        }
+
         if (!opts->check_only) {
             FILE* out = stdout;
             if (opts->output_file) {
@@ -546,7 +577,8 @@ static int run_debug_pipeline(const MainOptions* opts, const char* source,
             }
 
             CodeGen gen;
-            codegen_init(&gen, out, make_codegen_checker(&checker), opts->rc_debug, 0, source_file);
+            codegen_init(&gen, out, make_codegen_checker(&checker), opts->rc_debug, 0, source_file,
+                         opts->line_directives);
             codegen_emit(&gen, ast);
             codegen_free(&gen);
             checker_free(&checker);
@@ -594,7 +626,8 @@ int main(int argc, char** argv) {
     int result = 0;
     if (opts.lex_only) {
         run_lex_mode(source);
-    } else if (!opts.parse_only && !opts.check_only && !opts.print_ast_flag) {
+    } else if (!opts.parse_only && !opts.check_only && !opts.print_ast_flag &&
+               !opts.print_ast_checked) {
         result = run_normal_compile(&opts, source, source_file);
     } else {
         result = run_debug_pipeline(&opts, source, source_file);

@@ -484,7 +484,7 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
 
 // Initialize the code generator with output stream, checker results, and RC debug flag
 void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_debug, int test_mode,
-                  const char* source_file) {
+                  const char* source_file, int line_directives) {
     gen->out.file       = out;
     gen->out.indent     = 0;
     gen->out.temp_count = 0;
@@ -557,6 +557,7 @@ void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_d
     gen->test_mode           = test_mode;
     gen->test_index          = 0;
     gen->source_file         = source_file;
+    gen->line_directives     = line_directives;
 }
 
 void codegen_free(CodeGen* gen) {

@@ -156,13 +156,15 @@ typedef struct {
     int test_index; // Counter for emitting __test_N function names
     // Source file path for assert error messages
     const char* source_file;
+    // 1 = emit #line directives in generated C
+    int line_directives;
 } CodeGen;
 
 // Codegen lifecycle:
 // - codegen_init stores borrowed checker-derived metadata and output handles.
 // - codegen_emit consumes AST + semantic annotations to emit C; it does not own AST/checker data.
 void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_debug, int test_mode,
-                  const char* source_file);
+                  const char* source_file, int line_directives);
 void codegen_emit(CodeGen* gen, Node* ast);
 void codegen_free(CodeGen* gen);
 

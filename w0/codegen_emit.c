@@ -678,6 +678,10 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
 
     int is_void = return_type_is_void(fdn->return_type);
 
+    if (gen->line_directives && node->line > 0) {
+        emit(gen, "#line %d \"%s\"\n", node->line, gen->source_file);
+    }
+
     // Emit static for private functions (except main).
     if (!fdn->is_public && strcmp(fdn->name, "main") != 0) {
         emit(gen, "static ");
