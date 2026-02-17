@@ -1333,6 +1333,58 @@ static int type_satisfies_trait_bound(Checker* checker, Type* type, const char* 
     return 0;
 }
 
+// Check if a node is a lambda with at least one untyped parameter
+static int has_untyped_lambda_params(Node* node) {
+    if (node->type != NODE_LAMBDA)
+        return 0;
+    for (int i = 0; i < node->as.lambda.params.count; i++) {
+        if (!node->as.lambda.params.nodes[i]->as.param.type)
+            return 1;
+    }
+    return 0;
+}
+
+// Build an expected TYPE_FUNC from a generic parameter type node using partially-inferred types.
+// Only resolves param types whose type nodes are simple ident type params with known inference.
+// Returns NULL if any param type can't be resolved.
+static Type* build_expected_func_type(Checker* checker, Node* param_type_node, GenericFuncDef* gdef,
+                                      Type** inferred) {
+    if (!param_type_node || param_type_node->type != NODE_FUNC_TYPE)
+        return NULL;
+
+    NodeList* ft_params   = &param_type_node->as.func_type.param_types;
+    int       n           = ft_params->count;
+    Type**    param_types = xmalloc(n * sizeof(Type*));
+
+    for (int i = 0; i < n; i++) {
+        Node* pt       = ft_params->nodes[i];
+        param_types[i] = NULL;
+
+        if (pt->type == NODE_IDENT) {
+            // Check if it's a generic type param with known inference
+            for (int j = 0; j < gdef->type_param_count; j++) {
+                if (strcmp(pt->as.ident.name, gdef->type_params[j]) == 0) {
+                    param_types[i] = inferred[j]; // NULL if not yet inferred
+                    break;
+                }
+            }
+            // If not a type param, try to resolve as concrete type
+            if (!param_types[i]) {
+                param_types[i] = resolve_type(checker, pt);
+                if (param_types[i]->kind == TYPE_ERROR)
+                    param_types[i] = NULL;
+            }
+        }
+
+        if (!param_types[i]) {
+            free(param_types);
+            return NULL;
+        }
+    }
+
+    return type_func(param_types, n, NULL, 0);
+}
+
 static Type* try_check_generic_free_function_call(Checker* checker, Node* node) {
     Node* callee = node->as.call.func;
     if (callee->type != NODE_IDENT) {
@@ -1353,12 +1405,15 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
     }
 
     int    arg_count = node->as.call.args.count;
-    Type** arg_types = xmalloc(arg_count * sizeof(Type*));
+    Type** arg_types = xcalloc(arg_count, sizeof(Type*));
     int    has_error = 0;
+
+    // Pass 1: Check non-lambda-with-untyped-params arguments
     for (int i = 0; i < arg_count; i++) {
-        arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
-        if (arg_types[i]->kind == TYPE_ERROR) {
-            has_error = 1;
+        if (!has_untyped_lambda_params(node->as.call.args.nodes[i])) {
+            arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
+            if (arg_types[i]->kind == TYPE_ERROR)
+                has_error = 1;
         }
     }
     if (has_error) {
@@ -1366,10 +1421,41 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
         return type_error;
     }
 
+    // Partial inference from pass 1 args
     Type** inferred = xcalloc(gdef->type_param_count, sizeof(Type*));
     for (int i = 0; i < arg_count; i++) {
-        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
-        infer_type_param(checker, gdef, param_type_node, arg_types[i], inferred);
+        if (arg_types[i]) {
+            infer_type_param(checker, gdef, fdn->params.nodes[i]->as.param.type, arg_types[i],
+                             inferred);
+        }
+    }
+
+    // Pass 2: Check lambda args with expected types built from partial inference
+    for (int i = 0; i < arg_count; i++) {
+        if (!arg_types[i]) {
+            Type* old_expected = checker->expected_func_type;
+            Type* expected = build_expected_func_type(checker, fdn->params.nodes[i]->as.param.type,
+                                                      gdef, inferred);
+            if (expected)
+                checker->expected_func_type = expected;
+
+            arg_types[i]                = check_expression(checker, node->as.call.args.nodes[i]);
+            checker->expected_func_type = old_expected;
+
+            if (arg_types[i]->kind == TYPE_ERROR)
+                has_error = 1;
+
+            // Infer from the now-resolved lambda type
+            if (!has_error) {
+                infer_type_param(checker, gdef, fdn->params.nodes[i]->as.param.type, arg_types[i],
+                                 inferred);
+            }
+        }
+    }
+    if (has_error) {
+        free(arg_types);
+        free(inferred);
+        return type_error;
     }
 
     for (int i = 0; i < gdef->type_param_count; i++) {
@@ -1509,30 +1595,39 @@ static Type* try_check_generic_method_call(Checker* checker, Node* node) {
         return type_error;
     }
 
-    // Type-check all arguments
+    // Pre-fill inference array from receiver pattern BEFORE checking args
+    Type** inferred           = xcalloc(gdef->type_param_count, sizeof(Type*));
+    int    recv_pattern_count = fdn->receiver_type_args.count;
+    for (int i = 0; i < recv_arg_count && i < recv_pattern_count; i++) {
+        infer_type_param(checker, gdef, fdn->receiver_type_args.nodes[i], recv_args[i], inferred);
+    }
+    free(recv_args);
+
+    // Type-check all arguments (with expected types for lambda inference)
     int    arg_count = node->as.call.args.count;
     Type** arg_types = xmalloc(arg_count * sizeof(Type*));
     int    has_error = 0;
     for (int i = 0; i < arg_count; i++) {
+        // Build expected type for lambda args from partially-inferred params
+        Type* old_expected    = checker->expected_func_type;
+        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
+        Type* expected        = build_expected_func_type(checker, param_type_node, gdef, inferred);
+        if (expected)
+            checker->expected_func_type = expected;
+
         arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
+
+        checker->expected_func_type = old_expected;
+
         if (arg_types[i]->kind == TYPE_ERROR) {
             has_error = 1;
         }
     }
     if (has_error) {
         free(arg_types);
-        free(recv_args);
+        free(inferred);
         return type_error;
     }
-
-    // Pre-fill inference array from receiver pattern + concrete receiver args.
-    Type** inferred = xcalloc(gdef->type_param_count, sizeof(Type*));
-
-    int recv_pattern_count = fdn->receiver_type_args.count;
-    for (int i = 0; i < recv_arg_count && i < recv_pattern_count; i++) {
-        infer_type_param(checker, gdef, fdn->receiver_type_args.nodes[i], recv_args[i], inferred);
-    }
-    free(recv_args);
 
     // Infer remaining type params from arguments
     for (int i = 0; i < arg_count; i++) {
@@ -1608,8 +1703,18 @@ static int check_call_arg_count(Checker* checker, Node* node, Type* func_type) {
 
 static void check_call_named_args(Checker* checker, Node* node, Type* func_type) {
     for (int i = 0; i < func_type->as.func.param_count; i++) {
-        Type* arg_type   = check_expression(checker, node->as.call.args.nodes[i]);
         Type* param_type = func_type->as.func.param_types[i];
+
+        // Set expected type for lambda inference
+        Type* old_expected = checker->expected_func_type;
+        if (param_type->kind == TYPE_FUNC) {
+            checker->expected_func_type = param_type;
+        }
+
+        Type* arg_type = check_expression(checker, node->as.call.args.nodes[i]);
+
+        checker->expected_func_type = old_expected;
+
         if (!type_assignable(param_type, arg_type)) {
             char ctx[32];
             snprintf(ctx, sizeof(ctx), "Argument %d", i + 1);
@@ -2078,13 +2183,18 @@ static Type* check_lambda_expr(Checker* checker, Node* node) {
     }
     for (int i = 0; i < param_count; i++) {
         Node* p = params->nodes[i];
-        if (!p->as.param.type) {
-            check_error(checker, p->line, p->column,
-                        "Lambda parameter '%s' requires a type annotation", p->as.param.name);
+        if (p->as.param.type) {
+            param_types[i] = resolve_type(checker, p->as.param.type);
+        } else if (checker->expected_func_type && checker->expected_func_type->kind == TYPE_FUNC &&
+                   i < checker->expected_func_type->as.func.param_count &&
+                   checker->expected_func_type->as.func.param_types[i]) {
+            param_types[i] = checker->expected_func_type->as.func.param_types[i];
+        } else {
+            check_error(checker, p->line, p->column, "Cannot infer type for lambda parameter '%s'",
+                        p->as.param.name);
             free(param_types);
             return type_error;
         }
-        param_types[i] = resolve_type(checker, p->as.param.type);
         if (param_types[i]->kind == TYPE_ERROR) {
             free(param_types);
             return type_error;
