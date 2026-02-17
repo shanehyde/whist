@@ -1987,7 +1987,7 @@ static Type* check_tuple_lit_expr(Checker* checker, Node* node) {
     for (int i = 0; i < count; i++) {
         elems[i] = check_expression(checker, node->as.tuple_lit.elements.nodes[i]);
     }
-    Type* tuple_type                    = type_tuple(elems, count);
+    Type* tuple_type                 = type_tuple(elems, count);
     node->as.tuple_lit.resolved_type = tuple_type;
     return tuple_type;
 }
