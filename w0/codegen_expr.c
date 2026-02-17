@@ -345,6 +345,33 @@ static int is_extern_call(CodeGen* gen, Node* func) {
     return 0;
 }
 
+// Emit an indirect call through a __Closure value using the closure calling convention:
+//   ((RetType (*)(void*, ParamTypes...))(callee).fn)((callee).env, args...)
+// Uses a temp variable to avoid evaluating the callee expression multiple times.
+static void emit_closure_call(CodeGen* gen, Node* call) {
+    Type* ft  = call->as.call.resolved_func_type;
+    int   tmp = gen->out.temp_count++;
+
+    // Evaluate callee once into a temp
+    emit(gen, "({ __Closure __cl%d = ", tmp);
+    emit_expr(gen, call->as.call.func);
+    emit(gen, "; ((");
+    // Cast: RetType (*)(void*, ParamTypes...)
+    emit_resolved_type(gen, ft->as.func.return_type);
+    emit(gen, " (*)(void*");
+    for (int i = 0; i < ft->as.func.param_count; i++) {
+        emit(gen, ", ");
+        emit_resolved_type(gen, ft->as.func.param_types[i]);
+    }
+    emit(gen, "))__cl%d.fn)(__cl%d.env", tmp, tmp);
+    // Actual arguments
+    for (int i = 0; i < call->as.call.args.count; i++) {
+        emit(gen, ", ");
+        emit_expr(gen, call->as.call.args.nodes[i]);
+    }
+    emit(gen, "); })");
+}
+
 static void emit_regular_call(CodeGen* gen, Node* call, Node* func) {
     // Generic free function calls use the checker-set mangled name
     if (call->as.call.resolved_name) {
@@ -354,6 +381,13 @@ static void emit_regular_call(CodeGen* gen, Node* call, Node* func) {
         return;
     }
 
+    // Indirect call through closure (function stored in variable/field)
+    if (call->as.call.is_indirect_call) {
+        emit_closure_call(gen, call);
+        return;
+    }
+
+    // Direct function call
     const char* alias_name = find_call_alias(gen, func);
     if (alias_name) {
         emit(gen, "%s(", alias_name);
@@ -368,6 +402,9 @@ static void emit_regular_call(CodeGen* gen, Node* call, Node* func) {
 
     if (gen->current_module == NULL && call_ident_matches(func, "main")) {
         emit(gen, "__w0_user_main(");
+    } else if (func->type == NODE_IDENT) {
+        // Emit function name directly (bypass emit_expr to avoid thunk wrapping)
+        emit(gen, "%.*s(", func->as.ident.length, func->as.ident.name);
     } else {
         emit_expr(gen, func);
         emit(gen, "(");
@@ -582,10 +619,11 @@ static void emit_slice_expr(CodeGen* gen, Node* node) {
 
 // Emit a member access expression using -> for struct pointers or . for value types
 static void emit_member_expr(CodeGen* gen, Node* node) {
-    // Unbound method reference: Type.method -> StructName_method
+    // Unbound method reference: Type.method -> closure wrapping thunk
     if (node->as.member.is_method_ref) {
         const char* sname = member_struct_name(gen, node);
-        emit(gen, "%s_%.*s", sname, node->as.member.length, node->as.member.name);
+        emit(gen, "(__Closure){(void*)__%s_%.*s_thunk, NULL}", sname, node->as.member.length,
+             node->as.member.name);
         return;
     }
 
@@ -1238,6 +1276,10 @@ static void emit_ident_expr(CodeGen* gen, Node* node) {
     if (gen->in_enum_method && node->as.ident.length == 4 &&
         memcmp(node->as.ident.name, "self", 4) == 0) {
         emit(gen, "(*self)");
+    } else if (node->as.ident.resolved_func_type) {
+        // Named function used as a value — emit closure wrapping a thunk
+        emit(gen, "(__Closure){(void*)__%.*s_thunk, NULL}", node->as.ident.length,
+             node->as.ident.name);
     } else {
         emit(gen, "%.*s", node->as.ident.length, node->as.ident.name);
     }
@@ -1454,7 +1496,7 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_LAMBDA:
-        emit(gen, "__lambda_%d", node->as.lambda.lambda_id);
+        emit(gen, "(__Closure){(void*)__lambda_%d, NULL}", node->as.lambda.lambda_id);
         break;
 
     default:

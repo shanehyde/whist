@@ -356,16 +356,8 @@ static void emit_resolved_tuple_type(CodeGen* gen, Type* type) {
 }
 
 static void emit_resolved_func_type(CodeGen* gen, Type* type) {
-    emit_resolved_type(gen, type->as.func.return_type);
-    emit(gen, " (*)(");
-    for (int i = 0; i < type->as.func.param_count; i++) {
-        if (i > 0)
-            emit(gen, ", ");
-        emit_resolved_type(gen, type->as.func.param_types[i]);
-    }
-    if (type->as.func.param_count == 0)
-        emit(gen, "void");
-    emit(gen, ")");
+    (void)type;
+    emit(gen, "__Closure");
 }
 
 void emit_resolved_type(CodeGen* gen, Type* type) {
@@ -421,20 +413,8 @@ void emit_type_with_name(CodeGen* gen, Node* type_node, const char* name) {
     }
 
     if (type_node->type == NODE_FUNC_TYPE) {
-        // Function pointer: ret (*name)(params)
-        if (type_node->as.func_type.return_type)
-            emit_type(gen, type_node->as.func_type.return_type);
-        else
-            emit(gen, "void");
-        emit(gen, " (*%s)(", name);
-        for (int i = 0; i < type_node->as.func_type.param_types.count; i++) {
-            if (i > 0)
-                emit(gen, ", ");
-            emit_type(gen, type_node->as.func_type.param_types.nodes[i]);
-        }
-        if (type_node->as.func_type.param_types.count == 0)
-            emit(gen, "void");
-        emit(gen, ")");
+        // Closure: __Closure name
+        emit(gen, "__Closure %s", name);
     } else if (type_node->type == NODE_ARRAY_TYPE && type_node->as.array_type.size) {
         // Array: T name[n]
         emit_type(gen, type_node->as.array_type.elem_type);

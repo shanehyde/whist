@@ -916,7 +916,9 @@ static Type* check_member_type_ref(Checker* checker, Node* node, Type* type_val)
     sem_info_set_member_struct_name(checker->sem, node, sname);
     node->as.member.is_method_ref = 1;
 
-    return type_func(params, new_count, method_type->as.func.return_type, 0);
+    Type* result = type_func(params, new_count, method_type->as.func.return_type, 0);
+    node->as.member.resolved_func_type = result;
+    return result;
 }
 
 // Type-check a member access: dispatch to type-specific helpers
@@ -1760,6 +1762,23 @@ static Type* check_call_expr(Checker* checker, Node* node) {
         return type_error;
     }
 
+    // Determine if this is an indirect call (through a closure value)
+    Node* callee = node->as.call.func;
+    if (callee->type == NODE_IDENT) {
+        Symbol* sym = checker_lookup(checker, callee->as.ident.name);
+        if (sym && sym->kind == SYM_VAR) {
+            node->as.call.is_indirect_call   = 1;
+            node->as.call.resolved_func_type = func_type;
+        } else {
+            // Direct function call — clear func ref flag since this is a call, not a value ref
+            callee->as.ident.resolved_func_type = NULL;
+        }
+    } else {
+        // Non-ident callee (lambda, member field access, etc.) — always indirect
+        node->as.call.is_indirect_call   = 1;
+        node->as.call.resolved_func_type = func_type;
+    }
+
     check_call_named_args(checker, node, func_type);
     check_call_variadic_tail_args(checker, node, func_type);
     Type* ret = func_type->as.func.return_type;
@@ -2310,6 +2329,9 @@ Type* check_expression(Checker* checker, Node* node) {
             check_error(checker, node->line, node->column, "Undefined identifier '%s'",
                         node->as.ident.name);
             return type_error;
+        }
+        if (sym->kind == SYM_FUNC && sym->type->kind == TYPE_FUNC) {
+            node->as.ident.resolved_func_type = sym->type;
         }
         return sym->type;
     }

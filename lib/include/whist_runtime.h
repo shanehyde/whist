@@ -32,6 +32,12 @@ typedef struct {
     void (*cleanup)(void*);
 } __RcHeader;
 
+/* --- Closure (fat pointer for function values) --- */
+typedef struct {
+    void* fn;
+    void* env;
+} __Closure;
+
 #ifdef WHIST_RC_DEBUG
 
 static inline void* __rc_alloc(size_t size, void (*cleanup)(void*)) {

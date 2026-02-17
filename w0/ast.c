@@ -513,7 +513,12 @@ static void node_reset_checker_flags(Node* node) {
         break;
     case NODE_CALL:
         free(node->as.call.resolved_name);
-        node->as.call.resolved_name = NULL;
+        node->as.call.resolved_name      = NULL;
+        node->as.call.is_indirect_call   = 0;
+        node->as.call.resolved_func_type = NULL;
+        break;
+    case NODE_IDENT:
+        node->as.ident.resolved_func_type = NULL;
         break;
     case NODE_FOREACH:
         node->as.foreach_stmt.resolved_type = NULL;

@@ -683,17 +683,7 @@ static void emit_var_decl_inferred_type(CodeGen* gen, Node* node) {
         if (node->as.var_decl.resolved_type) {
             Type* rt = node->as.var_decl.resolved_type;
             if (rt->kind == TYPE_FUNC) {
-                // Function pointer: name goes inside the type
-                emit_resolved_type(gen, rt->as.func.return_type);
-                emit(gen, " (*%s)(", node->as.var_decl.name);
-                for (int i = 0; i < rt->as.func.param_count; i++) {
-                    if (i > 0)
-                        emit(gen, ", ");
-                    emit_resolved_type(gen, rt->as.func.param_types[i]);
-                }
-                if (rt->as.func.param_count == 0)
-                    emit(gen, "void");
-                emit(gen, ")");
+                emit(gen, "__Closure %s", node->as.var_decl.name);
             } else {
                 emit_resolved_type(gen, rt);
                 emit(gen, " %s", node->as.var_decl.name);
@@ -804,6 +794,11 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
     if (node->as.var_decl.init) {
         if (struct_type && node->as.var_decl.init->type == NODE_NULL_LIT) {
             emit(gen, " = NULL");
+        } else if (node->as.var_decl.init->type == NODE_NULL_LIT &&
+                   ((node->as.var_decl.resolved_type &&
+                     node->as.var_decl.resolved_type->kind == TYPE_FUNC) ||
+                    (node->as.var_decl.type && node->as.var_decl.type->type == NODE_FUNC_TYPE))) {
+            emit(gen, " = (__Closure){NULL, NULL}");
         } else {
             emit(gen, " = ");
             emit_expr(gen, node->as.var_decl.init);

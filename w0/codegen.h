@@ -134,6 +134,13 @@ typedef struct {
         int    count;
         int    capacity;
     } lambdas;
+    // Thunks for named functions used as closure values
+    struct {
+        char** c_names;    // C function names (owned copies)
+        Type** func_types; // TYPE_FUNC for each (not owned)
+        int    count;
+        int    capacity;
+    } thunks;
     // Current module name (NULL for "main")
     const char* current_module;
     // 1 if currently emitting an enum method body
