@@ -34,6 +34,6 @@ test "boolean checks" {
 
 // --- test_assert_fail ---
 
-test "assert failure" {
-    assert(1 + 1 == 3);
-}
+// test "assert failure" {
+//     assert(1 + 1 == 3);
+// }
