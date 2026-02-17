@@ -1432,11 +1432,14 @@ static const char* get_receiver_info(Checker* checker, Type* recv_type, Type*** 
         return "Vec";
     }
 
-    if (recv_type->kind == TYPE_STRUCT) {
-        // Look up the GenericInstance to find the base name
+    if (recv_type->kind == TYPE_STRUCT || recv_type->kind == TYPE_ENUM) {
+        const char* concrete_name =
+            (recv_type->kind == TYPE_STRUCT) ? recv_type->as.struc.name : recv_type->as.enm.name;
+
+        // Look up GenericInstance to recover base name + concrete type args.
         for (int i = 0; i < checker->generics.instance_count; i++) {
             GenericInstance* inst = &checker->generics.instances[i];
-            if (strcmp(inst->mangled_name, recv_type->as.struc.name) == 0) {
+            if (strcmp(inst->mangled_name, concrete_name) == 0) {
                 *out_args = xmalloc(inst->type_arg_count * sizeof(Type*));
                 for (int j = 0; j < inst->type_arg_count; j++) {
                     (*out_args)[j] = inst->type_args[j];
@@ -1445,8 +1448,9 @@ static const char* get_receiver_info(Checker* checker, Type* recv_type, Type*** 
                 return inst->base_name;
             }
         }
-        // Non-generic struct — use struct name as-is (no type args)
-        return recv_type->as.struc.name;
+
+        // Non-generic struct/enum — use type name as-is (no type args)
+        return concrete_name;
     }
 
     return NULL;
@@ -1521,11 +1525,12 @@ static Type* try_check_generic_method_call(Checker* checker, Node* node) {
         return type_error;
     }
 
-    // Pre-fill inference array: receiver type params are known from the receiver type
+    // Pre-fill inference array from receiver pattern + concrete receiver args.
     Type** inferred = xcalloc(gdef->type_param_count, sizeof(Type*));
 
-    for (int i = 0; i < recv_arg_count && i < gdef->receiver_param_count; i++) {
-        inferred[i] = recv_args[i];
+    int recv_pattern_count = fdn->receiver_type_args.count;
+    for (int i = 0; i < recv_arg_count && i < recv_pattern_count; i++) {
+        infer_type_param(checker, gdef, fdn->receiver_type_args.nodes[i], recv_args[i], inferred);
     }
     free(recv_args);
 

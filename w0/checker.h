@@ -101,8 +101,9 @@ typedef struct {
 
 // Generic free function definition (template)
 // Also used for method-level generics: func (Vec<T>) map<K>(...): Vec<K>
-// For methods: type_params = combined receiver + method params ["T", "K"],
-//   receiver_param_count = 1 (count of receiver's params)
+// For methods: type_params = combined receiver-bound + method params ["T", "K"].
+// receiver_param_count stores how many leading entries come from receiver pattern
+// bindings (not the receiver generic arity).
 typedef struct {
     char*       name;
     char**      type_params;       // ["T"] or ["T", "U"]
@@ -112,7 +113,7 @@ typedef struct {
     const char* source_module;
     // Method-level generics (NULL/0 for free functions)
     char* receiver_type;        // "Vec" for methods, NULL for free funcs
-    int   receiver_param_count; // Count of receiver type params (e.g., 1 for Vec<T>)
+    int   receiver_param_count; // Count of receiver-bound vars (e.g., 1 for Pair<i32, Box<T>>)
 } GenericFuncDef;
 
 // Instantiated generic free function (also used for method-level generics)

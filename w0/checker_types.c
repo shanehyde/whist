@@ -317,11 +317,17 @@ GenericFuncInstance* instantiate_generic_method_func(Checker* checker, GenericFu
     // e.g. "Vec_i64_map_string"
     func_decl_node* fdn = &def->decl->as.func_decl;
 
-    // Build receiver part: "Vec_i64"
-    char* recv_mangled =
-        type_mangle_generic(def->receiver_type, combined_args, def->receiver_param_count);
+    // Build receiver part from concrete receiver type to preserve specialized patterns.
+    // Example: Pair<i32, Box<i64>> -> "Pair_i32_Box_i64".
+    const char* recv_name =
+        receiver_concrete ? type_mangle_name(receiver_concrete) : def->receiver_type;
+    char* recv_mangled = xstrdup(recv_name);
 
     // Build method args part (the params after receiver params)
+    if (combined_count < def->receiver_param_count) {
+        free(recv_mangled);
+        return NULL;
+    }
     int    method_arg_count = combined_count - def->receiver_param_count;
     Type** method_args      = combined_args + def->receiver_param_count;
     char*  method_mangled   = type_mangle_generic(fdn->name, method_args, method_arg_count);
