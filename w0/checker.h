@@ -219,9 +219,9 @@ struct Checker {
     Type* self_type;
 
     // Lambda tracking
-    int    lambda_next_id;      // Next lambda ID (monotonically increasing)
-    int    lambda_depth;        // >0 when inside a lambda body
-    Node** lambda_stack;        // Stack of enclosing lambda nodes (innermost last)
+    int    lambda_next_id; // Next lambda ID (monotonically increasing)
+    int    lambda_depth;   // >0 when inside a lambda body
+    Node** lambda_stack;   // Stack of enclosing lambda nodes (innermost last)
     int    lambda_stack_count;
     int    lambda_stack_capacity;
 

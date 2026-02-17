@@ -2201,9 +2201,12 @@ static void add_capture(Node* lambda, const char* name, Type* type) {
     int cap = lambda->as.lambda.captures.capacity;
     if (cnt >= cap) {
         cap = cap ? cap * 2 : 4;
-        lambda->as.lambda.captures.names = xrealloc(lambda->as.lambda.captures.names, cap * sizeof(char*));
-        lambda->as.lambda.captures.types = xrealloc(lambda->as.lambda.captures.types, cap * sizeof(Type*));
-        lambda->as.lambda.captures.is_rc = xrealloc(lambda->as.lambda.captures.is_rc, cap * sizeof(int));
+        lambda->as.lambda.captures.names =
+            xrealloc(lambda->as.lambda.captures.names, cap * sizeof(char*));
+        lambda->as.lambda.captures.types =
+            xrealloc(lambda->as.lambda.captures.types, cap * sizeof(Type*));
+        lambda->as.lambda.captures.is_rc =
+            xrealloc(lambda->as.lambda.captures.is_rc, cap * sizeof(int));
         lambda->as.lambda.captures.capacity = cap;
     }
     lambda->as.lambda.captures.names[cnt] = xstrdup(name);
