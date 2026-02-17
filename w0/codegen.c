@@ -232,14 +232,24 @@ Type* type_from_node(Node* type_node) {
         return type_tuple(elems, count);
     }
     case NODE_GENERIC_TYPE: {
-        // For codegen, build a struct type with the mangled name
-        // Build mangled name
         const char* base      = type_node->as.generic_type.base_name;
         int         arg_count = type_node->as.generic_type.type_args.count;
         Type**      args      = xmalloc(arg_count * sizeof(Type*));
         for (int i = 0; i < arg_count; i++) {
             args[i] = type_from_node(type_node->as.generic_type.type_args.nodes[i]);
         }
+        // Vec and Span are special built-in generic types
+        if (strcmp(base, "Vec") == 0 && arg_count == 1) {
+            Type* result = type_vec(args[0]);
+            free(args);
+            return result;
+        }
+        if (strcmp(base, "Span") == 0 && arg_count == 1) {
+            Type* result = type_span(args[0]);
+            free(args);
+            return result;
+        }
+        // For other generics, build a struct type with the mangled name
         char* mangled = type_mangle_generic(base, args, arg_count);
         Type* result  = type_struct(mangled);
         free(mangled);
@@ -462,6 +472,10 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
         for (int i = 0; i < decl->as.impl_decl.methods.count; i++) {
             collect_tuple_types_from_decl(gen, decl->as.impl_decl.methods.nodes[i]);
         }
+        break;
+    case NODE_TEST_DECL:
+        if (decl->as.test_decl.body)
+            collect_tuple_types_from_stmt(gen, decl->as.test_decl.body);
         break;
     default:
         break;

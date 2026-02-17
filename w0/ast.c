@@ -668,7 +668,8 @@ Node* node_clone(Node* node) {
         c->as.tuple_type.elem_types = nodelist_clone(&node->as.tuple_type.elem_types);
         break;
     case NODE_TUPLE_LIT:
-        c->as.tuple_lit.elements = nodelist_clone(&node->as.tuple_lit.elements);
+        c->as.tuple_lit.elements      = nodelist_clone(&node->as.tuple_lit.elements);
+        c->as.tuple_lit.resolved_type = NULL; // Reset checker flag
         break;
     case NODE_ARRAY_LIT:
         c->as.array_lit.elements = nodelist_clone(&node->as.array_lit.elements);

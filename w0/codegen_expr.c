@@ -1488,7 +1488,12 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_TUPLE_LIT:
-        // Tuple literal: (e1, e2, ...) -> {e1, e2, ...}.
+        // Tuple literal: (e1, e2, ...) -> (__tuple_tN){e1, e2, ...}
+        if (node->as.tuple_lit.resolved_type) {
+            emit(gen, "(");
+            emit_resolved_type(gen, node->as.tuple_lit.resolved_type);
+            emit(gen, ")");
+        }
         emit_compound_literal_from_list(gen, &node->as.tuple_lit.elements);
         break;
 
