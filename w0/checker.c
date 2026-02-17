@@ -506,7 +506,7 @@ static int check_destruct_pattern_redefinitions_internal(Checker* checker, Destr
 
     case PATTERN_STRUCT:
         for (int i = 0; i < pattern->as.struc.count; i++) {
-            const char* name = pattern->as.struc.field_names[i];
+            const char* name = pattern->as.struc.local_names[i];
 
             if (checker_lookup_local(checker, name)) {
                 check_error(checker, line, col, "Redefinition of '%s'", name);
@@ -641,7 +641,7 @@ static void define_destruct_pattern_vars(Checker* checker, DestructPattern* patt
 
     case PATTERN_STRUCT:
         for (int i = 0; i < pattern->as.struc.count; i++) {
-            checker_define(checker, pattern->as.struc.field_names[i], SYM_VAR,
+            checker_define(checker, pattern->as.struc.local_names[i], SYM_VAR,
                            pattern->as.struc.field_types[i], is_const, is_public,
                            checker->modules.current_module);
         }

@@ -1537,7 +1537,7 @@ void emit_destruct_pattern(CodeGen* gen, DestructPattern* pattern, const char* t
                 emit(gen, "const ");
             }
             emit_resolved_type(gen, pattern->as.struc.field_types[i]);
-            emit(gen, " %s = %s->%s;\n", pattern->as.struc.field_names[i], temp_prefix,
+            emit(gen, " %s = %s->%s;\n", pattern->as.struc.local_names[i], temp_prefix,
                  pattern->as.struc.field_names[i]);
         }
         break;
