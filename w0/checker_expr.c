@@ -5,6 +5,7 @@
 #include "alloc.h"
 #include "checker_internal.h"
 #include "sem_info.h"
+#include "vec.h"
 
 // Forward declaration for check_struct_init (called by check_new_expr)
 static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
@@ -916,7 +917,9 @@ static Type* check_member_type_ref(Checker* checker, Node* node, Type* type_val)
     sem_info_set_member_struct_name(checker->sem, node, sname);
     node->as.member.is_method_ref = 1;
 
-    return type_func(params, new_count, method_type->as.func.return_type, 0);
+    Type* result = type_func(params, new_count, method_type->as.func.return_type, 0);
+    node->as.member.resolved_func_type = result;
+    return result;
 }
 
 // Type-check a member access: dispatch to type-specific helpers
@@ -1760,6 +1763,23 @@ static Type* check_call_expr(Checker* checker, Node* node) {
         return type_error;
     }
 
+    // Determine if this is an indirect call (through a closure value)
+    Node* callee = node->as.call.func;
+    if (callee->type == NODE_IDENT) {
+        Symbol* sym = checker_lookup(checker, callee->as.ident.name);
+        if (sym && sym->kind == SYM_VAR) {
+            node->as.call.is_indirect_call   = 1;
+            node->as.call.resolved_func_type = func_type;
+        } else {
+            // Direct function call — clear func ref flag since this is a call, not a value ref
+            callee->as.ident.resolved_func_type = NULL;
+        }
+    } else {
+        // Non-ident callee (lambda, member field access, etc.) — always indirect
+        node->as.call.is_indirect_call   = 1;
+        node->as.call.resolved_func_type = func_type;
+    }
+
     check_call_named_args(checker, node, func_type);
     check_call_variadic_tail_args(checker, node, func_type);
     Type* ret = func_type->as.func.return_type;
@@ -2148,25 +2168,63 @@ static Type* check_try_expr(Checker* checker, Node* node) {
 // =============================================================================
 
 // Check if a variable name is captured across a lambda boundary
-static int is_captured_variable(Checker* checker, const char* name) {
-    int    crossed_boundary = 0;
-    Scope* scope            = checker->scope;
+// Count how many lambda boundaries are crossed to reach the variable's definition.
+// Returns 0 if no boundary is crossed (variable is local). Returns the count of
+// lambda boundaries crossed, or 0 if the variable isn't found.
+static int count_captured_boundaries(Checker* checker, const char* name) {
+    int    crossed = 0;
+    Scope* scope   = checker->scope;
     while (scope) {
-        // Check this scope for the variable
         unsigned hash = 5381;
         for (const char* p = name; *p; p++)
             hash = ((hash << 5) + hash) + (unsigned char)*p;
         int idx = hash % scope->size;
         for (Symbol* sym = scope->symbols[idx]; sym; sym = sym->next) {
             if (strcmp(sym->name, name) == 0 && sym->kind == SYM_VAR) {
-                return crossed_boundary;
+                return crossed;
             }
         }
         if (scope->is_lambda_boundary)
-            crossed_boundary = 1;
+            crossed++;
         scope = scope->parent;
     }
     return 0;
+}
+
+// Add a capture to a lambda node (deduplicated by name).
+static void add_capture(Node* lambda, const char* name, Type* type) {
+    for (int i = 0; i < lambda->as.lambda.captures.count; i++) {
+        if (strcmp(lambda->as.lambda.captures.names[i], name) == 0)
+            return;
+    }
+    int cnt = lambda->as.lambda.captures.count;
+    int cap = lambda->as.lambda.captures.capacity;
+    if (cnt >= cap) {
+        cap = cap ? cap * 2 : 4;
+        lambda->as.lambda.captures.names =
+            xrealloc(lambda->as.lambda.captures.names, cap * sizeof(char*));
+        lambda->as.lambda.captures.types =
+            xrealloc(lambda->as.lambda.captures.types, cap * sizeof(Type*));
+        lambda->as.lambda.captures.is_rc =
+            xrealloc(lambda->as.lambda.captures.is_rc, cap * sizeof(int));
+        lambda->as.lambda.captures.capacity = cap;
+    }
+    lambda->as.lambda.captures.names[cnt] = xstrdup(name);
+    lambda->as.lambda.captures.types[cnt] = type;
+    lambda->as.lambda.captures.is_rc[cnt] =
+        type_is_rc_managed(type) || (type && type->kind == TYPE_FUNC);
+    lambda->as.lambda.captures.count = cnt + 1;
+}
+
+// Collect captures for a variable that crosses lambda boundaries.
+// Adds the variable to each intermediate lambda's capture list.
+static void collect_captures(Checker* checker, const char* name, Type* type, int boundary_count) {
+    int start = checker->lambda_stack_count - boundary_count;
+    if (start < 0)
+        start = 0;
+    for (int i = start; i < checker->lambda_stack_count; i++) {
+        add_capture(checker->lambda_stack[i], name, type);
+    }
 }
 
 static Type* check_lambda_expr(Checker* checker, Node* node) {
@@ -2219,6 +2277,10 @@ static Type* check_lambda_expr(Checker* checker, Node* node) {
     Type* old_return = checker->current_func_return;
     checker->lambda_depth++;
 
+    // Push lambda onto capture tracking stack
+    VEC_GROW(checker->lambda_stack, checker->lambda_stack_count, checker->lambda_stack_capacity);
+    checker->lambda_stack[checker->lambda_stack_count++] = node;
+
     // Define params in lambda scope
     for (int i = 0; i < param_count; i++) {
         Node* p = params->nodes[i];
@@ -2258,6 +2320,7 @@ static Type* check_lambda_expr(Checker* checker, Node* node) {
     }
 
     // Restore state
+    checker->lambda_stack_count--;
     checker->lambda_depth--;
     checker->current_func_return = old_return;
     checker_pop_scope(checker);
@@ -2299,17 +2362,24 @@ Type* check_expression(Checker* checker, Node* node) {
         return type_null; // null reference
 
     case NODE_IDENT: {
-        if (checker->lambda_depth > 0 && is_captured_variable(checker, node->as.ident.name)) {
-            check_error(checker, node->line, node->column,
-                        "Cannot capture variable '%s' — closures not yet supported",
-                        node->as.ident.name);
-            return type_error;
+        if (checker->lambda_depth > 0) {
+            int boundaries = count_captured_boundaries(checker, node->as.ident.name);
+            if (boundaries > 0) {
+                // Variable crosses lambda boundaries — collect captures
+                Symbol* sym = checker_lookup(checker, node->as.ident.name);
+                if (sym && sym->kind == SYM_VAR) {
+                    collect_captures(checker, node->as.ident.name, sym->type, boundaries);
+                }
+            }
         }
         Symbol* sym = checker_lookup(checker, node->as.ident.name);
         if (!sym) {
             check_error(checker, node->line, node->column, "Undefined identifier '%s'",
                         node->as.ident.name);
             return type_error;
+        }
+        if (sym->kind == SYM_FUNC && sym->type->kind == TYPE_FUNC) {
+            node->as.ident.resolved_func_type = sym->type;
         }
         return sym->type;
     }

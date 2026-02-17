@@ -8,6 +8,7 @@
 #include "codegen_emit.h"
 #include "codegen_internal.h"
 #include "codegen_types.h"
+#include "sem_info.h"
 #include "types.h"
 #include "vec.h"
 
@@ -526,6 +527,14 @@ void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_d
     gen->lambdas.count    = 0;
     gen->lambdas.capacity = 0;
 
+    gen->thunks.c_names    = NULL;
+    gen->thunks.func_types = NULL;
+    gen->thunks.count      = 0;
+    gen->thunks.capacity   = 0;
+
+    gen->capture_ctx.names = NULL;
+    gen->capture_ctx.count = 0;
+
     gen->tuple_types         = NULL;
     gen->tuple_type_count    = 0;
     gen->tuple_type_capacity = 0;
@@ -569,6 +578,11 @@ void codegen_free(CodeGen* gen) {
     free(gen->hoist.nodes);
     free(gen->hoist.names);
     free(gen->lambdas.nodes);
+    for (int i = 0; i < gen->thunks.count; i++) {
+        free(gen->thunks.c_names[i]);
+    }
+    free(gen->thunks.c_names);
+    free(gen->thunks.func_types);
 }
 
 // Collect tuple types from all declarations and register non-generic type aliases
@@ -837,6 +851,24 @@ static void collect_lambdas_node(CodeGen* gen, Node* node) {
         return;
     }
 
+    // Collect thunks for function references used as values
+    if (node->type == NODE_IDENT && node->as.ident.resolved_func_type) {
+        char c_name[256];
+        snprintf(c_name, sizeof(c_name), "%.*s", node->as.ident.length, node->as.ident.name);
+        register_thunk(gen, c_name, node->as.ident.resolved_func_type);
+    }
+    if (node->type == NODE_MEMBER && node->as.member.is_method_ref &&
+        node->as.member.resolved_func_type) {
+        const char* sname =
+            sem_info_get_member_struct_name(gen->checker.sem, node, node->as.member.struct_name);
+        if (sname) {
+            char c_name[256];
+            snprintf(c_name, sizeof(c_name), "%s_%.*s", sname, node->as.member.length,
+                     node->as.member.name);
+            register_thunk(gen, c_name, node->as.member.resolved_func_type);
+        }
+    }
+
     switch (node->type) {
     // Expressions
     case NODE_BINARY:
@@ -967,6 +999,58 @@ static void collect_lambdas(CodeGen* gen, Node* ast) {
     collect_lambdas_node(gen, ast);
 }
 
+// Emit environment struct typedefs and cleanup functions for capturing lambdas.
+static void emit_lambda_env_typedefs(CodeGen* gen) {
+    int emitted = 0;
+    for (int i = 0; i < gen->lambdas.count; i++) {
+        Node* lam = gen->lambdas.nodes[i];
+        if (lam->as.lambda.captures.count == 0)
+            continue;
+
+        int id = lam->as.lambda.lambda_id;
+
+        // Emit env struct typedef
+        emit(gen, "typedef struct {\n");
+        for (int c = 0; c < lam->as.lambda.captures.count; c++) {
+            emit(gen, "    ");
+            emit_resolved_type(gen, lam->as.lambda.captures.types[c]);
+            emit(gen, " %s;\n", lam->as.lambda.captures.names[c]);
+        }
+        emit(gen, "} __lambda_%d_env;\n", id);
+
+        // Emit cleanup function (only if there are RC captures)
+        int has_rc = 0;
+        for (int c = 0; c < lam->as.lambda.captures.count; c++) {
+            if (lam->as.lambda.captures.is_rc[c]) {
+                has_rc = 1;
+                break;
+            }
+        }
+        if (has_rc) {
+            emit(gen, "static void __lambda_%d_env_cleanup(void* __raw) {\n", id);
+            emit(gen, "    __lambda_%d_env* __e = (__lambda_%d_env*)__raw;\n", id, id);
+            for (int c = 0; c < lam->as.lambda.captures.count; c++) {
+                if (lam->as.lambda.captures.is_rc[c]) {
+                    Type* ct = lam->as.lambda.captures.types[c];
+                    if (ct && ct->kind == TYPE_STRING) {
+                        emit(gen, "    __rc_dec((void*)__e->%s);\n",
+                             lam->as.lambda.captures.names[c]);
+                    } else if (ct && ct->kind == TYPE_FUNC) {
+                        emit(gen, "    __rc_dec(__e->%s.env);\n", lam->as.lambda.captures.names[c]);
+                    } else {
+                        emit(gen, "    __rc_dec(__e->%s);\n", lam->as.lambda.captures.names[c]);
+                    }
+                }
+            }
+            emit(gen, "}\n");
+        }
+        emit(gen, "\n");
+        emitted = 1;
+    }
+    if (emitted)
+        emit(gen, "\n");
+}
+
 static void emit_lambda_forward_decls(CodeGen* gen) {
     for (int i = 0; i < gen->lambdas.count; i++) {
         Node* lam       = gen->lambdas.nodes[i];
@@ -976,15 +1060,12 @@ static void emit_lambda_forward_decls(CodeGen* gen) {
 
         emit(gen, "static ");
         emit_resolved_type(gen, func_type->as.func.return_type);
-        emit(gen, " __lambda_%d(", lam->as.lambda.lambda_id);
+        emit(gen, " __lambda_%d(void* __env", lam->as.lambda.lambda_id);
         for (int p = 0; p < func_type->as.func.param_count; p++) {
-            if (p > 0)
-                emit(gen, ", ");
+            emit(gen, ", ");
             emit_resolved_type(gen, func_type->as.func.param_types[p]);
             emit(gen, " %s", lam->as.lambda.params.nodes[p]->as.param.name);
         }
-        if (func_type->as.func.param_count == 0)
-            emit(gen, "void");
         emit(gen, ");\n");
     }
     if (gen->lambdas.count > 0)
@@ -1000,18 +1081,27 @@ static void emit_lambda_definitions(CodeGen* gen) {
 
         emit(gen, "static ");
         emit_resolved_type(gen, func_type->as.func.return_type);
-        emit(gen, " __lambda_%d(", lam->as.lambda.lambda_id);
+        emit(gen, " __lambda_%d(void* __env", lam->as.lambda.lambda_id);
         for (int p = 0; p < func_type->as.func.param_count; p++) {
-            if (p > 0)
-                emit(gen, ", ");
+            emit(gen, ", ");
             emit_resolved_type(gen, func_type->as.func.param_types[p]);
             emit(gen, " %s", lam->as.lambda.params.nodes[p]->as.param.name);
         }
-        if (func_type->as.func.param_count == 0)
-            emit(gen, "void");
         emit(gen, ") {\n");
 
         gen->out.indent++;
+        int has_captures = lam->as.lambda.captures.count > 0;
+        if (has_captures) {
+            int id = lam->as.lambda.lambda_id;
+            emit_indent(gen);
+            emit(gen, "__lambda_%d_env* __cenv = (__lambda_%d_env*)__env;\n", id, id);
+            // Set capture context for ident substitution
+            gen->capture_ctx.names = lam->as.lambda.captures.names;
+            gen->capture_ctx.count = lam->as.lambda.captures.count;
+        } else {
+            emit_indent(gen);
+            emit(gen, "(void)__env;\n");
+        }
         if (lam->as.lambda.is_expr_body) {
             // Expression body: return expr;
             emit_indent(gen);
@@ -1026,9 +1116,75 @@ static void emit_lambda_definitions(CodeGen* gen) {
                 rc_cleanup_all(gen, NULL);
             }
         }
+        // Clear capture context
+        if (has_captures) {
+            gen->capture_ctx.names = NULL;
+            gen->capture_ctx.count = 0;
+        }
         gen->out.indent--;
         emit(gen, "}\n\n");
         rc_clear_all(gen);
+    }
+}
+
+// Register a thunk for a named function used as a closure value.
+// Deduplicates by C function name.
+void register_thunk(CodeGen* gen, const char* c_name, Type* func_type) {
+    // Check if already registered
+    for (int i = 0; i < gen->thunks.count; i++) {
+        if (strcmp(gen->thunks.c_names[i], c_name) == 0) {
+            return;
+        }
+    }
+    VEC_GROW(gen->thunks.c_names, gen->thunks.count, gen->thunks.capacity);
+    gen->thunks.func_types = xrealloc(gen->thunks.func_types, gen->thunks.capacity * sizeof(Type*));
+    gen->thunks.c_names[gen->thunks.count]    = xstrdup(c_name);
+    gen->thunks.func_types[gen->thunks.count] = func_type;
+    gen->thunks.count++;
+}
+
+static void emit_thunk_forward_decls(CodeGen* gen) {
+    for (int i = 0; i < gen->thunks.count; i++) {
+        Type* ft = gen->thunks.func_types[i];
+        emit(gen, "static ");
+        emit_resolved_type(gen, ft->as.func.return_type);
+        emit(gen, " __%s_thunk(void* __env", gen->thunks.c_names[i]);
+        for (int p = 0; p < ft->as.func.param_count; p++) {
+            emit(gen, ", ");
+            emit_resolved_type(gen, ft->as.func.param_types[p]);
+            emit(gen, " __p%d", p);
+        }
+        emit(gen, ");\n");
+    }
+    if (gen->thunks.count > 0)
+        emit(gen, "\n");
+}
+
+static void emit_thunk_definitions(CodeGen* gen) {
+    for (int i = 0; i < gen->thunks.count; i++) {
+        Type* ft = gen->thunks.func_types[i];
+        emit(gen, "static ");
+        emit_resolved_type(gen, ft->as.func.return_type);
+        emit(gen, " __%s_thunk(void* __env", gen->thunks.c_names[i]);
+        for (int p = 0; p < ft->as.func.param_count; p++) {
+            emit(gen, ", ");
+            emit_resolved_type(gen, ft->as.func.param_types[p]);
+            emit(gen, " __p%d", p);
+        }
+        emit(gen, ") {\n");
+        emit(gen, "    (void)__env;\n");
+        emit(gen, "    ");
+        if (ft->as.func.return_type && ft->as.func.return_type != type_void) {
+            emit(gen, "return ");
+        }
+        emit(gen, "%s(", gen->thunks.c_names[i]);
+        for (int p = 0; p < ft->as.func.param_count; p++) {
+            if (p > 0)
+                emit(gen, ", ");
+            emit(gen, "__p%d", p);
+        }
+        emit(gen, ");\n");
+        emit(gen, "}\n\n");
     }
 }
 
@@ -2019,7 +2175,9 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit_struct_body_typedefs(gen, ast);
     emit_function_forward_decls(gen, ast);
     collect_lambdas(gen, ast);
+    emit_lambda_env_typedefs(gen);
     emit_lambda_forward_decls(gen);
+    emit_thunk_forward_decls(gen);
     emit_enum_eq_helpers(gen, ast);
     emit_vec_cleanup(gen);
     emit_vec_methods(gen);
@@ -2027,6 +2185,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     emit_struct_cleanup(gen, ast);
     emit_declarations(gen, ast);
     emit_lambda_definitions(gen);
+    emit_thunk_definitions(gen);
     emit_generic_method_impls(gen, ast);
     emit_generic_func_impls(gen, ast);
     if (gen->test_mode) {

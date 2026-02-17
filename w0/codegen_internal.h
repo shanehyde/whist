@@ -9,6 +9,7 @@ Type*           subst_lookup(CodeGen* gen, const char* name);
 char*           stringify_expr(Node* node);
 int             lookup_string_lit(CodeGen* gen, const char* value, int length);
 GenericFuncDef* lookup_generic_func_def_for_instance(CodeGen* gen, const char* base_name);
+void            register_thunk(CodeGen* gen, const char* c_name, Type* func_type);
 
 // --- From codegen_emit.c: shared helpers ---
 void        defer_push(CodeGen* gen, Node* node);

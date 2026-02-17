@@ -174,7 +174,7 @@ func (HashMap<K, V>) keys(): Vec<K> {
     return result;
 }
 
-func (Vec<T>) any(pred: func(T) :bool): bool {
+func (const Vec<T>) any(pred: func(T) :bool): bool {
     foreach (const elem in self) {
         if (pred(elem)) {
             return true;
@@ -183,7 +183,7 @@ func (Vec<T>) any(pred: func(T) :bool): bool {
     return false;
 }
 
-func (Vec<T>) all(pred: func(T) :bool): bool {
+func (const Vec<T>) all(pred: func(T) :bool): bool {
     foreach (const elem in self) {
         if (!pred(elem)) {
             return false;
@@ -192,7 +192,7 @@ func (Vec<T>) all(pred: func(T) :bool): bool {
     return true;
 }
 
-func (Vec<T>) map<K>(transform: func(T) :K): Vec<K> {
+func (const Vec<T>) map<K>(transform: func(T) :K): Vec<K> {
     var result = new Vec<K>{};
     foreach (const elem in self) {
         result.push(transform(elem));
@@ -200,7 +200,7 @@ func (Vec<T>) map<K>(transform: func(T) :K): Vec<K> {
     return result;
 }
 
-func (Vec<T>) filter(pred: func(T) :bool): Vec<T> {
+func (const Vec<T>) filter(pred: func(T) :bool): Vec<T> {
     var result = new Vec<T>{};
     foreach (const elem in self) {
         if (pred(elem)) {

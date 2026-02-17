@@ -220,6 +220,12 @@ void node_free(Node* node) {
         nodelist_free(&node->as.lambda.params);
         node_free(node->as.lambda.return_type);
         node_free(node->as.lambda.body);
+        for (int i = 0; i < node->as.lambda.captures.count; i++) {
+            free(node->as.lambda.captures.names[i]);
+        }
+        free(node->as.lambda.captures.names);
+        free(node->as.lambda.captures.types);
+        free(node->as.lambda.captures.is_rc);
         break;
     case NODE_BINARY:
         node_free(node->as.binary.left);
@@ -513,7 +519,12 @@ static void node_reset_checker_flags(Node* node) {
         break;
     case NODE_CALL:
         free(node->as.call.resolved_name);
-        node->as.call.resolved_name = NULL;
+        node->as.call.resolved_name      = NULL;
+        node->as.call.is_indirect_call   = 0;
+        node->as.call.resolved_func_type = NULL;
+        break;
+    case NODE_IDENT:
+        node->as.ident.resolved_func_type = NULL;
         break;
     case NODE_FOREACH:
         node->as.foreach_stmt.resolved_type = NULL;
@@ -528,6 +539,17 @@ static void node_reset_checker_flags(Node* node) {
     case NODE_LAMBDA:
         node->as.lambda.lambda_id     = 0;
         node->as.lambda.resolved_type = NULL;
+        for (int i = 0; i < node->as.lambda.captures.count; i++) {
+            free(node->as.lambda.captures.names[i]);
+        }
+        free(node->as.lambda.captures.names);
+        free(node->as.lambda.captures.types);
+        free(node->as.lambda.captures.is_rc);
+        node->as.lambda.captures.names    = NULL;
+        node->as.lambda.captures.types    = NULL;
+        node->as.lambda.captures.is_rc    = NULL;
+        node->as.lambda.captures.count    = 0;
+        node->as.lambda.captures.capacity = 0;
         break;
     default:
         break; // Node types without checker flags need no reset

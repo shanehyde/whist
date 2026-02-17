@@ -345,6 +345,33 @@ static int is_extern_call(CodeGen* gen, Node* func) {
     return 0;
 }
 
+// Emit an indirect call through a __Closure value using the closure calling convention:
+//   ((RetType (*)(void*, ParamTypes...))(callee).fn)((callee).env, args...)
+// Uses a temp variable to avoid evaluating the callee expression multiple times.
+static void emit_closure_call(CodeGen* gen, Node* call) {
+    Type* ft  = call->as.call.resolved_func_type;
+    int   tmp = gen->out.temp_count++;
+
+    // Evaluate callee once into a temp
+    emit(gen, "({ __Closure __cl%d = ", tmp);
+    emit_expr(gen, call->as.call.func);
+    emit(gen, "; ((");
+    // Cast: RetType (*)(void*, ParamTypes...)
+    emit_resolved_type(gen, ft->as.func.return_type);
+    emit(gen, " (*)(void*");
+    for (int i = 0; i < ft->as.func.param_count; i++) {
+        emit(gen, ", ");
+        emit_resolved_type(gen, ft->as.func.param_types[i]);
+    }
+    emit(gen, "))__cl%d.fn)(__cl%d.env", tmp, tmp);
+    // Actual arguments
+    for (int i = 0; i < call->as.call.args.count; i++) {
+        emit(gen, ", ");
+        emit_expr(gen, call->as.call.args.nodes[i]);
+    }
+    emit(gen, "); })");
+}
+
 static void emit_regular_call(CodeGen* gen, Node* call, Node* func) {
     // Generic free function calls use the checker-set mangled name
     if (call->as.call.resolved_name) {
@@ -354,6 +381,13 @@ static void emit_regular_call(CodeGen* gen, Node* call, Node* func) {
         return;
     }
 
+    // Indirect call through closure (function stored in variable/field)
+    if (call->as.call.is_indirect_call) {
+        emit_closure_call(gen, call);
+        return;
+    }
+
+    // Direct function call
     const char* alias_name = find_call_alias(gen, func);
     if (alias_name) {
         emit(gen, "%s(", alias_name);
@@ -368,6 +402,9 @@ static void emit_regular_call(CodeGen* gen, Node* call, Node* func) {
 
     if (gen->current_module == NULL && call_ident_matches(func, "main")) {
         emit(gen, "__w0_user_main(");
+    } else if (func->type == NODE_IDENT) {
+        // Emit function name directly (bypass emit_expr to avoid thunk wrapping)
+        emit(gen, "%.*s(", func->as.ident.length, func->as.ident.name);
     } else {
         emit_expr(gen, func);
         emit(gen, "(");
@@ -582,10 +619,11 @@ static void emit_slice_expr(CodeGen* gen, Node* node) {
 
 // Emit a member access expression using -> for struct pointers or . for value types
 static void emit_member_expr(CodeGen* gen, Node* node) {
-    // Unbound method reference: Type.method -> StructName_method
+    // Unbound method reference: Type.method -> closure wrapping thunk
     if (node->as.member.is_method_ref) {
         const char* sname = member_struct_name(gen, node);
-        emit(gen, "%s_%.*s", sname, node->as.member.length, node->as.member.name);
+        emit(gen, "(__Closure){(void*)__%s_%.*s_thunk, NULL}", sname, node->as.member.length,
+             node->as.member.name);
         return;
     }
 
@@ -1233,12 +1271,42 @@ static void emit_match_expr(CodeGen* gen, Node* node) {
     emit(gen, "__matchv%d; })", match_id);
 }
 
+static int capture_ctx_contains(CodeGen* gen, const char* name, int length) {
+    for (int i = 0; i < gen->capture_ctx.count; i++) {
+        if (length == (int)strlen(gen->capture_ctx.names[i]) &&
+            memcmp(name, gen->capture_ctx.names[i], length) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Emit the correct source expression for a capture name while emitting lambda literals.
+// If we're inside another capturing lambda, the source may be __cenv->name.
+static void emit_capture_source_name(CodeGen* gen, const char* name) {
+    int len = (int)strlen(name);
+    if (capture_ctx_contains(gen, name, len)) {
+        emit(gen, "__cenv->%s", name);
+    } else {
+        emit(gen, "%s", name);
+    }
+}
+
 static void emit_ident_expr(CodeGen* gen, Node* node) {
     // In enum methods, self is a pointer but represents a value — dereference it.
     if (gen->in_enum_method && node->as.ident.length == 4 &&
         memcmp(node->as.ident.name, "self", 4) == 0) {
         emit(gen, "(*self)");
+    } else if (node->as.ident.resolved_func_type) {
+        // Named function used as a value — emit closure wrapping a thunk
+        emit(gen, "(__Closure){(void*)__%.*s_thunk, NULL}", node->as.ident.length,
+             node->as.ident.name);
     } else {
+        // Check if this is a captured variable
+        if (capture_ctx_contains(gen, node->as.ident.name, node->as.ident.length)) {
+            emit(gen, "__cenv->%.*s", node->as.ident.length, node->as.ident.name);
+            return;
+        }
         emit(gen, "%.*s", node->as.ident.length, node->as.ident.name);
     }
 }
@@ -1454,7 +1522,49 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_LAMBDA:
-        emit(gen, "__lambda_%d", node->as.lambda.lambda_id);
+        if (node->as.lambda.captures.count > 0) {
+            int id     = node->as.lambda.lambda_id;
+            int has_rc = 0;
+            for (int c = 0; c < node->as.lambda.captures.count; c++) {
+                if (node->as.lambda.captures.is_rc[c]) {
+                    has_rc = 1;
+                    break;
+                }
+            }
+            const char* cleanup = has_rc ? "__lambda_%d_env_cleanup" : "NULL";
+            emit(gen,
+                 "({ __lambda_%d_env* __cenv_%d = (__lambda_%d_env*)__rc_alloc("
+                 "sizeof(__lambda_%d_env), ",
+                 id, id, id, id);
+            if (has_rc) {
+                emit(gen, "__lambda_%d_env_cleanup", id);
+            } else {
+                emit(gen, "NULL");
+            }
+            (void)cleanup;
+            emit(gen, ");\n");
+            for (int c = 0; c < node->as.lambda.captures.count; c++) {
+                emit(gen, "    __cenv_%d->%s = ", id, node->as.lambda.captures.names[c]);
+                emit_capture_source_name(gen, node->as.lambda.captures.names[c]);
+                emit(gen, ";\n");
+                if (node->as.lambda.captures.is_rc[c]) {
+                    Type* ct = node->as.lambda.captures.types[c];
+                    if (ct && ct->kind == TYPE_STRING) {
+                        emit(gen, "    __rc_inc((void*)__cenv_%d->%s);\n", id,
+                             node->as.lambda.captures.names[c]);
+                    } else if (ct && ct->kind == TYPE_FUNC) {
+                        emit(gen, "    __rc_inc(__cenv_%d->%s.env);\n", id,
+                             node->as.lambda.captures.names[c]);
+                    } else {
+                        emit(gen, "    __rc_inc(__cenv_%d->%s);\n", id,
+                             node->as.lambda.captures.names[c]);
+                    }
+                }
+            }
+            emit(gen, "    (__Closure){(void*)__lambda_%d, (void*)__cenv_%d}; })", id, id);
+        } else {
+            emit(gen, "(__Closure){(void*)__lambda_%d, NULL}", node->as.lambda.lambda_id);
+        }
         break;
 
     default:

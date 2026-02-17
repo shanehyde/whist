@@ -3,11 +3,38 @@
 
 import std;
 import fs;
+import time;
 import collections;
+
+struct Timer {
+    start: i64,
+    desc: string,
+}
+
+impl Timer {
+    func init(desc: string) {
+        self.start = time.time_ms();
+        self.desc = desc;
+    }
+}
+
+func (Timer) timelapsed(): i64 {
+    return time.time_ms() - self.start;
+}
+
+impl Drop for Timer {
+    func drop() {
+        var elapsed = self.timelapsed();
+        std.println($"{self.desc} took {elapsed} ms");
+    }
+}
+
 
 // --- Helpers ---
 
 func collect_files(dir: string, files: Vec<string>): void {
+    // std.println($"Collecting files in {dir}...");
+    // var t = new Timer($"collecting files in {dir}");
     var dh = fs.open_dir(dir);
     if (dh == null) {
         return;
@@ -26,14 +53,10 @@ func collect_files(dir: string, files: Vec<string>): void {
     }
     fs.close_dir(dh);
 
-    // Recurse into subdirectories
-    var i: i64 = 0;
-    while (i < dirs.count) {
-        collect_files(dirs[i], files);
-        i = i + 1;
+    foreach(const dir in dirs) {
+        collect_files(dir, files);
     }
 }
-
 
 func read_expected_lines(path: string, prefix: string): Vec<string> {
     var lines = new Vec<string>{};
@@ -54,67 +77,57 @@ func file_contains(path: string, pattern: string): bool {
 func display_path(file: string): string {
     // Strip "test/" prefix for display
     if (file.starts_with("test/")) {
-        return file[5:file.length()];
+        return file[5:];
     }
     return file;
 }
 
 func check_output_contains(output: string, expected: Vec<string>): bool {
-    var i: i64 = 0;
-    while (i < expected.count) {
-        if (!output.contains(expected[i])) {
+    foreach (const line in expected) {
+        if (!output.contains(line)) {
             return false;
         }
-        i = i + 1;
     }
     return true;
 }
 
 // --- Test runners ---
 
-func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bool): bool {
-    var cmd = w0 + " --lib-path " + lib_path + " test " + file;
-    var result = std.exec(cmd);
-
-    var combined = result.output + result.error_output;
-    var expected = read_expected_lines(file, "Expected");
-
-    if (expected.count > 0) {
-        if (!check_output_contains(combined, expected)) {
-            if (verbose) {
-                std.println("  command: " + cmd);
-                std.println("  output:  " + combined);
-            }
-            return false;
-        }
-        return true;
-    }
+func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bool): Result<bool, string> {
+    var cmd = $"{w0} --lib-path {lib_path} test {file}";
+    var {output, error_output, exit_code} = std.exec(cmd);
+    var combined = output + error_output;
 
     // No expected lines — just check exit code
-    if (result.exit_code != 0) {
+    if (exit_code != 0) {
         if (verbose) {
             std.println("  command: " + cmd);
             std.println("  output:  " + combined);
         }
-        return false;
+        return Result::Err("Non-zero exit code");
     }
-    return true;
+    return Result::Ok(true);
 }
 
 func run_program_test(file: string, w0: string, lib_path: string, verbose: bool): bool {
+
     // Compile
-    var compile_cmd = w0 + " --lib-path " + lib_path + " " + file + " | cc -x c -I" + lib_path + "/include -o /tmp/whist_test_bin - " + lib_path + "/whist_runtime.c";
-    var compile_result = std.exec(compile_cmd);
-    if (compile_result.exit_code != 0) {
-        if (verbose) {
-            std.println("  compile failed:");
-            std.println("  " + compile_result.error_output);
-        }
-        return false;
-    }
+    // var compile_cmd = $"{w0} --lib-path {lib_path} {file} | cc -x c -I{lib_path}/include -o /tmp/whist_test_bin - {lib_path}/whist_runtime.c";
+    // {
+    // var {output, error_output, exit_code} = std.exec(compile_cmd);
+    // if (exit_code != 0) {
+    //     if (verbose) {
+    //         std.println("  compile failed:");
+    //         std.println("  " + error_output);
+    //     }
+    //     return false;
+    // }
+    // }
+
+    var run_cmd = $"{w0} run --lib-path {lib_path} {file}";
 
     // Run
-    var run_result = std.exec("/tmp/whist_test_bin");
+    var {output, error_output, exit_code} = std.exec(run_cmd);
 
     // Check expected exit code
     var expected_exit_lines = read_expected_lines(file, "Expected exit");
@@ -123,12 +136,12 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
         expected_exit = std.parse_i64(expected_exit_lines[0]);
     }
 
-    var actual_exit: i64 = run_result.exit_code as i64;
+    var actual_exit: i64 = exit_code as i64;
     if (actual_exit != expected_exit) {
         if (verbose) {
             std.println($"  exit code: {actual_exit} (expected {expected_exit})");
-            std.println("  stdout: " + run_result.output);
-            std.println("  stderr: " + run_result.error_output);
+            std.println("  stdout: " + output);
+            std.println("  stderr: " + error_output);
         }
         return false;
     }
@@ -136,14 +149,13 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
     // Check expected stdout
     var expected_stdout = read_expected_lines(file, "Expected");
     if (expected_stdout.count > 0) {
-        if (!check_output_contains(run_result.output, expected_stdout)) {
+        if (!check_output_contains(output, expected_stdout)) {
             if (verbose) {
                 std.println("  stdout mismatch:");
-                std.println("  actual: " + run_result.output);
+                std.println("  actual: " + output);
                 var k: i64 = 0;
-                while (k < expected_stdout.count) {
-                    std.println("  expected line: " + expected_stdout[k]);
-                    k = k + 1;
+                foreach (const line in expected_stdout) {
+                     std.println("  expected line: " + line);
                 }
             }
             return false;
@@ -153,10 +165,10 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
     // Check expected stderr
     var expected_stderr = read_expected_lines(file, "Expected stderr");
     if (expected_stderr.count > 0) {
-        if (!check_output_contains(run_result.error_output, expected_stderr)) {
+        if (!check_output_contains(error_output, expected_stderr)) {
             if (verbose) {
                 std.println("  stderr mismatch:");
-                std.println("  actual: " + run_result.error_output);
+                std.println("  actual: " + error_output);
             }
             return false;
         }
@@ -166,24 +178,27 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
 }
 
 func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): bool {
-    var cmd = w0 + " --lib-path " + lib_path + " --check " + file;
-    var result = std.exec(cmd);
+    var cmd = $"{w0} --lib-path {lib_path} --check {file}";
+
+    var {output, error_output, exit_code} = std.exec(cmd);
+
+    var nonzero = |x: i64| x != 0;
 
     // Should fail (non-zero exit)
-    if (result.exit_code == 0) {
+    if (exit_code == 0) {
         if (verbose) {
             std.println("  should have failed but succeeded");
         }
         return false;
     }
 
-    var output = result.output + result.error_output;
+    var o = output + error_output;
 
     // Must contain "Error:"
-    if (!output.contains("Error:")) {
+    if (!o.contains("Error:")) {
         if (verbose) {
             std.println("  no error message in output:");
-            std.println("  " + output);
+            std.println("  " + o);
         }
         return false;
     }
@@ -191,14 +206,12 @@ func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): 
     // Check expected error text
     var expected = read_expected_lines(file, "Expected error");
     if (expected.count > 0) {
-        if (!check_output_contains(output, expected)) {
+        if (!check_output_contains(o, expected)) {
             if (verbose) {
                 std.println("  wrong error message:");
-                std.println("  output: " + output);
-                var k: i64 = 0;
-                while (k < expected.count) {
-                    std.println("  expected: " + expected[k]);
-                    k = k + 1;
+                std.println("  output: " + o);
+                foreach (const line in expected) {
+                    std.println("  expected line: " + line);
                 }
             }
             return false;
@@ -211,33 +224,27 @@ func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): 
 // --- Main ---
 
 func main(): i32 {
-    var args = std.args();
+    // var args = std.args();
 
-    var run_valid = false;
-    var run_errors = false;
-    var verbose = false;
+    const args = std.args();
 
-    var i: i64 = 1;
-    while (i < args.count) {
-        if (args[i] == "--run" || args[i] == "--valid") {
-            run_valid = true;
-        } else if (args[i] == "--errors") {
-            run_errors = true;
-        } else if (args[i] == "--verbose") {
-            verbose = true;
-        } else if (args[i] == "--help") {
-            std.println("Usage: test_runner [OPTIONS]");
-            std.println("");
-            std.println("Options:");
-            std.println("  --run       Run only executable program tests (test/run/**)");
-            std.println("  --errors    Run only error case tests (test/errors/**)");
-            std.println("  --verbose   Show detailed output on failure");
-            std.println("  --help      Show this help");
-            std.println("");
-            std.println("With no options, runs all tests.");
-            return 0;
-        }
-        i = i + 1;
+    var run_valid = args.any(|x: string| x == "--run" || x == "--valid");
+    var run_errors = args.any(|x: string| x == "--errors");
+    var verbose = args.any(|x: string| x == "--verbose");
+
+    if(args.any(|x: string| x == "--help")) {
+        std.println("""
+        Usage: test_runner [OPTIONS]
+
+        Options:
+          --run       Run only executable program tests (test/run/**)
+          --errors    Run only error case tests (test/errors/**)
+          --verbose   Show detailed output on failure
+          --help      Show this help
+
+        With no options, runs all tests.
+        """);
+        return 0;
     }
 
     // Default: run all
@@ -265,23 +272,24 @@ func main(): i32 {
         collect_files("test/run", files);
         files.sort();
 
-        var j: i64 = 0;
-        while (j < files.count) {
-            var file = files[j];
+        foreach (const file in files) {
             var disp = display_path(file);
 
             var has_test_blocks = file_contains(file, "test \"");
             var has_main = file_contains(file, "func main(");
 
             if (has_test_blocks) {
-                std.print($"{disp}: ");
-                var ok = run_test_block_file(file, w0, lib_path, verbose);
-                if (ok) {
-                    std.println("PASS");
-                    run_passed = run_passed + 1;
-                } else {
-                    std.println("FAIL");
-                    run_failed = run_failed + 1;
+                std.print($"{disp}: tests - ");
+                // var ok = run_test_block_file(file, w0, lib_path, verbose);
+                match (run_test_block_file(file, w0, lib_path, verbose)) {
+                    Ok(_) => {
+                        std.println("PASS");
+                        run_passed = run_passed + 1;
+                    }
+                    Err(msg) => {
+                        std.println("FAIL: " + msg);
+                        run_failed = run_failed + 1;
+                    }
                 }
             } else if (has_main) {
                 std.print($"{disp}: ");
@@ -299,8 +307,6 @@ func main(): i32 {
                 }
                 run_skipped = run_skipped + 1;
             }
-
-            j = j + 1;
         }
         std.println("");
     }
@@ -312,9 +318,7 @@ func main(): i32 {
         collect_files("test/errors", files);
         files.sort();
 
-        var j: i64 = 0;
-        while (j < files.count) {
-            var file = files[j];
+        foreach (const file in files) {
             var disp = display_path(file);
 
             std.print($"{disp}: ");
@@ -326,8 +330,6 @@ func main(): i32 {
                 std.println("FAIL");
                 error_failed = error_failed + 1;
             }
-
-            j = j + 1;
         }
         std.println("");
     }

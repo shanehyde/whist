@@ -208,6 +208,7 @@ struct Node {
         struct {
             char* name;
             int   length;
+            Type* resolved_func_type; // Set by checker: TYPE_FUNC when ident refers to SYM_FUNC
         } ident;
 
         // Binary expression
@@ -231,7 +232,9 @@ struct Node {
         struct {
             Node*    func;
             NodeList args;
-            char*    resolved_name; // Set by checker: mangled name for generic function calls
+            char*    resolved_name;    // Set by checker: mangled name for generic function calls
+            int      is_indirect_call; // Set by checker: 1 if call through closure (SYM_VAR callee)
+            Type*    resolved_func_type; // Set by checker: callee TYPE_FUNC for indirect calls
         } call;
 
         // Index expression: arr[index]
@@ -260,11 +263,12 @@ struct Node {
             Node* object;
             char* name;
             int   length;
-            int   is_ref;          // Set by checker: 1 if object is a struct reference
-            int   is_const_access; // Set by checker: 1 if accessing a const field
-            char* struct_name;     // Set by checker if this is a method access (NULL otherwise)
-            char* module_name;     // Set by checker for module-qualified access (e.g., "std")
-            int   is_method_ref;   // Set by checker: 1 if Type.method unbound reference
+            int   is_ref;             // Set by checker: 1 if object is a struct reference
+            int   is_const_access;    // Set by checker: 1 if accessing a const field
+            char* struct_name;        // Set by checker if this is a method access (NULL otherwise)
+            char* module_name;        // Set by checker for module-qualified access (e.g., "std")
+            int   is_method_ref;      // Set by checker: 1 if Type.method unbound reference
+            Type* resolved_func_type; // Set by checker: TYPE_FUNC for method refs
         } member;
 
         // Assignment
@@ -337,6 +341,14 @@ struct Node {
             // Set by checker:
             int   lambda_id;     // Unique ID for codegen (__lambda_N)
             Type* resolved_type; // TYPE_FUNC
+            // Capture list (set by checker for closures):
+            struct {
+                char** names; // Captured variable names (owned copies)
+                Type** types; // Type of each captured variable (not owned)
+                int*   is_rc; // 1 if captured variable is RC-managed
+                int    count;
+                int    capacity;
+            } captures;
         } lambda;
 
         // Tuple type: (T1, T2, ...)

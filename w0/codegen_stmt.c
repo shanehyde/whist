@@ -175,6 +175,12 @@ static void cleanup_owned_temps(CodeGen* gen, int saved_count) {
     gen->hoist.count = saved_count;
 }
 
+// True when the RHS is a closure variable reference (not a named function symbol).
+// Copying from such an lvalue needs an env retain.
+static int closure_ident_needs_env_inc(Node* expr) {
+    return expr && expr->type == NODE_IDENT && !expr->as.ident.resolved_func_type;
+}
+
 static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
     if (expr->type != NODE_ASSIGN || expr->as.assign.op != TOK_EQ ||
         expr->as.assign.target->type != NODE_IDENT ||
@@ -430,6 +436,30 @@ static void emit_expr_stmt(CodeGen* gen, Node* node) {
         return;
     }
 
+    // Closure reassignment: f = new_closure — dec old env before assign
+    if (expr->type == NODE_ASSIGN && expr->as.assign.op == TOK_EQ &&
+        expr->as.assign.target->type == NODE_IDENT) {
+        char env_name[256];
+        snprintf(env_name, sizeof(env_name), "%s.env", expr->as.assign.target->as.ident.name);
+        if (rc_is_tracked(gen, env_name)) {
+            int temp_id   = gen->out.temp_count++;
+            int needs_inc = closure_ident_needs_env_inc(expr->as.assign.value);
+            emit_indent(gen);
+            emit(gen, "__Closure __cl_tmp%d = ", temp_id);
+            emit_expr(gen, expr->as.assign.value);
+            emit(gen, ";\n");
+            if (needs_inc) {
+                emit_indent(gen);
+                emit(gen, "__rc_inc(__cl_tmp%d.env);\n", temp_id);
+            }
+            emit_indent(gen);
+            emit(gen, "__rc_dec(%s);\n", env_name);
+            emit_indent(gen);
+            emit(gen, "%s = __cl_tmp%d;\n", expr->as.assign.target->as.ident.name, temp_id);
+            return;
+        }
+    }
+
     // Check for owned temps in the expression tree
     if (has_owned_temps(expr)) {
         int saved = hoist_owned_temps(gen, expr);
@@ -683,17 +713,7 @@ static void emit_var_decl_inferred_type(CodeGen* gen, Node* node) {
         if (node->as.var_decl.resolved_type) {
             Type* rt = node->as.var_decl.resolved_type;
             if (rt->kind == TYPE_FUNC) {
-                // Function pointer: name goes inside the type
-                emit_resolved_type(gen, rt->as.func.return_type);
-                emit(gen, " (*%s)(", node->as.var_decl.name);
-                for (int i = 0; i < rt->as.func.param_count; i++) {
-                    if (i > 0)
-                        emit(gen, ", ");
-                    emit_resolved_type(gen, rt->as.func.param_types[i]);
-                }
-                if (rt->as.func.param_count == 0)
-                    emit(gen, "void");
-                emit(gen, ")");
+                emit(gen, "__Closure %s", node->as.var_decl.name);
             } else {
                 emit_resolved_type(gen, rt);
                 emit(gen, " %s", node->as.var_decl.name);
@@ -794,6 +814,9 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
     }
 
     int struct_type = node->as.var_decl.type && is_struct_type(gen, node->as.var_decl.type);
+    int is_func_var =
+        (node->as.var_decl.resolved_type && node->as.var_decl.resolved_type->kind == TYPE_FUNC) ||
+        (node->as.var_decl.type && node->as.var_decl.type->type == NODE_FUNC_TYPE);
 
     if (node->as.var_decl.type) {
         emit_type_with_name(gen, node->as.var_decl.type, node->as.var_decl.name);
@@ -804,16 +827,38 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
     if (node->as.var_decl.init) {
         if (struct_type && node->as.var_decl.init->type == NODE_NULL_LIT) {
             emit(gen, " = NULL");
+        } else if (node->as.var_decl.init->type == NODE_NULL_LIT &&
+                   ((node->as.var_decl.resolved_type &&
+                     node->as.var_decl.resolved_type->kind == TYPE_FUNC) ||
+                    (node->as.var_decl.type && node->as.var_decl.type->type == NODE_FUNC_TYPE))) {
+            emit(gen, " = (__Closure){NULL, NULL}");
         } else {
             emit(gen, " = ");
             emit_expr(gen, node->as.var_decl.init);
         }
+    } else if (is_func_var) {
+        // Ensure env cleanup sees a deterministic pointer value.
+        emit(gen, " = (__Closure){NULL, NULL}");
     }
     emit(gen, ";\n");
+
+    // Closure copy from another closure variable needs an env retain.
+    if (is_func_var && closure_ident_needs_env_inc(node->as.var_decl.init)) {
+        emit_indent(gen);
+        emit(gen, "__rc_inc(%s.env);\n", node->as.var_decl.name);
+    }
 
     // Cleanup owned temps after the var decl
     if (has_temps) {
         cleanup_owned_temps(gen, saved);
+    }
+
+    // Track closure env for scope cleanup: __rc_dec(f.env) at scope exit.
+    // __rc_dec(NULL) is a no-op, so this is safe even for non-capturing closures.
+    if (is_func_var) {
+        char env_name[256];
+        snprintf(env_name, sizeof(env_name), "%s.env", node->as.var_decl.name);
+        rc_push_var(gen, env_name, NULL);
     }
 }
 
@@ -821,7 +866,8 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
 // Handles RC cleanup, defer integration, and return value evaluation.
 static void emit_return_stmt(CodeGen* gen, Node* node) {
     // Determine if we're returning an RC var (skip it in cleanup)
-    const char* skip_name = NULL;
+    const char* skip_name    = NULL;
+    char        env_buf[256] = {0};
     if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_IDENT) {
         // Check if the returned identifier is an RC var
         const char* ret_name = node->as.return_stmt.value->as.ident.name;
@@ -829,6 +875,13 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
             if (strcmp(gen->rc.vars[i].name, ret_name) == 0) {
                 skip_name = ret_name;
                 break;
+            }
+        }
+        // If returning a closure variable, skip its .env cleanup (ownership transfer)
+        if (!skip_name) {
+            snprintf(env_buf, sizeof(env_buf), "%s.env", ret_name);
+            if (rc_is_tracked(gen, env_buf)) {
+                skip_name = env_buf;
             }
         }
     }
