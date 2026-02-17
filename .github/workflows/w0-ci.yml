@@ -24,4 +24,4 @@ jobs:
 
       - name: Run tests
         working-directory: w0
-        run: bin/test_runner --verbose
+        run: make test

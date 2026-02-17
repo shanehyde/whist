@@ -896,6 +896,14 @@ void emit_hoisted_owned_temp(CodeGen* gen, Node* node, const char* temp_name) {
         emit_hoisted_new_expr(gen, node, temp_name);
         return;
     }
+    if (node->type == NODE_LAMBDA) {
+        // Closure with captures: hoist to __Closure temp so we can dec the env after use
+        emit_indent(gen);
+        emit(gen, "__Closure %s = ", temp_name);
+        emit_expr(gen, node);
+        emit(gen, ";\n");
+        return;
+    }
     emit_indent(gen);
     emit_resolved_type(gen, node->owned_temp_type);
     emit(gen, " %s = ", temp_name);
@@ -1488,7 +1496,12 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_TUPLE_LIT:
-        // Tuple literal: (e1, e2, ...) -> {e1, e2, ...}.
+        // Tuple literal: (e1, e2, ...) -> (__tuple_tN){e1, e2, ...}
+        if (node->as.tuple_lit.resolved_type) {
+            emit(gen, "(");
+            emit_resolved_type(gen, node->as.tuple_lit.resolved_type);
+            emit(gen, ")");
+        }
         emit_compound_literal_from_list(gen, &node->as.tuple_lit.elements);
         break;
 

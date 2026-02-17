@@ -359,6 +359,7 @@ struct Node {
         // Tuple literal: (e1, e2, ...)
         struct {
             NodeList elements;
+            Type*    resolved_type; // Set by checker (tuple type)
         } tuple_lit;
 
         // Array literal: [e1, e2, ...]

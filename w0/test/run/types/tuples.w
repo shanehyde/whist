@@ -1,5 +1,11 @@
 // Expected: PASS: tuples
+// Expected: PASS: tuples with function return
 // Test tuple types and operations
+
+func beep(): (i64, Vec<string>) {
+    return (42, new Vec<string>{ "hello", "world" });
+}
+
 
 test "tuples" {
     // Basic tuple literal with type annotation
@@ -21,4 +27,12 @@ test "tuples" {
 
     // Verify values via sum
     assert(x + pair[0] + pair[1] + a + b == 75);
+}
+
+test "tuples with function return" {
+    var (num, vec) = beep();
+    assert(num == 42);
+    assert(vec.count == 2);
+    assert(vec[0] == "hello");
+    assert(vec[1] == "world");
 }

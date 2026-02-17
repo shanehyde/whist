@@ -37,5 +37,8 @@ Node* lookup_generic_template_field_type(CodeGen* gen, const char* field_name);
 
 // --- From codegen_stmt.c: statement emission ---
 void emit_block_contents(CodeGen* gen, Node* block);
+int  has_owned_temps(Node* node);
+int  hoist_owned_temps(CodeGen* gen, Node* expr);
+void cleanup_owned_temps(CodeGen* gen, int saved_count);
 
 #endif

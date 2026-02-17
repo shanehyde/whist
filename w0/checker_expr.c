@@ -691,6 +691,7 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
         snprintf(lookup_mangled, sizeof(lookup_mangled), "Vec_%s", type_mangle_name(elem_type));
         VecInstance* inst = lookup_vec_instance_pub(checker, lookup_mangled);
         if (inst) {
+            ensure_vec_user_methods(checker, inst);
             for (int i = 0; i < inst->method_count; i++) {
                 if (strcmp(inst->method_names[i], member_name) == 0) {
                     if (!inst->method_is_const[i]) {
@@ -1986,7 +1987,9 @@ static Type* check_tuple_lit_expr(Checker* checker, Node* node) {
     for (int i = 0; i < count; i++) {
         elems[i] = check_expression(checker, node->as.tuple_lit.elements.nodes[i]);
     }
-    return type_tuple(elems, count);
+    Type* tuple_type                 = type_tuple(elems, count);
+    node->as.tuple_lit.resolved_type = tuple_type;
+    return tuple_type;
 }
 
 // Type-check a string interpolation: validate that all parts are formattable types
@@ -2329,6 +2332,12 @@ static Type* check_lambda_expr(Checker* checker, Node* node) {
     Type* func_type               = type_func(param_types, param_count, return_type, 0);
     node->as.lambda.resolved_type = func_type;
     // param_types ownership transferred to type_func
+
+    // Lambdas with captures allocate an env via __rc_alloc — mark as owned temp
+    // so the hoist pattern will dec the env after the call site
+    if (node->as.lambda.captures.count > 0) {
+        node->is_owned_temp = 1;
+    }
 
     return func_type;
 }

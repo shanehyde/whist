@@ -120,6 +120,23 @@ check_rc_free_order() {
     return 0
 }
 
+check_rc_leaks() {
+    local stderr_file="$1"
+    local allocs frees leaked
+
+    # Extract addresses from RC_ALLOC and RC_FREE lines
+    allocs=$(awk '/RC_ALLOC:/ {print $2}' "$stderr_file" | sort)
+    frees=$(awk '/RC_FREE:/ {print $2}' "$stderr_file" | sort)
+
+    # If no allocs at all, nothing to check
+    [ -z "$allocs" ] && return 0
+
+    # Find allocs without matching frees
+    leaked=$(comm -23 <(echo "$allocs") <(echo "$frees"))
+    [ -z "$leaked" ] && return 0
+    return 1
+}
+
 run_program_test() {
     local file="$1"
     local expected_stdout expected_stderr expected_free_order expected_exit
@@ -133,9 +150,8 @@ run_program_test() {
         expected_exit="0"
     fi
 
-    if [ -n "$expected_free_order" ]; then
-        extra_flags+=("--rc-debug")
-    fi
+    # Always compile with --rc-debug to enable leak detection
+    extra_flags+=("--rc-debug")
 
     print_test_header "$file"
 
@@ -225,6 +241,24 @@ run_program_test() {
         return
     fi
 
+    # Only check for RC leaks on clean exits (panics/crashes can't clean up)
+    if [ "$expected_exit" -eq 0 ]; then
+        if ! check_rc_leaks "$tmp_stderr"; then
+            if $verbose; then
+                echo -e "${RED}✗ FAIL (rc leak)${RESET}"
+                echo -e "${GRAY}leaked addresses:${RESET}"
+                comm -23 <(awk '/RC_ALLOC:/ {print $2}' "$tmp_stderr" | sort) \
+                         <(awk '/RC_FREE:/ {print $2}' "$tmp_stderr" | sort)
+                echo ""
+            else
+                echo -e " ${RED}✗ FAIL (rc leak)${RESET}"
+            fi
+            rm -f "$tmp_bin" "$tmp_stdout" "$tmp_stderr"
+            ((run_failed++))
+            return
+        fi
+    fi
+
     if $verbose; then
         echo -e "${GREEN}✓ PASS${RESET}"
         echo ""
@@ -243,18 +277,29 @@ run_w0_test_file() {
 
     print_test_header "$file"
 
-    local output run_status
-    output=$("$W0" --lib-path "$LIB_PATH" test "$file" 2>&1)
-    run_status=$?
+    local tmp_stdout tmp_stderr
+    tmp_stdout=$(mktemp /tmp/w0_test_stdout_XXXXXX)
+    tmp_stderr=$(mktemp /tmp/w0_test_stderr_XXXXXX)
+
+    "$W0" --rc-debug --lib-path "$LIB_PATH" test "$file" >"$tmp_stdout" 2>"$tmp_stderr"
+    local run_status=$?
+
+    # Combine stdout and non-RC-debug stderr for output matching
+    # (test framework prints PASS/FAIL to stderr)
+    local tmp_combined
+    tmp_combined=$(mktemp /tmp/w0_test_combined_XXXXXX)
+    cat "$tmp_stdout" > "$tmp_combined"
+    grep -v '^RC_\(ALLOC\|FREE\|INC\|DEC\):' "$tmp_stderr" >> "$tmp_combined" 2>/dev/null
 
     if [ "$run_status" -ne 0 ] && [ -z "$expected_lines" ]; then
         if $verbose; then
             echo -e "${RED}✗ FAIL (w0 test runtime exit $run_status)${RESET}"
-            echo "$output"
+            cat "$tmp_combined"
             echo ""
         else
             echo -e " ${RED}✗ FAIL (w0 test runtime)${RESET}"
         fi
+        rm -f "$tmp_stdout" "$tmp_stderr" "$tmp_combined"
         ((run_failed++))
         return
     fi
@@ -262,18 +307,34 @@ run_w0_test_file() {
     if [ -n "$expected_lines" ]; then
         while IFS= read -r expected; do
             [ -z "$expected" ] && continue
-            if ! printf '%s\n' "$output" | grep -Fq -- "$expected"; then
+            if ! grep -Fq -- "$expected" "$tmp_combined"; then
                 if $verbose; then
                     echo -e "${RED}✗ FAIL (missing expected output: $expected)${RESET}"
-                    echo "$output"
+                    cat "$tmp_combined"
                     echo ""
                 else
                     echo -e " ${RED}✗ FAIL (output)${RESET}"
                 fi
+                rm -f "$tmp_stdout" "$tmp_stderr" "$tmp_combined"
                 ((run_failed++))
                 return
             fi
         done <<< "$expected_lines"
+    fi
+
+    if ! check_rc_leaks "$tmp_stderr"; then
+        if $verbose; then
+            echo -e "${RED}✗ FAIL (rc leak)${RESET}"
+            echo -e "${GRAY}leaked addresses:${RESET}"
+            comm -23 <(awk '/RC_ALLOC:/ {print $2}' "$tmp_stderr" | sort) \
+                     <(awk '/RC_FREE:/ {print $2}' "$tmp_stderr" | sort)
+            echo ""
+        else
+            echo -e " ${RED}✗ FAIL (rc leak)${RESET}"
+        fi
+        rm -f "$tmp_stdout" "$tmp_stderr" "$tmp_combined"
+        ((run_failed++))
+        return
     fi
 
     if $verbose; then
@@ -282,6 +343,7 @@ run_w0_test_file() {
     else
         echo -e " ${GREEN}✓ PASS${RESET}"
     fi
+    rm -f "$tmp_stdout" "$tmp_stderr" "$tmp_combined"
     ((run_passed++))
 }
 

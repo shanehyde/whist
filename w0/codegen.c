@@ -232,14 +232,24 @@ Type* type_from_node(Node* type_node) {
         return type_tuple(elems, count);
     }
     case NODE_GENERIC_TYPE: {
-        // For codegen, build a struct type with the mangled name
-        // Build mangled name
         const char* base      = type_node->as.generic_type.base_name;
         int         arg_count = type_node->as.generic_type.type_args.count;
         Type**      args      = xmalloc(arg_count * sizeof(Type*));
         for (int i = 0; i < arg_count; i++) {
             args[i] = type_from_node(type_node->as.generic_type.type_args.nodes[i]);
         }
+        // Vec and Span are special built-in generic types
+        if (strcmp(base, "Vec") == 0 && arg_count == 1) {
+            Type* result = type_vec(args[0]);
+            free(args);
+            return result;
+        }
+        if (strcmp(base, "Span") == 0 && arg_count == 1) {
+            Type* result = type_span(args[0]);
+            free(args);
+            return result;
+        }
+        // For other generics, build a struct type with the mangled name
         char* mangled = type_mangle_generic(base, args, arg_count);
         Type* result  = type_struct(mangled);
         free(mangled);
@@ -463,6 +473,10 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
             collect_tuple_types_from_decl(gen, decl->as.impl_decl.methods.nodes[i]);
         }
         break;
+    case NODE_TEST_DECL:
+        if (decl->as.test_decl.body)
+            collect_tuple_types_from_stmt(gen, decl->as.test_decl.body);
+        break;
     default:
         break;
     }
@@ -470,7 +484,7 @@ static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
 
 // Initialize the code generator with output stream, checker results, and RC debug flag
 void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_debug, int test_mode,
-                  const char* source_file) {
+                  const char* source_file, int line_directives) {
     gen->out.file       = out;
     gen->out.indent     = 0;
     gen->out.temp_count = 0;
@@ -543,6 +557,7 @@ void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_d
     gen->test_mode           = test_mode;
     gen->test_index          = 0;
     gen->source_file         = source_file;
+    gen->line_directives     = line_directives;
 }
 
 void codegen_free(CodeGen* gen) {
@@ -1104,10 +1119,36 @@ static void emit_lambda_definitions(CodeGen* gen) {
         }
         if (lam->as.lambda.is_expr_body) {
             // Expression body: return expr;
-            emit_indent(gen);
-            emit(gen, "return ");
-            emit_expr(gen, lam->as.lambda.body);
-            emit(gen, ";\n");
+            Node* body = lam->as.lambda.body;
+            // Check for intermediate owned temps (e.g., nested string concat).
+            // Temporarily clear the outermost is_owned_temp — its ownership
+            // transfers to the caller, so it must not be hoisted/dec'd.
+            int ret_is_owned = body->is_owned_temp;
+            if (ret_is_owned)
+                body->is_owned_temp = 0;
+            int body_has_temps = has_owned_temps(body);
+            if (body_has_temps) {
+                int saved = hoist_owned_temps(gen, body);
+                if (ret_is_owned)
+                    body->is_owned_temp = 1; // restore before emit_expr
+                int tmp = gen->out.temp_count++;
+                emit_indent(gen);
+                emit(gen, "typeof(");
+                emit_expr(gen, body);
+                emit(gen, ") __rc_ret%d = ", tmp);
+                emit_expr(gen, body);
+                emit(gen, ";\n");
+                cleanup_owned_temps(gen, saved);
+                emit_indent(gen);
+                emit(gen, "return __rc_ret%d;\n", tmp);
+            } else {
+                if (ret_is_owned)
+                    body->is_owned_temp = 1; // restore
+                emit_indent(gen);
+                emit(gen, "return ");
+                emit_expr(gen, body);
+                emit(gen, ";\n");
+            }
         } else {
             // Block body
             emit_block_contents(gen, lam->as.lambda.body);

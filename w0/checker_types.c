@@ -880,18 +880,21 @@ Type* instantiate_generic_enum(Checker* checker, GenericDef* def, char* mangled,
     return enum_type;
 }
 
-// Instantiate user-defined methods on a Vec<T> instance from the Vec GenericDef
-static void instantiate_vec_user_methods(Checker* checker, const char* mangled, Type* elem_type,
-                                         Type* vec_type) {
+// Instantiate user-defined methods on a Vec<T> instance from the Vec GenericDef.
+// Called lazily on first member access to ensure all methods have been registered.
+void ensure_vec_user_methods(Checker* checker, VecInstance* inst) {
+    if (inst->methods_instantiated) {
+        return;
+    }
+    inst->methods_instantiated = 1;
+
     GenericDef* vec_def = lookup_generic_def(checker, "Vec");
     if (!vec_def || vec_def->method_count == 0) {
         return;
     }
 
-    VecInstance* inst = lookup_vec_instance(checker, mangled);
-    if (!inst) {
-        return;
-    }
+    Type* elem_type = inst->elem_type;
+    Type* vec_type  = inst->type;
 
     // Allocate method body storage
     inst->method_bodies     = xcalloc(vec_def->method_count, sizeof(Node*));
@@ -1014,9 +1017,6 @@ static Type* resolve_vec_type(Checker* checker, Node* type_node) {
         register_span_instance(checker, span_mangled, elem_type, span_type);
     }
 
-    // Instantiate user-defined methods on this Vec<T>
-    instantiate_vec_user_methods(checker, mangled, elem_type, vec_type);
-
     return vec_type;
 }
 
@@ -1041,9 +1041,6 @@ Type* ensure_vec_type(Checker* checker, Type* elem_type) {
         Type* span_type = type_span(elem_type);
         register_span_instance(checker, span_mangled, elem_type, span_type);
     }
-
-    // Instantiate user-defined methods on this Vec<T>
-    instantiate_vec_user_methods(checker, mangled, elem_type, vec_type);
 
     return vec_type;
 }
