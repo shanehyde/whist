@@ -960,6 +960,23 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit __rc_inc for a borrowed reference being returned (e.g., function parameter).
+// Parameters are borrowed; return values are owned. Converting borrowed → owned requires inc.
+static void emit_rc_inc_for_return(CodeGen* gen, const char* value_name) {
+    Node* rtype = resolve_alias(gen, gen->defer.return_type);
+    emit_indent(gen);
+    if (rtype && rtype->type == NODE_IDENT && strcmp(rtype->as.ident.name, "string") == 0) {
+        emit(gen, "__rc_inc((void*)%s);\n", value_name);
+    } else {
+        const char* enum_name = resolve_enum_name(gen, rtype);
+        if (enum_name && enum_has_rc_fields(gen, enum_name)) {
+            emit(gen, "__rc_inc_%s(%s);\n", enum_name, value_name);
+        } else {
+            emit(gen, "__rc_inc(%s);\n", value_name);
+        }
+    }
+}
+
 // Emit a return statement (NODE_RETURN).
 // Handles RC cleanup, defer integration, and return value evaluation.
 static void emit_return_stmt(CodeGen* gen, Node* node) {
@@ -982,6 +999,16 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
                 skip_name = env_buf;
             }
         }
+    }
+
+    // When returning an identifier that's not RC-tracked (e.g., a function parameter)
+    // and the return type is RC-managed, we must __rc_inc to give caller ownership.
+    // Parameters are borrowed references; return values must be owned.
+    int needs_borrow_inc = 0;
+    if (!skip_name && node->as.return_stmt.value &&
+        node->as.return_stmt.value->type == NODE_IDENT &&
+        gen->defer.return_type && type_node_has_rc(gen, gen->defer.return_type)) {
+        needs_borrow_inc = 1;
     }
 
     // Handle owned temps in return expression.
@@ -1009,6 +1036,9 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
             emit_expr(gen, node->as.return_stmt.value);
             emit(gen, ";\n");
         }
+        if (needs_borrow_inc) {
+            emit_rc_inc_for_return(gen, "__ret");
+        }
         if (gen->rc.count > 0) {
             rc_cleanup_all(gen, skip_name);
         }
@@ -1019,7 +1049,7 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
         emit(gen, "goto __cleanup;\n");
     } else {
         // No defers: cleanup RC + owned temps, then return
-        if (gen->rc.count > 0 || has_temps) {
+        if (gen->rc.count > 0 || has_temps || needs_borrow_inc) {
             if (node->as.return_stmt.value && !skip_name) {
                 // Complex expression: evaluate to temp first
                 emit_indent(gen);
@@ -1028,6 +1058,9 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
                 emit(gen, ") __rc_ret = ");
                 emit_expr(gen, node->as.return_stmt.value);
                 emit(gen, ";\n");
+                if (needs_borrow_inc) {
+                    emit_rc_inc_for_return(gen, "__rc_ret");
+                }
                 if (gen->rc.count > 0) {
                     rc_cleanup_all(gen, NULL);
                 }
