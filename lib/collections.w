@@ -209,3 +209,105 @@ func (const Vec<T>) filter(pred: func(T) :bool): Vec<T> {
     }
     return result;
 }
+
+// --- Set ---
+
+struct SetEntry<T: Hashable> {
+    next: SetEntry<T>,
+    key: T,
+}
+
+struct Set<T: Hashable> {
+    buckets: Vec<SetEntry<T>>,
+    count: i64,
+    capacity: i64,
+}
+
+func (Set<T>) init(cap: i64): void {
+    self.buckets.clear();
+    self.count = 0;
+    self.capacity = cap;
+    foreach (const i in 0..cap) {
+        self.buckets.push(null);
+    }
+}
+
+func (Set<T>) insert(value: T): void {
+    var h: i32 = value.hash();
+    if (h < 0) {
+        h = -h;
+    }
+    var index: i64 = h % self.capacity;
+
+    // Check if value already exists
+    var entry: SetEntry<T> = self.buckets[index];
+    while (entry != null) {
+        if (entry.key == value) {
+            return;
+        }
+        entry = entry.next;
+    }
+
+    // Not found, insert at head of bucket
+    var new_entry: SetEntry<T> = new SetEntry<T>{
+        next: self.buckets[index],
+        key: value,
+    };
+    self.buckets[index] = new_entry;
+    self.count = self.count + 1;
+}
+
+func (Set<T>) contains(value: T): bool {
+    var h: i32 = value.hash();
+    if (h < 0) {
+        h = -h;
+    }
+    var index: i64 = h % self.capacity;
+
+    var entry: SetEntry<T> = self.buckets[index];
+    while (entry != null) {
+        if (entry.key == value) {
+            return true;
+        }
+        entry = entry.next;
+    }
+    return false;
+}
+
+func (Set<T>) remove(value: T): bool {
+    var h: i32 = value.hash();
+    if (h < 0) {
+        h = -h;
+    }
+    var index: i64 = h % self.capacity;
+
+    var entry: SetEntry<T> = self.buckets[index];
+    var prev: SetEntry<T> = null;
+
+    while (entry != null) {
+        if (entry.key == value) {
+            if (prev == null) {
+                self.buckets[index] = entry.next;
+            } else {
+                prev.next = entry.next;
+            }
+            self.count = self.count - 1;
+            return true;
+        }
+        prev = entry;
+        entry = entry.next;
+    }
+    return false;
+}
+
+func (Set<T>) values(): Vec<T> {
+    var result = new Vec<T>{};
+    foreach (const i in 0..self.capacity) {
+        var entry: SetEntry<T> = self.buckets[i];
+        while (entry != null) {
+            result.push(entry.key);
+            entry = entry.next;
+        }
+    }
+    return result;
+}

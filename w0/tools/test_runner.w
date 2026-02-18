@@ -56,14 +56,31 @@ func extract_rc_addresses(output: string, prefix: string): Vec<string> {
     return addrs;
 }
 
+func build_address_set(addrs: Vec<string>): Set<string> {
+    var s = new Set<string>{
+        buckets: new Vec<SetEntry<string>>{},
+        count: 0, capacity: 0,
+    };
+    var cap: i64 = 64;
+    if (addrs.count > cap) {
+        cap = addrs.count * 2;
+    }
+    s.init(cap);
+    foreach (const addr in addrs) {
+        s.insert(addr);
+    }
+    return s;
+}
+
 func check_rc_leaks(stderr: string): bool {
     var allocs = extract_rc_addresses(stderr, "RC_ALLOC:");
     var frees = extract_rc_addresses(stderr, "RC_FREE:");
     if (allocs.count == 0) {
         return true;
     }
+    var free_set = build_address_set(frees);
     foreach (const addr in allocs) {
-        if (!frees.contains(addr)) {
+        if (!free_set.contains(addr)) {
             return false;
         }
     }
@@ -73,9 +90,10 @@ func check_rc_leaks(stderr: string): bool {
 func get_leaked_addresses(stderr: string): Vec<string> {
     var allocs = extract_rc_addresses(stderr, "RC_ALLOC:");
     var frees = extract_rc_addresses(stderr, "RC_FREE:");
+    var free_set = build_address_set(frees);
     var leaked = new Vec<string>{};
     foreach (const addr in allocs) {
-        if (!frees.contains(addr)) {
+        if (!free_set.contains(addr)) {
             leaked.push(addr);
         }
     }
