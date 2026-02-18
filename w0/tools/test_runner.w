@@ -29,41 +29,141 @@ impl Drop for Timer {
     }
 }
 
-// struct ReadDirResult {
-//     files: Vec<string>,
-//     dirs: Vec<string>
-// }
+// --- ANSI colors ---
 
-// func read_dir_all(path: string): ReadDirResult {
-//     var files: Vec<string> = new Vec<string>{};
-//     var dirs: Vec<string> = new Vec<string>{};
-//     var handle = fs::open_dir(path);
-//     if (handle == null) {
-//         return new ReadDirResult{files: files, dirs: dirs};
-//     }
-//     while (true) {
-//         var entry = fs::read_dir(handle);
-//         if (entry == "") {
-//             break;
-//         }
-//         if (fs::is_dir(entry)) {
-//             dirs.push(entry);
-//         } else {
-//             files.push(entry);
-//         }
-//     }
-//     fs::close_dir(handle);
-//     return new ReadDirResult{files: files, dirs: dirs};
-// }
+func ansi(code: string): string {
+    var sb = new StringBuilder{};
+    sb.append_char(27 as char);
+    sb.append("[");
+    sb.append(code);
+    sb.append("m");
+    return sb.to_string();
+}
 
-// --- Helpers ---
+// --- RC helpers ---
+
+func extract_rc_addresses(output: string, prefix: string): Vec<string> {
+    var addrs = new Vec<string>{};
+    foreach (const line in output.split("\n")) {
+        if (line.starts_with(prefix)) {
+            var parts = line.split(" ");
+            if (parts.count > 1) {
+                addrs.push(parts[1]);
+            }
+        }
+    }
+    addrs.sort();
+    return addrs;
+}
+
+func check_rc_leaks(stderr: string): bool {
+    var allocs = extract_rc_addresses(stderr, "RC_ALLOC:");
+    var frees = extract_rc_addresses(stderr, "RC_FREE:");
+    if (allocs.count == 0) {
+        return true;
+    }
+    foreach (const addr in allocs) {
+        if (!frees.contains(addr)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+func get_leaked_addresses(stderr: string): Vec<string> {
+    var allocs = extract_rc_addresses(stderr, "RC_ALLOC:");
+    var frees = extract_rc_addresses(stderr, "RC_FREE:");
+    var leaked = new Vec<string>{};
+    foreach (const addr in allocs) {
+        if (!frees.contains(addr)) {
+            leaked.push(addr);
+        }
+    }
+    return leaked;
+}
+
+func check_rc_free_order(stderr: string, expected: string): bool {
+    var parts = expected.split(" before ");
+    if (parts.count != 2) {
+        return false;
+    }
+    var left_idx = std::parse_i64(parts[0]);
+    var right_idx = std::parse_i64(parts[1]);
+
+    // Get alloc addresses in order of allocation
+    var alloc_addrs = new Vec<string>{};
+    foreach (const line in stderr.split("\n")) {
+        if (line.starts_with("RC_ALLOC:")) {
+            var line_parts = line.split(" ");
+            if (line_parts.count > 1) {
+                alloc_addrs.push(line_parts[1]);
+            }
+        }
+    }
+
+    if (left_idx < 1 || left_idx > alloc_addrs.count || right_idx < 1 || right_idx > alloc_addrs.count) {
+        return false;
+    }
+
+    var left_ptr = alloc_addrs[left_idx - 1];
+    var right_ptr = alloc_addrs[right_idx - 1];
+
+    // Find positions of frees in order
+    var left_pos: i64 = -1;
+    var right_pos: i64 = -1;
+    var pos: i64 = 0;
+    foreach (const line in stderr.split("\n")) {
+        if (line.starts_with("RC_FREE:")) {
+            var line_parts = line.split(" ");
+            if (line_parts.count > 1) {
+                if (line_parts[1] == left_ptr && left_pos == -1) {
+                    left_pos = pos;
+                }
+                if (line_parts[1] == right_ptr && right_pos == -1) {
+                    right_pos = pos;
+                }
+            }
+            pos = pos + 1;
+        }
+    }
+
+    if (left_pos == -1 || right_pos == -1) {
+        return false;
+    }
+    return left_pos <= right_pos;
+}
+
+func filter_rc_lines(output: string): string {
+    var sb = new StringBuilder{};
+    var first = true;
+    foreach (const line in output.split("\n")) {
+        if (!line.starts_with("RC_ALLOC:") && !line.starts_with("RC_FREE:") && !line.starts_with("RC_INC:") && !line.starts_with("RC_DEC:")) {
+            if (!first) {
+                sb.append("\n");
+            }
+            sb.append(line);
+            first = false;
+        }
+    }
+    return sb.to_string();
+}
+
+// --- Display helpers ---
+
+func pad_right(s: string, width: i64): string {
+    var sb = new StringBuilder{};
+    sb.append(s);
+    var i = s.length();
+    while (i < width) {
+        sb.append(" ");
+        i = i + 1;
+    }
+    return sb.to_string();
+}
+
+// --- File/output helpers ---
 
 func collect_files(dir: string, files: Vec<string>): void {
-    // std::println($"Collecting files in {dir}...");
-    // var t = new Timer($"collecting files in {dir}");
-
-    // var {files, dirs} = fs::read_dir_all(dir);
-
     var dh = fs::open_dir(dir);
     if (dh == null) {
         return;
@@ -105,7 +205,6 @@ func file_contains(path: string, pattern: string): bool {
 }
 
 func display_path(file: string): string {
-    // Strip "test/" prefix for display
     if (file.starts_with("test/")) {
         return file[5:];
     }
@@ -121,43 +220,39 @@ func check_output_contains(output: string, expected: Vec<string>): bool {
     return true;
 }
 
-// --- Test runners ---
-
-func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bool): Result<bool, string> {
-    var cmd = $"{w0} --lib-path {lib_path} test {file}";
-    var {output, error_output, exit_code} = std::exec(cmd);
-    var combined = output + error_output;
-
-    // No expected lines — just check exit code
-    if (exit_code != 0) {
-        if (verbose) {
-            std::println("  command: " + cmd);
-            std::println("  output:  " + combined);
+func extract_error_message(output: string): string {
+    foreach (const line in output.split("\n")) {
+        var idx = line.index_of("Error:");
+        if (idx >= 0) {
+            var rest = line[idx + 6 : line.length()];
+            if (rest.starts_with(" ")) {
+                return rest[1:rest.length()];
+            }
+            return rest;
         }
-        return Result::Err("Non-zero exit code");
     }
-    return Result::Ok(true);
+    return "";
 }
 
-func run_program_test(file: string, w0: string, lib_path: string, verbose: bool): bool {
+// --- Test runners ---
 
-    // Compile
-    // var compile_cmd = $"{w0} --lib-path {lib_path} {file} | cc -x c -I{lib_path}/include -o /tmp/whist_test_bin - {lib_path}/whist_runtime.c";
-    // {
-    // var {output, error_output, exit_code} = std::exec(compile_cmd);
-    // if (exit_code != 0) {
-    //     if (verbose) {
-    //         std::println("  compile failed:");
-    //         std::println("  " + error_output);
-    //     }
-    //     return false;
-    // }
-    // }
+func run_program_test(file: string, w0: string, lib_path: string, verbose: bool): Result<bool, string> {
+    var tmp_bin = "/tmp/whist_test_bin";
 
-    var run_cmd = $"{w0} run --lib-path {lib_path} {file}";
+    // Step 1: Compile with --rc-debug
+    var compile_cmd = $"{w0} --rc-debug --lib-path {lib_path} {file} | cc -x c -I{lib_path}/include -o {tmp_bin} - {lib_path}/whist_runtime.c";
+    var compile_result = std::exec(compile_cmd);
+    if (compile_result.exit_code != 0) {
+        if (verbose) {
+            std::println("  command: " + compile_cmd);
+            std::println("  output:  " + compile_result.error_output);
+        }
+        return Result::Err("compile");
+    }
 
-    // Run
-    var {output, error_output, exit_code} = std::exec(run_cmd);
+    // Step 2: Run the compiled binary
+    var run_result = std::exec(tmp_bin);
+    fs::remove_file(tmp_bin);
 
     // Check expected exit code
     var expected_exit_lines = read_expected_lines(file, "Expected exit");
@@ -166,60 +261,129 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
         expected_exit = std::parse_i64(expected_exit_lines[0]);
     }
 
-    var actual_exit: i64 = exit_code as i64;
+    var actual_exit: i64 = run_result.exit_code as i64;
     if (actual_exit != expected_exit) {
         if (verbose) {
             std::println($"  exit code: {actual_exit} (expected {expected_exit})");
-            std::println("  stdout: " + output);
-            std::println("  stderr: " + error_output);
+            std::println("  stdout: " + run_result.output);
+            std::println("  stderr: " + run_result.error_output);
         }
-        return false;
+        return Result::Err($"exit {actual_exit}, expected {expected_exit}");
     }
 
     // Check expected stdout
     var expected_stdout = read_expected_lines(file, "Expected");
     if (expected_stdout.count > 0) {
-        if (!check_output_contains(output, expected_stdout)) {
+        if (!check_output_contains(run_result.output, expected_stdout)) {
             if (verbose) {
                 std::println("  stdout mismatch:");
-                std::println("  actual: " + output);
-                var k: i64 = 0;
+                std::println("  actual: " + run_result.output);
                 foreach (const line in expected_stdout) {
-                     std::println("  expected line: " + line);
+                    std::println("  expected line: " + line);
                 }
             }
-            return false;
+            return Result::Err("stdout");
         }
     }
 
-    // Check expected stderr
+    // Check expected stderr (filter RC debug lines first)
     var expected_stderr = read_expected_lines(file, "Expected stderr");
     if (expected_stderr.count > 0) {
-        if (!check_output_contains(error_output, expected_stderr)) {
+        var filtered_stderr = filter_rc_lines(run_result.error_output);
+        if (!check_output_contains(filtered_stderr, expected_stderr)) {
             if (verbose) {
                 std::println("  stderr mismatch:");
-                std::println("  actual: " + error_output);
+                std::println("  actual: " + filtered_stderr);
             }
-            return false;
+            return Result::Err("stderr");
         }
     }
 
-    return true;
+    // Check expected RC free order
+    var expected_order_lines = read_expected_lines(file, "Expected rc free order");
+    if (expected_order_lines.count > 0) {
+        if (!check_rc_free_order(run_result.error_output, expected_order_lines[0])) {
+            if (verbose) {
+                std::println("  rc free order mismatch:");
+                std::println("  expected: " + expected_order_lines[0]);
+            }
+            return Result::Err("rc free order");
+        }
+    }
+
+    // Check RC leaks (only on clean exits)
+    if (expected_exit == 0) {
+        if (!check_rc_leaks(run_result.error_output)) {
+            if (verbose) {
+                std::println("  rc leak detected:");
+                var leaked = get_leaked_addresses(run_result.error_output);
+                foreach (const addr in leaked) {
+                    std::println("  leaked: " + addr);
+                }
+            }
+            return Result::Err("rc leak");
+        }
+    }
+
+    return Result::Ok(true);
 }
 
-func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): bool {
-    var cmd = $"{w0} --lib-path {lib_path} --check {file}";
-
+func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bool): Result<bool, string> {
+    var cmd = $"{w0} --rc-debug --lib-path {lib_path} test {file}";
     var {output, error_output, exit_code} = std::exec(cmd);
 
-    var nonzero = |x: i64| x != 0;
+    // Build combined output with RC lines filtered from stderr
+    var combined = output + filter_rc_lines(error_output);
+
+    // Check expected output lines
+    var expected_lines = read_expected_lines(file, "Expected");
+
+    if (exit_code != 0 && expected_lines.count == 0) {
+        if (verbose) {
+            std::println("  command: " + cmd);
+            std::println("  output:  " + combined);
+        }
+        return Result::Err("w0 test runtime");
+    }
+
+    if (expected_lines.count > 0) {
+        if (!check_output_contains(combined, expected_lines)) {
+            if (verbose) {
+                std::println("  output mismatch:");
+                std::println("  actual: " + combined);
+                foreach (const line in expected_lines) {
+                    std::println("  expected: " + line);
+                }
+            }
+            return Result::Err("output");
+        }
+    }
+
+    // Check RC leaks
+    if (!check_rc_leaks(error_output)) {
+        if (verbose) {
+            std::println("  rc leak detected:");
+            var leaked = get_leaked_addresses(error_output);
+            foreach (const addr in leaked) {
+                std::println("  leaked: " + addr);
+            }
+        }
+        return Result::Err("rc leak");
+    }
+
+    return Result::Ok(true);
+}
+
+func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): Result<string, string> {
+    var cmd = $"{w0} --lib-path {lib_path} --check {file}";
+    var {output, error_output, exit_code} = std::exec(cmd);
 
     // Should fail (non-zero exit)
     if (exit_code == 0) {
         if (verbose) {
             std::println("  should have failed but succeeded");
         }
-        return false;
+        return Result::Err("should have failed");
     }
 
     var o = output + error_output;
@@ -230,7 +394,7 @@ func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): 
             std::println("  no error message in output:");
             std::println("  " + o);
         }
-        return false;
+        return Result::Err("no error message");
     }
 
     // Check expected error text
@@ -241,28 +405,28 @@ func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): 
                 std::println("  wrong error message:");
                 std::println("  output: " + o);
                 foreach (const line in expected) {
-                    std::println("  expected line: " + line);
+                    std::println("  expected: " + line);
                 }
             }
-            return false;
+            return Result::Err("wrong error");
         }
     }
 
-    return true;
+    // Return actual error message for display
+    var actual = extract_error_message(o);
+    return Result::Ok(actual);
 }
 
 // --- Main ---
 
 func main(): i32 {
-    // var args = std::args();
-
     const args = std::args();
 
     var run_valid = args.any(|x| x == "--run" || x == "--valid");
     var run_errors = args.any(|x| x == "--errors");
     var verbose = args.any(|x| x == "--verbose");
 
-    if(args.any(|x| x == "--help")) {
+    if (args.any(|x| x == "--help")) {
         std::println("""
         Usage: test_runner [OPTIONS]
 
@@ -286,17 +450,23 @@ func main(): i32 {
     var w0 = "bin/w0";
     var lib_path = "../lib";
 
+    // Check that w0 binary exists
+    if (!fs::file_exists(w0)) {
+        std::println(ansi("1;31") + $"Error: {w0} not found. Run 'make' first." + ansi("0"));
+        return 1;
+    }
+
     var run_passed: i64 = 0;
     var run_failed: i64 = 0;
     var run_skipped: i64 = 0;
     var error_passed: i64 = 0;
     var error_failed: i64 = 0;
 
-    std::println("=== Running W0 Test Suite ===");
+    std::println(ansi("1;34") + "=== Running W0 Test Suite ===" + ansi("0"));
     std::println("");
 
     if (run_valid) {
-        std::println("=== Run Tests (test/run/**) ===");
+        std::println(ansi("1;36") + "=== Run Tests (test/run/**) ===" + ansi("0"));
 
         var files = new Vec<string>{};
         collect_files("test/run", files);
@@ -309,31 +479,32 @@ func main(): i32 {
             var has_main = file_contains(file, "func main(");
 
             if (has_test_blocks) {
-                std::print($"{disp}: tests - ");
-                // var ok = run_test_block_file(file, w0, lib_path, verbose);
+                std::print(pad_right($"{disp}:", 45));
                 match (run_test_block_file(file, w0, lib_path, verbose)) {
                     Ok(_) => {
-                        std::println("PASS");
+                        std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
                         run_passed = run_passed + 1;
                     }
                     Err(msg) => {
-                        std::println("FAIL: " + msg);
+                        std::println(" " + ansi("1;31") + "FAIL (" + msg + ")" + ansi("0"));
                         run_failed = run_failed + 1;
                     }
                 }
             } else if (has_main) {
-                std::print($"{disp}: ");
-                var ok = run_program_test(file, w0, lib_path, verbose);
-                if (ok) {
-                    std::println("PASS");
-                    run_passed = run_passed + 1;
-                } else {
-                    std::println("FAIL");
-                    run_failed = run_failed + 1;
+                std::print(pad_right($"{disp}:", 45));
+                match (run_program_test(file, w0, lib_path, verbose)) {
+                    Ok(_) => {
+                        std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
+                        run_passed = run_passed + 1;
+                    }
+                    Err(msg) => {
+                        std::println(" " + ansi("1;31") + "FAIL (" + msg + ")" + ansi("0"));
+                        run_failed = run_failed + 1;
+                    }
                 }
             } else {
                 if (verbose) {
-                    std::println($"{disp}: SKIP (helper module)");
+                    std::println(ansi("90") + $"{disp}: SKIP (helper module)" + ansi("0"));
                 }
                 run_skipped = run_skipped + 1;
             }
@@ -342,7 +513,7 @@ func main(): i32 {
     }
 
     if (run_errors) {
-        std::println("=== Error Cases (test/errors/**) ===");
+        std::println(ansi("1;36") + "=== Error Cases (test/errors/**) ===" + ansi("0"));
 
         var files = new Vec<string>{};
         collect_files("test/errors", files);
@@ -351,33 +522,39 @@ func main(): i32 {
         foreach (const file in files) {
             var disp = display_path(file);
 
-            std::print($"{disp}: ");
-            var ok = run_error_test(file, w0, lib_path, verbose);
-            if (ok) {
-                std::println("PASS (correct error)");
-                error_passed = error_passed + 1;
-            } else {
-                std::println("FAIL");
-                error_failed = error_failed + 1;
+            std::print(pad_right($"{disp}:", 45));
+
+            match (run_error_test(file, w0, lib_path, verbose)) {
+                Ok(actual) => {
+                    std::println(" " + ansi("1;32") + "PASS (correct error)" + ansi("0"));
+                    if (actual != "") {
+                        std::println("  " + ansi("90") + actual + ansi("0"));
+                    }
+                    error_passed = error_passed + 1;
+                }
+                Err(msg) => {
+                    std::println(" " + ansi("1;31") + "FAIL (" + msg + ")" + ansi("0"));
+                    error_failed = error_failed + 1;
+                }
             }
         }
         std::println("");
     }
 
     // Summary
-    std::println("=== Test Summary ===");
+    std::println(ansi("1;34") + "=== Test Summary ===" + ansi("0"));
 
     if (run_valid) {
         var run_total = run_passed + run_failed;
-        std::println($"Run Tests:      {run_passed}/{run_total} passed");
+        std::println(ansi("1;32") + $"Run Tests:      {run_passed}/{run_total} passed" + ansi("0"));
         if (run_skipped > 0) {
-            std::println($"Run Skipped:    {run_skipped} helper module(s)");
+            std::println(ansi("90") + $"Run Skipped:    {run_skipped} helper module(s)" + ansi("0"));
         }
     }
 
     if (run_errors) {
         var error_total = error_passed + error_failed;
-        std::println($"Error Cases:    {error_passed}/{error_total} passed");
+        std::println(ansi("1;32") + $"Error Cases:    {error_passed}/{error_total} passed" + ansi("0"));
     }
 
     var total_passed = run_passed + error_passed;
@@ -385,14 +562,14 @@ func main(): i32 {
     var total = total_passed + total_failed;
 
     if (run_valid && run_errors) {
-        std::println($"Total:          {total_passed}/{total} tests passed");
+        std::println(ansi("1;36") + $"Total:          {total_passed}/{total} tests passed" + ansi("0"));
     }
 
     if (total_failed == 0) {
-        std::println("All tests passed!");
+        std::println(ansi("1;32") + "All tests passed!" + ansi("0"));
         return 0;
     } else {
-        std::println($"{total_failed} test(s) failed");
+        std::println(ansi("1;31") + $"{total_failed} test(s) failed" + ansi("0"));
         return 1;
     }
 }
