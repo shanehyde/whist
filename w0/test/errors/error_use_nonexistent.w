@@ -2,7 +2,7 @@
 // Expected error: No public symbol 'nonexistent' in module 'std'
 
 import std;
-use std.nonexistent;
+use std::nonexistent;
 
 func main(): i32 {
     return 0;

@@ -291,13 +291,16 @@ struct Node {
         } field_init;
 
         // Enum value access: EnumName::ValueName or EnumName::ValueName(args)
+        // Also used for module access: module::func or module::func(args)
         struct {
             char*    enum_name;
             int      enum_name_length;
             char*    value_name;
             int      value_name_length;
-            NodeList args;         // constructor arg expressions (count==0 for bare tag)
-            int      is_data_enum; // set by checker: 1 if parent enum has data variants
+            NodeList args;           // constructor arg expressions (count==0 for bare tag)
+            int      has_parens;     // set by parser: 1 if () was present (even if empty)
+            int      is_data_enum;   // set by checker: 1 if parent enum has data variants
+            int      is_module_call; // set by checker: 1 if this is module::func access
         } enum_value;
 
         // New expression: new Type { fields } or new Type(args)

@@ -427,8 +427,10 @@ static Node* parse_enum_value(Parser* parser, Token enum_name) {
     node->as.enum_value.value_name        = copy_token_string(&value_name);
     node->as.enum_value.value_name_length = value_name.length;
     nodelist_init(&node->as.enum_value.args);
+    node->as.enum_value.has_parens = 0;
 
     if (match_token(parser, TOK_LPAREN)) {
+        node->as.enum_value.has_parens = 1;
         while (!check_token(parser, TOK_RPAREN) && !check_token(parser, TOK_EOF)) {
             Node* arg = parse_expression(parser);
             if (!arg)

@@ -142,6 +142,12 @@ static void collect_owned_temps(Node* node, Node*** temps, int* count, int* cap)
         collect_owned_temps(node->as.assign.target, temps, count, cap);
         collect_owned_temps(node->as.assign.value, temps, count, cap);
         break;
+    case NODE_ENUM_VALUE:
+        // Module calls (parsed as enum values) may contain owned temps in args
+        for (int i = 0; i < node->as.enum_value.args.count; i++) {
+            collect_owned_temps(node->as.enum_value.args.nodes[i], temps, count, cap);
+        }
+        break;
     default:
         break;
     }
@@ -463,6 +469,12 @@ int has_owned_temps(Node* node) {
         return 0;
     case NODE_ASSIGN:
         return has_owned_temps(node->as.assign.target) || has_owned_temps(node->as.assign.value);
+    case NODE_ENUM_VALUE:
+        for (int i = 0; i < node->as.enum_value.args.count; i++) {
+            if (has_owned_temps(node->as.enum_value.args.nodes[i]))
+                return 1;
+        }
+        return 0;
     default:
         return 0;
     }
@@ -671,7 +683,8 @@ static void emit_var_decl_rc_copy(CodeGen* gen, Node* node) {
                    init->type == NODE_STRING_INTERP ||
                    (init->type == NODE_BINARY && init->as.binary.is_string_op) ||
                    (init->type == NODE_SLICE && init->as.slice.is_string) ||
-                   (rc_type && rc_type->kind == TYPE_ENUM && init->type == NODE_ENUM_VALUE);
+                   (rc_type && rc_type->kind == TYPE_ENUM && init->type == NODE_ENUM_VALUE) ||
+                   (init->type == NODE_ENUM_VALUE && init->as.enum_value.is_module_call);
     if (!skip_inc && rc_type) {
         const char* inc_fn = get_inc_func_for_type(rc_type);
         emit_indent(gen);
@@ -765,8 +778,18 @@ static void emit_var_decl_inferred_type(CodeGen* gen, Node* node) {
         break;
     }
     case NODE_ENUM_VALUE:
-        emit(gen, "%.*s %s", enum_value_resolved_name_length(gen, node->as.var_decl.init),
-             enum_value_resolved_name(gen, node->as.var_decl.init), node->as.var_decl.name);
+        if (node->as.var_decl.init->as.enum_value.is_module_call) {
+            // Module call: use resolved_type from checker
+            if (node->as.var_decl.resolved_type) {
+                emit_resolved_type(gen, node->as.var_decl.resolved_type);
+                emit(gen, " %s", node->as.var_decl.name);
+            } else {
+                emit(gen, "int64_t %s", node->as.var_decl.name);
+            }
+        } else {
+            emit(gen, "%.*s %s", enum_value_resolved_name_length(gen, node->as.var_decl.init),
+                 enum_value_resolved_name(gen, node->as.var_decl.init), node->as.var_decl.name);
+        }
         break;
     default:
         if (node->as.var_decl.resolved_type) {

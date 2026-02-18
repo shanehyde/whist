@@ -616,7 +616,7 @@ Node* parse_use_stmt(Parser* parser) {
     Token module_token = parser->current;
     consume_token(parser, TOK_IDENT, "Expected module name after 'use'");
 
-    consume_token(parser, TOK_DOT, "Expected '.' after module name in use statement");
+    consume_token(parser, TOK_COLON_COLON, "Expected '::' after module name in use statement");
 
     // Allocate arrays for symbol names
     int    capacity     = 4;

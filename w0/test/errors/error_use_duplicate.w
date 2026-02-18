@@ -2,7 +2,7 @@
 // Expected error: Redefinition of 'print'
 
 import std;
-use std.print;
+use std::print;
 
 func print(s: string): void {
     return;

@@ -17,7 +17,7 @@ struct Container {
 
 impl Drop for Container {
     func drop(): void {
-        std.print("DROP_CALLED\n");
+        std::print("DROP_CALLED\n");
     }
 }
 
