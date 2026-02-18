@@ -62,7 +62,7 @@ func collect_files(dir: string, files: Vec<string>): void {
     // std::println($"Collecting files in {dir}...");
     // var t = new Timer($"collecting files in {dir}");
 
-    var {files, dirs} = fs::read_dir_all(dir);
+    // var {files, dirs} = fs::read_dir_all(dir);
 
     var dh = fs::open_dir(dir);
     if (dh == null) {
