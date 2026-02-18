@@ -480,27 +480,23 @@ func main(): i32 {
 
             if (has_test_blocks) {
                 std::print(pad_right($"{disp}:", 45));
-                match (run_test_block_file(file, w0, lib_path, verbose)) {
-                    Ok(_) => {
-                        std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
-                        run_passed += 1;
-                    }
-                    Err(msg) => {
-                        std::println(" " + ansi("1;31") + "FAIL (" + msg + ")" + ansi("0"));
-                        run_failed += 1;
-                    }
+                var result = run_test_block_file(file, w0, lib_path, verbose);
+                if (result.is_ok()) {
+                    std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
+                    run_passed += 1;
+                } else {
+                    std::println(" " + ansi("1;31") + "FAIL (" + result.error() + ")" + ansi("0"));
+                    run_failed += 1;
                 }
             } else if (has_main) {
                 std::print(pad_right($"{disp}:", 45));
-                match (run_program_test(file, w0, lib_path, verbose)) {
-                    Ok(_) => {
-                        std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
-                        run_passed += 1;
-                    }
-                    Err(msg) => {
-                        std::println(" " + ansi("1;31") + "FAIL (" + msg + ")" + ansi("0"));
-                        run_failed += 1;
-                    }
+                var result = run_program_test(file, w0, lib_path, verbose);
+                if (result.is_ok()) {
+                    std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
+                    run_passed += 1;
+                } else {
+                    std::println(" " + ansi("1;31") + "FAIL (" + result.error() + ")" + ansi("0"));
+                    run_failed += 1;
                 }
             } else {
                 if (verbose) {
@@ -524,18 +520,16 @@ func main(): i32 {
 
             std::print(pad_right($"{disp}:", 45));
 
-            match (run_error_test(file, w0, lib_path, verbose)) {
-                Ok(actual) => {
-                    std::println(" " + ansi("1;32") + "PASS (correct error)" + ansi("0"));
-                    if (actual != "") {
-                        std::println("  " + ansi("90") + actual + ansi("0"));
-                    }
-                    error_passed += 1;
+            var result = run_error_test(file, w0, lib_path, verbose);
+            if let Ok(actual) = result {
+                std::println(" " + ansi("1;32") + "PASS (correct error)" + ansi("0"));
+                if (actual != "") {
+                    std::println("  " + ansi("90") + actual + ansi("0"));
                 }
-                Err(msg) => {
-                    std::println(" " + ansi("1;31") + "FAIL (" + msg + ")" + ansi("0"));
-                    error_failed += 1;
-                }
+                error_passed += 1;
+            } else {
+                std::println(" " + ansi("1;31") + "FAIL (" + result.error() + ")" + ansi("0"));
+                error_failed += 1;
             }
         }
         std::println("");

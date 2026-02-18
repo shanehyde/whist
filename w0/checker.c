@@ -1329,6 +1329,72 @@ void check_statement(Checker* checker, Node* node) {
         check_match_stmt(checker, node);
         break;
 
+    case NODE_IF_LET: {
+        // Type-check expression
+        Type* expr_type = check_expression(checker, node->as.if_let_stmt.expr);
+        if (expr_type->kind == TYPE_ERROR)
+            break;
+
+        // Must be an enum type (not a value enum)
+        if (expr_type->kind != TYPE_ENUM) {
+            check_error(checker, node->line, node->column, "if-let requires an enum type, got '%s'",
+                        type_name(expr_type));
+            break;
+        }
+
+        node->as.if_let_stmt.resolved_type = expr_type;
+
+        // Look up variant in enum type
+        const char* variant_name = node->as.if_let_stmt.variant_name;
+        int         variant_idx  = -1;
+        for (int i = 0; i < expr_type->as.enm.value_count; i++) {
+            if (strcmp(expr_type->as.enm.value_names[i], variant_name) == 0) {
+                variant_idx = i;
+                break;
+            }
+        }
+        if (variant_idx < 0) {
+            check_error(checker, node->line, node->column, "'%s' is not a variant of enum '%s'",
+                        variant_name, expr_type->as.enm.name);
+            break;
+        }
+
+        // If qualified name given, verify it matches
+        if (node->as.if_let_stmt.enum_name) {
+            if (strcmp(node->as.if_let_stmt.enum_name, expr_type->as.enm.name) != 0) {
+                check_error(checker, node->line, node->column,
+                            "Enum name '%s' does not match expression type '%s'",
+                            node->as.if_let_stmt.enum_name, expr_type->as.enm.name);
+                break;
+            }
+        }
+
+        // Check binding count
+        int expected_bindings = expr_type->as.enm.variant_type_counts[variant_idx];
+        if (node->as.if_let_stmt.binding_count != expected_bindings) {
+            check_error(checker, node->line, node->column,
+                        "Variant '%s' expects %d binding(s), got %d", variant_name,
+                        expected_bindings, node->as.if_let_stmt.binding_count);
+            break;
+        }
+
+        // Push scope, define bindings, check then_block, pop scope
+        checker_push_scope(checker);
+        for (int j = 0; j < node->as.if_let_stmt.binding_count; j++) {
+            Type* binding_type = expr_type->as.enm.variant_types[variant_idx][j];
+            checker_define(checker, node->as.if_let_stmt.bindings[j], SYM_VAR, binding_type, 0, 0,
+                           NULL);
+        }
+        check_statement(checker, node->as.if_let_stmt.then_block);
+        checker_pop_scope(checker);
+
+        // Check else_block (no bindings in scope)
+        if (node->as.if_let_stmt.else_block) {
+            check_statement(checker, node->as.if_let_stmt.else_block);
+        }
+        break;
+    }
+
     default:
         check_error(checker, node->line, node->column, "Unknown statement type %d", node->type);
         break;

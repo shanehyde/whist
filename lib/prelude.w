@@ -102,6 +102,55 @@ func (const Result<T, E>) error(): E {
     }
 }
 
+func (const Result<T, E>) unwrap_or_else(f: func(E): T): T {
+    match (self) {
+        Ok(v) => return v;
+        Err(e) => return f(e);
+    }
+}
+
+func (const Result<T, E>) map<U>(f: func(T): U): Result<U, E> {
+    match (self) {
+        Ok(v) => return Result::Ok(f(v));
+        Err(e) => return Result::Err(e);
+    }
+}
+
+func (const Result<T, E>) map_err<F>(f: func(E): F): Result<T, F> {
+    match (self) {
+        Ok(v) => return Result::Ok(v);
+        Err(e) => return Result::Err(f(e));
+    }
+}
+
+func (const Result<T, E>) and_then<U>(f: func(T): Result<U, E>): Result<U, E> {
+    match (self) {
+        Ok(v) => return f(v);
+        Err(e) => return Result::Err(e);
+    }
+}
+
+func (const Option<T>) unwrap_or_else(f: func(): T): T {
+    match (self) {
+        Some(v) => return v;
+        None => return f();
+    }
+}
+
+func (const Option<T>) map<U>(f: func(T): U): Option<U> {
+    match (self) {
+        Some(v) => return Option::Some(f(v));
+        None => return Option::None;
+    }
+}
+
+func (const Option<T>) and_then<U>(f: func(T): Option<U>): Option<U> {
+    match (self) {
+        Some(v) => return f(v);
+        None => return Option::None;
+    }
+}
+
 trait Drop {
     func drop(): void;
 }

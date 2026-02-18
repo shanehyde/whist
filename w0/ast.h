@@ -79,6 +79,7 @@ typedef enum {
     NODE_VAR_DECL,
     NODE_BLOCK,
     NODE_IF,
+    NODE_IF_LET,
     NODE_WHILE,
     NODE_FOR,
     NODE_FOREACH,
@@ -409,6 +410,20 @@ struct Node {
             Node* then_block;
             Node* else_block;
         } if_stmt;
+
+        // If-let statement: if let Variant(bindings) = expr { ... } else { ... }
+        struct {
+            Node*  expr;         // Expression being matched
+            char*  variant_name; // Variant to match (e.g., "Ok")
+            int    variant_name_length;
+            char*  enum_name; // Qualified enum name (NULL if inferred)
+            int    enum_name_length;
+            char** bindings; // Binding names [f0, f1, ...]
+            int    binding_count;
+            Node*  then_block;
+            Node*  else_block;    // NODE_IF, NODE_IF_LET, or NODE_BLOCK
+            Type*  resolved_type; // Set by checker: enum type of expr
+        } if_let_stmt;
 
         // While statement
         struct {
