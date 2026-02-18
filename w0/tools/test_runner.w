@@ -166,19 +166,6 @@ func filter_rc_lines(output: string): string {
     return sb.to_string();
 }
 
-// --- Display helpers ---
-
-func pad_right(s: string, width: i64): string {
-    var sb = new StringBuilder{};
-    sb.append(s);
-    var i = s.length();
-    while (i < width) {
-        sb.append(" ");
-        i += 1;
-    }
-    return sb.to_string();
-}
-
 // --- File/output helpers ---
 
 func collect_files(dir: string, files: Vec<string>): void {
@@ -211,7 +198,7 @@ func read_expected_lines(path: string, prefix: string): Vec<string> {
 
     foreach (const line in fs::read_file(path).split("\n")) {
         if (line.starts_with(marker)) {
-            lines.push(line[marker.length():line.length()]);
+            lines.push(line.strip_prefix(marker));
         }
     }
     return lines;
@@ -223,10 +210,7 @@ func file_contains(path: string, pattern: string): bool {
 }
 
 func display_path(file: string): string {
-    if (file.starts_with("test/")) {
-        return file[5:];
-    }
-    return file;
+    return file.strip_prefix("test/");
 }
 
 func check_output_contains(output: string, expected: Vec<string>): bool {
@@ -242,11 +226,7 @@ func extract_error_message(output: string): string {
     foreach (const line in output.split("\n")) {
         var idx = line.index_of("Error:");
         if (idx >= 0) {
-            var rest = line[idx + 6 : line.length()];
-            if (rest.starts_with(" ")) {
-                return rest[1:rest.length()];
-            }
-            return rest;
+            return line[idx + 6 : line.length()].trim_start();
         }
     }
     return "";
@@ -497,7 +477,7 @@ func main(): i32 {
             var has_main = file_contains(file, "func main(");
 
             if (has_test_blocks) {
-                std::print(pad_right($"{disp}:", 45));
+                std::print($"{disp}:".pad_right(45, ' '));
                 var result = run_test_block_file(file, w0, lib_path, verbose);
                 if (result.is_ok()) {
                     std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
@@ -507,7 +487,7 @@ func main(): i32 {
                     run_failed += 1;
                 }
             } else if (has_main) {
-                std::print(pad_right($"{disp}:", 45));
+                std::print($"{disp}:".pad_right(45, ' '));
                 var result = run_program_test(file, w0, lib_path, verbose);
                 if (result.is_ok()) {
                     std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
@@ -536,7 +516,7 @@ func main(): i32 {
         foreach (const file in files) {
             var disp = display_path(file);
 
-            std::print(pad_right($"{disp}:", 45));
+            std::print($"{disp}:".pad_right(45, ' '));
 
             var result = run_error_test(file, w0, lib_path, verbose);
             if let Ok(actual) = result {
