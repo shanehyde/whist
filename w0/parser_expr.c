@@ -6,23 +6,72 @@
 #include "alloc.h"
 #include "parser_internal.h"
 
-static char decode_escape(char c) {
+// Decode an escape sequence starting at *src (just past the backslash).
+// Advances *src past the consumed escape characters. Returns the decoded char value.
+static char decode_escape(const char** src, const char* end) {
+    char c = **src;
     switch (c) {
     case 'n':
+        (*src)++;
         return '\n';
     case 't':
+        (*src)++;
         return '\t';
     case 'r':
+        (*src)++;
         return '\r';
-    case '0':
-        return '\0';
     case '\\':
+        (*src)++;
         return '\\';
     case '"':
+        (*src)++;
         return '"';
     case '\'':
+        (*src)++;
         return '\'';
+    case 'e':
+        (*src)++;
+        return '\x1b';
+    case 'x': {
+        // Hex escape: \xNN
+        (*src)++; // skip 'x'
+        int value = 0;
+        for (int i = 0; i < 2 && *src < end; i++) {
+            char h = **src;
+            if (h >= '0' && h <= '9')
+                value = value * 16 + (h - '0');
+            else if (h >= 'a' && h <= 'f')
+                value = value * 16 + (h - 'a' + 10);
+            else if (h >= 'A' && h <= 'F')
+                value = value * 16 + (h - 'A' + 10);
+            else
+                break;
+            (*src)++;
+        }
+        return (char)value;
+    }
+    case '0':
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7': {
+        // Octal escape: up to 3 digits
+        int value = 0;
+        for (int i = 0; i < 3 && *src < end; i++) {
+            char o = **src;
+            if (o >= '0' && o <= '7')
+                value = value * 8 + (o - '0');
+            else
+                break;
+            (*src)++;
+        }
+        return (char)value;
+    }
     default:
+        (*src)++;
         return c;
     }
 }
@@ -142,8 +191,7 @@ static Node* parse_interp_string(Parser* parser) {
         if (*src == '\\' && src + 1 < end) {
             // Escape sequence in text
             src++;
-            buf[buf_len++] = decode_escape(*src);
-            src++;
+            buf[buf_len++] = decode_escape(&src, end);
         } else if (*src == '{') {
             if (src + 1 < end && src[1] == '{') {
                 // Escaped brace: {{ -> literal {
@@ -309,7 +357,7 @@ static Node* parse_string_lit(Token token) {
     while (src < end) {
         if (*src == '\\' && src + 1 < end) {
             src++;
-            raw[raw_len++] = decode_escape(*src++);
+            raw[raw_len++] = decode_escape(&src, end);
         } else {
             raw[raw_len++] = *src++;
         }
@@ -392,7 +440,9 @@ static Node* parse_string_lit(Token token) {
 static Node* parse_char_lit(Token token) {
     Node* node = node_new(NODE_CHAR_LIT, token.line, token.column);
     if (token.start[1] == '\\') {
-        node->as.char_lit.value = decode_escape(token.start[2]);
+        const char* src = token.start + 2;
+        const char* end = token.start + token.length - 1; // before closing '
+        node->as.char_lit.value = decode_escape(&src, end);
     } else {
         node->as.char_lit.value = token.start[1];
     }

@@ -1,5 +1,5 @@
 // Test character escape sequences
-// Expected exit: 1
+// Expected exit: 0
 
 func main(): i32 {
     // Simple escapes
@@ -10,6 +10,7 @@ func main(): i32 {
     var single_quote: char = '\'';
     var double_quote: char = '\"';
     var null_char: char = '\0';
+    var esc: char = '\e';
 
     // Hex escapes
     var hex_A: char = '\x41';      // 'A'
@@ -23,8 +24,20 @@ func main(): i32 {
     var regular: char = 'X';
 
     // Verify hex escape produces correct value
-    if (hex_A == 'A') {
-        return 0;
+    if (hex_A != 'A') {
+        return 1;
     }
-    return 1;
+    // Verify octal escape produces correct value
+    if (octal_A != 'A') {
+        return 2;
+    }
+    // Verify \e produces ESC (0x1b = 27)
+    if (esc != '\x1b') {
+        return 3;
+    }
+    // Verify hex newline matches simple escape
+    if (hex_newline != '\n') {
+        return 4;
+    }
+    return 0;
 }
