@@ -2,6 +2,7 @@
 // Expected: PASS: variables
 // Expected: PASS: integers
 // Expected: PASS: operators
+// Expected: PASS: bitwise_assign
 // Expected: PASS: shift_assign
 // Expected: PASS: control_flow
 // Expected: PASS: functions
@@ -127,6 +128,25 @@ test "operators" {
     a /= 2;
 
     assert(a == 19);
+}
+
+// Test modulo, bitwise compound assignment operators
+test "bitwise_assign" {
+    var a: i64 = 17;
+    a %= 5;
+    assert(a == 2);
+
+    var b: i64 = 0xFF;
+    b &= 0x0F;
+    assert(b == 0x0F);
+
+    var c: i64 = 0x0F;
+    c |= 0xF0;
+    assert(c == 0xFF);
+
+    var d: i64 = 0xFF;
+    d ^= 0x0F;
+    assert(d == 0xF0);
 }
 
 // Test shift assignment operators <<= and >>=

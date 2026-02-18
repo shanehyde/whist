@@ -123,7 +123,7 @@ func check_rc_free_order(stderr: string, expected: string): bool {
                     right_pos = pos;
                 }
             }
-            pos = pos + 1;
+            pos += 1;
         }
     }
 
@@ -156,7 +156,7 @@ func pad_right(s: string, width: i64): string {
     var i = s.length();
     while (i < width) {
         sb.append(" ");
-        i = i + 1;
+        i += 1;
     }
     return sb.to_string();
 }
@@ -483,11 +483,11 @@ func main(): i32 {
                 match (run_test_block_file(file, w0, lib_path, verbose)) {
                     Ok(_) => {
                         std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
-                        run_passed = run_passed + 1;
+                        run_passed += 1;
                     }
                     Err(msg) => {
                         std::println(" " + ansi("1;31") + "FAIL (" + msg + ")" + ansi("0"));
-                        run_failed = run_failed + 1;
+                        run_failed += 1;
                     }
                 }
             } else if (has_main) {
@@ -495,18 +495,18 @@ func main(): i32 {
                 match (run_program_test(file, w0, lib_path, verbose)) {
                     Ok(_) => {
                         std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
-                        run_passed = run_passed + 1;
+                        run_passed += 1;
                     }
                     Err(msg) => {
                         std::println(" " + ansi("1;31") + "FAIL (" + msg + ")" + ansi("0"));
-                        run_failed = run_failed + 1;
+                        run_failed += 1;
                     }
                 }
             } else {
                 if (verbose) {
                     std::println(ansi("90") + $"{disp}: SKIP (helper module)" + ansi("0"));
                 }
-                run_skipped = run_skipped + 1;
+                run_skipped += 1;
             }
         }
         std::println("");
@@ -530,11 +530,11 @@ func main(): i32 {
                     if (actual != "") {
                         std::println("  " + ansi("90") + actual + ansi("0"));
                     }
-                    error_passed = error_passed + 1;
+                    error_passed += 1;
                 }
                 Err(msg) => {
                     std::println(" " + ansi("1;31") + "FAIL (" + msg + ")" + ansi("0"));
-                    error_failed = error_failed + 1;
+                    error_failed += 1;
                 }
             }
         }
