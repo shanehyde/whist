@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <ctype.h>
 
 /* --- argc/argv globals (defined in whist_runtime.c) --- */
 extern int    __w0_argc;
@@ -192,6 +193,88 @@ static inline int64_t __String_index_of(const char* s, const char* pattern) {
 static inline bool __String_ends_with(const char* s, const char* suffix) {
     size_t ls = strlen(s), lsuf = strlen(suffix);
     return ls >= lsuf && strcmp(s + ls - lsuf, suffix) == 0;
+}
+
+static inline const char* __String_trim(const char* s) {
+    const char* start = s;
+    while (*start && isspace((unsigned char)*start))
+        start++;
+    const char* end = s + strlen(s);
+    while (end > start && isspace((unsigned char)*(end - 1)))
+        end--;
+    int64_t len = (int64_t)(end - start);
+    char*   r   = (char*)__rc_alloc(len + 1, NULL);
+    memcpy(r, start, len);
+    r[len] = '\0';
+    return r;
+}
+
+static inline const char* __String_trim_start(const char* s) {
+    const char* start = s;
+    while (*start && isspace((unsigned char)*start))
+        start++;
+    int64_t len = (int64_t)(s + strlen(s) - start);
+    char*   r   = (char*)__rc_alloc(len + 1, NULL);
+    memcpy(r, start, len);
+    r[len] = '\0';
+    return r;
+}
+
+static inline const char* __String_trim_end(const char* s) {
+    size_t      slen = strlen(s);
+    const char* end  = s + slen;
+    while (end > s && isspace((unsigned char)*(end - 1)))
+        end--;
+    int64_t len = (int64_t)(end - s);
+    char*   r   = (char*)__rc_alloc(len + 1, NULL);
+    memcpy(r, s, len);
+    r[len] = '\0';
+    return r;
+}
+
+static inline const char* __String_strip_prefix(const char* s, const char* prefix) {
+    size_t plen = strlen(prefix);
+    if (strncmp(s, prefix, plen) == 0) {
+        return __String_substr(s, (int64_t)plen, (int64_t)strlen(s));
+    }
+    return __String_substr(s, 0, (int64_t)strlen(s));
+}
+
+static inline const char* __String_strip_suffix(const char* s, const char* suffix) {
+    size_t slen   = strlen(s);
+    size_t suflen = strlen(suffix);
+    if (slen >= suflen && strcmp(s + slen - suflen, suffix) == 0) {
+        return __String_substr(s, 0, (int64_t)(slen - suflen));
+    }
+    return __String_substr(s, 0, (int64_t)slen);
+}
+
+static inline const char* __String_pad_left(const char* s, int64_t width, char pad) {
+    int64_t slen = (int64_t)strlen(s);
+    if (slen >= width) {
+        char* r = (char*)__rc_alloc(slen + 1, NULL);
+        memcpy(r, s, slen + 1);
+        return r;
+    }
+    int64_t pad_count = width - slen;
+    char*   r         = (char*)__rc_alloc(width + 1, NULL);
+    memset(r, pad, pad_count);
+    memcpy(r + pad_count, s, slen + 1);
+    return r;
+}
+
+static inline const char* __String_pad_right(const char* s, int64_t width, char pad) {
+    int64_t slen = (int64_t)strlen(s);
+    if (slen >= width) {
+        char* r = (char*)__rc_alloc(slen + 1, NULL);
+        memcpy(r, s, slen + 1);
+        return r;
+    }
+    char* r = (char*)__rc_alloc(width + 1, NULL);
+    memcpy(r, s, slen);
+    memset(r + slen, pad, width - slen);
+    r[width] = '\0';
+    return r;
 }
 
 /* --- Vec<string> helpers (needed by __String_split) --- */

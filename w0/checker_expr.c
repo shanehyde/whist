@@ -728,6 +728,24 @@ static Type* check_member_string(Checker* checker, Node* node) {
         Type* ret     = ensure_vec_type(checker, type_string);
         return type_func(params, 1, ret, 0);
     }
+    if (strcmp(member_name, "trim") == 0 || strcmp(member_name, "trim_start") == 0 ||
+        strcmp(member_name, "trim_end") == 0) {
+        sem_info_set_member_struct_name(checker->sem, node, "__String");
+        return type_func(NULL, 0, type_string, 0);
+    }
+    if (strcmp(member_name, "strip_prefix") == 0 || strcmp(member_name, "strip_suffix") == 0) {
+        sem_info_set_member_struct_name(checker->sem, node, "__String");
+        Type** params = xmalloc(1 * sizeof(Type*));
+        params[0]     = type_string;
+        return type_func(params, 1, type_string, 0);
+    }
+    if (strcmp(member_name, "pad_left") == 0 || strcmp(member_name, "pad_right") == 0) {
+        sem_info_set_member_struct_name(checker->sem, node, "__String");
+        Type** params = xmalloc(2 * sizeof(Type*));
+        params[0]     = type_int64;
+        params[1]     = type_char;
+        return type_func(params, 2, type_string, 0);
+    }
     return NULL; // Not a built-in string method; fall through to primitive methods
 }
 
