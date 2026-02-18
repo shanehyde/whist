@@ -1006,8 +1006,8 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
     // Parameters are borrowed references; return values must be owned.
     int needs_borrow_inc = 0;
     if (!skip_name && node->as.return_stmt.value &&
-        node->as.return_stmt.value->type == NODE_IDENT &&
-        gen->defer.return_type && type_node_has_rc(gen, gen->defer.return_type)) {
+        node->as.return_stmt.value->type == NODE_IDENT && gen->defer.return_type &&
+        type_node_has_rc(gen, gen->defer.return_type)) {
         needs_borrow_inc = 1;
     }
 
@@ -1582,6 +1582,118 @@ static void emit_continue_stmt(CodeGen* gen, Node* node) {
     emit(gen, "continue;\n");
 }
 
+static void emit_if_let_stmt(CodeGen* gen, Node* node) {
+    Type* enum_type = node->as.if_let_stmt.resolved_type;
+    if (!enum_type)
+        return;
+
+    const char* enum_name = enum_type->as.enm.name;
+    const char* variant   = node->as.if_let_stmt.variant_name;
+    int         is_data   = enum_type->as.enm.has_data;
+
+    // Handle owned temps in the expression
+    Node* subject          = node->as.if_let_stmt.expr;
+    int   subject_is_owned = subject->is_owned_temp;
+    if (subject_is_owned)
+        subject->is_owned_temp = 0;
+
+    int saved     = 0;
+    int has_temps = has_owned_temps(subject);
+    if (has_temps) {
+        saved = hoist_owned_temps(gen, subject);
+    }
+
+    // Emit: EnumType __if_letN = <expr>;
+    int let_id = gen->out.temp_count++;
+    emit_indent(gen);
+    emit(gen, "%s __if_let%d = ", enum_name, let_id);
+    emit_expr(gen, node->as.if_let_stmt.expr);
+    emit(gen, ";\n");
+
+    // Emit: if (__if_letN.tag == EnumType_Variant) {
+    emit_indent(gen);
+    if (is_data) {
+        emit(gen, "if (__if_let%d.tag == %s_%s) {\n", let_id, enum_name, variant);
+    } else {
+        emit(gen, "if (__if_let%d == %s_%s) {\n", let_id, enum_name, variant);
+    }
+
+    gen->out.indent++;
+
+    // Emit binding declarations
+    if (is_data && node->as.if_let_stmt.binding_count > 0) {
+        int variant_idx = -1;
+        for (int i = 0; i < enum_type->as.enm.value_count; i++) {
+            if (strcmp(enum_type->as.enm.value_names[i], variant) == 0) {
+                variant_idx = i;
+                break;
+            }
+        }
+        for (int j = 0; j < node->as.if_let_stmt.binding_count; j++) {
+            emit_indent(gen);
+            emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);
+            emit(gen, " %s = __if_let%d.%s.f%d;\n", node->as.if_let_stmt.bindings[j], let_id,
+                 variant, j);
+        }
+    }
+
+    // Emit then block
+    emit_stmt_body(gen, node->as.if_let_stmt.then_block);
+    gen->out.indent--;
+
+    emit_indent(gen);
+    emit(gen, "}");
+
+    // Emit else block
+    if (node->as.if_let_stmt.else_block) {
+        if (node->as.if_let_stmt.else_block->type == NODE_IF) {
+            int else_if_has_temps =
+                has_owned_temps(node->as.if_let_stmt.else_block->as.if_stmt.cond);
+            if (else_if_has_temps) {
+                emit(gen, " else {\n");
+                gen->out.indent++;
+                emit_stmt(gen, node->as.if_let_stmt.else_block);
+                gen->out.indent--;
+                emit_indent(gen);
+                emit(gen, "}\n");
+            } else {
+                emit(gen, " else ");
+                gen->out.indent--;
+                emit_stmt(gen, node->as.if_let_stmt.else_block);
+                gen->out.indent++;
+            }
+        } else if (node->as.if_let_stmt.else_block->type == NODE_IF_LET) {
+            emit(gen, " else {\n");
+            gen->out.indent++;
+            emit_stmt(gen, node->as.if_let_stmt.else_block);
+            gen->out.indent--;
+            emit_indent(gen);
+            emit(gen, "}\n");
+        } else {
+            emit(gen, " else {\n");
+            gen->out.indent++;
+            emit_stmt_body(gen, node->as.if_let_stmt.else_block);
+            gen->out.indent--;
+            emit_indent(gen);
+            emit(gen, "}\n");
+        }
+    } else {
+        emit(gen, "\n");
+    }
+
+    // Cleanup sub-expression owned temps
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+    // Cleanup subject if it was an owned temp
+    if (subject_is_owned) {
+        subject->is_owned_temp = 1;
+        char name[32];
+        snprintf(name, sizeof(name), "__if_let%d", let_id);
+        emit_owned_temp_dec(gen, subject, name);
+    }
+}
+
 static void emit_unknown_stmt(CodeGen* gen, Node* node) {
     emit_indent(gen);
     emit(gen, "/* unknown stmt %d */;\n", node ? node->type : -1);
@@ -1590,12 +1702,13 @@ static void emit_unknown_stmt(CodeGen* gen, Node* node) {
 typedef void (*StmtEmitter)(CodeGen* gen, Node* node);
 
 static const StmtEmitter stmt_emitters[NODE_PROGRAM + 1] = {
-    [NODE_EXPR_STMT] = emit_expr_stmt,  [NODE_VAR_DECL] = emit_var_decl_stmt,
-    [NODE_BLOCK] = emit_block_stmt,     [NODE_IF] = emit_if_stmt,
-    [NODE_WHILE] = emit_while_stmt,     [NODE_FOR] = emit_for_stmt,
-    [NODE_FOREACH] = emit_foreach_stmt, [NODE_RETURN] = emit_return_stmt,
-    [NODE_BREAK] = emit_break_stmt,     [NODE_CONTINUE] = emit_continue_stmt,
-    [NODE_DEFER] = emit_defer_stmt,     [NODE_MATCH] = emit_match_stmt,
+    [NODE_EXPR_STMT] = emit_expr_stmt,    [NODE_VAR_DECL] = emit_var_decl_stmt,
+    [NODE_BLOCK] = emit_block_stmt,       [NODE_IF] = emit_if_stmt,
+    [NODE_IF_LET] = emit_if_let_stmt,     [NODE_WHILE] = emit_while_stmt,
+    [NODE_FOR] = emit_for_stmt,           [NODE_FOREACH] = emit_foreach_stmt,
+    [NODE_RETURN] = emit_return_stmt,     [NODE_BREAK] = emit_break_stmt,
+    [NODE_CONTINUE] = emit_continue_stmt, [NODE_DEFER] = emit_defer_stmt,
+    [NODE_MATCH] = emit_match_stmt,
 };
 
 // Dispatch statement code generation based on node type

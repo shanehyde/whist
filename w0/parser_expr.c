@@ -440,8 +440,8 @@ static Node* parse_string_lit(Token token) {
 static Node* parse_char_lit(Token token) {
     Node* node = node_new(NODE_CHAR_LIT, token.line, token.column);
     if (token.start[1] == '\\') {
-        const char* src = token.start + 2;
-        const char* end = token.start + token.length - 1; // before closing '
+        const char* src         = token.start + 2;
+        const char* end         = token.start + token.length - 1; // before closing '
         node->as.char_lit.value = decode_escape(&src, end);
     } else {
         node->as.char_lit.value = token.start[1];
