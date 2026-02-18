@@ -3,11 +3,7 @@ import collections;
 
 test "collections_set" {
     // Test string set
-    var s = new Set<string>{
-        buckets: new Vec<SetEntry<string>>{},
-        count: 0, capacity: 0,
-    };
-    s.init(16);
+    var s = new Set<string>(16);
 
     // Test insert and contains
     s.insert("hello");
@@ -40,11 +36,7 @@ test "collections_set" {
     assert(vals.count == 2);
 
     // Test i64 set
-    var s2 = new Set<i64>{
-        buckets: new Vec<SetEntry<i64>>{},
-        count: 0, capacity: 0,
-    };
-    s2.init(8);
+    var s2 = new Set<i64>(8);
 
     s2.insert(100);
     s2.insert(200);
@@ -66,11 +58,7 @@ test "collections_set" {
     assert(s2.count == 2);
 
     // Test hash collisions via small capacity
-    var s3 = new Set<i64>{
-        buckets: new Vec<SetEntry<i64>>{},
-        count: 0, capacity: 0,
-    };
-    s3.init(2);
+    var s3 = new Set<i64>(2);
 
     s3.insert(1);
     s3.insert(2);

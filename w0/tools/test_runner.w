@@ -69,15 +69,11 @@ func extract_rc_addresses(output: string, prefix: string): Vec<string> {
 }
 
 func build_address_set(addrs: Vec<string>): Set<string> {
-    var s = new Set<string>{
-        buckets: new Vec<SetEntry<string>>{},
-        count: 0, capacity: 0,
-    };
     var cap: i64 = 64;
     if (addrs.count > cap) {
         cap = addrs.count * 2;
     }
-    s.init(cap);
+    var s = new Set<string>(cap);
     foreach (const addr in addrs) {
         s.insert(addr);
     }
