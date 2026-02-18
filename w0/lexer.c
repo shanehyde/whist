@@ -228,10 +228,41 @@ static Token number(Lexer* lexer) {
     return make_token(lexer, type);
 }
 
+// Skip a valid escape sequence after the backslash has been consumed.
+// Returns 0 on success, or an error message string on failure.
+static const char* skip_escape(Lexer* lexer) {
+    char escaped = peek(lexer);
+    if (escaped == 'x') {
+        // Hex escape: \xNN
+        advance(lexer);
+        for (int i = 0; i < 2; i++) {
+            if (!isxdigit(peek(lexer))) {
+                return "Invalid hex escape in string literal";
+            }
+            advance(lexer);
+        }
+        return NULL;
+    } else if (escaped >= '0' && escaped <= '7') {
+        // Octal escape: up to 3 digits
+        for (int i = 0; i < 3 && peek(lexer) >= '0' && peek(lexer) <= '7'; i++) {
+            advance(lexer);
+        }
+        return NULL;
+    } else {
+        // Simple escape: \n, \t, \r, \\, \', \", \e, etc.
+        advance(lexer);
+        return NULL;
+    }
+}
+
 static Token string(Lexer* lexer) {
     while (peek(lexer) != '"' && !is_at_end(lexer)) {
         if (peek(lexer) == '\\' && peek_next(lexer) != '\0') {
             advance(lexer); // skip backslash
+            const char* err = skip_escape(lexer);
+            if (err)
+                return error_token(lexer, err);
+            continue;
         }
         advance(lexer);
     }
@@ -255,6 +286,10 @@ static Token triple_string(Lexer* lexer) {
         }
         if (peek(lexer) == '\\' && peek_next(lexer) != '\0') {
             advance(lexer); // skip backslash
+            const char* err = skip_escape(lexer);
+            if (err)
+                return error_token(lexer, err);
+            continue;
         }
         advance(lexer);
     }
@@ -288,6 +323,10 @@ static Token interp_string(Lexer* lexer) {
             }
             if (c == '\\' && peek_next(lexer) != '\0') {
                 advance(lexer); // skip backslash
+                const char* err = skip_escape(lexer);
+                if (err)
+                    return error_token(lexer, err);
+                continue;
             }
             advance(lexer);
         } else {

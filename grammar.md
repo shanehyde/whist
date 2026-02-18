@@ -539,20 +539,18 @@ var      while
                | '{' <expression> '}'
 
 <string-char> ::= <any-char-except-quote-or-backslash>
-               | <string-escape-sequence>
+               | <escape-sequence>
 
-<char-literal> ::= '\'' ( <char-char> | <char-escape-sequence> ) '\''
+<char-literal> ::= '\'' ( <char-char> | <escape-sequence> ) '\''
 
 <char-char> ::= <any-char-except-quote-or-backslash>
 
-<string-escape-sequence> ::= '\\' ( 'n' | 't' | 'r' | '0' | '\\' | '\'' | '"' )
-
-<char-escape-sequence> ::= <string-escape-sequence>
-                         | '\\x' <hex-digit> <hex-digit>
-                         | '\\' <octal-digit> [ <octal-digit> [ <octal-digit> ] ]
+<escape-sequence> ::= '\\' ( 'n' | 't' | 'r' | '0' | '\\' | '\'' | '"' | 'e' )
+                   | '\\x' <hex-digit> <hex-digit>
+                   | '\\' <octal-digit> [ <octal-digit> [ <octal-digit> ] ]
 ```
 
-Current bootstrap limitation: string/char semantic decoding only handles simple escapes (`\n`, `\t`, `\r`, `\0`, `\\`, `\'`, `\"`). Hex/octal char escapes are tokenized but not numerically decoded yet.
+`\e` is a shorthand for ESC (0x1b). Hex escapes (`\x41` = 'A') and octal escapes (`\101` = 'A') are supported in both strings and character literals.
 
 **String interpolation:** `$"Hello {name}!"` embeds expressions inside `{...}` braces. Any expression that resolves to a printable type (`i8`–`i64`, `u8`–`u64`, `f32`, `f64`, `bool`, `char`, `string`) can appear inside braces. Use `{{` and `}}` for literal brace characters. Interpolated strings produce a `string` value.
 
