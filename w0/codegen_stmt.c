@@ -651,6 +651,29 @@ static void emit_var_decl_rc_new_struct(CodeGen* gen, Node* node) {
                 // Vec index read of RC element — inc the borrowed reference
                 emit_indent(gen);
                 emit(gen, "__rc_inc(%s->%s);\n", node->as.var_decl.name, field->as.field_init.name);
+            } else if (val->type == NODE_IDENT && !rc_is_tracked(gen, val->as.ident.name)) {
+                // Untracked ident (e.g. function parameter) — check if the struct
+                // field type is RC-managed and inc if so
+                const char* fname = field->as.field_init.name;
+                for (int j = 0; j < rtype->as.struc.field_count; j++) {
+                    if (strcmp(rtype->as.struc.field_names[j], fname) == 0) {
+                        Type* ftype = rtype->as.struc.field_types[j];
+                        if (ftype && (ftype->kind == TYPE_STRING || ftype->kind == TYPE_STRUCT ||
+                                      ftype->kind == TYPE_VEC ||
+                                      (ftype->kind == TYPE_ENUM && ftype->as.enm.has_rc_fields))) {
+                            const char* inc_fn = get_inc_func_for_type(ftype);
+                            emit_indent(gen);
+                            if (ftype->kind == TYPE_STRING) {
+                                emit(gen, "%s((void*)%s->%s);\n", inc_fn, node->as.var_decl.name,
+                                     fname);
+                            } else {
+                                emit(gen, "%s(%s->%s);\n", inc_fn, node->as.var_decl.name, fname);
+                            }
+                            free((char*)inc_fn);
+                        }
+                        break;
+                    }
+                }
             }
         }
     }
