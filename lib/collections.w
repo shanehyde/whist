@@ -187,14 +187,25 @@ struct Set<T: Hashable> {
     capacity: i64,
 }
 
-func (Set<T>) init(cap: i64): void {
-    self.buckets.clear();
-    self.count = 0;
-    self.capacity = cap;
-    foreach (const i in 0..cap) {
-        self.buckets.push(null);
+impl Set<T> {
+     func init(cap: i64) {
+        self.buckets = new Vec<SetEntry<T>>{};
+        self.count = 0;
+        self.capacity = cap;
+        foreach (const i in 0..cap) {
+           self.buckets.push(null);
+        }
     }
 }
+
+// func (Set<T>) init(cap: i64): void {
+//     self.buckets.clear();
+//     self.count = 0;
+//     self.capacity = cap;
+//     foreach (const i in 0..cap) {
+//         self.buckets.push(null);
+//     }
+// }
 
 func (Set<T>) insert(value: T): void {
     var h: i32 = value.hash();

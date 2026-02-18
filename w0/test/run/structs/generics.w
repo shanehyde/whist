@@ -16,6 +16,13 @@ struct SimplePair<K, V> {
     second: V,
 }
 
+impl SimplePair<K, V> {
+    func init(f: K, s: V) {
+        self.first = f;
+        self.second = s;
+    }
+}
+
 func (Box<T>) get(): T {
     return self.value;
 }
@@ -53,7 +60,7 @@ test "generics_methods" {
 // --- generics_pair ---
 
 test "generics_pair" {
-    var p = new SimplePair<i64, i32> {first: 100, second: 42};
+    var p = new SimplePair<i64, i32>(100, 42);
     assert(p.first == 100);
     assert(p.second == 42);
 }
