@@ -29,12 +29,41 @@ impl Drop for Timer {
     }
 }
 
+// struct ReadDirResult {
+//     files: Vec<string>,
+//     dirs: Vec<string>
+// }
+
+// func read_dir_all(path: string): ReadDirResult {
+//     var files: Vec<string> = new Vec<string>{};
+//     var dirs: Vec<string> = new Vec<string>{};
+//     var handle = fs::open_dir(path);
+//     if (handle == null) {
+//         return new ReadDirResult{files: files, dirs: dirs};
+//     }
+//     while (true) {
+//         var entry = fs::read_dir(handle);
+//         if (entry == "") {
+//             break;
+//         }
+//         if (fs::is_dir(entry)) {
+//             dirs.push(entry);
+//         } else {
+//             files.push(entry);
+//         }
+//     }
+//     fs::close_dir(handle);
+//     return new ReadDirResult{files: files, dirs: dirs};
+// }
 
 // --- Helpers ---
 
 func collect_files(dir: string, files: Vec<string>): void {
     // std::println($"Collecting files in {dir}...");
     // var t = new Timer($"collecting files in {dir}");
+
+    var {files, dirs} = fs::read_dir_all(dir);
+
     var dh = fs::open_dir(dir);
     if (dh == null) {
         return;
@@ -61,6 +90,7 @@ func collect_files(dir: string, files: Vec<string>): void {
 func read_expected_lines(path: string, prefix: string): Vec<string> {
     var lines = new Vec<string>{};
     var marker = "// " + prefix + ": ";
+
     foreach (const line in fs::read_file(path).split("\n")) {
         if (line.starts_with(marker)) {
             lines.push(line[marker.length():line.length()]);
@@ -228,11 +258,11 @@ func main(): i32 {
 
     const args = std::args();
 
-    var run_valid = args.any(|x: string| x == "--run" || x == "--valid");
-    var run_errors = args.any(|x: string| x == "--errors");
-    var verbose = args.any(|x: string| x == "--verbose");
+    var run_valid = args.any(|x| x == "--run" || x == "--valid");
+    var run_errors = args.any(|x| x == "--errors");
+    var verbose = args.any(|x| x == "--verbose");
 
-    if(args.any(|x: string| x == "--help")) {
+    if(args.any(|x| x == "--help")) {
         std::println("""
         Usage: test_runner [OPTIONS]
 
