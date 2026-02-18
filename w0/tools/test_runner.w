@@ -13,13 +13,13 @@ struct Timer {
 
 impl Timer {
     func init(desc: string) {
-        self.start = time.time_ms();
+        self.start = time::time_ms();
         self.desc = desc;
     }
 }
 
 func (Timer) timelapsed(): i64 {
-    return time.time_ms() - self.start;
+    return time::time_ms() - self.start;
 }
 
 impl Drop for Timer {
