@@ -490,23 +490,6 @@ static Type* check_slice_expr(Checker* checker, Node* node) {
 // --- Member access helpers (dispatched from check_member_expr) ---
 
 // Check module-qualified member access (e.g., std.print, fs.open)
-static Type* check_member_module(Checker* checker, Node* node, const char* module_name) {
-    // Built-in: std.format(string, ...) -> string
-    if (strcmp(module_name, "std") == 0 && strcmp(node->as.member.name, "format") == 0) {
-        sem_info_set_member_module_name(checker->sem, node, module_name);
-        Type** params = xmalloc(1 * sizeof(Type*));
-        params[0]     = type_string;
-        return type_func(params, 1, type_string, 1);
-    }
-    Symbol* sym = checker_lookup_in_module(checker, module_name, node->as.member.name);
-    if (!sym) {
-        check_error(checker, node->line, node->column, "Module '%s' has no public symbol '%s'",
-                    module_name, node->as.member.name);
-        return type_error;
-    }
-    sem_info_set_member_module_name(checker->sem, node, module_name);
-    return sym->type;
-}
 
 // Check span member access (count, data)
 static Type* check_member_span(Checker* checker, Node* node) {
@@ -925,11 +908,14 @@ static Type* check_member_type_ref(Checker* checker, Node* node, Type* type_val)
 
 // Type-check a member access: dispatch to type-specific helpers
 static Type* check_member_expr(Checker* checker, Node* node) {
-    // Check for module-qualified access first (e.g., std.print)
+    // Module access must use :: not . (e.g., std::print, not std.print)
     if (node->as.member.object->type == NODE_IDENT) {
         const char* name = node->as.member.object->as.ident.name;
-        if (is_imported_module(checker, name))
-            return check_member_module(checker, node, name);
+        if (is_imported_module(checker, name)) {
+            check_error(checker, node->line, node->column,
+                        "Use '::' for module access (e.g., %s::%s)", name, node->as.member.name);
+            return type_error;
+        }
     }
 
     // Check for Type.method unbound method reference (e.g., Point.move)
@@ -1205,12 +1191,100 @@ static Type* resolve_generic_enum_value_type(Checker* checker, Node* node, const
     return enum_type;
 }
 
+// Type-check module::func or module::func(args) parsed as NODE_ENUM_VALUE
+static Type* check_module_call_expr(Checker* checker, Node* node) {
+    const char* module_name = node->as.enum_value.enum_name;
+    const char* func_name   = node->as.enum_value.value_name;
+    int         arg_count   = node->as.enum_value.args.count;
+
+    node->as.enum_value.is_module_call = 1;
+
+    // Built-in: std::format(string, ...) -> string
+    if (strcmp(module_name, "std") == 0 && strcmp(func_name, "format") == 0) {
+        if (arg_count < 1) {
+            check_error(checker, node->line, node->column,
+                        "std::format requires at least 1 argument");
+            return type_error;
+        }
+        Type* fmt_type = check_expression(checker, node->as.enum_value.args.nodes[0]);
+        if (fmt_type->kind != TYPE_ERROR && !type_assignable(type_string, fmt_type)) {
+            check_error(checker, node->line, node->column,
+                        "std::format first argument must be string, got '%s'", type_name(fmt_type));
+            return type_error;
+        }
+        for (int i = 1; i < arg_count; i++) {
+            check_expression(checker, node->as.enum_value.args.nodes[i]);
+        }
+        node->is_owned_temp   = 1;
+        node->owned_temp_type = type_string;
+        return type_string;
+    }
+
+    // Look up the function in the module
+    Symbol* sym = checker_lookup_in_module(checker, module_name, func_name);
+    if (!sym) {
+        check_error(checker, node->line, node->column, "Module '%s' has no public symbol '%s'",
+                    module_name, func_name);
+        return type_error;
+    }
+
+    Type* func_type = sym->type;
+
+    // If no parens, this is a function/const reference (e.g., std::println as a value)
+    if (!node->as.enum_value.has_parens) {
+        return func_type;
+    }
+
+    // Validate it's callable
+    if (func_type->kind != TYPE_FUNC) {
+        check_error(checker, node->line, node->column, "Module symbol '%s::%s' is not callable",
+                    module_name, func_name);
+        return type_error;
+    }
+
+    // Check argument count
+    int expected   = func_type->as.func.param_count;
+    int is_varargs = func_type->as.func.is_varargs;
+    if (is_varargs ? (arg_count < expected) : (arg_count != expected)) {
+        check_error(checker, node->line, node->column, "'%s::%s' expects %s%d argument(s), got %d",
+                    module_name, func_name, is_varargs ? "at least " : "", expected, arg_count);
+        return type_error;
+    }
+
+    // Type-check each argument
+    for (int i = 0; i < arg_count; i++) {
+        Type* arg_type = check_expression(checker, node->as.enum_value.args.nodes[i]);
+        if (i < expected && arg_type->kind != TYPE_ERROR) {
+            Type* param_type = func_type->as.func.param_types[i];
+            if (!type_assignable(param_type, arg_type)) {
+                check_error(checker, node->as.enum_value.args.nodes[i]->line,
+                            node->as.enum_value.args.nodes[i]->column,
+                            "'%s::%s' argument %d: expected '%s', got '%s'", module_name, func_name,
+                            i + 1, type_name(param_type), type_name(arg_type));
+            }
+        }
+    }
+
+    Type* ret = func_type->as.func.return_type;
+    if (type_is_rc_managed(ret)) {
+        node->is_owned_temp   = 1;
+        node->owned_temp_type = ret;
+    }
+    return ret;
+}
+
 // Type-check an enum variant constructor, including generic enum type inference
 static Type* check_enum_value_expr(Checker* checker, Node* node) {
     const char* enum_name  = node->as.enum_value.enum_name;
     const char* value_name = node->as.enum_value.value_name;
-    Symbol*     sym        = checker_lookup(checker, enum_name);
-    Type*       enum_type  = NULL;
+
+    // Check if this is module::func access (e.g., std::println)
+    if (is_imported_module(checker, enum_name)) {
+        return check_module_call_expr(checker, node);
+    }
+
+    Symbol* sym       = checker_lookup(checker, enum_name);
+    Type*   enum_type = NULL;
 
     if (sym && sym->kind == SYM_TYPE && sym->type->kind == TYPE_ENUM) {
         // Non-generic enum or already-instantiated generic enum.

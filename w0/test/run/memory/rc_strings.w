@@ -54,8 +54,8 @@ test "rc_strings" {
     assert(parts[2] == "three");
     // parts.clear(); // Clear should free strings
 
-    // std.format creates RC-managed string
-    var formatted = std.format("value=%d", 99);
+    // std::format creates RC-managed string
+    var formatted = std::format("value=%d", 99);
     assert(formatted == "value=99");
 }
 

@@ -785,6 +785,14 @@ static void check_var_decl_stmt(Checker* checker, Node* node) {
                 node->as.var_decl.is_rc = 1;
                 sym->is_rc              = 1;
             }
+        } else if (node->as.var_decl.init->type == NODE_ENUM_VALUE &&
+                   node->as.var_decl.init->as.enum_value.is_module_call && var_type) {
+            // Module call (parsed as enum value): store resolved type for codegen
+            node->as.var_decl.resolved_type = var_type;
+            if (type_is_rc_managed(var_type)) {
+                node->as.var_decl.is_rc = 1;
+                sym->is_rc              = 1;
+            }
         }
     }
 

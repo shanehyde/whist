@@ -2,7 +2,7 @@
 // Expected error: Cannot call mutating method 'push' on const 'v'
 
 import std;
-use std.println;
+use std::println;
 
 struct Box {
     const v: Vec<i32>,

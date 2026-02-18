@@ -61,14 +61,15 @@ Operators: `+ - * / %`, `== != < > <= >=`, `&& || !`, `& | ^ ~ << >>`, `. ->`
 
 ### Imports
 
-**Module imports** (from `lib/` directory) require qualification:
+**Module imports** (from `lib/` directory) require `::` qualification:
 ```whist
 import std;
 
 func main(): i32 {
-    std.print("Hello!\n");        // ✓ Correct: module-qualified
-    var x = std.abs_i64(-42);     // ✓ Correct: module-qualified
-    // print("Hi!\n");            // ✗ Error: unqualified access
+    std::print("Hello!\n");        // ✓ Correct: module-qualified with ::
+    var x = std::abs_i64(-42);     // ✓ Correct: module-qualified with ::
+    // print("Hi!\n");             // ✗ Error: unqualified access
+    // std.print("Hi!\n");         // ✗ Error: use :: not . for modules
     return 0;
 }
 ```
@@ -76,13 +77,13 @@ func main(): i32 {
 **Use declarations** selectively bring module symbols into unqualified scope:
 ```whist
 import std;
-use std.print;                  // single symbol
-use std.{abs_i64, max_i64};    // grouped symbols
+use std::print;                  // single symbol
+use std::{abs_i64, max_i64};    // grouped symbols
 
 func main(): i32 {
-    print("Hello!\n");          // ✓ Correct: brought in by use
-    var x = abs_i64(-42);       // ✓ Correct: brought in by use
-    var y = std.min_i64(1, 2);  // ✓ Correct: qualified still works
+    print("Hello!\n");           // ✓ Correct: brought in by use
+    var x = abs_i64(-42);        // ✓ Correct: brought in by use
+    var y = std::min_i64(1, 2);  // ✓ Correct: qualified still works
     return 0;
 }
 ```
@@ -106,16 +107,16 @@ bin/w0 --lib-path ../lib program.w | cc -x c -Ilib/include -o program - lib/whis
 ```
 
 **`std.w`** — Core utilities (imported as `import std;`):
-- `std.print(s: string)` — print a string
-- `std.abs_i64(x: i64)`, `std.max_i64(a, b)`, `std.min_i64(a, b)` — integer math
+- `std::print(s: string)` — print a string
+- `std::abs_i64(x: i64)`, `std::max_i64(a, b)`, `std::min_i64(a, b)` — integer math
 
 **`fs.w`** — File I/O (imported as `import fs;`):
-- Convenience: `fs.read_file`, `fs.write_file`, `fs.append_file`, `fs.file_exists`, `fs.remove_file`, `fs.rename_file`, `fs.file_size`
-- Handle-based: `fs.open`, `fs.close`, `fs.read_line`, `fs.write_string`, `fs.flush`, `fs.seek`, `fs.tell`, `fs.eof`
-- Directory ops: `fs.mkdir`, `fs.mkdir_all`, `fs.rmdir`, `fs.is_dir`, `fs.is_file`, `fs.cwd`, `fs.chdir`
-- Directory iteration: `fs.open_dir`, `fs.read_dir`, `fs.close_dir` (handle-based, like file handles)
-- Path utilities: `fs.join_path`, `fs.dirname`, `fs.basename`, `fs.extension`, `fs.abs_path`
-- Metadata & temp: `fs.modified_time`, `fs.temp_dir`
+- Convenience: `fs::read_file`, `fs::write_file`, `fs::append_file`, `fs::file_exists`, `fs::remove_file`, `fs::rename_file`, `fs::file_size`
+- Handle-based: `fs::open`, `fs::close`, `fs::read_line`, `fs::write_string`, `fs::flush`, `fs::seek`, `fs::tell`, `fs::eof`
+- Directory ops: `fs::mkdir`, `fs::mkdir_all`, `fs::rmdir`, `fs::is_dir`, `fs::is_file`, `fs::cwd`, `fs::chdir`
+- Directory iteration: `fs::open_dir`, `fs::read_dir`, `fs::close_dir` (handle-based, like file handles)
+- Path utilities: `fs::join_path`, `fs::dirname`, `fs::basename`, `fs::extension`, `fs::abs_path`
+- Metadata & temp: `fs::modified_time`, `fs::temp_dir`
 - Handles are `voidptr` (opaque FILE*/DIR* pointers); `null` means invalid
 - Requires `-Ilib/include` when compiling the generated C (for `fs.h` runtime)
 
@@ -194,7 +195,8 @@ Key checker-set flags that codegen depends on:
 - `slice.is_string` / `slice.resolved_type` -- string vs array slice emission
 - `index.is_tuple_index` -- tuple element access
 - `enum_value.is_data_enum` -- tagged union construction
-- `call.is_format_call` -- `std.format` builtin handling
+- `enum_value.is_module_call` -- `module::func` call (parsed as enum value, resolved as module access)
+- `call.is_format_call` -- `std::format` builtin handling
 
 **Name mangling**: Generic types become `TypeName_Arg1_Arg2` (e.g., `Box_i64`, `Pair_i64_string`). Methods become `StructName_methodName`. Functions are handled by `type_mangle_generic` in `types.c` and `build_mangled_name_from_generic_node` in `codegen.c`.
 

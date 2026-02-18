@@ -25,7 +25,7 @@ func (Timer) timelapsed(): i64 {
 impl Drop for Timer {
     func drop() {
         var elapsed = self.timelapsed();
-        std.println($"{self.desc} took {elapsed} ms");
+        std::println($"{self.desc} took {elapsed} ms");
     }
 }
 
@@ -33,25 +33,25 @@ impl Drop for Timer {
 // --- Helpers ---
 
 func collect_files(dir: string, files: Vec<string>): void {
-    // std.println($"Collecting files in {dir}...");
+    // std::println($"Collecting files in {dir}...");
     // var t = new Timer($"collecting files in {dir}");
-    var dh = fs.open_dir(dir);
+    var dh = fs::open_dir(dir);
     if (dh == null) {
         return;
     }
 
     var dirs = new Vec<string>{};
-    var entry = fs.read_dir(dh);
+    var entry = fs::read_dir(dh);
     while (entry != "") {
-        var path = fs.join_path(dir, entry);
-        if (fs.is_dir(path)) {
+        var path = fs::join_path(dir, entry);
+        if (fs::is_dir(path)) {
             dirs.push(path);
         } else if (entry.ends_with(".w")) {
             files.push(path);
         }
-        entry = fs.read_dir(dh);
+        entry = fs::read_dir(dh);
     }
-    fs.close_dir(dh);
+    fs::close_dir(dh);
 
     foreach(const dir in dirs) {
         collect_files(dir, files);
@@ -61,7 +61,7 @@ func collect_files(dir: string, files: Vec<string>): void {
 func read_expected_lines(path: string, prefix: string): Vec<string> {
     var lines = new Vec<string>{};
     var marker = "// " + prefix + ": ";
-    foreach (const line in fs.read_file(path).split("\n")) {
+    foreach (const line in fs::read_file(path).split("\n")) {
         if (line.starts_with(marker)) {
             lines.push(line[marker.length():line.length()]);
         }
@@ -70,7 +70,7 @@ func read_expected_lines(path: string, prefix: string): Vec<string> {
 }
 
 func file_contains(path: string, pattern: string): bool {
-    var content = fs.read_file(path);
+    var content = fs::read_file(path);
     return content.contains(pattern);
 }
 
@@ -95,14 +95,14 @@ func check_output_contains(output: string, expected: Vec<string>): bool {
 
 func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bool): Result<bool, string> {
     var cmd = $"{w0} --lib-path {lib_path} test {file}";
-    var {output, error_output, exit_code} = std.exec(cmd);
+    var {output, error_output, exit_code} = std::exec(cmd);
     var combined = output + error_output;
 
     // No expected lines — just check exit code
     if (exit_code != 0) {
         if (verbose) {
-            std.println("  command: " + cmd);
-            std.println("  output:  " + combined);
+            std::println("  command: " + cmd);
+            std::println("  output:  " + combined);
         }
         return Result::Err("Non-zero exit code");
     }
@@ -114,11 +114,11 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
     // Compile
     // var compile_cmd = $"{w0} --lib-path {lib_path} {file} | cc -x c -I{lib_path}/include -o /tmp/whist_test_bin - {lib_path}/whist_runtime.c";
     // {
-    // var {output, error_output, exit_code} = std.exec(compile_cmd);
+    // var {output, error_output, exit_code} = std::exec(compile_cmd);
     // if (exit_code != 0) {
     //     if (verbose) {
-    //         std.println("  compile failed:");
-    //         std.println("  " + error_output);
+    //         std::println("  compile failed:");
+    //         std::println("  " + error_output);
     //     }
     //     return false;
     // }
@@ -127,21 +127,21 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
     var run_cmd = $"{w0} run --lib-path {lib_path} {file}";
 
     // Run
-    var {output, error_output, exit_code} = std.exec(run_cmd);
+    var {output, error_output, exit_code} = std::exec(run_cmd);
 
     // Check expected exit code
     var expected_exit_lines = read_expected_lines(file, "Expected exit");
     var expected_exit: i64 = 0;
     if (expected_exit_lines.count > 0) {
-        expected_exit = std.parse_i64(expected_exit_lines[0]);
+        expected_exit = std::parse_i64(expected_exit_lines[0]);
     }
 
     var actual_exit: i64 = exit_code as i64;
     if (actual_exit != expected_exit) {
         if (verbose) {
-            std.println($"  exit code: {actual_exit} (expected {expected_exit})");
-            std.println("  stdout: " + output);
-            std.println("  stderr: " + error_output);
+            std::println($"  exit code: {actual_exit} (expected {expected_exit})");
+            std::println("  stdout: " + output);
+            std::println("  stderr: " + error_output);
         }
         return false;
     }
@@ -151,11 +151,11 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
     if (expected_stdout.count > 0) {
         if (!check_output_contains(output, expected_stdout)) {
             if (verbose) {
-                std.println("  stdout mismatch:");
-                std.println("  actual: " + output);
+                std::println("  stdout mismatch:");
+                std::println("  actual: " + output);
                 var k: i64 = 0;
                 foreach (const line in expected_stdout) {
-                     std.println("  expected line: " + line);
+                     std::println("  expected line: " + line);
                 }
             }
             return false;
@@ -167,8 +167,8 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
     if (expected_stderr.count > 0) {
         if (!check_output_contains(error_output, expected_stderr)) {
             if (verbose) {
-                std.println("  stderr mismatch:");
-                std.println("  actual: " + error_output);
+                std::println("  stderr mismatch:");
+                std::println("  actual: " + error_output);
             }
             return false;
         }
@@ -180,14 +180,14 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
 func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): bool {
     var cmd = $"{w0} --lib-path {lib_path} --check {file}";
 
-    var {output, error_output, exit_code} = std.exec(cmd);
+    var {output, error_output, exit_code} = std::exec(cmd);
 
     var nonzero = |x: i64| x != 0;
 
     // Should fail (non-zero exit)
     if (exit_code == 0) {
         if (verbose) {
-            std.println("  should have failed but succeeded");
+            std::println("  should have failed but succeeded");
         }
         return false;
     }
@@ -197,8 +197,8 @@ func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): 
     // Must contain "Error:"
     if (!o.contains("Error:")) {
         if (verbose) {
-            std.println("  no error message in output:");
-            std.println("  " + o);
+            std::println("  no error message in output:");
+            std::println("  " + o);
         }
         return false;
     }
@@ -208,10 +208,10 @@ func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): 
     if (expected.count > 0) {
         if (!check_output_contains(o, expected)) {
             if (verbose) {
-                std.println("  wrong error message:");
-                std.println("  output: " + o);
+                std::println("  wrong error message:");
+                std::println("  output: " + o);
                 foreach (const line in expected) {
-                    std.println("  expected line: " + line);
+                    std::println("  expected line: " + line);
                 }
             }
             return false;
@@ -224,16 +224,16 @@ func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): 
 // --- Main ---
 
 func main(): i32 {
-    // var args = std.args();
+    // var args = std::args();
 
-    const args = std.args();
+    const args = std::args();
 
     var run_valid = args.any(|x: string| x == "--run" || x == "--valid");
     var run_errors = args.any(|x: string| x == "--errors");
     var verbose = args.any(|x: string| x == "--verbose");
 
     if(args.any(|x: string| x == "--help")) {
-        std.println("""
+        std::println("""
         Usage: test_runner [OPTIONS]
 
         Options:
@@ -262,11 +262,11 @@ func main(): i32 {
     var error_passed: i64 = 0;
     var error_failed: i64 = 0;
 
-    std.println("=== Running W0 Test Suite ===");
-    std.println("");
+    std::println("=== Running W0 Test Suite ===");
+    std::println("");
 
     if (run_valid) {
-        std.println("=== Run Tests (test/run/**) ===");
+        std::println("=== Run Tests (test/run/**) ===");
 
         var files = new Vec<string>{};
         collect_files("test/run", files);
@@ -279,40 +279,40 @@ func main(): i32 {
             var has_main = file_contains(file, "func main(");
 
             if (has_test_blocks) {
-                std.print($"{disp}: tests - ");
+                std::print($"{disp}: tests - ");
                 // var ok = run_test_block_file(file, w0, lib_path, verbose);
                 match (run_test_block_file(file, w0, lib_path, verbose)) {
                     Ok(_) => {
-                        std.println("PASS");
+                        std::println("PASS");
                         run_passed = run_passed + 1;
                     }
                     Err(msg) => {
-                        std.println("FAIL: " + msg);
+                        std::println("FAIL: " + msg);
                         run_failed = run_failed + 1;
                     }
                 }
             } else if (has_main) {
-                std.print($"{disp}: ");
+                std::print($"{disp}: ");
                 var ok = run_program_test(file, w0, lib_path, verbose);
                 if (ok) {
-                    std.println("PASS");
+                    std::println("PASS");
                     run_passed = run_passed + 1;
                 } else {
-                    std.println("FAIL");
+                    std::println("FAIL");
                     run_failed = run_failed + 1;
                 }
             } else {
                 if (verbose) {
-                    std.println($"{disp}: SKIP (helper module)");
+                    std::println($"{disp}: SKIP (helper module)");
                 }
                 run_skipped = run_skipped + 1;
             }
         }
-        std.println("");
+        std::println("");
     }
 
     if (run_errors) {
-        std.println("=== Error Cases (test/errors/**) ===");
+        std::println("=== Error Cases (test/errors/**) ===");
 
         var files = new Vec<string>{};
         collect_files("test/errors", files);
@@ -321,33 +321,33 @@ func main(): i32 {
         foreach (const file in files) {
             var disp = display_path(file);
 
-            std.print($"{disp}: ");
+            std::print($"{disp}: ");
             var ok = run_error_test(file, w0, lib_path, verbose);
             if (ok) {
-                std.println("PASS (correct error)");
+                std::println("PASS (correct error)");
                 error_passed = error_passed + 1;
             } else {
-                std.println("FAIL");
+                std::println("FAIL");
                 error_failed = error_failed + 1;
             }
         }
-        std.println("");
+        std::println("");
     }
 
     // Summary
-    std.println("=== Test Summary ===");
+    std::println("=== Test Summary ===");
 
     if (run_valid) {
         var run_total = run_passed + run_failed;
-        std.println($"Run Tests:      {run_passed}/{run_total} passed");
+        std::println($"Run Tests:      {run_passed}/{run_total} passed");
         if (run_skipped > 0) {
-            std.println($"Run Skipped:    {run_skipped} helper module(s)");
+            std::println($"Run Skipped:    {run_skipped} helper module(s)");
         }
     }
 
     if (run_errors) {
         var error_total = error_passed + error_failed;
-        std.println($"Error Cases:    {error_passed}/{error_total} passed");
+        std::println($"Error Cases:    {error_passed}/{error_total} passed");
     }
 
     var total_passed = run_passed + error_passed;
@@ -355,14 +355,14 @@ func main(): i32 {
     var total = total_passed + total_failed;
 
     if (run_valid && run_errors) {
-        std.println($"Total:          {total_passed}/{total} tests passed");
+        std::println($"Total:          {total_passed}/{total} tests passed");
     }
 
     if (total_failed == 0) {
-        std.println("All tests passed!");
+        std::println("All tests passed!");
         return 0;
     } else {
-        std.println($"{total_failed} test(s) failed");
+        std::println($"{total_failed} test(s) failed");
         return 1;
     }
 }

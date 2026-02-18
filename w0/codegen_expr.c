@@ -159,8 +159,43 @@ static void emit_char_lit(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a module::func call that was parsed as NODE_ENUM_VALUE
+static void emit_module_enum_value_call(CodeGen* gen, Node* node) {
+    const char* module_name = node->as.enum_value.enum_name;
+    const char* func_name   = node->as.enum_value.value_name;
+    int         func_len    = node->as.enum_value.value_name_length;
+    int         arg_count   = node->as.enum_value.args.count;
+
+    // std::format -> __std_format (special builtin)
+    if (strcmp(module_name, "std") == 0 && strcmp(func_name, "format") == 0) {
+        emit(gen, "__std_format(");
+        for (int i = 0; i < arg_count; i++) {
+            if (i > 0)
+                emit(gen, ", ");
+            emit_expr(gen, node->as.enum_value.args.nodes[i]);
+        }
+        emit(gen, ")");
+        return;
+    }
+
+    // Regular module call: module_func(args)
+    emit(gen, "%s_%.*s(", module_name, func_len, func_name);
+    for (int i = 0; i < arg_count; i++) {
+        if (i > 0)
+            emit(gen, ", ");
+        emit_expr(gen, node->as.enum_value.args.nodes[i]);
+    }
+    emit(gen, ")");
+}
+
 // Emit an enum variant: simple tag, bare data enum, or data enum with constructor args
 static void emit_enum_value(CodeGen* gen, Node* node) {
+    // Check if this is a module::func call (parsed as enum value, resolved by checker)
+    if (node->as.enum_value.is_module_call) {
+        emit_module_enum_value_call(gen, node);
+        return;
+    }
+
     const char* enum_name    = enum_value_resolved_name(gen, node);
     int         enum_len     = enum_value_resolved_name_length(gen, node);
     int         is_data_enum = sem_info_get_enum_value_is_data_enum(gen->checker.sem, node,

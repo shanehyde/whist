@@ -1,7 +1,7 @@
 import std;
 
 func main(): i32 {
-    var args = std.args();
+    var args = std::args();
 
     if (args.count < 1) {
         return 1;

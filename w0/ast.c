@@ -492,7 +492,8 @@ static void node_reset_checker_flags(Node* node) {
         node->as.member.is_method_ref   = 0;
         break;
     case NODE_ENUM_VALUE:
-        node->as.enum_value.is_data_enum = 0;
+        node->as.enum_value.is_data_enum   = 0;
+        node->as.enum_value.is_module_call = 0;
         break;
     case NODE_NEW_EXPR:
         node->as.new_expr.resolved_type = NULL;

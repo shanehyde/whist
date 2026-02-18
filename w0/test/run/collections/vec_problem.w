@@ -8,10 +8,10 @@ struct ReadDirResult {
 
 func main() : i32 {
 
-    var args = std.args();
+    var args = std::args();
 
     if(args.any(|a| a == "--help")) {
-        std.println("Usage: vec_problem [--help]");
+        std::println("Usage: vec_problem [--help]");
         return 0;
     }
 

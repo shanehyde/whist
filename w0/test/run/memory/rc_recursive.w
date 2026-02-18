@@ -20,7 +20,7 @@ import time;
 // impl Drop for Timer {
 //     func drop() {
 //         var elapsed = self.timelapsed();
-//         std.println($"{self.desc} took {elapsed} ms");
+//         std::println($"{self.desc} took {elapsed} ms");
 //     }
 // }
 
@@ -39,5 +39,5 @@ func dostuff(i: i32) : void {
 
 test "rc_recursive" {
     dostuff(10);
-    // std.println($"result: {result}");
+    // std::println($"result: {result}");
 }
