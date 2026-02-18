@@ -51,6 +51,19 @@ test "vec_filter_basic" {
     assert(evens[1] == 4);
 }
 
+test "vec_filtervec_each_basic" {
+    var nums = new Vec<i64>{};
+    nums.push(1);
+    nums.push(2);
+    nums.push(3);
+    nums.push(4);
+    nums.push(5);
+    var count = 0;
+
+    var evens = nums.each(|x| count += 1);
+    assert(count == 5);
+}
+
 func main(): i32 {
     return 0;
 }

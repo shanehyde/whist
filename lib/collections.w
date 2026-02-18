@@ -210,6 +210,13 @@ func (const Vec<T>) filter(pred: func(T) :bool): Vec<T> {
     return result;
 }
 
+func (const Vec<T>) each<K>(f: func(T) :K): const Vec<T> {
+    foreach (const elem in self) {
+        f(elem);
+    }
+    return self;
+}
+
 // --- Set ---
 
 struct SetEntry<T: Hashable> {
