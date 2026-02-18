@@ -31,27 +31,39 @@ impl Drop for Timer {
 
 // --- ANSI colors ---
 
+func red(s: string): string {
+    return $"\e[1;31m{s}\e[0m";
+}
+func green(s: string): string {
+    return $"\e[1;32m{s}\e[0m";
+}
+func blue(s: string): string {
+    return $"\e[1;34m{s}\e[0m";
+}
+func cyan(s: string): string {
+    return $"\e[1;36m{s}\e[0m";
+}
+func yellow(s: string): string {
+    return $"\e[1;33m{s}\e[0m";
+}
+func gray(s: string): string {
+    return $"\e[90m{s}\e[0m";
+}
+
 func ansi(code: string): string {
-    var sb = new StringBuilder{};
-    sb.append_char(27 as char);
-    sb.append("[");
-    sb.append(code);
-    sb.append("m");
-    return sb.to_string();
+    return $"\e[{code}m";
 }
 
 // --- RC helpers ---
 
 func extract_rc_addresses(output: string, prefix: string): Vec<string> {
     var addrs = new Vec<string>{};
-    foreach (const line in output.split("\n")) {
-        if (line.starts_with(prefix)) {
-            var parts = line.split(" ");
-            if (parts.count > 1) {
-                addrs.push(parts[1]);
-            }
+    output.split("\n").filter(|line| line.starts_with(prefix)).each(|line| {
+        var parts = line.split(" ");
+        if (parts.count > 1) {
+            addrs.push(parts[1]);
         }
-    }
+    });
     addrs.sort();
     return addrs;
 }
@@ -194,7 +206,7 @@ func collect_files(dir: string, files: Vec<string>): void {
 
 func read_expected_lines(path: string, prefix: string): Vec<string> {
     var lines = new Vec<string>{};
-    var marker = "// " + prefix + ": ";
+    var marker = $"// {prefix}: ";
 
     foreach (const line in fs::read_file(path).split("\n")) {
         if (line.starts_with(marker)) {
@@ -242,8 +254,8 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
     var compile_result = std::exec(compile_cmd);
     if (compile_result.exit_code != 0) {
         if (verbose) {
-            std::println("  command: " + compile_cmd);
-            std::println("  output:  " + compile_result.error_output);
+            std::println($"  command: {compile_cmd}");
+            std::println($"  output:  {compile_result.error_output}");
         }
         return Result::Err("compile");
     }
@@ -263,8 +275,8 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
     if (actual_exit != expected_exit) {
         if (verbose) {
             std::println($"  exit code: {actual_exit} (expected {expected_exit})");
-            std::println("  stdout: " + run_result.output);
-            std::println("  stderr: " + run_result.error_output);
+            std::println($"  stdout: {run_result.output}");
+            std::println($"  stderr: {run_result.error_output}");
         }
         return Result::Err($"exit {actual_exit}, expected {expected_exit}");
     }
@@ -275,9 +287,9 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
         if (!check_output_contains(run_result.output, expected_stdout)) {
             if (verbose) {
                 std::println("  stdout mismatch:");
-                std::println("  actual: " + run_result.output);
+                std::println($"  actual: {run_result.output}");
                 foreach (const line in expected_stdout) {
-                    std::println("  expected line: " + line);
+                    std::println($"  expected line: {line}");
                 }
             }
             return Result::Err("stdout");
@@ -291,7 +303,7 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
         if (!check_output_contains(filtered_stderr, expected_stderr)) {
             if (verbose) {
                 std::println("  stderr mismatch:");
-                std::println("  actual: " + filtered_stderr);
+                std::println($"  actual: {filtered_stderr}");
             }
             return Result::Err("stderr");
         }
@@ -303,7 +315,7 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
         if (!check_rc_free_order(run_result.error_output, expected_order_lines[0])) {
             if (verbose) {
                 std::println("  rc free order mismatch:");
-                std::println("  expected: " + expected_order_lines[0]);
+                std::println($"  expected: {expected_order_lines[0]}");
             }
             return Result::Err("rc free order");
         }
@@ -316,7 +328,7 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
                 std::println("  rc leak detected:");
                 var leaked = get_leaked_addresses(run_result.error_output);
                 foreach (const addr in leaked) {
-                    std::println("  leaked: " + addr);
+                    std::println($"  leaked: {addr}");
                 }
             }
             return Result::Err("rc leak");
@@ -331,15 +343,15 @@ func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bo
     var {output, error_output, exit_code} = std::exec(cmd);
 
     // Build combined output with RC lines filtered from stderr
-    var combined = output + filter_rc_lines(error_output);
+    var combined = $"{output}{filter_rc_lines(error_output)}";
 
     // Check expected output lines
     var expected_lines = read_expected_lines(file, "Expected");
 
     if (exit_code != 0 && expected_lines.count == 0) {
         if (verbose) {
-            std::println("  command: " + cmd);
-            std::println("  output:  " + combined);
+            std::println($"  command: {cmd}");
+            std::println($"  output:  {combined}");
         }
         return Result::Err("w0 test runtime");
     }
@@ -348,9 +360,9 @@ func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bo
         if (!check_output_contains(combined, expected_lines)) {
             if (verbose) {
                 std::println("  output mismatch:");
-                std::println("  actual: " + combined);
+                std::println($"  actual: {combined}");
                 foreach (const line in expected_lines) {
-                    std::println("  expected: " + line);
+                    std::println($"  expected: {line}");
                 }
             }
             return Result::Err("output");
@@ -363,7 +375,7 @@ func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bo
             std::println("  rc leak detected:");
             var leaked = get_leaked_addresses(error_output);
             foreach (const addr in leaked) {
-                std::println("  leaked: " + addr);
+                std::println($"  leaked: {addr}");
             }
         }
         return Result::Err("rc leak");
@@ -384,13 +396,13 @@ func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): 
         return Result::Err("should have failed");
     }
 
-    var o = output + error_output;
+    var o = $"{output}{error_output}";
 
     // Must contain "Error:"
     if (!o.contains("Error:")) {
         if (verbose) {
             std::println("  no error message in output:");
-            std::println("  " + o);
+            std::println($"  {o}");
         }
         return Result::Err("no error message");
     }
@@ -401,9 +413,9 @@ func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): 
         if (!check_output_contains(o, expected)) {
             if (verbose) {
                 std::println("  wrong error message:");
-                std::println("  output: " + o);
+                std::println($"  output: {o}");
                 foreach (const line in expected) {
-                    std::println("  expected: " + line);
+                    std::println($"  expected: {line}");
                 }
             }
             return Result::Err("wrong error");
@@ -450,7 +462,7 @@ func main(): i32 {
 
     // Check that w0 binary exists
     if (!fs::file_exists(w0)) {
-        std::println(ansi("1;31") + $"Error: {w0} not found. Run 'make' first." + ansi("0"));
+        std::println($"{red($"Error: {w0} not found. Run 'make' first.")}");
         return 1;
     }
 
@@ -460,11 +472,12 @@ func main(): i32 {
     var error_passed: i64 = 0;
     var error_failed: i64 = 0;
 
-    std::println(ansi("1;34") + "=== Running W0 Test Suite ===" + ansi("0"));
+    std::println($"{blue("=== Running W0 Test Suite ===")}");
     std::println("");
 
     if (run_valid) {
-        std::println(ansi("1;36") + "=== Run Tests (test/run/**) ===" + ansi("0"));
+        std::println($"{cyan("=== Run Tests (test/run/**) ===")}");
+
 
         var files = new Vec<string>{};
         collect_files("test/run", files);
@@ -480,25 +493,25 @@ func main(): i32 {
                 std::print($"{disp}:".pad_right(45, ' '));
                 var result = run_test_block_file(file, w0, lib_path, verbose);
                 if (result.is_ok()) {
-                    std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
+                    std::println($" {green("PASS")}");
                     run_passed += 1;
                 } else {
-                    std::println(" " + ansi("1;31") + "FAIL (" + result.error() + ")" + ansi("0"));
+                    std::println($" {red("FAIL")} ({result.error()})");
                     run_failed += 1;
                 }
             } else if (has_main) {
                 std::print($"{disp}:".pad_right(45, ' '));
                 var result = run_program_test(file, w0, lib_path, verbose);
                 if (result.is_ok()) {
-                    std::println(" " + ansi("1;32") + "PASS" + ansi("0"));
+                    std::println($" {green("PASS")}");
                     run_passed += 1;
                 } else {
-                    std::println(" " + ansi("1;31") + "FAIL (" + result.error() + ")" + ansi("0"));
+                    std::println($" {red("FAIL")} ({result.error()})");
                     run_failed += 1;
                 }
             } else {
                 if (verbose) {
-                    std::println(ansi("90") + $"{disp}: SKIP (helper module)" + ansi("0"));
+                    std::println($"{gray($"{disp}: SKIP (helper module)")}");
                 }
                 run_skipped += 1;
             }
@@ -507,7 +520,7 @@ func main(): i32 {
     }
 
     if (run_errors) {
-        std::println(ansi("1;36") + "=== Error Cases (test/errors/**) ===" + ansi("0"));
+        std::println($"{cyan("=== Error Cases (test/errors/**) ===")}");
 
         var files = new Vec<string>{};
         collect_files("test/errors", files);
@@ -520,13 +533,13 @@ func main(): i32 {
 
             var result = run_error_test(file, w0, lib_path, verbose);
             if let Ok(actual) = result {
-                std::println(" " + ansi("1;32") + "PASS (correct error)" + ansi("0"));
+                std::println($" {green("PASS")} (correct error)");
                 if (actual != "") {
-                    std::println("  " + ansi("90") + actual + ansi("0"));
+                    std::println($"  {gray(actual)}");
                 }
                 error_passed += 1;
             } else {
-                std::println(" " + ansi("1;31") + "FAIL (" + result.error() + ")" + ansi("0"));
+                std::println($" {red("FAIL")} ({result.error()})");
                 error_failed += 1;
             }
         }
@@ -534,19 +547,19 @@ func main(): i32 {
     }
 
     // Summary
-    std::println(ansi("1;34") + "=== Test Summary ===" + ansi("0"));
+    std::println($"{blue("=== Test Summary ===")}");
 
     if (run_valid) {
         var run_total = run_passed + run_failed;
-        std::println(ansi("1;32") + $"Run Tests:      {run_passed}/{run_total} passed" + ansi("0"));
+        std::println($"{green($"Run Tests:      {run_passed}/{run_total} passed")}");
         if (run_skipped > 0) {
-            std::println(ansi("90") + $"Run Skipped:    {run_skipped} helper module(s)" + ansi("0"));
+            std::println($"{gray($"Run Skipped:    {run_skipped} helper module(s)")}");
         }
     }
 
     if (run_errors) {
         var error_total = error_passed + error_failed;
-        std::println(ansi("1;32") + $"Error Cases:    {error_passed}/{error_total} passed" + ansi("0"));
+        std::println($"{green($"Error Cases:    {error_passed}/{error_total} passed")}");
     }
 
     var total_passed = run_passed + error_passed;
@@ -554,14 +567,14 @@ func main(): i32 {
     var total = total_passed + total_failed;
 
     if (run_valid && run_errors) {
-        std::println(ansi("1;36") + $"Total:          {total_passed}/{total} tests passed" + ansi("0"));
+        std::println($"{cyan($"Total:          {total_passed}/{total} tests passed")}");
     }
 
     if (total_failed == 0) {
-        std::println(ansi("1;32") + "All tests passed!" + ansi("0"));
+        std::println($"{green("All tests passed!")}");
         return 0;
     } else {
-        std::println(ansi("1;31") + $"{total_failed} test(s) failed" + ansi("0"));
+        std::println($"{red($"{total_failed} test(s) failed")}");
         return 1;
     }
 }
