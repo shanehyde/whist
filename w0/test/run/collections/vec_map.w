@@ -1,6 +1,7 @@
 // Expected: PASS: vec_map_basic
 // Expected: PASS: vec_map_type_transform
 // Expected: PASS: vec_filter_basic
+// Expected: PASS: vec_each_basic
 
 import collections;
 
@@ -51,17 +52,19 @@ test "vec_filter_basic" {
     assert(evens[1] == 4);
 }
 
-test "vec_filtervec_each_basic" {
+test "vec_each_basic" {
     var nums = new Vec<i64>{};
     nums.push(1);
     nums.push(2);
     nums.push(3);
     nums.push(4);
     nums.push(5);
-    var count = 0;
 
-    var evens = nums.each(|x| count += 1);
-    assert(count == 5);
+    var collected = new Vec<i64>{};
+    nums.each(|x| collected.push(x));
+    assert(collected.count == 5);
+    assert(collected[0] == 1);
+    assert(collected[4] == 5);
 }
 
 func main(): i32 {

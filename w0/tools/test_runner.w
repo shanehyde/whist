@@ -58,22 +58,12 @@ func ansi(code: string): string {
 
 func extract_rc_addresses(output: string, prefix: string): Vec<string> {
     var addrs = new Vec<string>{};
-
     output.split("\n").filter(|line| line.starts_with(prefix)).each(|line| {
         var parts = line.split(" ");
         if (parts.count > 1) {
             addrs.push(parts[1]);
         }
     });
-
-    foreach (const line in output.split("\n")) {
-        if (line.starts_with(prefix)) {
-            var parts = line.split(" ");
-            if (parts.count > 1) {
-                addrs.push(parts[1]);
-            }
-        }
-    }
     addrs.sort();
     return addrs;
 }
