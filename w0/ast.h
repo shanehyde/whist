@@ -516,6 +516,7 @@ struct Node {
             int   name_length;
             Node* type;
             int   is_const;
+            int   is_private;
         } field;
 
         // Enum declaration

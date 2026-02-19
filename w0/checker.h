@@ -219,6 +219,9 @@ struct Checker {
     // concrete implementing type in impl blocks; NULL otherwise.
     Type* self_type;
 
+    // Private field access: base type name of receiver when inside a method
+    const char* current_method_receiver;
+
     // Lambda tracking
     int    lambda_next_id; // Next lambda ID (monotonically increasing)
     int    lambda_depth;   // >0 when inside a lambda body

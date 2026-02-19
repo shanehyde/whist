@@ -249,6 +249,11 @@ static Node* parse_struct_decl(Parser* parser, int is_public) {
     consume_token(parser, TOK_LBRACE, "Expected '{' after struct name");
 
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
+        int field_is_private = 0;
+        if (match_token(parser, TOK_PRIVATE)) {
+            field_is_private = 1;
+        }
+
         int field_is_const = 0;
         if (match_token(parser, TOK_CONST)) {
             field_is_const = 1;
@@ -261,6 +266,7 @@ static Node* parse_struct_decl(Parser* parser, int is_public) {
         field->as.field.name        = copy_token_string(&field_name);
         field->as.field.name_length = field_name.length;
         field->as.field.is_const    = field_is_const;
+        field->as.field.is_private  = field_is_private;
 
         consume_token(parser, TOK_COLON, "Expected ':' after field name");
         field->as.field.type = parse_type(parser);

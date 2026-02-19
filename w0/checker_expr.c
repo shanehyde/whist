@@ -787,6 +787,15 @@ static Type* check_member_struct(Checker* checker, Node* node, Type* object) {
     // Find field first
     for (int i = 0; i < object->as.struc.field_count; i++) {
         if (strcmp(object->as.struc.field_names[i], member_name) == 0) {
+            // Check private field access
+            if (object->as.struc.field_is_private && object->as.struc.field_is_private[i]) {
+                if (!checker->current_method_receiver ||
+                    strcmp(object->as.struc.base_name, checker->current_method_receiver) != 0) {
+                    check_error(checker, node->line, node->column, "Field '%s' is private",
+                                member_name);
+                    return type_error;
+                }
+            }
             int object_is_const = 0;
             if (node->as.member.object->type == NODE_IDENT) {
                 Symbol* sym     = checker_lookup(checker, node->as.member.object->as.ident.name);
@@ -2580,6 +2589,18 @@ static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type) 
                         struct_type->as.struc.name, field_name);
             had_error = 1;
             continue;
+        }
+
+        // Check private field access in struct init
+        if (struct_type->as.struc.field_is_private &&
+            struct_type->as.struc.field_is_private[field_index]) {
+            if (!checker->current_method_receiver ||
+                strcmp(struct_type->as.struc.base_name, checker->current_method_receiver) != 0) {
+                check_error(checker, field->line, field->column, "Field '%s' is private",
+                            field_name);
+                had_error = 1;
+                continue;
+            }
         }
 
         if (seen[field_index]) {

@@ -67,9 +67,11 @@ struct Type {
         // Struct
         struct {
             char*  name;
+            char*  base_name; // For generic instances: base type name (e.g. "Set" for "Set_i64")
             char** field_names;
             Type** field_types;
             int*   field_is_const;
+            int*   field_is_private;
             int    field_count;
             // Methods
             char** method_names;

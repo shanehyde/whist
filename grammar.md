@@ -100,7 +100,7 @@ as compatible (no deep/shallow immutability distinction yet).
 
 <type-param> ::= <identifier> [ ':' <identifier> ]
 
-<field-decl> ::= [ 'const' ] <identifier> ':' <type> [ ',' ]
+<field-decl> ::= [ 'private' ] [ 'const' ] <identifier> ':' <type> [ ',' ]
 ```
 
 **Generic structs:** Structs can be parameterized by one or more type parameters:
