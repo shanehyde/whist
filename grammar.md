@@ -267,7 +267,7 @@ Create vecs: `var v = new Vec<i64>{};` or `var v = new Vec<i64>{1, 2, 3};`
 ```bnf
 <statement> ::= <var-decl>
              | <if-stmt>
-             | <if-let-stmt>
+             | <if-is-stmt>
              | <while-stmt>
              | <for-stmt>
              | <foreach-stmt>
@@ -281,9 +281,12 @@ Create vecs: `var v = new Vec<i64>{};` or `var v = new Vec<i64>{1, 2, 3};`
 
 <block> ::= '{' { <statement> } '}'
 
-<if-stmt> ::= 'if' '(' <expression> ')' <block> [ 'else' ( <if-stmt> | <if-let-stmt> | <block> ) ]
+<if-stmt> ::= 'if' '(' <expression> ')' <block> [ 'else' ( <if-stmt> | <if-is-stmt> | <block> ) ]
 
-<if-let-stmt> ::= 'if' 'let' <match-pattern> '=' <expression> <block> [ 'else' ( <if-stmt> | <if-let-stmt> | <block> ) ]
+<if-is-stmt> ::= 'if' '(' <expression> 'is' <variant-pattern> [ '&&' <expression> ] ')' <block>
+                 [ 'else' ( <if-stmt> | <if-is-stmt> | <block> ) ]
+
+<variant-pattern> ::= [ <identifier> '::' ] <identifier> [ '(' <identifier> { ',' <identifier> } ')' ]
 
 <while-stmt> ::= 'while' '(' <expression> ')' <block>
 
@@ -322,7 +325,7 @@ The second form iterates over a collection. Currently supported: `Vec<T>`, `Span
                     | '-' <integer-literal> | '-' <float-literal>
 ```
 
-`if let` statements conditionally bind enum variant payloads. The pattern uses the same syntax as match arms (variant name with optional bindings). If the expression matches the variant, the bindings are available in the then-block. Otherwise, the optional else-block executes. Chains like `if let ... { } else if let ... { } else { }` are supported.
+`if ... is` statements conditionally test and destructure enum variants. The expression is evaluated, then tested against a variant pattern. If the variant matches, any bindings are available in the then-block. Bare checks without bindings are allowed (e.g., `if (opt is None)`). An optional `&&` condition can follow the pattern to add a guard (e.g., `if (opt is Some(v) && v > 0)`). The guard expression can use the bindings. Chains like `if (x is A) { } else if (x is B) { } else { }` are supported.
 
 Match statements destructure enum values by variant, or match on scalar/string values using literal patterns. When matching on an enum type, each arm matches a variant pattern and binds payload fields to local variables. Variant names can be unqualified (`Some(v)`) or qualified (`Option::Some(v)`). When matching on integers, floats, strings, chars, or bools, each arm uses a literal pattern. The wildcard pattern `_` matches any value. Match expressions (used as values) require a `_` arm. Commas between arms are optional.
 
@@ -490,7 +493,7 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
 ```
 as       break    by          const     continue  defer
 else     enum     extern      false     for       foreach
-func     if       impl        import    in        let
+func     if       impl        import    in        is
 match    new      null        public    private   return
 self     struct   test        trait     true      type
 use      var      while

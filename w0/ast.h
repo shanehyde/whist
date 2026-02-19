@@ -411,7 +411,7 @@ struct Node {
             Node* else_block;
         } if_stmt;
 
-        // If-let statement: if let Variant(bindings) = expr { ... } else { ... }
+        // If-is statement: if (expr is Variant(bindings) [&& cond]) { ... } else { ... }
         struct {
             Node*  expr;         // Expression being matched
             char*  variant_name; // Variant to match (e.g., "Ok")
@@ -422,6 +422,7 @@ struct Node {
             int    binding_count;
             Node*  then_block;
             Node*  else_block;    // NODE_IF, NODE_IF_LET, or NODE_BLOCK
+            Node*  extra_cond;    // Optional && condition after pattern (NULL if none)
             Type*  resolved_type; // Set by checker: enum type of expr
         } if_let_stmt;
 
