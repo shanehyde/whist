@@ -1412,9 +1412,18 @@ static void emit_if_stmt(CodeGen* gen, Node* node) {
                 emit(gen, "}\n");
             } else {
                 emit(gen, " else ");
-                gen->out.indent--;
-                emit_stmt(gen, node->as.if_stmt.else_block);
-                gen->out.indent++;
+                if (gen->line_directives) {
+                    emit(gen, "{\n");
+                    gen->out.indent++;
+                    emit_stmt(gen, node->as.if_stmt.else_block);
+                    gen->out.indent--;
+                    emit_indent(gen);
+                    emit(gen, "}\n");
+                } else {
+                    gen->out.indent--;
+                    emit_stmt(gen, node->as.if_stmt.else_block);
+                    gen->out.indent++;
+                }
             }
         } else {
             emit(gen, " else {\n");

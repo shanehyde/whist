@@ -41,7 +41,8 @@ typedef struct {
 
 #ifdef WHIST_RC_DEBUG
 
-static inline void* __rc_alloc(size_t size, void (*cleanup)(void*)) {
+static inline void* __rc_alloc_impl(size_t size, void (*cleanup)(void*),
+                                     const char* file, int line) {
     __RcHeader* h = (__RcHeader*)malloc(sizeof(__RcHeader) + size);
     if (!h) {
         fprintf(stderr, "Panic: out of memory\n");
@@ -50,21 +51,21 @@ static inline void* __rc_alloc(size_t size, void (*cleanup)(void*)) {
     h->refcount = 1;
     h->cleanup  = cleanup;
     void* ptr   = (void*)(h + 1);
-    fprintf(stderr, "RC_ALLOC: %p (size=%zu, rc=1)\n", ptr, size);
+    fprintf(stderr, "RC_ALLOC: %p (size=%zu, rc=1) at %s:%d\n", ptr, size, file, line);
     return ptr;
 }
 
-static inline void __rc_inc(void* ptr) {
+static inline void __rc_inc_impl(void* ptr, const char* file, int line) {
     if (!ptr)
         return;
     __RcHeader* h = ((__RcHeader*)ptr - 1);
     if (h->refcount == SIZE_MAX)
         return; /* immortal string literal */
     h->refcount++;
-    fprintf(stderr, "RC_INC: %p (rc=%zu)\n", ptr, h->refcount);
+    fprintf(stderr, "RC_INC: %p (rc=%zu) at %s:%d\n", ptr, h->refcount, file, line);
 }
 
-static inline void __rc_dec(void* ptr) {
+static inline void __rc_dec_impl(void* ptr, const char* file, int line) {
     if (!ptr)
         return;
     __RcHeader* h = (__RcHeader*)ptr - 1;
@@ -73,12 +74,16 @@ static inline void __rc_dec(void* ptr) {
     if (--h->refcount == 0) {
         if (h->cleanup)
             h->cleanup(ptr);
-        fprintf(stderr, "RC_FREE: %p\n", ptr);
+        fprintf(stderr, "RC_FREE: %p at %s:%d\n", ptr, file, line);
         free(h);
     } else {
-        fprintf(stderr, "RC_DEC: %p (rc=%zu)\n", ptr, h->refcount);
+        fprintf(stderr, "RC_DEC: %p (rc=%zu) at %s:%d\n", ptr, h->refcount, file, line);
     }
 }
+
+#define __rc_alloc(size, cleanup) __rc_alloc_impl(size, cleanup, __FILE__, __LINE__)
+#define __rc_inc(ptr) __rc_inc_impl((void*)(ptr), __FILE__, __LINE__)
+#define __rc_dec(ptr) __rc_dec_impl((void*)(ptr), __FILE__, __LINE__)
 
 #else /* !WHIST_RC_DEBUG */
 
