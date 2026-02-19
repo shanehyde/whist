@@ -658,9 +658,7 @@ static void emit_var_decl_rc_new_struct(CodeGen* gen, Node* node) {
                 for (int j = 0; j < rtype->as.struc.field_count; j++) {
                     if (strcmp(rtype->as.struc.field_names[j], fname) == 0) {
                         Type* ftype = rtype->as.struc.field_types[j];
-                        if (ftype && (ftype->kind == TYPE_STRING || ftype->kind == TYPE_STRUCT ||
-                                      ftype->kind == TYPE_VEC ||
-                                      (ftype->kind == TYPE_ENUM && ftype->as.enm.has_rc_fields))) {
+                        if (type_is_rc_managed(ftype)) {
                             const char* inc_fn = get_inc_func_for_type(ftype);
                             emit_indent(gen);
                             if (ftype->kind == TYPE_STRING) {
