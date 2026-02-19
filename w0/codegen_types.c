@@ -111,9 +111,10 @@ int type_node_has_rc(CodeGen* gen, Node* type_node) {
     if (resolved) {
         if (resolved->kind == TYPE_ENUM)
             return resolved->as.enm.has_rc_fields;
-        if (resolved->kind == TYPE_STRUCT)
-            return 1; // Structs are always RC (heap-allocated pointers)
-        return 0;     // Primitives, etc.
+        if (resolved->kind == TYPE_STRUCT || resolved->kind == TYPE_STRING ||
+            resolved->kind == TYPE_VEC)
+            return 1;
+        return 0; // Primitives, etc.
     }
 
     if (strcmp(name, "string") == 0)

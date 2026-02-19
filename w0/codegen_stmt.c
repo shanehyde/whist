@@ -1539,7 +1539,7 @@ static void emit_for_stmt(CodeGen* gen, Node* node) {
 
 static void emit_foreach_collection_stmt(CodeGen* gen, Node* node) {
     // Hoist owned temps in collection expression (evaluated once before the loop)
-    int saved = 0;
+    int saved = gen->hoist.count;
     if (has_owned_temps(node->as.foreach_stmt.collection)) {
         saved = hoist_owned_temps(gen, node->as.foreach_stmt.collection);
     }
