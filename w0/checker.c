@@ -139,6 +139,7 @@ void checker_init(Checker* checker) {
     checker->enum_target_hint               = NULL;
     checker->expected_func_type             = NULL;
     checker->self_type                      = NULL;
+    checker->current_method_receiver        = NULL;
     checker->lambda_next_id                 = 0;
     checker->lambda_depth                   = 0;
     checker->lambda_stack                   = NULL;
@@ -1766,9 +1767,11 @@ static void check_func_decl(Checker* checker, Node* node) {
     checker->modules.current_accessible_modules = fdn->accessible_modules;
     checker->modules.current_accessible_modules_count = fdn->accessible_modules_count;
 
-    // For methods, inject 'self' into scope.
+    // For methods, inject 'self' into scope and set private field access context.
+    const char* old_receiver = checker->current_method_receiver;
     if (is_method) {
         define_method_self_symbol(checker, receiver_type, fdn->receiver_is_const);
+        checker->current_method_receiver = receiver_type;
     }
 
     define_func_params_in_scope(checker, fdn, func_type);
@@ -1778,7 +1781,8 @@ static void check_func_decl(Checker* checker, Node* node) {
     checker->modules.current_accessible_modules       = old_accessible_modules;
     checker->modules.current_accessible_modules_count = old_accessible_modules_count;
 
-    checker->current_func_return = old_return;
+    checker->current_method_receiver = old_receiver;
+    checker->current_func_return     = old_return;
     checker_pop_scope(checker);
     free(mangled_name);
 }
@@ -1811,16 +1815,18 @@ static void check_struct_decl(Checker* checker, Node* node) {
     Type* struct_type = type_struct(name);
     int   field_count = node->as.struct_decl.fields.count;
 
-    struct_type->as.struc.field_count    = field_count;
-    struct_type->as.struc.field_names    = xmalloc(field_count * sizeof(char*));
-    struct_type->as.struc.field_types    = xmalloc(field_count * sizeof(Type*));
-    struct_type->as.struc.field_is_const = xmalloc(field_count * sizeof(int));
+    struct_type->as.struc.field_count      = field_count;
+    struct_type->as.struc.field_names      = xmalloc(field_count * sizeof(char*));
+    struct_type->as.struc.field_types      = xmalloc(field_count * sizeof(Type*));
+    struct_type->as.struc.field_is_const   = xmalloc(field_count * sizeof(int));
+    struct_type->as.struc.field_is_private = xmalloc(field_count * sizeof(int));
 
     for (int i = 0; i < field_count; i++) {
-        Node* field                             = node->as.struct_decl.fields.nodes[i];
-        struct_type->as.struc.field_names[i]    = xstrdup(field->as.field.name);
-        struct_type->as.struc.field_types[i]    = resolve_type(checker, field->as.field.type);
-        struct_type->as.struc.field_is_const[i] = field->as.field.is_const;
+        Node* field                               = node->as.struct_decl.fields.nodes[i];
+        struct_type->as.struc.field_names[i]      = xstrdup(field->as.field.name);
+        struct_type->as.struc.field_types[i]      = resolve_type(checker, field->as.field.type);
+        struct_type->as.struc.field_is_const[i]   = field->as.field.is_const;
+        struct_type->as.struc.field_is_private[i] = field->as.field.is_private;
     }
 
     // Check if any field is an RC-managed type (struct, Vec, or enum with RC fields)

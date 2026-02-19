@@ -805,6 +805,7 @@ Node* node_clone(Node* node) {
         c->as.field.name_length = node->as.field.name_length;
         c->as.field.type        = node_clone(node->as.field.type);
         c->as.field.is_const    = node->as.field.is_const;
+        c->as.field.is_private  = node->as.field.is_private;
         break;
     default:
         fprintf(stderr, "node_clone: unhandled node type %d\n", node->type);

@@ -84,16 +84,18 @@ Type* type_array(Type* elem, int size) {
 }
 
 Type* type_struct(const char* name) {
-    Type* type                     = type_new(TYPE_STRUCT);
-    type->as.struc.name            = xstrdup(name);
-    type->as.struc.field_names     = NULL;
-    type->as.struc.field_types     = NULL;
-    type->as.struc.field_is_const  = NULL;
-    type->as.struc.field_count     = 0;
-    type->as.struc.method_names    = NULL;
-    type->as.struc.method_types    = NULL;
-    type->as.struc.method_is_const = NULL;
-    type->as.struc.method_count    = 0;
+    Type* type                      = type_new(TYPE_STRUCT);
+    type->as.struc.name             = xstrdup(name);
+    type->as.struc.base_name        = type->as.struc.name; // same allocation for non-generic
+    type->as.struc.field_names      = NULL;
+    type->as.struc.field_types      = NULL;
+    type->as.struc.field_is_const   = NULL;
+    type->as.struc.field_is_private = NULL;
+    type->as.struc.field_count      = 0;
+    type->as.struc.method_names     = NULL;
+    type->as.struc.method_types     = NULL;
+    type->as.struc.method_is_const  = NULL;
+    type->as.struc.method_count     = 0;
     return type;
 }
 

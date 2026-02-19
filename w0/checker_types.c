@@ -1123,6 +1123,9 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
     // Instantiate: create a new TYPE_STRUCT with substituted field types
     Type* struct_type = type_struct(mangled);
 
+    // Set base_name for generic instances (e.g. "Set" for "Set_i64")
+    struct_type->as.struc.base_name = xstrdup(base_name);
+
     // Register early to handle recursive types
     register_generic_instance(checker, mangled, base_name, struct_type, resolved_args, arg_count);
 
@@ -1139,16 +1142,18 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
     Node* decl        = def->decl;
     int   field_count = decl->as.struct_decl.fields.count;
 
-    struct_type->as.struc.field_count    = field_count;
-    struct_type->as.struc.field_names    = xmalloc(field_count * sizeof(char*));
-    struct_type->as.struc.field_types    = xmalloc(field_count * sizeof(Type*));
-    struct_type->as.struc.field_is_const = xmalloc(field_count * sizeof(int));
+    struct_type->as.struc.field_count      = field_count;
+    struct_type->as.struc.field_names      = xmalloc(field_count * sizeof(char*));
+    struct_type->as.struc.field_types      = xmalloc(field_count * sizeof(Type*));
+    struct_type->as.struc.field_is_const   = xmalloc(field_count * sizeof(int));
+    struct_type->as.struc.field_is_private = xmalloc(field_count * sizeof(int));
 
     for (int i = 0; i < field_count; i++) {
-        Node* field                             = decl->as.struct_decl.fields.nodes[i];
-        struct_type->as.struc.field_names[i]    = xstrdup(field->as.field.name);
-        struct_type->as.struc.field_types[i]    = resolve_type(checker, field->as.field.type);
-        struct_type->as.struc.field_is_const[i] = field->as.field.is_const;
+        Node* field                               = decl->as.struct_decl.fields.nodes[i];
+        struct_type->as.struc.field_names[i]      = xstrdup(field->as.field.name);
+        struct_type->as.struc.field_types[i]      = resolve_type(checker, field->as.field.type);
+        struct_type->as.struc.field_is_const[i]   = field->as.field.is_const;
+        struct_type->as.struc.field_is_private[i] = field->as.field.is_private;
     }
 
     // Check if any field is an RC-managed type (struct, Vec, or enum with RC fields)
@@ -1263,6 +1268,10 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
             checker->modules.current_accessible_modules       = mfdn->accessible_modules;
             checker->modules.current_accessible_modules_count = mfdn->accessible_modules_count;
 
+            // Set private field access context for generic method body
+            const char* old_receiver         = checker->current_method_receiver;
+            checker->current_method_receiver = base_name;
+
             // Inject 'self' into scope
             checker_define(checker, "self", SYM_VAR, struct_type, mfdn->receiver_is_const, 0, NULL);
 
@@ -1280,6 +1289,7 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
 
             checker->modules.current_accessible_modules       = old_accessible_modules;
             checker->modules.current_accessible_modules_count = old_accessible_modules_count;
+            checker->current_method_receiver                  = old_receiver;
             checker->current_func_return                      = old_return;
             checker_pop_scope(checker);
         }
