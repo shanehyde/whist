@@ -202,3 +202,22 @@ func (const Vec<T>) each(f: func(T) -> void) -> void {
         f(elem);
     }
 }
+
+func (const Vec<T>) is_empty() -> bool {
+    return self.count == 0;
+}
+
+func (const Vec<T>) find(pred: func(T) -> bool) -> Option<T> {
+    foreach (const elem in self) {
+        if (pred(elem)) {
+            return Option::Some(elem);
+        }
+    }
+    return Option::None;
+}
+
+func (Vec<T>) extend(other: Vec<T>) -> void {
+    foreach (const elem in other) {
+        self.push(elem);
+    }
+}

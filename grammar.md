@@ -255,6 +255,9 @@ Create spans using slice syntax: `var s: Span<i64> = arr[:];`
 - `vec.contains(x)` — membership test (when `T` supports equality)
 - `vec.first()` / `vec.last()` — return `Option<T>`
 - `vec.sort()` — in-place sort (for orderable primitive `T`)
+- `vec.is_empty()` — returns `true` if the vec has no elements
+- `vec.find(pred)` — returns `Option::Some(elem)` for the first element matching the predicate, or `Option::None`
+- `vec.extend(other)` — appends all elements from another `Vec<T>`
 - `vec.data` — private (compile error if accessed directly)
 - Slice syntax produces a `Span<T>`: `vec[:]`, `vec[1:3]`, `vec[2:]`
 

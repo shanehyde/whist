@@ -68,25 +68,15 @@ func extract_rc_addresses(output: string, prefix: string) -> Vec<string> {
     return addrs;
 }
 
-func build_address_set(addrs: Vec<string>) -> Set<string> {
-    var cap: i64 = 64;
-    if (addrs.count > cap) {
-        cap = addrs.count * 2;
-    }
-    var s = new Set<string>(cap);
-    foreach (const addr in addrs) {
-        s.insert(addr);
-    }
-    return s;
-}
-
 func check_rc_leaks(stderr: string) -> bool {
     var allocs = extract_rc_addresses(stderr, "RC_ALLOC:");
     var frees = extract_rc_addresses(stderr, "RC_FREE:");
-    if (allocs.count == 0) {
+    if (allocs.is_empty()) {
         return true;
     }
-    var free_set = build_address_set(frees);
+    var cap = std::max_i64(64, frees.count * 2);
+    var free_set = new Set<string>(cap);
+    free_set.insert_all(frees);
     foreach (const addr in allocs) {
         if (!free_set.contains(addr)) {
             return false;
@@ -98,7 +88,9 @@ func check_rc_leaks(stderr: string) -> bool {
 func get_leaked_addresses(stderr: string) -> Vec<string> {
     var allocs = extract_rc_addresses(stderr, "RC_ALLOC:");
     var frees = extract_rc_addresses(stderr, "RC_FREE:");
-    var free_set = build_address_set(frees);
+    var cap = std::max_i64(64, frees.count * 2);
+    var free_set = new Set<string>(cap);
+    free_set.insert_all(frees);
     var leaked = new Vec<string>{};
     foreach (const addr in allocs) {
         if (!free_set.contains(addr)) {
@@ -176,30 +168,6 @@ func filter_rc_lines(output: string) -> string {
 
 // --- File/output helpers ---
 
-func collect_files(dir: string, files: Vec<string>) -> void {
-    var dh = fs::open_dir(dir);
-    if (dh == null) {
-        return;
-    }
-
-    var dirs = new Vec<string>{};
-    var entry = fs::read_dir(dh);
-    while (entry != "") {
-        var path = fs::join_path(dir, entry);
-        if (fs::is_dir(path)) {
-            dirs.push(path);
-        } else if (entry.ends_with(".w")) {
-            files.push(path);
-        }
-        entry = fs::read_dir(dh);
-    }
-    fs::close_dir(dh);
-
-    foreach(const dir in dirs) {
-        collect_files(dir, files);
-    }
-}
-
 func read_expected_lines(path: string, prefix: string) -> Vec<string> {
     var lines = new Vec<string>{};
     var marker = $"// {prefix}: ";
@@ -221,20 +189,11 @@ func display_path(file: string) -> string {
     return file.strip_prefix("test/");
 }
 
-func check_output_contains(output: string, expected: Vec<string>) -> bool {
-    foreach (const line in expected) {
-        if (!output.contains(line)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 func extract_error_message(output: string) -> string {
     foreach (const line in output.split("\n")) {
         var idx = line.index_of("Error:");
         if (idx >= 0) {
-            return line[idx + 6 : line.length()].trim_start();
+            return line[idx + 6:].trim_start();
         }
     }
     return "";
@@ -263,7 +222,7 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
     // Check expected exit code
     var expected_exit_lines = read_expected_lines(file, "Expected exit");
     var expected_exit: i64 = 0;
-    if (expected_exit_lines.count > 0) {
+    if (!expected_exit_lines.is_empty()) {
         expected_exit = std::parse_i64(expected_exit_lines[0]);
     }
 
@@ -279,8 +238,8 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
 
     // Check expected stdout
     var expected_stdout = read_expected_lines(file, "Expected");
-    if (expected_stdout.count > 0) {
-        if (!check_output_contains(run_result.output, expected_stdout)) {
+    if (!expected_stdout.is_empty()) {
+        if (!expected_stdout.all(|line| run_result.output.contains(line))) {
             if (verbose) {
                 std::println("  stdout mismatch:");
                 std::println($"  actual: {run_result.output}");
@@ -294,9 +253,9 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
 
     // Check expected stderr (filter RC debug lines first)
     var expected_stderr = read_expected_lines(file, "Expected stderr");
-    if (expected_stderr.count > 0) {
+    if (!expected_stderr.is_empty()) {
         var filtered_stderr = filter_rc_lines(run_result.error_output);
-        if (!check_output_contains(filtered_stderr, expected_stderr)) {
+        if (!expected_stderr.all(|line| filtered_stderr.contains(line))) {
             if (verbose) {
                 std::println("  stderr mismatch:");
                 std::println($"  actual: {filtered_stderr}");
@@ -307,7 +266,7 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
 
     // Check expected RC free order
     var expected_order_lines = read_expected_lines(file, "Expected rc free order");
-    if (expected_order_lines.count > 0) {
+    if (!expected_order_lines.is_empty()) {
         if (!check_rc_free_order(run_result.error_output, expected_order_lines[0])) {
             if (verbose) {
                 std::println("  rc free order mismatch:");
@@ -344,7 +303,7 @@ func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bo
     // Check expected output lines
     var expected_lines = read_expected_lines(file, "Expected");
 
-    if (exit_code != 0 && expected_lines.count == 0) {
+    if (exit_code != 0 && expected_lines.is_empty()) {
         if (verbose) {
             std::println($"  command: {cmd}");
             std::println($"  output:  {combined}");
@@ -352,8 +311,8 @@ func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bo
         return Result::Err("w0 test runtime");
     }
 
-    if (expected_lines.count > 0) {
-        if (!check_output_contains(combined, expected_lines)) {
+    if (!expected_lines.is_empty()) {
+        if (!expected_lines.all(|line| combined.contains(line))) {
             if (verbose) {
                 std::println("  output mismatch:");
                 std::println($"  actual: {combined}");
@@ -405,8 +364,8 @@ func run_error_test(file: string, w0: string, lib_path: string, verbose: bool) -
 
     // Check expected error text
     var expected = read_expected_lines(file, "Expected error");
-    if (expected.count > 0) {
-        if (!check_output_contains(o, expected)) {
+    if (!expected.is_empty()) {
+        if (!expected.all(|line| o.contains(line))) {
             if (verbose) {
                 std::println("  wrong error message:");
                 std::println($"  output: {o}");
@@ -475,8 +434,7 @@ func main() -> i32 {
         std::println($"{cyan("=== Run Tests (test/run/**) ===")}");
 
 
-        var files = new Vec<string>{};
-        collect_files("test/run", files);
+        var files = fs::walk_dir("test/run").filter(|f| f.ends_with(".w"));
         files.sort();
 
         foreach (const file in files) {
@@ -518,8 +476,7 @@ func main() -> i32 {
     if (run_errors) {
         std::println($"{cyan("=== Error Cases (test/errors/**) ===")}");
 
-        var files = new Vec<string>{};
-        collect_files("test/errors", files);
+        var files = fs::walk_dir("test/errors").filter(|f| f.ends_with(".w"));
         files.sort();
 
         foreach (const file in files) {
