@@ -8,7 +8,7 @@ enum Shape {
 
 func main() -> i32 {
     var s: Shape = Shape::Circle(5.0);
-    if let Circle(a, b) = s {
+    if (s is Circle(a, b)) {
         return 0;
     }
     return 0;

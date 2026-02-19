@@ -1610,9 +1610,10 @@ static void emit_if_let_stmt(CodeGen* gen, Node* node) {
     if (!enum_type)
         return;
 
-    const char* enum_name = enum_type->as.enm.name;
-    const char* variant   = node->as.if_let_stmt.variant_name;
-    int         is_data   = enum_type->as.enm.has_data;
+    const char* enum_name  = enum_type->as.enm.name;
+    const char* variant    = node->as.if_let_stmt.variant_name;
+    int         is_data    = enum_type->as.enm.has_data;
+    Node*       extra_cond = node->as.if_let_stmt.extra_cond;
 
     // Handle owned temps in the expression
     Node* subject          = node->as.if_let_stmt.expr;
@@ -1624,6 +1625,15 @@ static void emit_if_let_stmt(CodeGen* gen, Node* node) {
     int has_temps = has_owned_temps(subject);
     if (has_temps) {
         saved = hoist_owned_temps(gen, subject);
+    }
+
+    // When extra_cond + else_block, we need a flag to track if the match succeeded
+    int has_flag = extra_cond && node->as.if_let_stmt.else_block;
+    int flag_id  = 0;
+    if (has_flag) {
+        flag_id = gen->out.temp_count++;
+        emit_indent(gen);
+        emit(gen, "int __matched%d = 0;\n", flag_id);
     }
 
     // Emit: EnumType __if_letN = <expr>;
@@ -1660,16 +1670,47 @@ static void emit_if_let_stmt(CodeGen* gen, Node* node) {
         }
     }
 
-    // Emit then block
-    emit_stmt_body(gen, node->as.if_let_stmt.then_block);
-    gen->out.indent--;
+    if (extra_cond) {
+        // Nested if for the && condition
+        emit_indent(gen);
+        emit(gen, "if (");
+        emit_expr(gen, extra_cond);
+        emit(gen, ") {\n");
+        gen->out.indent++;
+        if (has_flag) {
+            emit_indent(gen);
+            emit(gen, "__matched%d = 1;\n", flag_id);
+        }
+        emit_stmt_body(gen, node->as.if_let_stmt.then_block);
+        gen->out.indent--;
+        emit_indent(gen);
+        emit(gen, "}\n");
+    } else {
+        // Emit then block directly
+        emit_stmt_body(gen, node->as.if_let_stmt.then_block);
+    }
 
+    gen->out.indent--;
     emit_indent(gen);
     emit(gen, "}");
 
     // Emit else block
     if (node->as.if_let_stmt.else_block) {
-        if (node->as.if_let_stmt.else_block->type == NODE_IF) {
+        if (has_flag) {
+            // With extra_cond + else: use flag-based approach
+            emit(gen, "\n");
+            emit_indent(gen);
+            emit(gen, "if (!__matched%d) {\n", flag_id);
+            gen->out.indent++;
+            if (node->as.if_let_stmt.else_block->type == NODE_BLOCK) {
+                emit_stmt_body(gen, node->as.if_let_stmt.else_block);
+            } else {
+                emit_stmt(gen, node->as.if_let_stmt.else_block);
+            }
+            gen->out.indent--;
+            emit_indent(gen);
+            emit(gen, "}\n");
+        } else if (node->as.if_let_stmt.else_block->type == NODE_IF) {
             int else_if_has_temps =
                 has_owned_temps(node->as.if_let_stmt.else_block->as.if_stmt.cond);
             if (else_if_has_temps) {

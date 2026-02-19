@@ -1336,10 +1336,10 @@ void check_statement(Checker* checker, Node* node) {
         if (expr_type->kind == TYPE_ERROR)
             break;
 
-        // Must be an enum type (not a value enum)
+        // Must be an enum type
         if (expr_type->kind != TYPE_ENUM) {
-            check_error(checker, node->line, node->column, "if-let requires an enum type, got '%s'",
-                        type_name(expr_type));
+            check_error(checker, node->line, node->column,
+                        "'is' pattern requires an enum type, got '%s'", type_name(expr_type));
             break;
         }
 
@@ -1370,21 +1370,32 @@ void check_statement(Checker* checker, Node* node) {
             }
         }
 
-        // Check binding count
+        // Check binding count: allow bare check (0 bindings) or exact match
         int expected_bindings = expr_type->as.enm.variant_type_counts[variant_idx];
-        if (node->as.if_let_stmt.binding_count != expected_bindings) {
+        if (node->as.if_let_stmt.binding_count != 0 &&
+            node->as.if_let_stmt.binding_count != expected_bindings) {
             check_error(checker, node->line, node->column,
                         "Variant '%s' expects %d binding(s), got %d", variant_name,
                         expected_bindings, node->as.if_let_stmt.binding_count);
             break;
         }
 
-        // Push scope, define bindings, check then_block, pop scope
+        // Push scope, define bindings, check extra_cond and then_block, pop scope
         checker_push_scope(checker);
         for (int j = 0; j < node->as.if_let_stmt.binding_count; j++) {
             Type* binding_type = expr_type->as.enm.variant_types[variant_idx][j];
             checker_define(checker, node->as.if_let_stmt.bindings[j], SYM_VAR, binding_type, 0, 0,
                            NULL);
+        }
+        // Type-check optional && condition (bindings are in scope)
+        if (node->as.if_let_stmt.extra_cond) {
+            Type* cond_type = check_expression(checker, node->as.if_let_stmt.extra_cond);
+            if (cond_type->kind != TYPE_ERROR && cond_type->kind != TYPE_BOOL) {
+                check_error(checker, node->as.if_let_stmt.extra_cond->line,
+                            node->as.if_let_stmt.extra_cond->column,
+                            "'is' pattern '&&' condition must be bool, got '%s'",
+                            type_name(cond_type));
+            }
         }
         check_statement(checker, node->as.if_let_stmt.then_block);
         checker_pop_scope(checker);

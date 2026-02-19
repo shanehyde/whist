@@ -8,7 +8,7 @@ enum Color {
 
 func main() -> i32 {
     var c: Color = Color::Red;
-    if let Purple = c {
+    if (c is Purple) {
         return 0;
     }
     return 0;

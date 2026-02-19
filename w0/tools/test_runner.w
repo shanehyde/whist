@@ -528,7 +528,7 @@ func main() -> i32 {
             std::print($"{disp}:".pad_right(45, ' '));
 
             var result = run_error_test(file, w0, lib_path, verbose);
-            if let Ok(actual) = result {
+            if (result is Ok(actual)) {
                 std::println($" {green("PASS")} (correct error)");
                 if (actual != "") {
                     std::println($"  {gray(actual)}");

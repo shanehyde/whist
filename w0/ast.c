@@ -297,6 +297,7 @@ void node_free(Node* node) {
         free(node->as.if_let_stmt.bindings);
         node_free(node->as.if_let_stmt.then_block);
         node_free(node->as.if_let_stmt.else_block);
+        node_free(node->as.if_let_stmt.extra_cond);
         break;
     case NODE_WHILE:
         node_free(node->as.while_stmt.cond);
@@ -738,6 +739,7 @@ Node* node_clone(Node* node) {
         }
         c->as.if_let_stmt.then_block = node_clone(node->as.if_let_stmt.then_block);
         c->as.if_let_stmt.else_block = node_clone(node->as.if_let_stmt.else_block);
+        c->as.if_let_stmt.extra_cond = node_clone(node->as.if_let_stmt.extra_cond);
         break;
     case NODE_WHILE:
         c->as.while_stmt.cond = node_clone(node->as.while_stmt.cond);
