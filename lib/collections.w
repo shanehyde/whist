@@ -153,7 +153,7 @@ func (HashMap<K, V>) delete(key: K) -> bool {
             } else {
                 prev.next = entry.next;
             }
-            self.count = self.count - 1;
+            self.count -= 1;
             return true;
         }
         prev = entry;
@@ -182,9 +182,9 @@ struct SetEntry<T: Hashable> {
 }
 
 struct Set<T: Hashable> {
-    buckets: Vec<SetEntry<T>>,
+    private buckets: Vec<SetEntry<T>>,
     count: i64,
-    capacity: i64,
+    private capacity: i64,
 }
 
 impl Set<T> {
@@ -229,7 +229,13 @@ func (Set<T>) insert(value: T) -> void {
         key: value,
     };
     self.buckets[index] = new_entry;
-    self.count = self.count + 1;
+    self.count += 1;
+}
+
+func (Set<T>) insert_all(items: Vec<T>) -> void {
+    foreach (const item in items) {
+        self.insert(item);
+    }
 }
 
 func (Set<T>) contains(value: T) -> bool {
@@ -266,7 +272,7 @@ func (Set<T>) remove(value: T) -> bool {
             } else {
                 prev.next = entry.next;
             }
-            self.count = self.count - 1;
+            self.count -= 1;
             return true;
         }
         prev = entry;

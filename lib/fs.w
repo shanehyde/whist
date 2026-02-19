@@ -192,3 +192,30 @@ func modified_time(path: string) -> i64 {
 func temp_dir() -> string {
     return fs__temp_dir();
 }
+
+// Recursive directory walk
+
+func walk_dir(dir: string) -> Vec<string> {
+    var files = new Vec<string>{};
+    var dirs = new Vec<string>{};
+    var dh = fs__open_dir(dir);
+    if (dh == null) {
+        return files;
+    }
+    var entry = fs__read_dir(dh);
+    while (entry != "") {
+        var path = fs__join_path(dir, entry);
+        if (fs__is_dir(path)) {
+            dirs.push(path);
+        } else {
+            files.push(path);
+        }
+        entry = fs__read_dir(dh);
+    }
+    fs__close_dir(dh);
+    foreach (const subdir in dirs) {
+        var sub_files = walk_dir(subdir);
+        files.extend(sub_files);
+    }
+    return files;
+}
