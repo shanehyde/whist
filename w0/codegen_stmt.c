@@ -1034,6 +1034,11 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
         needs_borrow_inc = 1;
     }
 
+    // Capture enclosing hoisted temps (e.g., from foreach collection expression).
+    // These must be cleaned up on return but NOT removed from the hoist list,
+    // since the non-returning path's cleanup_owned_temps still needs them.
+    int enclosing_hoists = gen->hoist.count;
+
     // Handle owned temps in return expression.
     // If the return value itself is an owned temp (e.g., return new Box{...}),
     // ownership transfers to the caller — exclude it from hoisting.
@@ -1068,11 +1073,14 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
         if (has_temps) {
             cleanup_owned_temps(gen, saved);
         }
+        for (int i = 0; i < enclosing_hoists; i++) {
+            emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
+        }
         emit_indent(gen);
         emit(gen, "goto __cleanup;\n");
     } else {
         // No defers: cleanup RC + owned temps, then return
-        if (gen->rc.count > 0 || has_temps || needs_borrow_inc) {
+        if (gen->rc.count > 0 || has_temps || needs_borrow_inc || enclosing_hoists > 0) {
             if (node->as.return_stmt.value && !skip_name) {
                 // Complex expression: evaluate to temp first
                 emit_indent(gen);
@@ -1090,6 +1098,9 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
                 if (has_temps) {
                     cleanup_owned_temps(gen, saved);
                 }
+                for (int i = 0; i < enclosing_hoists; i++) {
+                    emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
+                }
                 emit_indent(gen);
                 emit(gen, "return __rc_ret;\n");
             } else {
@@ -1098,6 +1109,9 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
                 }
                 if (has_temps) {
                     cleanup_owned_temps(gen, saved);
+                }
+                for (int i = 0; i < enclosing_hoists; i++) {
+                    emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
                 }
                 emit_indent(gen);
                 emit(gen, "return");

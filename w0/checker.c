@@ -697,6 +697,9 @@ static void check_var_decl_stmt(Checker* checker, Node* node) {
             } else if (init->type == NODE_CALL) {
                 node->as.var_decl.is_rc         = 1;
                 node->as.var_decl.resolved_type = init_type;
+            } else if (init->type == NODE_ENUM_VALUE && init->as.enum_value.is_module_call) {
+                node->as.var_decl.is_rc         = 1;
+                node->as.var_decl.resolved_type = init_type;
             }
         }
         return;
