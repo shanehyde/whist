@@ -118,7 +118,7 @@ typedef enum {
     NODE_GENERIC_TYPE, // Box<i64>, Pair<K, V>
 
     // Function type
-    NODE_FUNC_TYPE, // func(T1, T2): ReturnType
+    NODE_FUNC_TYPE, // func(T1, T2) -> ReturnType
 
     // Other
     NODE_PARAM,
@@ -141,12 +141,12 @@ typedef struct {
     char* receiver_type;     // Method receiver struct name (NULL for regular functions)
     int   receiver_type_len; // Length of receiver type name
     int   receiver_is_const; // 1 if const receiver, 0 if mutable
-    // For generic method receivers: func (Box<T>) get(): T
-    // or func (Pair<i32, Box<T>>) set(): void
+    // For generic method receivers: func (Box<T>) get() -> T
+    // or func (Pair<i32, Box<T>>) set() -> void
     NodeList receiver_type_args; // Type nodes for type arguments in receiver
     char*    name;
     int      name_length;
-    // Generic type parameters for free functions: func identity<T>(x: T): T
+    // Generic type parameters for free functions: func identity<T>(x: T) -> T
     char**   type_params;       // ["T"] or ["T", "U"]
     char**   type_param_bounds; // Trait bounds parallel to type_params (NULL entries = unbounded)
     int      type_param_count;
@@ -385,7 +385,7 @@ struct Node {
             NodeList type_args; // list of type nodes
         } generic_type;
 
-        // Function type: func(T1, T2): ReturnType
+        // Function type: func(T1, T2) -> ReturnType
         struct {
             NodeList param_types; // Parameter type nodes
             Node*    return_type; // Return type node (NULL for void)

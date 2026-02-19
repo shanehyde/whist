@@ -1,7 +1,7 @@
 // Expected: PASS: generic_func_bounds
 
 trait Printable {
-    const func label(): string;
+    const func label() -> string;
 }
 
 struct Dog {
@@ -9,12 +9,12 @@ struct Dog {
 }
 
 impl Printable for Dog {
-    const func label(): string {
+    const func label() -> string {
         return self.name;
     }
 }
 
-func get_label<T: Printable>(x: T): string {
+func get_label<T: Printable>(x: T) -> string {
     return x.label();
 }
 

@@ -30,6 +30,6 @@ test "vec_filter_with_capture" {
     assert(result[1] == 5);
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

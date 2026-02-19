@@ -61,7 +61,7 @@ if name == null {
 ### Guard Clauses
 
 ```whist
-func process(data: ?Data): void {
+func process(data: ?Data) -> void {
     if data == null {
         return;
     }
@@ -69,7 +69,7 @@ func process(data: ?Data): void {
     data.process();
 }
 
-func require_data(data: ?Data): Result<void, Error> {
+func require_data(data: ?Data) -> Result<void, Error> {
     if data == null {
         return Err("data required");
     }
@@ -82,7 +82,7 @@ func require_data(data: ?Data): Result<void, Error> {
 ### Let-Else (if supported)
 
 ```whist
-func process(input: ?string): Result<i64, Error> {
+func process(input: ?string) -> Result<i64, Error> {
     let value = input else {
         return Err("input required");
     };
@@ -192,7 +192,7 @@ var name: ?string = get_name();
 var definite: string = name!;  // panics if name is null
 
 // Use when you're certain it's not null
-func process_valid_user(user: User): void {
+func process_valid_user(user: User) -> void {
     // user.email is required field, never null
     send_email(user.email!);
 }
@@ -212,7 +212,7 @@ Consider pattern matching or `??` for production code.
 ### Nullable Parameters
 
 ```whist
-func greet(name: ?string): void {
+func greet(name: ?string) -> void {
     print("Hello, {name ?? \"stranger\"}!");
 }
 
@@ -223,7 +223,7 @@ greet(null);     // Hello, stranger!
 ### Nullable Return Types
 
 ```whist
-func find(items: Span<i64>, target: i64): ?i64 {
+func find(items: Span<i64>, target: i64) -> ?i64 {
     foreach i in 0..items.count {
         if items[i] == target {
             return i;  // implicitly wrapped
@@ -346,14 +346,14 @@ match maybe_value {
 ### With Generics
 
 ```whist
-func unwrap_or<T>(opt: ?T, default: T): T {
+func unwrap_or<T>(opt: ?T, default: T) -> T {
     if opt != null {
         return opt;
     }
     return default;
 }
 
-func map<T, U>(opt: ?T, f: func(T): U): ?U {
+func map<T, U>(opt: ?T, f: func(T) -> U) -> ?U {
     if opt != null {
         return f(opt);
     }
@@ -366,10 +366,10 @@ func map<T, U>(opt: ?T, f: func(T): U): ?U {
 ```whist
 // Could have a trait for "maybe" values
 trait Unwrappable<T> {
-    func unwrap(): T;
-    func unwrap_or(default: T): T;
-    func is_some(): bool;
-    func is_none(): bool;
+    func unwrap() -> T;
+    func unwrap_or(default: T) -> T;
+    func is_some() -> bool;
+    func is_none() -> bool;
 }
 ```
 
@@ -377,7 +377,7 @@ trait Unwrappable<T> {
 
 ```whist
 // Convert between Option and Result
-func ok_or<T, E>(opt: ?T, err: E): Result<T, E> {
+func ok_or<T, E>(opt: ?T, err: E) -> Result<T, E> {
     if opt != null {
         return Ok(opt);
     }
@@ -385,7 +385,7 @@ func ok_or<T, E>(opt: ?T, err: E): Result<T, E> {
 }
 
 // Get Ok value or null
-func ok<T, E>(result: Result<T, E>): ?T {
+func ok<T, E>(result: Result<T, E>) -> ?T {
     match result {
         Ok(v) => v,
         Err(_) => null,
@@ -443,7 +443,7 @@ force_unwrap = expr "!"
 
 ```whist
 // User lookup with fallbacks
-func get_display_name(user_id: i64): string {
+func get_display_name(user_id: i64) -> string {
     var user = find_user(user_id);
     return user?.profile?.display_name
         ?? user?.username
@@ -451,7 +451,7 @@ func get_display_name(user_id: i64): string {
 }
 
 // Config loading with defaults
-func load_settings(): Settings {
+func load_settings() -> Settings {
     return Settings {
         theme: config.get("theme") ?? "light",
         font_size: config.get_i64("font_size") ?? 14,
@@ -461,7 +461,7 @@ func load_settings(): Settings {
 }
 
 // Safe navigation in data structures
-func get_nested(json: JsonValue, path: Span<string>): ?JsonValue {
+func get_nested(json: JsonValue, path: Span<string>) -> ?JsonValue {
     var current: ?JsonValue = json;
     foreach key in path {
         current = current?.as_object()?.get(key);
@@ -476,7 +476,7 @@ var result = input
     ?.abs();
 
 // Early return pattern
-func process_order(order_id: i64): Result<Receipt, Error> {
+func process_order(order_id: i64) -> Result<Receipt, Error> {
     var order = find_order(order_id) ?? return Err("order not found");
     var user = find_user(order.user_id) ?? return Err("user not found");
     var payment = user.default_payment ?? return Err("no payment method");
@@ -490,7 +490,7 @@ struct Cache {
 }
 
 impl Cache {
-    func (Cache) get(): Data {
+    func (Cache) get() -> Data {
         self.data ??= load_data();
         return self.data!;
     }

@@ -8,15 +8,15 @@
 // Expected: PASS: functions
 
 // Shared function definitions for the functions test
-func add(a: i32, b: i32): i32 {
+func add(a: i32, b: i32) -> i32 {
     return a + b;
 }
 
-func multiply(x: i32, y: i32): i32 {
+func multiply(x: i32, y: i32) -> i32 {
     return x * y;
 }
 
-func factorial(n: i32): i32 {
+func factorial(n: i32) -> i32 {
     if (n <= 1) {
         return 1;
     }

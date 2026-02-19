@@ -2,7 +2,7 @@
 // RC RUNTIME TEST: Drop on generic struct is called when refcount reaches 0
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 struct Box<T> {
@@ -10,7 +10,7 @@ struct Box<T> {
 }
 
 impl Drop for Box<T> {
-    func drop(): void {
+    func drop() -> void {
         // Generic drop called
     }
 }

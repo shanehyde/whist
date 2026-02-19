@@ -1,7 +1,7 @@
 // Expected error: Method 'count' return type mismatch
 
 trait Countable {
-    func count(): i64;
+    func count() -> i64;
 }
 
 struct Bag {
@@ -9,11 +9,11 @@ struct Bag {
 }
 
 impl Countable for Bag {
-    func count(): string {
+    func count() -> string {
         return "oops";
     }
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

@@ -1,16 +1,16 @@
 // Expected: PASS: lambda_runtime
 
-func apply(f: func(i64): i64, x: i64): i64 {
+func apply(f: func(i64) -> i64, x: i64) -> i64 {
     return f(x);
 }
 
-func apply2(f: func(i64, i64): i64, a: i64, b: i64): i64 {
+func apply2(f: func(i64, i64) -> i64, a: i64, b: i64) -> i64 {
     return f(a, b);
 }
 
 test "lambda_runtime" {
     // Lambda called through variable
-    var square: func(i64): i64 = |x: i64| x * x;
+    var square: func(i64) -> i64 = |x: i64| x * x;
     assert(square(5) == 25);
 
     // Lambda passed to higher-order function
@@ -22,7 +22,7 @@ test "lambda_runtime" {
     assert(sum == 42);
 
     // Block body lambda
-    var abs_val: func(i64): i64 = |x: i64| -> i64 {
+    var abs_val: func(i64) -> i64 = |x: i64| -> i64 {
         if (x < 0) {
             return -x;
         }
@@ -32,7 +32,7 @@ test "lambda_runtime" {
     assert(abs_val(3) == 3);
 
     // Empty params lambda
-    var get42: func(): i64 = || 42;
+    var get42: func() -> i64 = || 42;
     assert(get42() == 42);
 
     // Direct call
@@ -40,8 +40,8 @@ test "lambda_runtime" {
     assert(x == 42);
 
     // Multiple lambdas in same function
-    var inc: func(i64): i64 = |x: i64| x + 1;
-    var dec: func(i64): i64 = |x: i64| x - 1;
+    var inc: func(i64) -> i64 = |x: i64| x + 1;
+    var dec: func(i64) -> i64 = |x: i64| x - 1;
     assert(inc(10) == 11);
     assert(dec(10) == 9);
 }

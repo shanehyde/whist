@@ -2,25 +2,25 @@
 // Expected: PASS: self_type_param
 
 trait Clonable {
-    func clone(): Self;
+    func clone() -> Self;
 }
 
 struct Point { x: i64, y: i64 }
 
 impl Clonable for Point {
-    func clone(): Point {
+    func clone() -> Point {
         return new Point { x: 10, y: 20 };
     }
 }
 
 trait Combinable {
-    func combine(other: Self): Self;
+    func combine(other: Self) -> Self;
 }
 
 struct Counter { value: i64 }
 
 impl Combinable for Counter {
-    func combine(other: Counter): Counter {
+    func combine(other: Counter) -> Counter {
         return new Counter { value: 42 };
     }
 }

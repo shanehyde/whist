@@ -5,7 +5,7 @@ enum Option<T> {
     None,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var opt: Option<i64> = Option::Some(42);
     match (opt) {
         Some(a, b) => { return 1; },

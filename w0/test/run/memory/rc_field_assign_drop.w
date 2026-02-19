@@ -4,7 +4,7 @@
 import std;
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 struct Child {
@@ -16,11 +16,11 @@ struct Parent {
 }
 
 impl Drop for Child {
-    func drop(): void {
+    func drop() -> void {
     }
 }
 
-func main(): i32 {
+func main() -> i32 {
     var p = new Parent { child: new Child { value: 1 } };
 
     // Reassign with a fresh RC value; old child (alloc 1) should be freed

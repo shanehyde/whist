@@ -7,15 +7,15 @@ import std;
 
 struct Point { x: i64, y: i64 }
 
-func apply_s(f: func(string): string, x: string): string {
+func apply_s(f: func(string) -> string, x: string) -> string {
     return f(x);
 }
 
-func apply_i(f: func(i64): i64, x: i64): i64 {
+func apply_i(f: func(i64) -> i64, x: i64) -> i64 {
     return f(x);
 }
 
-func get_x(p: Point): i64 {
+func get_x(p: Point) -> i64 {
     return p.x;
 }
 
@@ -44,7 +44,7 @@ test "closure_capture_vec" {
 }
 
 test "closure_capture_closure_value" {
-    var h: func(i64): i64 = null;
+    var h: func(i64) -> i64 = null;
     {
         var x: i64 = 10;
         var f = |y: i64| -> i64 x + y;

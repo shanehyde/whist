@@ -38,7 +38,7 @@ Additional **borrower** references can exist:
 - Borrowers must not outlive the owner
 
 ```whist
-func example(): void {
+func example() -> void {
     var owned point = new Point { x: 10, y: 20 };  // owner, refcount = 1
 
     var borrowed ref = point;  // borrower, refcount = 2
@@ -56,13 +56,13 @@ func example(): void {
 Statically verify that borrowers don't outlive owners.
 
 ```whist
-func example(): void {
+func example() -> void {
     var point = new Point { x: 10, y: 20 };
     var ref = &point;          // borrow
     use(ref);
 }   // point freed here, ref already out of scope ✓
 
-func bad(): &Point {
+func bad() -> &Point {
     var point = new Point { x: 10, y: 20 };
     return &point;             // ERROR: returning reference to local
 }
@@ -84,14 +84,14 @@ func bad(): &Point {
 Owner tracks if borrowers exist; panic if owner dies with live borrowers.
 
 ```whist
-func example(): void {
+func example() -> void {
     var point = new Point { x: 10, y: 20 };  // refcount = 1
     var ref = &point;                         // refcount = 2
     // ref out of scope, refcount = 1
     // point out of scope, refcount = 0, free ✓
 }
 
-func bad(): void {
+func bad() -> void {
     var ref: &Point;
     {
         var point = new Point { x: 10, y: 20 };
@@ -116,7 +116,7 @@ func bad(): void {
 Borrowers become weak references that auto-nil when owner dies.
 
 ```whist
-func example(): void {
+func example() -> void {
     var point = new Point { x: 10, y: 20 };
     var ref = &point;          // weak reference
 
@@ -125,7 +125,7 @@ func example(): void {
     }
 }
 
-func flexible(): void {
+func flexible() -> void {
     var ref: ?&Point = null;
     {
         var point = new Point { x: 10, y: 20 };
@@ -153,14 +153,14 @@ func flexible(): void {
 All references are equal; last one to leave frees the memory.
 
 ```whist
-func example(): void {
+func example() -> void {
     var a = new Point { x: 10, y: 20 };  // refcount = 1
     var b = a;                            // refcount = 2
     // b out of scope, refcount = 1
     // a out of scope, refcount = 0, freed
 }
 
-func escape(): Point {
+func escape() -> Point {
     var point = new Point { x: 10, y: 20 };
     return point;              // ownership transferred
 }
@@ -253,17 +253,17 @@ var b = move a;        // a is now invalid
 print(a.x);            // ERROR: use after move
 
 // Function takes ownership
-func consume(owned p: Point): void {
+func consume(owned p: Point) -> void {
     // p is freed when function returns
 }
 
 // Function borrows
-func inspect(p: &Point): void {
+func inspect(p: &Point) -> void {
     print(p.x);        // just reading
 }
 
 // Function returns owned
-func create(): owned Point {
+func create() -> owned Point {
     return new Point { x: 0, y: 0 };
 }
 ```
@@ -272,7 +272,7 @@ func create(): owned Point {
 
 ```whist
 // Reference valid for lifetime 'a
-func longest<'a>(x: &'a string, y: &'a string): &'a string {
+func longest<'a>(x: &'a string, y: &'a string) -> &'a string {
     if x.len > y.len { return x; }
     return y;
 }
@@ -367,11 +367,11 @@ struct Box<T> {
 }
 
 impl<T> Box<T> {
-    func new(value: T): owned Box<T> {
+    func new(value: T) -> owned Box<T> {
         return new Box { value: move value };
     }
 
-    func (Box<T>) get(): &T {
+    func (Box<T>) get() -> &T {
         return &self.value;
     }
 }
@@ -392,11 +392,11 @@ var closure = move || {
 
 ```whist
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 impl Drop for FileHandle {
-    func (FileHandle) drop(): void {
+    func (FileHandle) drop() -> void {
         close_file(self.fd);
     }
 }

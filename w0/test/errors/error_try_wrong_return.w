@@ -6,15 +6,15 @@ enum Result<T, E> {
     Err(E),
 }
 
-func get_value(): Result<i64, string> {
+func get_value() -> Result<i64, string> {
     return Result::Ok(42);
 }
 
-func bad_return(): i64 {
+func bad_return() -> i64 {
     var x = get_value()?;
     return x;
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

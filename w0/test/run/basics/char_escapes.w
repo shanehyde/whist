@@ -1,7 +1,7 @@
 // Test character escape sequences
 // Expected exit: 0
 
-func main(): i32 {
+func main() -> i32 {
     // Simple escapes
     var newline: char = '\n';
     var tab: char = '\t';

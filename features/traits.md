@@ -10,8 +10,8 @@ Phase 1 covers trait declarations, `impl` blocks, and trait bounds on generic st
 
 ```whist
 trait Greetable {
-    func greet(): string;
-    const func id(): i64;
+    func greet() -> string;
+    const func id() -> i64;
 }
 ```
 
@@ -25,7 +25,7 @@ struct Dog {
 }
 
 impl Greetable for Dog {
-    func greet(): string {
+    func greet() -> string {
         return self.name;
     }
 }
@@ -37,7 +37,7 @@ An `impl` block provides concrete method implementations for a trait on a specif
 
 ```whist
 trait HasValue {
-    func value(): i64;
+    func value() -> i64;
 }
 
 struct Box<T: HasValue> {
@@ -86,8 +86,8 @@ Methods with bodies in trait declarations, used when impl doesn't override:
 
 ```whist
 trait Eq {
-    func eq(other: Self): bool;
-    func ne(other: Self): bool { return !self.eq(other); }
+    func eq(other: Self) -> bool;
+    func ne(other: Self) -> bool { return !self.eq(other); }
 }
 ```
 
@@ -97,7 +97,7 @@ Traits that require other traits:
 
 ```whist
 trait Ord: Eq {
-    func cmp(other: Self): Ordering;
+    func cmp(other: Self) -> Ordering;
 }
 ```
 
@@ -106,7 +106,7 @@ trait Ord: Eq {
 Constraining a type parameter to implement multiple traits:
 
 ```whist
-func debug_sort<T: Ord + Debug>(items: Span<T>): void { ... }
+func debug_sort<T: Ord + Debug>(items: Span<T>) -> void { ... }
 ```
 
 ### Generic Traits
@@ -115,7 +115,7 @@ Traits parameterized by types:
 
 ```whist
 trait Iterator<T> {
-    func next(): ?T;
+    func next() -> ?T;
 }
 ```
 
@@ -126,7 +126,7 @@ Types that are part of a trait definition:
 ```whist
 trait Iterator {
     type Item;
-    func next(): ?Self::Item;
+    func next() -> ?Self::Item;
 }
 ```
 
@@ -135,7 +135,7 @@ trait Iterator {
 Currently bounds only work on generic struct type params. Extending to function-level generics:
 
 ```whist
-func sort<T: Ord>(items: Span<T>): void { ... }
+func sort<T: Ord>(items: Span<T>) -> void { ... }
 ```
 
 ### Where Clauses
@@ -143,7 +143,7 @@ func sort<T: Ord>(items: Span<T>): void { ... }
 For complex bounds:
 
 ```whist
-func process<K, V>(map: Map<K, V>): void
+func process<K, V>(map: Map<K, V>) -> void
 where
     K: Eq + Hash,
     V: Clone
@@ -157,7 +157,7 @@ where
 Runtime polymorphism via vtables:
 
 ```whist
-func log(item: &Printable): void {
+func log(item: &Printable) -> void {
     print(item.to_string());
 }
 ```

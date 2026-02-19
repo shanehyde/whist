@@ -4,7 +4,7 @@ struct Point {
     y: i64,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var a = new Point { x: 1, y: 2 };
     var b = new Point { x: 1, y: 2 };
     if (a == b) {}

@@ -7,7 +7,7 @@ Whist aims to be a practical language with modern features — generics, a modul
 ```whist
 import std;
 
-func main(): i32 {
+func main() -> i32 {
     std.print("Hello, world!\n");
     return 0;
 }

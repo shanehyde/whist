@@ -122,7 +122,7 @@ whist-lsp/
     "params": {
         "textDocument": {
             "uri": "file:///path/to/file.w",
-            "text": "func main(): i32 { ... }"
+            "text": "func main() -> i32 { ... }"
         }
     }
 }
@@ -173,7 +173,7 @@ whist-lsp/
     "result": {
         "contents": {
             "kind": "markdown",
-            "value": "```whist\nfunc add(a: i64, b: i64): i64\n```\nAdds two numbers."
+            "value": "```whist\nfunc add(a: i64, b: i64) -> i64\n```\nAdds two numbers."
         }
     }
 }
@@ -194,8 +194,8 @@ whist-lsp/
 // Server → Client
 {
     "result": [
-        { "label": "print", "kind": 3, "detail": "func(string): void" },
-        { "label": "println", "kind": 3, "detail": "func(string): void" },
+        { "label": "print", "kind": 3, "detail": "func(string) -> void" },
+        { "label": "println", "kind": 3, "detail": "func(string) -> void" },
         { "label": "Point", "kind": 22, "detail": "struct" }
     ]
 }
@@ -245,7 +245,7 @@ For responsive editing:
 Re-parse only changed regions:
 
 ```whist
-func on_change(doc: *Document, changes: Vec<Change>): void {
+func on_change(doc: *Document, changes: Vec<Change>) -> void {
     // For small changes, patch the AST
     // For large changes, full re-parse
     if changes.len == 1 && changes[0].is_small() {
@@ -264,7 +264,7 @@ func on_change(doc: *Document, changes: Vec<Change>): void {
 Don't analyze on every keystroke:
 
 ```whist
-func on_change(doc: *Document): void {
+func on_change(doc: *Document) -> void {
     cancel_pending_analysis(doc);
     schedule_analysis(doc, delay: 100);  // 100ms debounce
 }
@@ -275,7 +275,7 @@ func on_change(doc: *Document): void {
 Analyze in separate thread:
 
 ```whist
-func analyze_async(doc: *Document): void {
+func analyze_async(doc: *Document) -> void {
     spawn {
         var result = full_analysis(doc);
         send_diagnostics(doc.uri, result.diagnostics);
@@ -295,7 +295,7 @@ import checker;
 import ast;
 import types;
 
-func analyze(content: string): AnalysisResult {
+func analyze(content: string) -> AnalysisResult {
     var tokens = lexer.tokenize(content);
     var ast = parser.parse(tokens);
     var (typed_ast, errors) = checker.check(ast);
@@ -455,7 +455,7 @@ User types "std."
 
 User hovers over "print"
   → textDocument/hover
-  ← "func print(s: string): void"
+  ← "func print(s: string) -> void"
 
 User Ctrl+clicks "Point"
   → textDocument/definition

@@ -400,7 +400,7 @@ void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods
             continue;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            // Direct generic methods: func (Box<T>) get(): T
+            // Direct generic methods: func (Box<T>) get() -> T
             // Exclude method-level generics (type_param_count > 0) — those go through
             // GenericFuncInstance
             if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.body != NULL &&
@@ -411,7 +411,7 @@ void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods
                 VEC_GROW(methods, count, capacity);
                 methods[count++] = decl;
             }
-            // Methods inside impl blocks: impl Drop for Box { func (Box<T>) drop(): void }
+            // Methods inside impl blocks: impl Drop for Box { func (Box<T>) drop() -> void }
             if (decl->type == NODE_IMPL_DECL) {
                 for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
                     Node* method = decl->as.impl_decl.methods.nodes[j];
@@ -1924,7 +1924,7 @@ static Node* find_generic_method_func_decl(Node* ast, const char* receiver_type,
             continue;
         for (int d = 0; d < mod->as.module.decls.count; d++) {
             Node* decl = mod->as.module.decls.nodes[d];
-            // Direct method: func (Vec<T>) map<K>(...): Vec<K>
+            // Direct method: func (Vec<T>) map<K>(...) -> Vec<K>
             if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type != NULL &&
                 decl->as.func_decl.type_param_count > 0 &&
                 strcmp(decl->as.func_decl.receiver_type, receiver_type) == 0 &&

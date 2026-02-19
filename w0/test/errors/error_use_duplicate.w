@@ -4,10 +4,10 @@
 import std;
 use std::print;
 
-func print(s: string): void {
+func print(s: string) -> void {
     return;
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

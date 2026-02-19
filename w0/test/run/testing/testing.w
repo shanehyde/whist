@@ -5,11 +5,11 @@
 
 // --- test_basic ---
 
-func add(a: i64, b: i64): i64 {
+func add(a: i64, b: i64) -> i64 {
     return a + b;
 }
 
-func sub(a: i64, b: i64): i64 {
+func sub(a: i64, b: i64) -> i64 {
     return a - b;
 }
 

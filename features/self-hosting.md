@@ -148,7 +148,7 @@ Target: Compile hello world
 ```whist
 import std;
 
-func main(): i32 {
+func main() -> i32 {
     std.print("Hello from wc!\n");
     return 0;
 }
@@ -211,39 +211,39 @@ Minimum stdlib needed for compiler:
 
 ```whist
 // I/O
-func read_file(path: string): Result<string, Error>;
-func write_file(path: string, content: string): Result<void, Error>;
-func print(s: string): void;
-func eprint(s: string): void;  // stderr
+func read_file(path: string) -> Result<string, Error>;
+func write_file(path: string, content: string) -> Result<void, Error>;
+func print(s: string) -> void;
+func eprint(s: string) -> void;  // stderr
 
 // Strings
-func (string) length(): i64;
-func (string) char_at(i: i64): char;
-func (string) substring(start: i64, end: i64): string;
-func (string) contains(s: string): bool;
-func (string) starts_with(s: string): bool;
-func (string) split(sep: string): Vec<string>;
+func (string) length() -> i64;
+func (string) char_at(i: i64) -> char;
+func (string) substring(start: i64, end: i64) -> string;
+func (string) contains(s: string) -> bool;
+func (string) starts_with(s: string) -> bool;
+func (string) split(sep: string) -> Vec<string>;
 
 // String builder
 struct StringBuilder { ... }
-func (StringBuilder) append(s: string): void;
-func (StringBuilder) to_string(): string;
+func (StringBuilder) append(s: string) -> void;
+func (StringBuilder) to_string() -> string;
 
 // Collections
 struct Vec<T> { ... }
-func (Vec<T>) push(item: T): void;
-func (Vec<T>) pop(): ?T;
-func (Vec<T>) get(i: i64): ?T;
-func (Vec<T>) len(): i64;
+func (Vec<T>) push(item: T) -> void;
+func (Vec<T>) pop() -> ?T;
+func (Vec<T>) get(i: i64) -> ?T;
+func (Vec<T>) len() -> i64;
 
 struct HashMap<K, V> { ... }
-func (HashMap<K, V>) insert(k: K, v: V): void;
-func (HashMap<K, V>) get(k: K): ?V;
-func (HashMap<K, V>) contains(k: K): bool;
+func (HashMap<K, V>) insert(k: K, v: V) -> void;
+func (HashMap<K, V>) get(k: K) -> ?V;
+func (HashMap<K, V>) contains(k: K) -> bool;
 
 // Process
-func exit(code: i32): void;
-func args(): Vec<string>;
+func exit(code: i32) -> void;
+func args() -> Vec<string>;
 ```
 
 ## Challenges

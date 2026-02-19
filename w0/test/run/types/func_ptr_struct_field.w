@@ -1,8 +1,8 @@
 // Expected: PASS: func_ptr_struct_field
 
-struct Callback { handler: func(i64): i64 }
+struct Callback { handler: func(i64) -> i64 }
 
-func twice(x: i64): i64 {
+func twice(x: i64) -> i64 {
     return x * 2;
 }
 

@@ -5,7 +5,7 @@ struct Item {
     value: i64,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var items = new Vec<Item>{};
     items.push(new Item { value: 10 });
     items.push(new Item { value: 20 });

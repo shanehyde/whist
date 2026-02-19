@@ -5,7 +5,7 @@ struct Point {
     x: i64,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var points = new Vec<Point>{};
     points.sort();
     return 0;

@@ -65,7 +65,7 @@ Operators: `+ - * / %`, `== != < > <= >=`, `&& || !`, `& | ^ ~ << >>`, `. ->`
 ```whist
 import std;
 
-func main(): i32 {
+func main() -> i32 {
     std::print("Hello!\n");        // ✓ Correct: module-qualified with ::
     var x = std::abs_i64(-42);     // ✓ Correct: module-qualified with ::
     // print("Hi!\n");             // ✗ Error: unqualified access
@@ -80,7 +80,7 @@ import std;
 use std::print;                  // single symbol
 use std::{abs_i64, max_i64};    // grouped symbols
 
-func main(): i32 {
+func main() -> i32 {
     print("Hello!\n");           // ✓ Correct: brought in by use
     var x = abs_i64(-42);        // ✓ Correct: brought in by use
     var y = std::min_i64(1, 2);  // ✓ Correct: qualified still works
@@ -92,7 +92,7 @@ func main(): i32 {
 ```whist
 import "./helper.w";
 
-func main(): i32 {
+func main() -> i32 {
     helper_function();  // ✓ Correct: no qualification needed
     return 0;
 }
@@ -129,16 +129,16 @@ bin/w0 --lib-path ../lib program.w | cc -x c -Ilib/include -o program - lib/whis
 ```whist
 struct Point { x: i64, y: i64 }
 
-func add(a: i64, b: i64): i64 {
+func add(a: i64, b: i64) -> i64 {
     return a + b;
 }
 
-func (Point) move(dx: i64, dy: i64): void {
+func (Point) move(dx: i64, dy: i64) -> void {
     self->x += dx;
     self->y += dy;
 }
 
-func main(): i64 {
+func main() -> i64 {
     var x = 42;
     const PI = 3.14159;
     return 0;

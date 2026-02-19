@@ -3,7 +3,7 @@
 // Exercises Bug 2 fix: generic-instance fields in non-generic __rc_dec
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 struct Inner {
@@ -11,7 +11,7 @@ struct Inner {
 }
 
 impl Drop for Inner {
-    func drop(): void {
+    func drop() -> void {
         // Inner cleanup
     }
 }

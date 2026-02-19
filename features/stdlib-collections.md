@@ -28,60 +28,60 @@ struct Vec<T> {
 
 impl<T> Vec<T> {
     // Constructors
-    func new(): Vec<T>;
-    func with_capacity(cap: i64): Vec<T>;
-    func from_array(arr: [T]): Vec<T>;
-    func from_span(span: Span<T>): Vec<T>;
+    func new() -> Vec<T>;
+    func with_capacity(cap: i64) -> Vec<T>;
+    func from_array(arr: [T]) -> Vec<T>;
+    func from_span(span: Span<T>) -> Vec<T>;
 
     // Access
-    func (Vec<T>) get(index: i64): ?T;
-    func (Vec<T>) get_unchecked(index: i64): T;
-    func (Vec<T>) first(): ?T;
-    func (Vec<T>) last(): ?T;
-    func (Vec<T>) as_span(): Span<T>;
+    func (Vec<T>) get(index: i64) -> ?T;
+    func (Vec<T>) get_unchecked(index: i64) -> T;
+    func (Vec<T>) first() -> ?T;
+    func (Vec<T>) last() -> ?T;
+    func (Vec<T>) as_span() -> Span<T>;
 
     // Modification
-    func (Vec<T>) push(value: T): void;
-    func (Vec<T>) pop(): ?T;
-    func (Vec<T>) insert(index: i64, value: T): void;
-    func (Vec<T>) remove(index: i64): T;
-    func (Vec<T>) swap_remove(index: i64): T;  // O(1) remove
-    func (Vec<T>) clear(): void;
-    func (Vec<T>) truncate(len: i64): void;
+    func (Vec<T>) push(value: T) -> void;
+    func (Vec<T>) pop() -> ?T;
+    func (Vec<T>) insert(index: i64, value: T) -> void;
+    func (Vec<T>) remove(index: i64) -> T;
+    func (Vec<T>) swap_remove(index: i64) -> T;  // O(1) remove
+    func (Vec<T>) clear() -> void;
+    func (Vec<T>) truncate(len: i64) -> void;
 
     // Size
-    func (Vec<T>) len(): i64;
-    func (Vec<T>) capacity(): i64;
-    func (Vec<T>) is_empty(): bool;
-    func (Vec<T>) reserve(additional: i64): void;
-    func (Vec<T>) shrink_to_fit(): void;
+    func (Vec<T>) len() -> i64;
+    func (Vec<T>) capacity() -> i64;
+    func (Vec<T>) is_empty() -> bool;
+    func (Vec<T>) reserve(additional: i64) -> void;
+    func (Vec<T>) shrink_to_fit() -> void;
 
     // Iteration
-    func (Vec<T>) iter(): Iterator<T>;
-    func (Vec<T>) iter_mut(): MutIterator<T>;
+    func (Vec<T>) iter() -> Iterator<T>;
+    func (Vec<T>) iter_mut() -> MutIterator<T>;
 
     // Functional
-    func (Vec<T>) map<U>(f: func(T): U): Vec<U>;
-    func (Vec<T>) filter(pred: func(T): bool): Vec<T>;
-    func (Vec<T>) fold<A>(init: A, f: func(A, T): A): A;
-    func (Vec<T>) find(pred: func(T): bool): ?T;
-    func (Vec<T>) any(pred: func(T): bool): bool;
-    func (Vec<T>) all(pred: func(T): bool): bool;
+    func (Vec<T>) map<U>(f: func(T) -> U) -> Vec<U>;
+    func (Vec<T>) filter(pred: func(T) -> bool) -> Vec<T>;
+    func (Vec<T>) fold<A>(init: A, f: func(A, T) -> A) -> A;
+    func (Vec<T>) find(pred: func(T) -> bool) -> ?T;
+    func (Vec<T>) any(pred: func(T) -> bool) -> bool;
+    func (Vec<T>) all(pred: func(T) -> bool) -> bool;
 
     // Sorting (requires T: Ord)
-    func (Vec<T>) sort(): void;
-    func (Vec<T>) sort_by(cmp: func(T, T): Ordering): void;
+    func (Vec<T>) sort() -> void;
+    func (Vec<T>) sort_by(cmp: func(T, T) -> Ordering) -> void;
 
     // Misc
-    func (Vec<T>) reverse(): void;
-    func (Vec<T>) contains(value: T): bool;  // requires T: Eq
-    func (Vec<T>) dedup(): void;             // requires T: Eq
-    func (Vec<T>) clone(): Vec<T>;           // requires T: Clone
+    func (Vec<T>) reverse() -> void;
+    func (Vec<T>) contains(value: T) -> bool;  // requires T: Eq
+    func (Vec<T>) dedup() -> void;             // requires T: Eq
+    func (Vec<T>) clone() -> Vec<T>;           // requires T: Clone
 }
 
 // Index operator
-func (Vec<T>) [](index: i64): T;
-func (Vec<T>) []=(index: i64, value: T): void;
+func (Vec<T>) [](index: i64) -> T;
+func (Vec<T>) []=(index: i64, value: T) -> void;
 ```
 
 ### Usage
@@ -110,11 +110,11 @@ struct Vec<T> {
 }
 
 impl<T> Vec<T> {
-    func new(): Vec<T> {
+    func new() -> Vec<T> {
         return Vec { data: null, len: 0, cap: 0 };
     }
 
-    func (Vec<T>) push(value: T): void {
+    func (Vec<T>) push(value: T) -> void {
         if self.len == self.cap {
             self.grow();
         }
@@ -122,7 +122,7 @@ impl<T> Vec<T> {
         self.len += 1;
     }
 
-    func (Vec<T>) grow(): void {
+    func (Vec<T>) grow() -> void {
         var new_cap = if self.cap == 0 { 4 } else { self.cap * 2 };
         self.data = realloc(self.data, new_cap * sizeof(T));
         self.cap = new_cap;
@@ -143,30 +143,30 @@ struct HashMap<K, V> {
 
 impl<K: Hash + Eq, V> HashMap<K, V> {
     // Constructors
-    func new(): HashMap<K, V>;
-    func with_capacity(cap: i64): HashMap<K, V>;
+    func new() -> HashMap<K, V>;
+    func with_capacity(cap: i64) -> HashMap<K, V>;
 
     // Access
-    func (HashMap<K, V>) get(key: K): ?V;
-    func (HashMap<K, V>) get_or_default(key: K, default: V): V;
-    func (HashMap<K, V>) contains_key(key: K): bool;
+    func (HashMap<K, V>) get(key: K) -> ?V;
+    func (HashMap<K, V>) get_or_default(key: K, default: V) -> V;
+    func (HashMap<K, V>) contains_key(key: K) -> bool;
 
     // Modification
-    func (HashMap<K, V>) insert(key: K, value: V): ?V;  // returns old value
-    func (HashMap<K, V>) remove(key: K): ?V;
-    func (HashMap<K, V>) clear(): void;
+    func (HashMap<K, V>) insert(key: K, value: V) -> ?V;  // returns old value
+    func (HashMap<K, V>) remove(key: K) -> ?V;
+    func (HashMap<K, V>) clear() -> void;
 
     // Size
-    func (HashMap<K, V>) len(): i64;
-    func (HashMap<K, V>) is_empty(): bool;
+    func (HashMap<K, V>) len() -> i64;
+    func (HashMap<K, V>) is_empty() -> bool;
 
     // Iteration
-    func (HashMap<K, V>) keys(): Iterator<K>;
-    func (HashMap<K, V>) values(): Iterator<V>;
-    func (HashMap<K, V>) iter(): Iterator<(K, V)>;
+    func (HashMap<K, V>) keys() -> Iterator<K>;
+    func (HashMap<K, V>) values() -> Iterator<V>;
+    func (HashMap<K, V>) iter() -> Iterator<(K, V)>;
 
     // Entry API
-    func (HashMap<K, V>) entry(key: K): Entry<K, V>;
+    func (HashMap<K, V>) entry(key: K) -> Entry<K, V>;
 }
 
 enum Entry<K, V> {
@@ -175,9 +175,9 @@ enum Entry<K, V> {
 }
 
 impl<K, V> Entry<K, V> {
-    func or_insert(default: V): *V;
-    func or_insert_with(f: func(): V): *V;
-    func and_modify(f: func(*V): void): Entry<K, V>;
+    func or_insert(default: V) -> *V;
+    func or_insert_with(f: func() -> V) -> *V;
+    func and_modify(f: func(*V) -> void) -> Entry<K, V>;
 }
 ```
 
@@ -218,25 +218,25 @@ struct HashSet<T> {
 }
 
 impl<T: Hash + Eq> HashSet<T> {
-    func new(): HashSet<T>;
+    func new() -> HashSet<T>;
 
-    func (HashSet<T>) insert(value: T): bool;  // true if new
-    func (HashSet<T>) remove(value: T): bool;
-    func (HashSet<T>) contains(value: T): bool;
+    func (HashSet<T>) insert(value: T) -> bool;  // true if new
+    func (HashSet<T>) remove(value: T) -> bool;
+    func (HashSet<T>) contains(value: T) -> bool;
 
-    func (HashSet<T>) len(): i64;
-    func (HashSet<T>) is_empty(): bool;
-    func (HashSet<T>) clear(): void;
+    func (HashSet<T>) len() -> i64;
+    func (HashSet<T>) is_empty() -> bool;
+    func (HashSet<T>) clear() -> void;
 
     // Set operations
-    func (HashSet<T>) union(other: HashSet<T>): HashSet<T>;
-    func (HashSet<T>) intersection(other: HashSet<T>): HashSet<T>;
-    func (HashSet<T>) difference(other: HashSet<T>): HashSet<T>;
-    func (HashSet<T>) symmetric_difference(other: HashSet<T>): HashSet<T>;
-    func (HashSet<T>) is_subset(other: HashSet<T>): bool;
-    func (HashSet<T>) is_superset(other: HashSet<T>): bool;
+    func (HashSet<T>) union(other: HashSet<T>) -> HashSet<T>;
+    func (HashSet<T>) intersection(other: HashSet<T>) -> HashSet<T>;
+    func (HashSet<T>) difference(other: HashSet<T>) -> HashSet<T>;
+    func (HashSet<T>) symmetric_difference(other: HashSet<T>) -> HashSet<T>;
+    func (HashSet<T>) is_subset(other: HashSet<T>) -> bool;
+    func (HashSet<T>) is_superset(other: HashSet<T>) -> bool;
 
-    func (HashSet<T>) iter(): Iterator<T>;
+    func (HashSet<T>) iter() -> Iterator<T>;
 }
 ```
 
@@ -265,21 +265,21 @@ Doubly-linked list for O(1) insert/remove at ends.
 struct LinkedList<T> { ... }
 
 impl<T> LinkedList<T> {
-    func new(): LinkedList<T>;
+    func new() -> LinkedList<T>;
 
-    func (LinkedList<T>) push_front(value: T): void;
-    func (LinkedList<T>) push_back(value: T): void;
-    func (LinkedList<T>) pop_front(): ?T;
-    func (LinkedList<T>) pop_back(): ?T;
+    func (LinkedList<T>) push_front(value: T) -> void;
+    func (LinkedList<T>) push_back(value: T) -> void;
+    func (LinkedList<T>) pop_front() -> ?T;
+    func (LinkedList<T>) pop_back() -> ?T;
 
-    func (LinkedList<T>) front(): ?T;
-    func (LinkedList<T>) back(): ?T;
+    func (LinkedList<T>) front() -> ?T;
+    func (LinkedList<T>) back() -> ?T;
 
-    func (LinkedList<T>) len(): i64;
-    func (LinkedList<T>) is_empty(): bool;
-    func (LinkedList<T>) clear(): void;
+    func (LinkedList<T>) len() -> i64;
+    func (LinkedList<T>) is_empty() -> bool;
+    func (LinkedList<T>) clear() -> void;
 
-    func (LinkedList<T>) iter(): Iterator<T>;
+    func (LinkedList<T>) iter() -> Iterator<T>;
 }
 ```
 
@@ -306,14 +306,14 @@ Specialized collections for FIFO/LIFO access.
 struct Queue<T> { ... }
 
 impl<T> Queue<T> {
-    func new(): Queue<T>;
+    func new() -> Queue<T>;
 
-    func (Queue<T>) enqueue(value: T): void;
-    func (Queue<T>) dequeue(): ?T;
-    func (Queue<T>) peek(): ?T;
+    func (Queue<T>) enqueue(value: T) -> void;
+    func (Queue<T>) dequeue() -> ?T;
+    func (Queue<T>) peek() -> ?T;
 
-    func (Queue<T>) len(): i64;
-    func (Queue<T>) is_empty(): bool;
+    func (Queue<T>) len() -> i64;
+    func (Queue<T>) is_empty() -> bool;
 }
 ```
 
@@ -323,14 +323,14 @@ impl<T> Queue<T> {
 struct Stack<T> { ... }
 
 impl<T> Stack<T> {
-    func new(): Stack<T>;
+    func new() -> Stack<T>;
 
-    func (Stack<T>) push(value: T): void;
-    func (Stack<T>) pop(): ?T;
-    func (Stack<T>) peek(): ?T;
+    func (Stack<T>) push(value: T) -> void;
+    func (Stack<T>) pop() -> ?T;
+    func (Stack<T>) peek() -> ?T;
 
-    func (Stack<T>) len(): i64;
-    func (Stack<T>) is_empty(): bool;
+    func (Stack<T>) len() -> i64;
+    func (Stack<T>) is_empty() -> bool;
 }
 ```
 
@@ -361,21 +361,21 @@ Sorted collections using B-trees.
 
 ```whist
 impl<K: Ord, V> BTreeMap<K, V> {
-    func new(): BTreeMap<K, V>;
+    func new() -> BTreeMap<K, V>;
 
     // Same as HashMap, plus:
-    func (BTreeMap<K, V>) first_key(): ?K;
-    func (BTreeMap<K, V>) last_key(): ?K;
-    func (BTreeMap<K, V>) range(from: K, to: K): Iterator<(K, V)>;
+    func (BTreeMap<K, V>) first_key() -> ?K;
+    func (BTreeMap<K, V>) last_key() -> ?K;
+    func (BTreeMap<K, V>) range(from: K, to: K) -> Iterator<(K, V)>;
 }
 
 impl<T: Ord> BTreeSet<T> {
-    func new(): BTreeSet<T>;
+    func new() -> BTreeSet<T>;
 
     // Same as HashSet, plus:
-    func (BTreeSet<T>) first(): ?T;
-    func (BTreeSet<T>) last(): ?T;
-    func (BTreeSet<T>) range(from: T, to: T): Iterator<T>;
+    func (BTreeSet<T>) first() -> ?T;
+    func (BTreeSet<T>) last() -> ?T;
+    func (BTreeSet<T>) range(from: T, to: T) -> Iterator<T>;
 }
 ```
 
@@ -394,25 +394,25 @@ Common interface for iteration:
 
 ```whist
 trait Iterator<T> {
-    func next(): ?T;
+    func next() -> ?T;
 
     // Provided methods
-    func count(): i64;
-    func last(): ?T;
-    func nth(n: i64): ?T;
-    func skip(n: i64): Iterator<T>;
-    func take(n: i64): Iterator<T>;
-    func map<U>(f: func(T): U): Iterator<U>;
-    func filter(pred: func(T): bool): Iterator<T>;
-    func fold<A>(init: A, f: func(A, T): A): A;
-    func collect(): Vec<T>;
-    func for_each(f: func(T): void): void;
-    func find(pred: func(T): bool): ?T;
-    func any(pred: func(T): bool): bool;
-    func all(pred: func(T): bool): bool;
-    func enumerate(): Iterator<(i64, T)>;
-    func zip<U>(other: Iterator<U>): Iterator<(T, U)>;
-    func chain(other: Iterator<T>): Iterator<T>;
+    func count() -> i64;
+    func last() -> ?T;
+    func nth(n: i64) -> ?T;
+    func skip(n: i64) -> Iterator<T>;
+    func take(n: i64) -> Iterator<T>;
+    func map<U>(f: func(T) -> U) -> Iterator<U>;
+    func filter(pred: func(T) -> bool) -> Iterator<T>;
+    func fold<A>(init: A, f: func(A, T) -> A) -> A;
+    func collect() -> Vec<T>;
+    func for_each(f: func(T) -> void) -> void;
+    func find(pred: func(T) -> bool) -> ?T;
+    func any(pred: func(T) -> bool) -> bool;
+    func all(pred: func(T) -> bool) -> bool;
+    func enumerate() -> Iterator<(i64, T)>;
+    func zip<U>(other: Iterator<U>) -> Iterator<(T, U)>;
+    func chain(other: Iterator<T>) -> Iterator<T>;
 }
 ```
 
@@ -440,7 +440,7 @@ struct Vec<T> {
 }
 
 impl<T> Drop for Vec<T> {
-    func (Vec<T>) drop(): void {
+    func (Vec<T>) drop() -> void {
         // Drop all elements
         foreach i in 0..self.len {
             drop(self.data[i]);
@@ -462,7 +462,7 @@ impl<K: Hash + Eq, V> HashMap<K, V> { ... }
 impl<K: Ord, V> BTreeMap<K, V> { ... }
 
 // Vec.sort needs Ord
-func (Vec<T>) sort(): void where T: Ord { ... }
+func (Vec<T>) sort() -> void where T: Ord { ... }
 ```
 
 ### C Code Generation

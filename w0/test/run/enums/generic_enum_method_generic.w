@@ -6,14 +6,14 @@ enum Maybe<T> {
     None,
 }
 
-func (const Maybe<T>) map<U>(f: func(T): U): Maybe<U> {
+func (const Maybe<T>) map<U>(f: func(T) -> U) -> Maybe<U> {
     match (self) {
         Some(v) => return Maybe::Some(f(v));
         None => return Maybe::None;
     }
 }
 
-func is_even(x: i64): bool {
+func is_even(x: i64) -> bool {
     return x % 2 == 0;
 }
 
@@ -37,6 +37,6 @@ test "generic_enum_method_generic_none" {
     }
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

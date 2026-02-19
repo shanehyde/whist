@@ -23,7 +23,7 @@ Type :help for help, :quit to exit
 >>> x * 2
 84
 
->>> func square(n: i64): i64 { return n * n; }
+>>> func square(n: i64) -> i64 { return n * n; }
 >>> square(5)
 25
 
@@ -63,7 +63,7 @@ Variables persist across inputs:
 ### Function Definitions
 
 ```
->>> func fib(n: i64): i64 {
+>>> func fib(n: i64) -> i64 {
 ...     if n <= 1 { return n; }
 ...     return fib(n - 1) + fib(n - 2);
 ... }
@@ -77,7 +77,7 @@ Variables persist across inputs:
 ```
 >>> struct Vec2 { x: f64, y: f64 }
 
->>> func (Vec2) length(): f64 {
+>>> func (Vec2) length() -> f64 {
 ...     return sqrt(self.x * self.x + self.y * self.y);
 ... }
 
@@ -123,7 +123,7 @@ Commands start with `:`:
 i64
 
 >>> :type |x: i64| x * 2
-func(i64): i64
+func(i64) -> i64
 
 >>> :ast 1 + 2 * 3
 Binary(
@@ -138,8 +138,8 @@ Variables:
   p: Point = Point { x: 3, y: 4 }
 
 Functions:
-  square(i64): i64
-  fib(i64): i64
+  square(i64) -> i64
+  fib(i64) -> i64
 
 Types:
   Point { x: i64, y: i64 }
@@ -154,7 +154,7 @@ Time: 45ms
 Automatic continuation for incomplete expressions:
 
 ```
->>> func factorial(n: i64): i64 {
+>>> func factorial(n: i64) -> i64 {
 ...     if n <= 1 {
 ...         return 1;
 ...     }
@@ -280,7 +280,7 @@ Error: Parse error at line 1, column 20
 Build a tree-walking interpreter:
 
 ```whist
-func eval(expr: Expr, env: Environment): Value {
+func eval(expr: Expr, env: Environment) -> Value {
     match expr {
         Literal(v) => v,
         Identifier(name) => env.get(name),
@@ -307,7 +307,7 @@ func eval(expr: Expr, env: Environment): Value {
 Compile to native code on the fly:
 
 ```whist
-func repl_eval(input: string, state: ReplState): Result<Value, Error> {
+func repl_eval(input: string, state: ReplState) -> Result<Value, Error> {
     var ast = parse(input)?;
     var typed = type_check(ast, state.env)?;
 
@@ -329,7 +329,7 @@ func repl_eval(input: string, state: ReplState): Result<Value, Error> {
 Similar to current w0 approach:
 
 ```whist
-func repl_eval(input: string, state: ReplState): Result<Value, Error> {
+func repl_eval(input: string, state: ReplState) -> Result<Value, Error> {
     var ast = parse(input)?;
     var c_code = generate_c(ast, state);
 
@@ -368,14 +368,14 @@ struct ReplState {
 }
 
 impl ReplState {
-    func new(): ReplState {
+    func new() -> ReplState {
         var state = ReplState::default();
         // Pre-import standard library
         state.imports.push(load_module("std"));
         return state;
     }
 
-    func eval(self, input: string): Result<Value, Error> {
+    func eval(self, input: string) -> Result<Value, Error> {
         // Parse
         var ast = parse_repl_input(input)?;
 
@@ -420,7 +420,7 @@ struct LineEditor {
 }
 
 impl LineEditor {
-    func read_line(prompt: string): string {
+    func read_line(prompt: string) -> string {
         self.buffer.clear();
         self.cursor = 0;
 
@@ -467,10 +467,10 @@ Need to type-check new definitions with existing context:
 What happens when you redefine something?
 
 ```
->>> func foo(): i64 { return 1; }
+>>> func foo() -> i64 { return 1; }
 >>> foo()
 1
->>> func foo(): i64 { return 2; }  // redefine?
+>>> func foo() -> i64 { return 2; }  // redefine?
 >>> foo()
 2  // or error?
 ```
@@ -486,7 +486,7 @@ Handle I/O and mutable state:
 
 ```
 >>> var count = 0
->>> func increment(): void { count += 1; }
+>>> func increment() -> void { count += 1; }
 >>> increment()
 >>> increment()
 >>> count
@@ -547,7 +547,7 @@ Truncate large outputs:
 
 >>> var todos: Vec<Todo> = []
 
->>> func add_todo(text: string): void {
+>>> func add_todo(text: string) -> void {
 ...     todos.push(Todo {
 ...         id: todos.len() + 1,
 ...         text: text,
@@ -568,7 +568,7 @@ Truncate large outputs:
 >>> import http
 
 >>> :type http.get
-func(string): Result<Response, Error>
+func(string) -> Result<Response, Error>
 
 >>> var resp = http.get("https://api.example.com/data")?
 >>> resp.status

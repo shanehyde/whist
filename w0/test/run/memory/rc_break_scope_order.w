@@ -5,7 +5,7 @@ struct Box {
     value: i64,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var b = new Box { value: 1 };
     var i: i64 = 0;
     while (i < 1) {

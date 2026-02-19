@@ -1,11 +1,11 @@
 // Expected: PASS: voidptr
 // Test voidptr type
 
-func identity(p: voidptr): voidptr {
+func identity(p: voidptr) -> voidptr {
     return p;
 }
 
-func get_null(): voidptr {
+func get_null() -> voidptr {
     return null;
 }
 

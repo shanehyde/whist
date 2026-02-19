@@ -6,30 +6,30 @@
 // Expected: PASS: option_map
 // Expected: PASS: option_and_then
 
-func make_default(e: string): i64 {
+func make_default(e: string) -> i64 {
     return -1;
 }
 
-func make_zero(): i64 {
+func make_zero() -> i64 {
     return 0;
 }
 
-func times_two(x: i64): i64 {
+func times_two(x: i64) -> i64 {
     return x * 2;
 }
 
-func to_string_len(s: string): i64 {
+func to_string_len(s: string) -> i64 {
     return s.length();
 }
 
-func safe_div(x: i64): Result<i64, string> {
+func safe_div(x: i64) -> Result<i64, string> {
     if (x == 0) {
         return Result::Err("division by zero");
     }
     return Result::Ok(100 / x);
 }
 
-func add_ten(x: i64): Option<i64> {
+func add_ten(x: i64) -> Option<i64> {
     return Option::Some(x + 10);
 }
 

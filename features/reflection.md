@@ -57,7 +57,7 @@ Before traits exist, derives generate free functions:
 struct Point { x: i64, y: i64 }
 
 // Compiler generates:
-func Point_debug(self: *Point): string {
+func Point_debug(self: *Point) -> string {
     return "Point { x: " + i64_to_string(self->x) + ", y: " + i64_to_string(self->y) + " }";
 }
 ```
@@ -69,7 +69,7 @@ Once traits land, the same `@[derive(Debug)]` generates a proper `impl`:
 ```whist
 // Compiler generates:
 impl Debug for Point {
-    func (Point) debug_string(): string {
+    func (Point) debug_string() -> string {
         return "Point { x: " + self.x.debug_string() + ", y: " + self.y.debug_string() + " }";
     }
 }
@@ -196,7 +196,7 @@ struct User {
 }
 
 // Access type info at runtime
-func print_fields(user: *User): void {
+func print_fields(user: *User) -> void {
     var info = @type_info(User);
     var i = 0;
     while i < info.field_count {
@@ -280,8 +280,8 @@ struct Config {
 }
 
 // Compiler generates:
-func Config_get_field(self: *Config, name: string, out: *void): bool { ... }
-func Config_set_field(self: *Config, name: string, value: *void): bool { ... }
+func Config_get_field(self: *Config, name: string, out: *void) -> bool { ... }
+func Config_set_field(self: *Config, name: string, value: *void) -> bool { ... }
 ```
 
 This enables generic serialization, ORM mapping, and config loading without manual boilerplate.
@@ -295,9 +295,9 @@ Phase 3 is not implemented in w0. Instead, it is provided by the self-hosted com
 Comptime replaces the need for a separate source generator plugin system. Users write comptime functions in ordinary Whist that use compiler builtins (`@type_info`, `@fields`) to introspect types and return generated source:
 
 ```whist
-comptime func generate_to_json(comptime T: type): string {
+comptime func generate_to_json(comptime T: type) -> string {
     var info = @type_info(T);
-    var out = "func " + info.name + "_to_json(self: *" + info.name + "): string {\n";
+    var out = "func " + info.name + "_to_json(self: *" + info.name + ") -> string {\n";
     out += "    var result = \"{\";\n";
     foreach i in 0..info.field_count {
         if i > 0 { out += "    result += \", \";\n"; }
@@ -412,7 +412,7 @@ struct Config {
     max_connections: i32,
 }
 
-func save_config(config: *Config, path: string): void {
+func save_config(config: *Config, path: string) -> void {
     var json = Config_serialize(config);
     std.write_file(path, json);
 }
@@ -427,7 +427,7 @@ struct Point { x: i64, y: i64 }
 @[derive(Debug)]
 struct Line { start: Point, end: Point }
 
-func main(): i32 {
+func main() -> i32 {
     var line = Line {
         start: Point { x: 0, y: 0 },
         end: Point { x: 10, y: 20 },
@@ -448,7 +448,7 @@ struct User {
     email: string,
 }
 
-func print_type_info(): void {
+func print_type_info() -> void {
     var info = @type_info(User);
     std.print("Type: " + info.name + "\n");
     std.print("Size: " + u64_to_string(info.size) + " bytes\n");
@@ -478,7 +478,7 @@ struct User {
 
 // comptime generates User_to_json(), User_from_json(), etc.
 
-func main(): i32 {
+func main() -> i32 {
     var user = User { id: 1, name: "Alice", email: "alice@example.com" };
     std.print(User_to_json(&user));
     return 0;

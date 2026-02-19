@@ -3,8 +3,8 @@
 // Expected: PASS: traits_primitive
 
 trait Greetable {
-    func greet(): string;
-    const func name_length(): i64;
+    func greet() -> string;
+    const func name_length() -> i64;
 }
 
 struct Dog {
@@ -12,16 +12,16 @@ struct Dog {
 }
 
 impl Greetable for Dog {
-    func greet(): string {
+    func greet() -> string {
         return self.name;
     }
-    const func name_length(): i64 {
+    const func name_length() -> i64 {
         return 3;
     }
 }
 
 trait HasValue {
-    func value(): i64;
+    func value() -> i64;
 }
 
 struct Wrapper {
@@ -29,7 +29,7 @@ struct Wrapper {
 }
 
 impl HasValue for Wrapper {
-    func value(): i64 {
+    func value() -> i64 {
         return self.v;
     }
 }
@@ -39,11 +39,11 @@ struct Box<T: HasValue> {
 }
 
 trait Hashable {
-    const func hash(): i32;
+    const func hash() -> i32;
 }
 
 impl Hashable for i32 {
-    const func hash(): i32 {
+    const func hash() -> i32 {
         return self;
     }
 }

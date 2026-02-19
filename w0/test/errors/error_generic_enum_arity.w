@@ -5,7 +5,7 @@ enum Result<T, E> {
     Err(E),
 }
 
-func main(): i32 {
+func main() -> i32 {
     var x: Result<i64> = Result::Ok(42);
     return 0;
 }

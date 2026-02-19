@@ -33,11 +33,11 @@ var items = filter(list, |x| x > 0);
 Polymorphism beyond generics:
 ```whist
 trait Printable {
-    func to_string(): string;
+    func to_string() -> string;
 }
 
 impl Printable for Point {
-    func (Point) to_string(): string {
+    func (Point) to_string() -> string {
         return "Point(...)";
     }
 }
@@ -61,7 +61,7 @@ match value {
 
 Structured error handling:
 ```whist
-func divide(a: i64, b: i64): Result<i64, string> {
+func divide(a: i64, b: i64) -> Result<i64, string> {
     if b == 0 {
         return Err("division by zero");
     }
@@ -97,7 +97,7 @@ type JsonValue = null | bool | i64 | f64 | string | JsonArray | JsonObject;
 Named aliases for complex types:
 ```whist
 type UserId = i64;
-type Callback = func(i32, i32): i32;
+type Callback = func(i32, i32) -> i32;
 type StringMap<V> = Map<string, V>;
 ```
 
@@ -156,7 +156,7 @@ Compile-time execution via an AST interpreter in the self-hosted compiler:
 - Not in w0 (avoids dual-maintenance of interpreter + codegen in C)
 
 ```whist
-comptime func gen_eq(comptime T: type): string {
+comptime func gen_eq(comptime T: type) -> string {
     var info = @type_info(T);
     // ... generate equality function by walking fields ...
 }

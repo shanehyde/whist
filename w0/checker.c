@@ -1525,14 +1525,14 @@ static int try_register_generic_func_or_method(Checker* checker, Node* node) {
     int             is_method   = (receiver != NULL);
     int             has_typearg = fdn->receiver_type_args.count > 0;
 
-    // Generic free function: func identity<T>(x: T): T
+    // Generic free function: func identity<T>(x: T) -> T
     if (!is_method && fdn->type_param_count > 0) {
         register_generic_func_def(checker, name, fdn->type_params, fdn->type_param_bounds,
                                   fdn->type_param_count, node);
         return 1;
     }
 
-    // Method-level generic: func (Vec<T>) map<K>(...): Vec<K>
+    // Method-level generic: func (Vec<T>) map<K>(...) -> Vec<K>
     // Must be checked BEFORE the plain generic receiver method branch
     if (is_method && has_typearg && fdn->type_param_count > 0) {
         GenericDef* def = lookup_generic_def(checker, receiver);
@@ -1580,7 +1580,7 @@ static int try_register_generic_func_or_method(Checker* checker, Node* node) {
         return 1;
     }
 
-    // Generic receiver method: func (Box<T>) get(): T
+    // Generic receiver method: func (Box<T>) get() -> T
     if (is_method && has_typearg) {
         GenericDef* def = lookup_generic_def(checker, receiver);
         if (!def) {

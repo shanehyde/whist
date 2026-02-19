@@ -1,6 +1,6 @@
 // Expected error: Cannot assign to const 'x'
 
-func main(): i32 {
+func main() -> i32 {
     foreach (const x in 0..5) {
         if (x == 3) {
             break;

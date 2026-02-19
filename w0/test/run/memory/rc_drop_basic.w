@@ -2,7 +2,7 @@
 // RC RUNTIME TEST: Drop method is called when refcount reaches 0
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 struct Resource {
@@ -10,7 +10,7 @@ struct Resource {
 }
 
 impl Drop for Resource {
-    func drop(): void {
+    func drop() -> void {
         // Drop method called - resource cleaned up
     }
 }

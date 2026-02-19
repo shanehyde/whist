@@ -5,7 +5,7 @@ struct Box {
     const v: i64,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var b = new Box { v: 42 };
     b.v = 99;
     return 0;

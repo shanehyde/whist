@@ -66,7 +66,7 @@ All pointers are i32 indices into this memory.
 ### Function Example
 
 ```whist
-func add(a: i32, b: i32): i32 {
+func add(a: i32, b: i32) -> i32 {
     return a + b;
 }
 ```
@@ -84,7 +84,7 @@ func add(a: i32, b: i32): i32 {
 WASM uses stack-based execution:
 
 ```whist
-func example(): i32 {
+func example() -> i32 {
     return add(1, 2) * 3;
 }
 ```
@@ -106,7 +106,7 @@ Structs are laid out in linear memory:
 ```whist
 struct Point { x: i32, y: i32 }
 
-func make_point(): Point {
+func make_point() -> Point {
     return Point { x: 10, y: 20 };
 }
 ```
@@ -202,22 +202,22 @@ Minimal runtime needed:
 
 ```whist
 // Memory management
-extern func alloc(size: i32): i32;
-extern func free(ptr: i32): void;
+extern func alloc(size: i32) -> i32;
+extern func free(ptr: i32) -> void;
 
 // Console output
-extern func print(s: string): void;
-extern func print_i32(n: i32): void;
+extern func print(s: string) -> void;
+extern func print_i32(n: i32) -> void;
 
 // Math (can use WASM builtins)
-extern func sqrt(x: f64): f64;
-extern func sin(x: f64): f64;
+extern func sqrt(x: f64) -> f64;
+extern func sin(x: f64) -> f64;
 
 // Time
-extern func now(): f64;  // milliseconds
+extern func now() -> f64;  // milliseconds
 
 // Random
-extern func random(): f64;  // 0.0 to 1.0
+extern func random() -> f64;  // 0.0 to 1.0
 ```
 
 ## WASI Support
@@ -226,12 +226,12 @@ WebAssembly System Interface for non-browser environments:
 
 ```whist
 // File I/O via WASI
-extern func fd_read(fd: i32, iovs: i32, iovs_len: i32, nread: i32): i32;
-extern func fd_write(fd: i32, iovs: i32, iovs_len: i32, nwritten: i32): i32;
+extern func fd_read(fd: i32, iovs: i32, iovs_len: i32, nread: i32) -> i32;
+extern func fd_write(fd: i32, iovs: i32, iovs_len: i32, nwritten: i32) -> i32;
 
 // Args and environment
-extern func args_get(argv: i32, argv_buf: i32): i32;
-extern func environ_get(environ: i32, environ_buf: i32): i32;
+extern func args_get(argv: i32, argv_buf: i32) -> i32;
+extern func environ_get(environ: i32, environ_buf: i32) -> i32;
 ```
 
 Run WASI modules with:
@@ -336,7 +336,7 @@ Must go through JavaScript:
 document.getElementById("foo");
 
 // Must import from JS
-extern func get_element(id: string): Element;
+extern func get_element(id: string) -> Element;
 ```
 
 ### 3. 32-bit Pointers
@@ -391,7 +391,7 @@ struct Game {
     score: i32,
 }
 
-public func init(): *Game {
+public func init() -> *Game {
     var game = wasm.alloc::<Game>();
     game.x = 400.0;
     game.y = 300.0;
@@ -399,11 +399,11 @@ public func init(): *Game {
     return game;
 }
 
-public func update(game: *Game, dt: f32): void {
+public func update(game: *Game, dt: f32) -> void {
     // Update game state
 }
 
-public func render(game: *Game): void {
+public func render(game: *Game) -> void {
     wasm.clear_canvas();
     wasm.draw_rect(game.x, game.y, 50.0, 50.0);
     wasm.draw_text(10.0, 10.0, "Score: {game.score}");

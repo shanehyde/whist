@@ -76,8 +76,8 @@ The compiler uses a custom hash table for symbol lookup (scope chains, type regi
 The existing `hash_table.w` test shows it's *possible* with generics, but a built-in is better.
 
 - [ ] **12. HashMap\<K,V\> built-in type** — `new HashMap<K,V>{}` with methods:
-  - `map.set(key, value)`, `map.get(key): Option<V>`, `map.has(key): bool`
-  - `map.delete(key)`, `map.count`: i64, `map.keys(): Vec<K>`
+  - `map.set(key, value)`, `map.get(key) -> Option<V>`, `map.has(key) -> bool`
+  - `map.delete(key)`, `map.count`: i64, `map.keys() -> Vec<K>`
   - *Test:* insert, lookup, delete, iterate keys
   - *Why:* symbol tables, type caches, import registries
 
@@ -132,11 +132,11 @@ constantly in the lexer.
 Not heavily used in the current compiler, but enables cleaner AST visitors
 and comparators for sorting.
 
-- [ ] **19. Function pointer types** — `func(i32, i32): bool` as a type
+- [ ] **19. Function pointer types** — `func(i32, i32) -> bool` as a type
   - *Test:* pass a named function as argument, call it via the parameter
   - *Why:* callback parameters, generic comparators
 
-- [ ] **20. Anonymous functions (stretch)** — `func(x: i32): i32 { return x + 1; }`
+- [ ] **20. Anonymous functions (stretch)** — `func(x: i32) -> i32 { return x + 1; }`
   - *Test:* assign anonymous function to variable, call it
   - *Why:* inline visitors, filter/map callbacks
 
@@ -170,7 +170,7 @@ and invokes the C compiler.
   - *Test:* program that writes to stderr (redirect and check)
   - *Why:* all diagnostics go to stderr
 
-- [ ] **24. Process arguments** — `std.args(): Vec<string>`
+- [ ] **24. Process arguments** — `std.args() -> Vec<string>`
   - *Test:* program that prints its own arguments
   - *Why:* CLI parsing for `-o`, `--check`, `--ast`, etc.
 
@@ -178,7 +178,7 @@ and invokes the C compiler.
   - *Test:* program that exits with code 42, shell checks `$?`
   - *Why:* fatal error handling (OOM, bad input)
 
-- [ ] **26. Run shell command** — `std.system(cmd: string): i32`
+- [ ] **26. Run shell command** — `std.system(cmd: string) -> i32`
   - *Test:* `std.system("echo hello")` returns 0
   - *Why:* invoking `cc` on generated C code
 

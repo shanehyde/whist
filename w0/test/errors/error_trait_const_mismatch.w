@@ -1,7 +1,7 @@
 // Expected error: receiver mutability mismatch
 
 trait Readable {
-    const func read(): i64;
+    const func read() -> i64;
 }
 
 struct Sensor {
@@ -9,11 +9,11 @@ struct Sensor {
 }
 
 impl Readable for Sensor {
-    func read(): i64 {
+    func read() -> i64 {
         return self.val;
     }
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

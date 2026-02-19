@@ -143,7 +143,7 @@ source = "git+https://github.com/bob/utils?branch=main#a1b2c3d4"
 # Exact version
 exact = "=1.2.3"
 
-# Caret (default): compatible updates
+# Caret (default) -> compatible updates
 caret = "^1.2.3"    # >=1.2.3, <2.0.0
 caret2 = "1.2.3"    # same as ^1.2.3
 
@@ -161,7 +161,7 @@ range = ">=1.2.3, <2.0.0"
 ### Resolution Algorithm
 
 ```whist
-func resolve(dependencies: Vec<Dependency>): Result<Solution, Error> {
+func resolve(dependencies: Vec<Dependency>) -> Result<Solution, Error> {
     // 1. Build dependency graph
     var graph = build_graph(dependencies);
 
@@ -180,7 +180,7 @@ func resolve(dependencies: Vec<Dependency>): Result<Solution, Error> {
     return Ok(solution);
 }
 
-func find_best_version(pkg: string, constraints: Vec<Constraint>): Result<Version, Error> {
+func find_best_version(pkg: string, constraints: Vec<Constraint>) -> Result<Version, Error> {
     var versions = registry.get_versions(pkg)?;
 
     // Filter by constraints
@@ -314,12 +314,12 @@ log = { version = "0.4", optional = true }
 import async_runtime;
 
 #[cfg(feature = "logging")]
-func log(msg: string): void {
+func log(msg: string) -> void {
     log.info(msg);
 }
 
 #[cfg(not(feature = "logging"))]
-func log(msg: string): void {
+func log(msg: string) -> void {
     // no-op
 }
 ```
@@ -342,7 +342,7 @@ import codegen;
 import std.env;
 import std.fs;
 
-func main(): i32 {
+func main() -> i32 {
     // Generate code
     var generated = codegen.generate_bindings("lib.h");
     fs.write("src/generated.w", generated)?;
@@ -515,7 +515,7 @@ version = "0.1.0"
 $ cat src/main.w
 import std;
 
-func main(): i32 {
+func main() -> i32 {
     std.print("Hello, World!\n");
     return 0;
 }

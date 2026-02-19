@@ -6,7 +6,7 @@ struct Counter {
     value: i64,
 }
 
-func make_counter(v: i64): Counter {
+func make_counter(v: i64) -> Counter {
     return new Counter { value: v };
 }
 

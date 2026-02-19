@@ -1,7 +1,7 @@
 // Expected: PASS: std_result
 // Test Result<T, E> from prelude — return Ok and Err, match on both
 
-func parse_number(s: string): Result<i64, string> {
+func parse_number(s: string) -> Result<i64, string> {
     if (s == "42") {
         return Result::Ok(42);
     }

@@ -5,7 +5,7 @@ struct Box {
     value: i64,
 }
 
-func main(): i32 {
+func main() -> i32 {
     if (true) {
         var b = new Box { value: 1 };
         if (b.value != 1) {

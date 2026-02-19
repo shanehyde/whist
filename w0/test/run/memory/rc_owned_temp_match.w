@@ -5,7 +5,7 @@ struct Wrapper {
     tag: i64,
 }
 
-func make_wrapper(t: i64): Wrapper {
+func make_wrapper(t: i64) -> Wrapper {
     return new Wrapper { tag: t };
 }
 

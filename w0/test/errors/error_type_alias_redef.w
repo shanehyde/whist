@@ -4,6 +4,6 @@
 type Foo = i64;
 type Foo = string;
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

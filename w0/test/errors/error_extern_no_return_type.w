@@ -5,6 +5,6 @@ private extern mylib {
     func foo(x: i32);
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

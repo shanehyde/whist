@@ -4,7 +4,7 @@
 
 import std;
 
-func make_greeting(name: string): string {
+func make_greeting(name: string) -> string {
     return "Hello, " + name + "!";
 }
 

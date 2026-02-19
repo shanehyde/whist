@@ -5,11 +5,11 @@
 
 import collections;
 
-func times_two(x: i64): i64 {
+func times_two(x: i64) -> i64 {
     return x * 2;
 }
 
-func is_big(x: i64): bool {
+func is_big(x: i64) -> bool {
     return x > 15;
 }
 
@@ -67,6 +67,6 @@ test "vec_each_basic" {
     assert(collected[4] == 5);
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

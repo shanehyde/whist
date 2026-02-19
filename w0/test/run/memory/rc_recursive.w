@@ -13,7 +13,7 @@ import time;
 //     }
 // }
 
-// func (Timer) timelapsed(): i64 {
+// func (Timer) timelapsed() -> i64 {
 //     return time.time_ms() - self.start;
 // }
 
@@ -24,7 +24,7 @@ import time;
 //     }
 // }
 
-func dostuff(i: i32) : void {
+func dostuff(i: i32) -> void {
     // var t = new Timer($"dostuff({i})");
     var v = new Vec<i32>{};
     // if (i <= 0) {

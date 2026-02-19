@@ -1,7 +1,7 @@
 // Expected error: No standalone method 'greet' found for type 'Dog'
 
 trait Greetable {
-    func greet(): string;
+    func greet() -> string;
 }
 
 struct Dog {
@@ -10,9 +10,9 @@ struct Dog {
 
 // Signature-only but no standalone method defined anywhere
 impl Greetable for Dog {
-    func greet(): string;
+    func greet() -> string;
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

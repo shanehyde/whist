@@ -3,7 +3,7 @@
 
 import std;
 
-func main(): i32 {
+func main() -> i32 {
     // This should work - abs_i64 is public in std
     var a = std::abs_i64(-5);
 

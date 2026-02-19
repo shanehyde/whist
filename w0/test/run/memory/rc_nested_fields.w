@@ -9,7 +9,7 @@ struct Outer {
     child: Inner,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var inner = new Inner { value: 42 };
     var outer = new Outer { child: inner };
     return 0;

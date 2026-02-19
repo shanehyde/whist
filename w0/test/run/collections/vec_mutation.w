@@ -6,7 +6,7 @@
 struct Point { x: i64, y: i64 }
 
 impl Eq for Point {
-    func eq(other: Point): bool {
+    func eq(other: Point) -> bool {
         return self.x == other.x && self.y == other.y;
     }
 }

@@ -80,39 +80,39 @@ var file = fs.open_with("data.txt", OpenOptions {
 
 ```whist
 // fs module functions
-func read(path: string): Result<Vec<u8>, IoError>;
-func read_to_string(path: string): Result<string, IoError>;
-func write(path: string, content: impl AsBytes): Result<void, IoError>;
-func append(path: string, content: impl AsBytes): Result<void, IoError>;
-func open(path: string, mode: OpenMode): Result<File, IoError>;
-func create(path: string): Result<File, IoError>;
+func read(path: string) -> Result<Vec<u8>, IoError>;
+func read_to_string(path: string) -> Result<string, IoError>;
+func write(path: string, content: impl AsBytes) -> Result<void, IoError>;
+func append(path: string, content: impl AsBytes) -> Result<void, IoError>;
+func open(path: string, mode: OpenMode) -> Result<File, IoError>;
+func create(path: string) -> Result<File, IoError>;
 
 // File struct
 struct File { ... }
 
 impl File {
     // Reading
-    func (File) read(buf: Span<u8>): Result<i64, IoError>;
-    func (File) read_exact(buf: Span<u8>): Result<void, IoError>;
-    func (File) read_to_end(): Result<Vec<u8>, IoError>;
-    func (File) read_to_string(): Result<string, IoError>;
-    func (File) read_line(): Result<string, IoError>;
+    func (File) read(buf: Span<u8>) -> Result<i64, IoError>;
+    func (File) read_exact(buf: Span<u8>) -> Result<void, IoError>;
+    func (File) read_to_end() -> Result<Vec<u8>, IoError>;
+    func (File) read_to_string() -> Result<string, IoError>;
+    func (File) read_line() -> Result<string, IoError>;
 
     // Writing
-    func (File) write(data: Span<u8>): Result<i64, IoError>;
-    func (File) write_all(data: Span<u8>): Result<void, IoError>;
-    func (File) flush(): Result<void, IoError>;
+    func (File) write(data: Span<u8>) -> Result<i64, IoError>;
+    func (File) write_all(data: Span<u8>) -> Result<void, IoError>;
+    func (File) flush() -> Result<void, IoError>;
 
     // Seeking
-    func (File) seek(pos: SeekFrom): Result<i64, IoError>;
-    func (File) position(): Result<i64, IoError>;
+    func (File) seek(pos: SeekFrom) -> Result<i64, IoError>;
+    func (File) position() -> Result<i64, IoError>;
 
     // Metadata
-    func (File) metadata(): Result<Metadata, IoError>;
-    func (File) set_permissions(perm: Permissions): Result<void, IoError>;
+    func (File) metadata() -> Result<Metadata, IoError>;
+    func (File) set_permissions(perm: Permissions) -> Result<void, IoError>;
 
     // Close
-    func (File) close(): void;
+    func (File) close() -> void;
 }
 
 enum OpenMode {
@@ -160,15 +160,15 @@ if fs.exists("config.txt") {
 ### API
 
 ```whist
-func create_dir(path: string): Result<void, IoError>;
-func create_dir_all(path: string): Result<void, IoError>;
-func remove_file(path: string): Result<void, IoError>;
-func remove_dir(path: string): Result<void, IoError>;
-func remove_dir_all(path: string): Result<void, IoError>;
-func read_dir(path: string): Result<Vec<DirEntry>, IoError>;
-func copy(from: string, to: string): Result<void, IoError>;
-func rename(from: string, to: string): Result<void, IoError>;
-func exists(path: string): bool;
+func create_dir(path: string) -> Result<void, IoError>;
+func create_dir_all(path: string) -> Result<void, IoError>;
+func remove_file(path: string) -> Result<void, IoError>;
+func remove_dir(path: string) -> Result<void, IoError>;
+func remove_dir_all(path: string) -> Result<void, IoError>;
+func read_dir(path: string) -> Result<Vec<DirEntry>, IoError>;
+func copy(from: string, to: string) -> Result<void, IoError>;
+func rename(from: string, to: string) -> Result<void, IoError>;
+func exists(path: string) -> bool;
 
 struct DirEntry {
     name: string,
@@ -200,9 +200,9 @@ print("Is symlink: {link_meta.is_symlink}\n");
 ### API
 
 ```whist
-func metadata(path: string): Result<Metadata, IoError>;
-func symlink_metadata(path: string): Result<Metadata, IoError>;
-func set_permissions(path: string, perm: Permissions): Result<void, IoError>;
+func metadata(path: string) -> Result<Metadata, IoError>;
+func symlink_metadata(path: string) -> Result<Metadata, IoError>;
+func set_permissions(path: string, perm: Permissions) -> Result<void, IoError>;
 
 struct Metadata {
     size: i64,
@@ -249,23 +249,23 @@ struct Path {
 }
 
 impl Path {
-    func from(s: string): Path;
-    func to_string(): string;
+    func from(s: string) -> Path;
+    func to_string() -> string;
 
-    func join(other: string): Path;
-    func parent(): ?Path;
-    func file_name(): ?string;
-    func extension(): ?string;
-    func stem(): ?string;
+    func join(other: string) -> Path;
+    func parent() -> ?Path;
+    func file_name() -> ?string;
+    func extension() -> ?string;
+    func stem() -> ?string;
 
-    func is_absolute(): bool;
-    func is_relative(): bool;
+    func is_absolute() -> bool;
+    func is_relative() -> bool;
 
-    func exists(): bool;
-    func is_file(): bool;
-    func is_dir(): bool;
+    func exists() -> bool;
+    func is_file() -> bool;
+    func is_dir() -> bool;
 
-    func components(): Iterator<string>;
+    func components() -> Iterator<string>;
 }
 ```
 
@@ -301,10 +301,10 @@ struct BufReader<R: Read> {
 }
 
 impl<R: Read> BufReader<R> {
-    func new(inner: R): BufReader<R>;
-    func with_capacity(cap: i64, inner: R): BufReader<R>;
-    func lines(): LinesIterator<R>;
-    func read_line(): Result<string, IoError>;
+    func new(inner: R) -> BufReader<R>;
+    func with_capacity(cap: i64, inner: R) -> BufReader<R>;
+    func lines() -> LinesIterator<R>;
+    func read_line() -> Result<string, IoError>;
 }
 
 struct BufWriter<W: Write> {
@@ -313,9 +313,9 @@ struct BufWriter<W: Write> {
 }
 
 impl<W: Write> BufWriter<W> {
-    func new(inner: W): BufWriter<W>;
-    func with_capacity(cap: i64, inner: W): BufWriter<W>;
-    func flush(): Result<void, IoError>;
+    func new(inner: W) -> BufWriter<W>;
+    func with_capacity(cap: i64, inner: W) -> BufWriter<W>;
+    func flush() -> Result<void, IoError>;
 }
 ```
 
@@ -323,37 +323,37 @@ impl<W: Write> BufWriter<W> {
 
 ```whist
 trait Read {
-    func read(buf: Span<u8>): Result<i64, IoError>;
+    func read(buf: Span<u8>) -> Result<i64, IoError>;
 
     // Provided
-    func read_exact(buf: Span<u8>): Result<void, IoError>;
-    func read_to_end(): Result<Vec<u8>, IoError>;
-    func read_to_string(): Result<string, IoError>;
+    func read_exact(buf: Span<u8>) -> Result<void, IoError>;
+    func read_to_end() -> Result<Vec<u8>, IoError>;
+    func read_to_string() -> Result<string, IoError>;
 }
 
 trait Write {
-    func write(buf: Span<u8>): Result<i64, IoError>;
-    func flush(): Result<void, IoError>;
+    func write(buf: Span<u8>) -> Result<i64, IoError>;
+    func flush() -> Result<void, IoError>;
 
     // Provided
-    func write_all(buf: Span<u8>): Result<void, IoError>;
+    func write_all(buf: Span<u8>) -> Result<void, IoError>;
 }
 
 trait Seek {
-    func seek(pos: SeekFrom): Result<i64, IoError>;
+    func seek(pos: SeekFrom) -> Result<i64, IoError>;
 
     // Provided
-    func rewind(): Result<void, IoError>;
-    func position(): Result<i64, IoError>;
+    func rewind() -> Result<void, IoError>;
+    func position() -> Result<i64, IoError>;
 }
 
 trait BufRead: Read {
-    func fill_buf(): Result<Span<u8>, IoError>;
-    func consume(amt: i64): void;
+    func fill_buf() -> Result<Span<u8>, IoError>;
+    func consume(amt: i64) -> void;
 
     // Provided
-    func read_line(): Result<string, IoError>;
-    func lines(): LinesIterator;
+    func read_line() -> Result<string, IoError>;
+    func lines() -> LinesIterator;
 }
 ```
 
@@ -393,8 +393,8 @@ enum IoError {
 }
 
 impl IoError {
-    func kind(): IoErrorKind;
-    func message(): string;
+    func kind() -> IoErrorKind;
+    func message() -> string;
 }
 
 // Usage
@@ -452,7 +452,7 @@ foreach event in watcher.events() {
 import fs;
 import io;
 
-func count_lines(path: string): Result<i64, IoError> {
+func count_lines(path: string) -> Result<i64, IoError> {
     var file = fs.open(path, OpenMode::Read)?;
     var reader = io.BufReader::new(file);
 
@@ -469,7 +469,7 @@ func count_lines(path: string): Result<i64, IoError> {
 ### Copy File with Progress
 
 ```whist
-func copy_with_progress(src: string, dst: string): Result<void, IoError> {
+func copy_with_progress(src: string, dst: string) -> Result<void, IoError> {
     var meta = fs.metadata(src)?;
     var total = meta.size;
     var copied = 0;
@@ -497,7 +497,7 @@ func copy_with_progress(src: string, dst: string): Result<void, IoError> {
 ### Process Config File
 
 ```whist
-func load_config(path: string): Result<Config, Error> {
+func load_config(path: string) -> Result<Config, Error> {
     var content = fs.read_to_string(path)
         .map_err(|e| Error::Io(e))?;
 

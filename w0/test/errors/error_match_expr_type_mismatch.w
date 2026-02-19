@@ -5,7 +5,7 @@ enum Flag {
     No,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var x = match (Flag::Yes) {
         Yes => 1,
         No => "no",
