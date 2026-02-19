@@ -91,7 +91,7 @@ static void infer_type_param(Checker* checker, GenericFuncDef* def, Node* param_
         return;
     }
 
-    // Function type: func(T1, T2): R
+    // Function type: func(T1, T2) -> R
     if (param_type->type == NODE_FUNC_TYPE && arg_type->kind == TYPE_FUNC) {
         int n = param_type->as.func_type.param_types.count;
         if (n == arg_type->as.func.param_count) {

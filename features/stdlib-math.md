@@ -70,19 +70,19 @@ math.rem_euclid(7, 3)   // 1 (Euclidean remainder)
 
 ```whist
 // Generic over numeric types
-func abs<T: Signed>(x: T): T;
-func min<T: Ord>(a: T, b: T): T;
-func max<T: Ord>(a: T, b: T): T;
-func clamp<T: Ord>(x: T, lo: T, hi: T): T;
+func abs<T: Signed>(x: T) -> T;
+func min<T: Ord>(a: T, b: T) -> T;
+func max<T: Ord>(a: T, b: T) -> T;
+func clamp<T: Ord>(x: T, lo: T, hi: T) -> T;
 
 // Integer specific
-func gcd(a: i64, b: i64): i64;
-func lcm(a: i64, b: i64): i64;
-func factorial(n: i64): i64;
+func gcd(a: i64, b: i64) -> i64;
+func lcm(a: i64, b: i64) -> i64;
+func factorial(n: i64) -> i64;
 
 // Float specific
-func sign(x: f64): f64;
-func copysign(magnitude: f64, sign: f64): f64;
+func sign(x: f64) -> f64;
+func copysign(magnitude: f64, sign: f64) -> f64;
 ```
 
 ## Rounding
@@ -107,15 +107,15 @@ math.fract(3.7)     // 0.7
 ### API
 
 ```whist
-func floor(x: f64): f64;
-func ceil(x: f64): f64;
-func round(x: f64): f64;
-func trunc(x: f64): f64;
-func fract(x: f64): f64;
+func floor(x: f64) -> f64;
+func ceil(x: f64) -> f64;
+func round(x: f64) -> f64;
+func trunc(x: f64) -> f64;
+func fract(x: f64) -> f64;
 
-func floor_i64(x: f64): i64;
-func ceil_i64(x: f64): i64;
-func round_i64(x: f64): i64;
+func floor_i64(x: f64) -> i64;
+func ceil_i64(x: f64) -> i64;
+func round_i64(x: f64) -> i64;
 ```
 
 ## Powers and Roots
@@ -150,22 +150,22 @@ math.hypot(3.0, 4.0) // 5.0 (sqrt(a² + b²))
 ### API
 
 ```whist
-func sqrt(x: f64): f64;
-func cbrt(x: f64): f64;
-func pow(base: f64, exp: f64): f64;
-func powi(base: f64, exp: i32): f64;
+func sqrt(x: f64) -> f64;
+func cbrt(x: f64) -> f64;
+func pow(base: f64, exp: f64) -> f64;
+func powi(base: f64, exp: i32) -> f64;
 
-func exp(x: f64): f64;
-func exp2(x: f64): f64;
-func expm1(x: f64): f64;
+func exp(x: f64) -> f64;
+func exp2(x: f64) -> f64;
+func expm1(x: f64) -> f64;
 
-func ln(x: f64): f64;
-func log2(x: f64): f64;
-func log10(x: f64): f64;
-func log(x: f64, base: f64): f64;
-func ln1p(x: f64): f64;
+func ln(x: f64) -> f64;
+func log2(x: f64) -> f64;
+func log10(x: f64) -> f64;
+func log(x: f64, base: f64) -> f64;
+func ln1p(x: f64) -> f64;
 
-func hypot(a: f64, b: f64): f64;
+func hypot(a: f64, b: f64) -> f64;
 ```
 
 ## Trigonometry
@@ -195,19 +195,19 @@ var (s, c) = math.sincos(angle);
 ### API
 
 ```whist
-func sin(x: f64): f64;
-func cos(x: f64): f64;
-func tan(x: f64): f64;
+func sin(x: f64) -> f64;
+func cos(x: f64) -> f64;
+func tan(x: f64) -> f64;
 
-func asin(x: f64): f64;
-func acos(x: f64): f64;
-func atan(x: f64): f64;
-func atan2(y: f64, x: f64): f64;
+func asin(x: f64) -> f64;
+func acos(x: f64) -> f64;
+func atan(x: f64) -> f64;
+func atan2(y: f64, x: f64) -> f64;
 
-func sincos(x: f64): (f64, f64);
+func sincos(x: f64) -> (f64, f64);
 
-func to_radians(degrees: f64): f64;
-func to_degrees(radians: f64): f64;
+func to_radians(degrees: f64) -> f64;
+func to_degrees(radians: f64) -> f64;
 ```
 
 ## Hyperbolic Functions
@@ -266,26 +266,26 @@ random.sample(array, 5)   // 5 random elements (no replacement)
 
 ```whist
 // Global RNG (thread-local, auto-seeded)
-func random(): f64;
-func random_i64(): i64;
-func random_range(lo: i64, hi: i64): i64;
-func random_bool(): bool;
-func shuffle<T>(items: Span<T>): void;
-func choice<T>(items: Span<T>): ?T;
-func sample<T>(items: Span<T>, n: i64): Vec<T>;
+func random() -> f64;
+func random_i64() -> i64;
+func random_range(lo: i64, hi: i64) -> i64;
+func random_bool() -> bool;
+func shuffle<T>(items: Span<T>) -> void;
+func choice<T>(items: Span<T>) -> ?T;
+func sample<T>(items: Span<T>, n: i64) -> Vec<T>;
 
 // Seeded RNG
 struct Rng { ... }
 
 impl Rng {
-    func seed(s: u64): Rng;
-    func from_entropy(): Rng;
+    func seed(s: u64) -> Rng;
+    func from_entropy() -> Rng;
 
-    func (Rng) next_u64(): u64;
-    func (Rng) next_i64(): i64;
-    func (Rng) next_f64(): f64;
-    func (Rng) next_range(lo: i64, hi: i64): i64;
-    func (Rng) next_bool(): bool;
+    func (Rng) next_u64() -> u64;
+    func (Rng) next_i64() -> i64;
+    func (Rng) next_f64() -> f64;
+    func (Rng) next_range(lo: i64, hi: i64) -> i64;
+    func (Rng) next_bool() -> bool;
 }
 
 // Distributions (optional)
@@ -328,30 +328,30 @@ a.is_negative()
 struct BigInt { ... }
 
 impl BigInt {
-    func from(n: i64): BigInt;
-    func parse(s: string): Result<BigInt, ParseError>;
+    func from(n: i64) -> BigInt;
+    func parse(s: string) -> Result<BigInt, ParseError>;
 
-    func (BigInt) to_i64(): ?i64;  // None if too big
-    func (BigInt) to_string(): string;
+    func (BigInt) to_i64() -> ?i64;  // None if too big
+    func (BigInt) to_string() -> string;
 
     // Arithmetic (operators also available)
-    func (BigInt) add(other: BigInt): BigInt;
-    func (BigInt) sub(other: BigInt): BigInt;
-    func (BigInt) mul(other: BigInt): BigInt;
-    func (BigInt) div(other: BigInt): BigInt;
-    func (BigInt) rem(other: BigInt): BigInt;
-    func (BigInt) pow(exp: u32): BigInt;
+    func (BigInt) add(other: BigInt) -> BigInt;
+    func (BigInt) sub(other: BigInt) -> BigInt;
+    func (BigInt) mul(other: BigInt) -> BigInt;
+    func (BigInt) div(other: BigInt) -> BigInt;
+    func (BigInt) rem(other: BigInt) -> BigInt;
+    func (BigInt) pow(exp: u32) -> BigInt;
 
     // Comparison
-    func (BigInt) cmp(other: BigInt): Ordering;
-    func (BigInt) abs(): BigInt;
-    func (BigInt) is_negative(): bool;
-    func (BigInt) is_zero(): bool;
+    func (BigInt) cmp(other: BigInt) -> Ordering;
+    func (BigInt) abs() -> BigInt;
+    func (BigInt) is_negative() -> bool;
+    func (BigInt) is_zero() -> bool;
 
     // Number theory
-    func (BigInt) gcd(other: BigInt): BigInt;
-    func (BigInt) lcm(other: BigInt): BigInt;
-    func (BigInt) mod_pow(exp: BigInt, modulus: BigInt): BigInt;
+    func (BigInt) gcd(other: BigInt) -> BigInt;
+    func (BigInt) lcm(other: BigInt) -> BigInt;
+    func (BigInt) mod_pow(exp: BigInt, modulus: BigInt) -> BigInt;
 }
 ```
 
@@ -370,7 +370,7 @@ var quotient = z1 / z2;
 
 // Properties
 z1.abs()      // Magnitude: 5.0
-z1.arg()      // Argument (angle): 0.927...
+z1.arg()      // Argument (angle) -> 0.927...
 z1.conj()     // Conjugate: 3 - 4i
 z1.norm()     // |z|²: 25.0
 
@@ -391,22 +391,22 @@ struct Complex {
 }
 
 impl Complex {
-    func new(re: f64, im: f64): Complex;
-    func from_polar(r: f64, theta: f64): Complex;
+    func new(re: f64, im: f64) -> Complex;
+    func from_polar(r: f64, theta: f64) -> Complex;
 
-    func (Complex) abs(): f64;
-    func (Complex) arg(): f64;
-    func (Complex) norm(): f64;
-    func (Complex) conj(): Complex;
+    func (Complex) abs() -> f64;
+    func (Complex) arg() -> f64;
+    func (Complex) norm() -> f64;
+    func (Complex) conj() -> Complex;
 
-    func (Complex) sqrt(): Complex;
-    func (Complex) exp(): Complex;
-    func (Complex) ln(): Complex;
-    func (Complex) pow(exp: Complex): Complex;
+    func (Complex) sqrt() -> Complex;
+    func (Complex) exp() -> Complex;
+    func (Complex) ln() -> Complex;
+    func (Complex) pow(exp: Complex) -> Complex;
 
-    func (Complex) sin(): Complex;
-    func (Complex) cos(): Complex;
-    func (Complex) tan(): Complex;
+    func (Complex) sin() -> Complex;
+    func (Complex) cos() -> Complex;
+    func (Complex) tan() -> Complex;
 }
 
 const I: Complex = Complex { re: 0.0, im: 1.0 };
@@ -441,7 +441,7 @@ var transformed = m.transform_point(point);
 ```whist
 import math;
 
-func solve_quadratic(a: f64, b: f64, c: f64): ?((f64, f64)) {
+func solve_quadratic(a: f64, b: f64, c: f64) -> ?((f64, f64)) {
     var discriminant = b * b - 4.0 * a * c;
 
     if discriminant < 0.0 {
@@ -463,7 +463,7 @@ import math;
 
 struct Point { x: f64, y: f64 }
 
-func distance(p1: Point, p2: Point): f64 {
+func distance(p1: Point, p2: Point) -> f64 {
     var dx = p2.x - p1.x;
     var dy = p2.y - p1.y;
     return math.hypot(dx, dy);
@@ -475,7 +475,7 @@ func distance(p1: Point, p2: Point): f64 {
 ```whist
 import random;
 
-func estimate_pi(samples: i64): f64 {
+func estimate_pi(samples: i64) -> f64 {
     var inside = 0;
 
     foreach _ in 0..samples {
@@ -495,7 +495,7 @@ func estimate_pi(samples: i64): f64 {
 ```whist
 import math;
 
-func is_prime(n: i64): bool {
+func is_prime(n: i64) -> bool {
     if n < 2 { return false; }
     if n == 2 { return true; }
     if n % 2 == 0 { return false; }

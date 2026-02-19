@@ -1,6 +1,6 @@
 import std;
 
-func main(): i32 {
+func main() -> i32 {
     var args = std::args();
 
     if (args.count < 1) {

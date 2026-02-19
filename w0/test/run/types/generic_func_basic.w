@@ -1,6 +1,6 @@
 // Expected: PASS: generic_func_basic
 
-func identity<T>(x: T): T {
+func identity<T>(x: T) -> T {
     return x;
 }
 

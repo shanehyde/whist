@@ -5,7 +5,7 @@
 // Expected: PASS: closure_copy_lifetime
 // Expected: PASS: closure_uninitialized_then_assign
 
-func apply(f: func(i64): i64, x: i64): i64 {
+func apply(f: func(i64) -> i64, x: i64) -> i64 {
     return f(x);
 }
 
@@ -41,7 +41,7 @@ test "closure_nested_transitive_capture" {
 }
 
 test "closure_copy_lifetime" {
-    var out: func(i64): i64 = null;
+    var out: func(i64) -> i64 = null;
     {
         var base: i64 = 40;
         var src = |x: i64| -> i64 x + base;
@@ -52,7 +52,7 @@ test "closure_copy_lifetime" {
 }
 
 test "closure_uninitialized_then_assign" {
-    var f: func(i64): i64;
+    var f: func(i64) -> i64;
     var n: i64 = 2;
     f = |x: i64| -> i64 x + n;
     assert(f(3) == 5);

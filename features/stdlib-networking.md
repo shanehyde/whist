@@ -51,7 +51,7 @@ foreach stream in listener.incoming() {
     };
 }
 
-func handle_client(stream: TcpStream): void {
+func handle_client(stream: TcpStream) -> void {
     var request = stream.read_to_string()?;
     stream.write("HTTP/1.1 200 OK\r\n\r\nHello!")?;
 }
@@ -64,35 +64,35 @@ struct TcpStream { ... }
 
 impl TcpStream {
     // Connection
-    func connect(addr: string): Result<TcpStream, NetError>;
-    func connect_timeout(addr: string, timeout: Duration): Result<TcpStream, NetError>;
+    func connect(addr: string) -> Result<TcpStream, NetError>;
+    func connect_timeout(addr: string, timeout: Duration) -> Result<TcpStream, NetError>;
 
     // I/O (implements Read + Write)
-    func read(buf: Span<u8>): Result<i64, NetError>;
-    func write(data: Span<u8>): Result<i64, NetError>;
-    func flush(): Result<void, NetError>;
+    func read(buf: Span<u8>) -> Result<i64, NetError>;
+    func write(data: Span<u8>) -> Result<i64, NetError>;
+    func flush() -> Result<void, NetError>;
 
     // Info
-    func peer_addr(): SocketAddr;
-    func local_addr(): SocketAddr;
+    func peer_addr() -> SocketAddr;
+    func local_addr() -> SocketAddr;
 
     // Options
-    func set_read_timeout(timeout: ?Duration): Result<void, NetError>;
-    func set_write_timeout(timeout: ?Duration): Result<void, NetError>;
-    func set_nodelay(nodelay: bool): Result<void, NetError>;
+    func set_read_timeout(timeout: ?Duration) -> Result<void, NetError>;
+    func set_write_timeout(timeout: ?Duration) -> Result<void, NetError>;
+    func set_nodelay(nodelay: bool) -> Result<void, NetError>;
 
     // Shutdown
-    func shutdown(how: Shutdown): Result<void, NetError>;
-    func close(): void;
+    func shutdown(how: Shutdown) -> Result<void, NetError>;
+    func close() -> void;
 }
 
 struct TcpListener { ... }
 
 impl TcpListener {
-    func bind(addr: string): Result<TcpListener, NetError>;
-    func accept(): Result<(TcpStream, SocketAddr), NetError>;
-    func incoming(): Iterator<Result<TcpStream, NetError>>;
-    func local_addr(): SocketAddr;
+    func bind(addr: string) -> Result<TcpListener, NetError>;
+    func accept() -> Result<(TcpStream, SocketAddr), NetError>;
+    func incoming() -> Iterator<Result<TcpStream, NetError>>;
+    func local_addr() -> SocketAddr;
 }
 
 enum Shutdown {
@@ -131,24 +131,24 @@ var data = socket.recv(buf)?;
 struct UdpSocket { ... }
 
 impl UdpSocket {
-    func bind(addr: string): Result<UdpSocket, NetError>;
+    func bind(addr: string) -> Result<UdpSocket, NetError>;
 
     // Unconnected
-    func send_to(data: Span<u8>, addr: string): Result<i64, NetError>;
-    func recv_from(buf: Span<u8>): Result<(i64, SocketAddr), NetError>;
+    func send_to(data: Span<u8>, addr: string) -> Result<i64, NetError>;
+    func recv_from(buf: Span<u8>) -> Result<(i64, SocketAddr), NetError>;
 
     // Connected
-    func connect(addr: string): Result<void, NetError>;
-    func send(data: Span<u8>): Result<i64, NetError>;
-    func recv(buf: Span<u8>): Result<i64, NetError>;
+    func connect(addr: string) -> Result<void, NetError>;
+    func send(data: Span<u8>) -> Result<i64, NetError>;
+    func recv(buf: Span<u8>) -> Result<i64, NetError>;
 
     // Info
-    func local_addr(): SocketAddr;
-    func peer_addr(): Result<SocketAddr, NetError>;
+    func local_addr() -> SocketAddr;
+    func peer_addr() -> Result<SocketAddr, NetError>;
 
     // Options
-    func set_broadcast(broadcast: bool): Result<void, NetError>;
-    func set_ttl(ttl: i32): Result<void, NetError>;
+    func set_broadcast(broadcast: bool) -> Result<void, NetError>;
+    func set_ttl(ttl: i32) -> Result<void, NetError>;
 }
 ```
 
@@ -247,45 +247,45 @@ var resp2 = client.get("https://api.example.com/b").send()?;
 
 ```whist
 // Convenience functions
-func get(url: string): RequestBuilder;
-func post(url: string): RequestBuilder;
-func put(url: string): RequestBuilder;
-func delete(url: string): RequestBuilder;
-func head(url: string): RequestBuilder;
+func get(url: string) -> RequestBuilder;
+func post(url: string) -> RequestBuilder;
+func put(url: string) -> RequestBuilder;
+func delete(url: string) -> RequestBuilder;
+func head(url: string) -> RequestBuilder;
 
 struct Client { ... }
 
 impl Client {
-    func new(): Client;
-    func with_config(config: ClientConfig): Client;
+    func new() -> Client;
+    func with_config(config: ClientConfig) -> Client;
 
-    func request(method: Method, url: string): RequestBuilder;
-    func get(url: string): RequestBuilder;
-    func post(url: string): RequestBuilder;
+    func request(method: Method, url: string) -> RequestBuilder;
+    func get(url: string) -> RequestBuilder;
+    func post(url: string) -> RequestBuilder;
     // ...
 }
 
 struct RequestBuilder { ... }
 
 impl RequestBuilder {
-    func header(key: string, value: string): RequestBuilder;
-    func headers(headers: HashMap<string, string>): RequestBuilder;
-    func body(body: string): RequestBuilder;
-    func json<T: Serialize>(value: T): Result<RequestBuilder, Error>;
-    func form(data: HashMap<string, string>): RequestBuilder;
-    func query(params: HashMap<string, string>): RequestBuilder;
-    func timeout(timeout: Duration): RequestBuilder;
-    func send(): Result<Response, HttpError>;
+    func header(key: string, value: string) -> RequestBuilder;
+    func headers(headers: HashMap<string, string>) -> RequestBuilder;
+    func body(body: string) -> RequestBuilder;
+    func json<T: Serialize>(value: T) -> Result<RequestBuilder, Error>;
+    func form(data: HashMap<string, string>) -> RequestBuilder;
+    func query(params: HashMap<string, string>) -> RequestBuilder;
+    func timeout(timeout: Duration) -> RequestBuilder;
+    func send() -> Result<Response, HttpError>;
 }
 
 struct Response { ... }
 
 impl Response {
-    func status(): StatusCode;
-    func headers(): Headers;
-    func text(): Result<string, HttpError>;
-    func bytes(): Result<Vec<u8>, HttpError>;
-    func json<T: Deserialize>(): Result<T, HttpError>;
+    func status() -> StatusCode;
+    func headers() -> Headers;
+    func text() -> Result<string, HttpError>;
+    func bytes() -> Result<Vec<u8>, HttpError>;
+    func json<T: Deserialize>() -> Result<T, HttpError>;
 }
 
 struct StatusCode {
@@ -293,10 +293,10 @@ struct StatusCode {
 }
 
 impl StatusCode {
-    func is_success(): bool;      // 200-299
-    func is_redirect(): bool;     // 300-399
-    func is_client_error(): bool; // 400-499
-    func is_server_error(): bool; // 500-599
+    func is_success() -> bool;      // 200-299
+    func is_redirect() -> bool;     // 300-399
+    func is_client_error() -> bool; // 400-499
+    func is_server_error() -> bool; // 500-599
 }
 
 enum Method {
@@ -366,18 +366,18 @@ struct Url {
 }
 
 impl Url {
-    func parse(s: string): Result<Url, ParseError>;
-    func to_string(): string;
-    func join(path: string): Result<Url, ParseError>;
+    func parse(s: string) -> Result<Url, ParseError>;
+    func to_string() -> string;
+    func join(path: string) -> Result<Url, ParseError>;
 
-    func query_pairs(): Iterator<(string, string)>;
-    func set_query_param(key: string, value: string): void;
+    func query_pairs() -> Iterator<(string, string)>;
+    func set_query_param(key: string, value: string) -> void;
 }
 
 // URL encoding
-func encode(s: string): string;           // "hello world" -> "hello%20world"
-func decode(s: string): Result<string, Error>;
-func encode_component(s: string): string; // More aggressive encoding
+func encode(s: string) -> string;           // "hello world" -> "hello%20world"
+func decode(s: string) -> Result<string, Error>;
+func encode_component(s: string) -> string; // More aggressive encoding
 ```
 
 ## Error Types
@@ -422,7 +422,7 @@ struct ApiClient {
 }
 
 impl ApiClient {
-    func new(base_url: string): ApiClient {
+    func new(base_url: string) -> ApiClient {
         return ApiClient {
             base_url: base_url,
             client: http.Client::new(),
@@ -430,7 +430,7 @@ impl ApiClient {
         };
     }
 
-    func (ApiClient) authenticate(username: string, password: string): Result<void, Error> {
+    func (ApiClient) authenticate(username: string, password: string) -> Result<void, Error> {
         var response = self.client
             .post("{self.base_url}/auth/login")
             .json(LoginRequest { username, password })?
@@ -445,7 +445,7 @@ impl ApiClient {
         return Ok(());
     }
 
-    func (ApiClient) get_users(): Result<Vec<User>, Error> {
+    func (ApiClient) get_users() -> Result<Vec<User>, Error> {
         var req = self.client.get("{self.base_url}/users");
 
         if let Some(token) = self.token {
@@ -464,7 +464,7 @@ impl ApiClient {
 import net;
 import io;
 
-func main(): Result<void, Error> {
+func main() -> Result<void, Error> {
     var listener = net.TcpListener::bind("127.0.0.1:7878")?;
     print("Echo server listening on port 7878\n");
 
@@ -492,7 +492,7 @@ func main(): Result<void, Error> {
 import http;
 import url;
 
-func shorten_url(long_url: string): Result<string, Error> {
+func shorten_url(long_url: string) -> Result<string, Error> {
     var response = http.post("https://api.short.io/links")
         .header("Authorization", "Bearer {API_KEY}")
         .json(CreateLinkRequest {

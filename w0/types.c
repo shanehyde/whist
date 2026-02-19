@@ -532,7 +532,7 @@ const char* type_name(Type* type) {
         }
         n += snprintf(buf + n, 256 - n, ")");
         if (type->as.func.return_type && type->as.func.return_type->kind != TYPE_VOID) {
-            snprintf(buf + n, 256 - n, ": %s", type_name(type->as.func.return_type));
+            snprintf(buf + n, 256 - n, " -> %s", type_name(type->as.func.return_type));
         }
         return buf;
     }

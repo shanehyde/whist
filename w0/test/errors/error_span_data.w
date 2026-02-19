@@ -1,7 +1,7 @@
 // Error test: accessing .data field on span should fail
 // Expected error: Span 'data' field is private; use indexing
 
-func main(): i32 {
+func main() -> i32 {
     var arr: [5]i64;
     arr[0] = 1;
     var s: Span<i64> = arr[:];

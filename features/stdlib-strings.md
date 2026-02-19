@@ -29,22 +29,22 @@ var multiline: string = "Line 1\nLine 2\nLine 3";
 ```whist
 impl string {
     // Length
-    func (string) len(): i64;           // Byte length
-    func (string) chars(): i64;         // Character count
-    func (string) is_empty(): bool;
+    func (string) len() -> i64;           // Byte length
+    func (string) chars() -> i64;         // Character count
+    func (string) is_empty() -> bool;
 
     // Access
-    func (string) char_at(index: i64): ?char;
-    func (string) byte_at(index: i64): ?u8;
+    func (string) char_at(index: i64) -> ?char;
+    func (string) byte_at(index: i64) -> ?u8;
 
     // Slicing
-    func (string) slice(start: i64, end: i64): string;
-    func (string) substring(start: i64, len: i64): string;
+    func (string) slice(start: i64, end: i64) -> string;
+    func (string) substring(start: i64, len: i64) -> string;
 
     // Comparison
-    func (string) eq(other: string): bool;
-    func (string) eq_ignore_case(other: string): bool;
-    func (string) cmp(other: string): Ordering;
+    func (string) eq(other: string) -> bool;
+    func (string) eq_ignore_case(other: string) -> bool;
+    func (string) cmp(other: string) -> Ordering;
 }
 ```
 
@@ -70,20 +70,20 @@ print(emoji.chars());   // 7 (characters)
 ```whist
 impl string {
     // Contains
-    func (string) contains(needle: string): bool;
-    func (string) contains_char(c: char): bool;
+    func (string) contains(needle: string) -> bool;
+    func (string) contains_char(c: char) -> bool;
 
     // Position
-    func (string) find(needle: string): ?i64;
-    func (string) rfind(needle: string): ?i64;
-    func (string) find_char(c: char): ?i64;
+    func (string) find(needle: string) -> ?i64;
+    func (string) rfind(needle: string) -> ?i64;
+    func (string) find_char(c: char) -> ?i64;
 
     // Prefix/Suffix
-    func (string) starts_with(prefix: string): bool;
-    func (string) ends_with(suffix: string): bool;
+    func (string) starts_with(prefix: string) -> bool;
+    func (string) ends_with(suffix: string) -> bool;
 
     // Count
-    func (string) count(needle: string): i64;
+    func (string) count(needle: string) -> i64;
 }
 ```
 
@@ -105,36 +105,36 @@ print(s.count("l"));            // 3
 ```whist
 impl string {
     // Case
-    func (string) to_upper(): string;
-    func (string) to_lower(): string;
-    func (string) to_title(): string;     // Title Case
-    func (string) capitalize(): string;   // First char upper
+    func (string) to_upper() -> string;
+    func (string) to_lower() -> string;
+    func (string) to_title() -> string;     // Title Case
+    func (string) capitalize() -> string;   // First char upper
 
     // Trimming
-    func (string) trim(): string;
-    func (string) trim_start(): string;
-    func (string) trim_end(): string;
-    func (string) trim_chars(chars: string): string;
+    func (string) trim() -> string;
+    func (string) trim_start() -> string;
+    func (string) trim_end() -> string;
+    func (string) trim_chars(chars: string) -> string;
 
     // Padding
-    func (string) pad_start(len: i64, c: char): string;
-    func (string) pad_end(len: i64, c: char): string;
-    func (string) center(len: i64, c: char): string;
+    func (string) pad_start(len: i64, c: char) -> string;
+    func (string) pad_end(len: i64, c: char) -> string;
+    func (string) center(len: i64, c: char) -> string;
 
     // Replace
-    func (string) replace(from: string, to: string): string;
-    func (string) replace_first(from: string, to: string): string;
-    func (string) replace_n(from: string, to: string, n: i64): string;
+    func (string) replace(from: string, to: string) -> string;
+    func (string) replace_first(from: string, to: string) -> string;
+    func (string) replace_n(from: string, to: string, n: i64) -> string;
 
     // Remove
-    func (string) remove_prefix(prefix: string): string;
-    func (string) remove_suffix(suffix: string): string;
+    func (string) remove_prefix(prefix: string) -> string;
+    func (string) remove_suffix(suffix: string) -> string;
 
     // Repeat
-    func (string) repeat(n: i64): string;
+    func (string) repeat(n: i64) -> string;
 
     // Reverse
-    func (string) reverse(): string;
+    func (string) reverse() -> string;
 }
 ```
 
@@ -162,21 +162,21 @@ print("hello".reverse());           // "olleh"
 ```whist
 impl string {
     // Split
-    func (string) split(sep: string): Vec<string>;
-    func (string) split_n(sep: string, n: i64): Vec<string>;
-    func (string) split_whitespace(): Vec<string>;
-    func (string) lines(): Vec<string>;
+    func (string) split(sep: string) -> Vec<string>;
+    func (string) split_n(sep: string, n: i64) -> Vec<string>;
+    func (string) split_whitespace() -> Vec<string>;
+    func (string) lines() -> Vec<string>;
 
     // Split (lazy iterator versions)
-    func (string) split_iter(sep: string): SplitIterator;
-    func (string) lines_iter(): LinesIterator;
+    func (string) split_iter(sep: string) -> SplitIterator;
+    func (string) lines_iter() -> LinesIterator;
 
     // Join (on Vec<string>)
     // Note: This is on the collection, not on string
 }
 
 impl Vec<string> {
-    func (Vec<string>) join(sep: string): string;
+    func (Vec<string>) join(sep: string) -> string;
 }
 ```
 
@@ -205,26 +205,26 @@ foreach line in text.lines_iter() {
 ```whist
 impl string {
     // Iteration
-    func (string) chars_iter(): CharIterator;
-    func (string) bytes_iter(): ByteIterator;
-    func (string) char_indices(): CharIndexIterator;
+    func (string) chars_iter() -> CharIterator;
+    func (string) bytes_iter() -> ByteIterator;
+    func (string) char_indices() -> CharIndexIterator;
 
     // Conversion
-    func (string) as_bytes(): Span<u8>;
-    func from_utf8(bytes: Span<u8>): Result<string, Utf8Error>;
-    func from_utf8_lossy(bytes: Span<u8>): string;
+    func (string) as_bytes() -> Span<u8>;
+    func from_utf8(bytes: Span<u8>) -> Result<string, Utf8Error>;
+    func from_utf8_lossy(bytes: Span<u8>) -> string;
 }
 
 impl char {
-    func (char) to_string(): string;
-    func (char) is_alphabetic(): bool;
-    func (char) is_numeric(): bool;
-    func (char) is_alphanumeric(): bool;
-    func (char) is_whitespace(): bool;
-    func (char) is_uppercase(): bool;
-    func (char) is_lowercase(): bool;
-    func (char) to_uppercase(): char;
-    func (char) to_lowercase(): char;
+    func (char) to_string() -> string;
+    func (char) is_alphabetic() -> bool;
+    func (char) is_numeric() -> bool;
+    func (char) is_alphanumeric() -> bool;
+    func (char) is_whitespace() -> bool;
+    func (char) is_uppercase() -> bool;
+    func (char) is_lowercase() -> bool;
+    func (char) to_uppercase() -> char;
+    func (char) to_lowercase() -> char;
 }
 ```
 
@@ -249,10 +249,10 @@ var back = string.from_utf8(bytes)?;
 
 ```whist
 impl string {
-    func (string) parse_i64(): Result<i64, ParseError>;
-    func (string) parse_f64(): Result<f64, ParseError>;
-    func (string) parse_bool(): Result<bool, ParseError>;
-    func (string) parse<T: FromStr>(): Result<T, T::Error>;
+    func (string) parse_i64() -> Result<i64, ParseError>;
+    func (string) parse_f64() -> Result<f64, ParseError>;
+    func (string) parse_bool() -> Result<bool, ParseError>;
+    func (string) parse<T: FromStr>() -> Result<T, T::Error>;
 }
 ```
 
@@ -271,7 +271,7 @@ var point = "10,20".parse::<Point>()?;
 
 ```whist
 trait ToString {
-    func to_string(): string;
+    func to_string() -> string;
 }
 
 // Built-in implementations
@@ -298,19 +298,19 @@ struct StringBuilder {
 }
 
 impl StringBuilder {
-    func new(): StringBuilder;
-    func with_capacity(cap: i64): StringBuilder;
+    func new() -> StringBuilder;
+    func with_capacity(cap: i64) -> StringBuilder;
 
-    func (StringBuilder) append(s: string): void;
-    func (StringBuilder) append_char(c: char): void;
-    func (StringBuilder) append_line(s: string): void;
-    func (StringBuilder) append_format(fmt: string, args: ...): void;
+    func (StringBuilder) append(s: string) -> void;
+    func (StringBuilder) append_char(c: char) -> void;
+    func (StringBuilder) append_line(s: string) -> void;
+    func (StringBuilder) append_format(fmt: string, args: ...) -> void;
 
-    func (StringBuilder) len(): i64;
-    func (StringBuilder) capacity(): i64;
-    func (StringBuilder) clear(): void;
+    func (StringBuilder) len() -> i64;
+    func (StringBuilder) capacity() -> i64;
+    func (StringBuilder) clear() -> void;
 
-    func (StringBuilder) to_string(): string;
+    func (StringBuilder) to_string() -> string;
 }
 ```
 
@@ -351,7 +351,7 @@ print("Pi: {pi:.2}");  // "Pi: 3.14"
 ### Format Function
 
 ```whist
-func format(template: string, args: ...): string;
+func format(template: string, args: ...) -> string;
 
 var s = format("Hello, {}!", "World");
 var s = format("{} + {} = {}", 1, 2, 3);
@@ -455,7 +455,7 @@ var result = re.replace_all("a1b2c3", "X");  // "aXbXcX"
 ### Parse CSV Line
 
 ```whist
-func parse_csv_line(line: string): Vec<string> {
+func parse_csv_line(line: string) -> Vec<string> {
     var fields = Vec::new();
     var current = StringBuilder::new();
     var in_quotes = false;
@@ -479,7 +479,7 @@ func parse_csv_line(line: string): Vec<string> {
 ### Word Count
 
 ```whist
-func word_count(text: string): HashMap<string, i64> {
+func word_count(text: string) -> HashMap<string, i64> {
     var counts = HashMap::new();
 
     foreach word in text.split_whitespace() {
@@ -495,7 +495,7 @@ func word_count(text: string): HashMap<string, i64> {
 ### Template Engine
 
 ```whist
-func render_template(template: string, vars: HashMap<string, string>): string {
+func render_template(template: string, vars: HashMap<string, string>) -> string {
     var result = template;
 
     foreach (key, value) in vars {

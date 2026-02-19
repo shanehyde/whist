@@ -1,6 +1,6 @@
 // Test block syntax is valid and passes type-checking.
 
-func add(a: i64, b: i64): i64 {
+func add(a: i64, b: i64) -> i64 {
     return a + b;
 }
 
@@ -14,6 +14,6 @@ test "boolean logic" {
     assert(!false);
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

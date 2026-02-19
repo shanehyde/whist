@@ -6,7 +6,7 @@ enum Option<T> {
     Some(T),
 }
 
-func main(): i32 {
+func main() -> i32 {
     // Infer T from constructor argument
     var x = Option::Some(42);
     var y = Option::Some(3.14);

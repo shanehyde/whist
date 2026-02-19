@@ -5,7 +5,7 @@ struct Box {
     const v: Vec<i32>,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var b = new Box { v: new Vec<i32>{} };
     b.v.push(1);
     return 0;

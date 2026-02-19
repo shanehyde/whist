@@ -82,7 +82,7 @@ DW_TAG_structure_type
 ### Functions
 
 ```whist
-func add(a: i64, b: i64): i64 {
+func add(a: i64, b: i64) -> i64 {
     return a + b;
 }
 ```
@@ -164,7 +164,7 @@ $ lldb ./program
 ```
 * thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
     frame #0: 0x0000000100001234 program`add(a=5, b=3) at program.w:2
-   1    func add(a: i64, b: i64): i64 {
+   1    func add(a: i64, b: i64) -> i64 {
 -> 2        return a + b;
    3    }
 ```
@@ -266,7 +266,7 @@ DAP messages:
 Ensure readable function names:
 
 ```whist
-func (Point) magnitude(): f64 { ... }
+func (Point) magnitude() -> f64 { ... }
 ```
 
 Mangle to: `Point_magnitude` (not `_ZN5Point9magnitudeEv`)

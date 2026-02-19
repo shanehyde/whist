@@ -11,7 +11,7 @@ type Flag = bool;
 struct Point { x: i64, y: i64 }
 type Pos = Point;
 
-func add_ids(a: UserId, b: UserId): UserId {
+func add_ids(a: UserId, b: UserId) -> UserId {
     return a + b;
 }
 

@@ -2,7 +2,7 @@
 // Provides fundamental types and traits without requiring explicit import.
 
 private extern whist_runtime {
-    func __whist_panic(msg: string): void as panic;
+    func __whist_panic(msg: string) -> void as panic;
 }
 
 enum Option<T> {
@@ -15,14 +15,14 @@ enum Result<T, E> {
     Err(E),
 }
 
-func (const Option<T>) has_value(): bool {
+func (const Option<T>) has_value() -> bool {
     match (self) {
         Some(_) => return true;
         None => return false;
     }
 }
 
-func (const Option<T>) value(): T {
+func (const Option<T>) value() -> T {
     match (self) {
         Some(v) => return v;
         None => {
@@ -31,7 +31,7 @@ func (const Option<T>) value(): T {
     }
 }
 
-func (const Option<T>) expect(msg: string): T {
+func (const Option<T>) expect(msg: string) -> T {
     match (self) {
         Some(v) => return v;
         None => {
@@ -40,35 +40,35 @@ func (const Option<T>) expect(msg: string): T {
     }
 }
 
-func (const Option<T>) value_or(def: T): T {
+func (const Option<T>) value_or(def: T) -> T {
     match (self) {
         Some(v) => return v;
         None => return def;
     }
 }
 
-func (const Result<T, E>) has_value(): bool {
+func (const Result<T, E>) has_value() -> bool {
     match (self) {
         Ok(_) => return true;
         Err(_) => return false;
     }
 }
 
-func (const Result<T, E>) is_ok(): bool {
+func (const Result<T, E>) is_ok() -> bool {
     match (self) {
         Ok(_) => return true;
         Err(_) => return false;
     }
 }
 
-func (const Result<T, E>) is_err(): bool {
+func (const Result<T, E>) is_err() -> bool {
     match (self) {
         Ok(_) => return false;
         Err(_) => return true;
     }
 }
 
-func (const Result<T, E>) value(): T {
+func (const Result<T, E>) value() -> T {
     match (self) {
         Ok(v) => return v;
         Err(_) => {
@@ -77,7 +77,7 @@ func (const Result<T, E>) value(): T {
     }
 }
 
-func (const Result<T, E>) expect(msg: string): T {
+func (const Result<T, E>) expect(msg: string) -> T {
     match (self) {
         Ok(v) => return v;
         Err(_) => {
@@ -86,14 +86,14 @@ func (const Result<T, E>) expect(msg: string): T {
     }
 }
 
-func (const Result<T, E>) value_or(def: T): T {
+func (const Result<T, E>) value_or(def: T) -> T {
     match (self) {
         Ok(v) => return v;
         Err(_) => return def;
     }
 }
 
-func (const Result<T, E>) error(): E {
+func (const Result<T, E>) error() -> E {
     match (self) {
         Ok(_) => {
             panic("Result.error() called on Ok");
@@ -102,49 +102,49 @@ func (const Result<T, E>) error(): E {
     }
 }
 
-func (const Result<T, E>) unwrap_or_else(f: func(E): T): T {
+func (const Result<T, E>) unwrap_or_else(f: func(E) -> T) -> T {
     match (self) {
         Ok(v) => return v;
         Err(e) => return f(e);
     }
 }
 
-func (const Result<T, E>) map<U>(f: func(T): U): Result<U, E> {
+func (const Result<T, E>) map<U>(f: func(T) -> U) -> Result<U, E> {
     match (self) {
         Ok(v) => return Result::Ok(f(v));
         Err(e) => return Result::Err(e);
     }
 }
 
-func (const Result<T, E>) map_err<F>(f: func(E): F): Result<T, F> {
+func (const Result<T, E>) map_err<F>(f: func(E) -> F) -> Result<T, F> {
     match (self) {
         Ok(v) => return Result::Ok(v);
         Err(e) => return Result::Err(f(e));
     }
 }
 
-func (const Result<T, E>) and_then<U>(f: func(T): Result<U, E>): Result<U, E> {
+func (const Result<T, E>) and_then<U>(f: func(T) -> Result<U, E>) -> Result<U, E> {
     match (self) {
         Ok(v) => return f(v);
         Err(e) => return Result::Err(e);
     }
 }
 
-func (const Option<T>) unwrap_or_else(f: func(): T): T {
+func (const Option<T>) unwrap_or_else(f: func() -> T) -> T {
     match (self) {
         Some(v) => return v;
         None => return f();
     }
 }
 
-func (const Option<T>) map<U>(f: func(T): U): Option<U> {
+func (const Option<T>) map<U>(f: func(T) -> U) -> Option<U> {
     match (self) {
         Some(v) => return Option::Some(f(v));
         None => return Option::None;
     }
 }
 
-func (const Option<T>) and_then<U>(f: func(T): Option<U>): Option<U> {
+func (const Option<T>) and_then<U>(f: func(T) -> Option<U>) -> Option<U> {
     match (self) {
         Some(v) => return f(v);
         None => return Option::None;
@@ -152,16 +152,16 @@ func (const Option<T>) and_then<U>(f: func(T): Option<U>): Option<U> {
 }
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 trait Eq {
-    func eq(other: Self): bool;
+    func eq(other: Self) -> bool;
 }
 
 // --- Vec extension methods ---
 
-func (const Vec<T>) any(pred: func(T) :bool): bool {
+func (const Vec<T>) any(pred: func(T) -> bool) -> bool {
     foreach (const elem in self) {
         if (pred(elem)) {
             return true;
@@ -170,7 +170,7 @@ func (const Vec<T>) any(pred: func(T) :bool): bool {
     return false;
 }
 
-func (const Vec<T>) all(pred: func(T) :bool): bool {
+func (const Vec<T>) all(pred: func(T) -> bool) -> bool {
     foreach (const elem in self) {
         if (!pred(elem)) {
             return false;
@@ -179,7 +179,7 @@ func (const Vec<T>) all(pred: func(T) :bool): bool {
     return true;
 }
 
-func (const Vec<T>) map<K>(transform: func(T) :K): Vec<K> {
+func (const Vec<T>) map<K>(transform: func(T) -> K) -> Vec<K> {
     var result = new Vec<K>{};
     foreach (const elem in self) {
         result.push(transform(elem));
@@ -187,7 +187,7 @@ func (const Vec<T>) map<K>(transform: func(T) :K): Vec<K> {
     return result;
 }
 
-func (const Vec<T>) filter(pred: func(T) :bool): Vec<T> {
+func (const Vec<T>) filter(pred: func(T) -> bool) -> Vec<T> {
     var result = new Vec<T>{};
     foreach (const elem in self) {
         if (pred(elem)) {
@@ -197,7 +197,7 @@ func (const Vec<T>) filter(pred: func(T) :bool): Vec<T> {
     return result;
 }
 
-func (const Vec<T>) each(f: func(T) :void): void {
+func (const Vec<T>) each(f: func(T) -> void) -> void {
     foreach (const elem in self) {
         f(elem);
     }

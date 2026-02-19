@@ -5,11 +5,11 @@ struct Resource {
 }
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 impl Drop for Resource {
-    func drop(): void {}
+    func drop() -> void {}
 }
 
 impl Resource {

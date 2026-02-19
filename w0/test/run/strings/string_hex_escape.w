@@ -1,7 +1,7 @@
 // Test hex, octal, and \e escape sequences in strings
 // Expected exit: 0
 
-func main(): i32 {
+func main() -> i32 {
     // Hex escape in string
     var hex_str: string = "\x41\x42\x43";
     if (hex_str != "ABC") {

@@ -5,12 +5,12 @@
 
 // --- Supporting definitions ---
 
-func identity<T>(x: T): T {
+func identity<T>(x: T) -> T {
     return x;
 }
 
 trait Printable {
-    const func label(): string;
+    const func label() -> string;
 }
 
 struct Dog {
@@ -18,24 +18,24 @@ struct Dog {
 }
 
 impl Printable for Dog {
-    const func label(): string {
+    const func label() -> string {
         return self.name;
     }
 }
 
-func get_label<T: Printable>(x: T): string {
+func get_label<T: Printable>(x: T) -> string {
     return x.label();
 }
 
-func first<A, B>(a: A, b: B): A {
+func first<A, B>(a: A, b: B) -> A {
     return a;
 }
 
-func second<A, B>(a: A, b: B): B {
+func second<A, B>(a: A, b: B) -> B {
     return b;
 }
 
-func vec_count<T>(v: Vec<T>): i64 {
+func vec_count<T>(v: Vec<T>) -> i64 {
     return v.count;
 }
 

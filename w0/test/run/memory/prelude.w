@@ -11,11 +11,11 @@ struct Point {
 }
 
 trait Eq {
-    func eq(other: Self): bool;
+    func eq(other: Self) -> bool;
 }
 
 impl Eq for Point {
-    func eq(other: Point): bool {
+    func eq(other: Point) -> bool {
         return self.x == other.x && self.y == other.y;
     }
 }

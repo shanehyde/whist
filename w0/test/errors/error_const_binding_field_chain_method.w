@@ -9,7 +9,7 @@ struct Outer {
     box: Box,
 }
 
-func main(): i32 {
+func main() -> i32 {
     const o = new Outer { box: new Box { v: new Vec<i32>{} } };
     o.box.v.push(1);
     return 0;

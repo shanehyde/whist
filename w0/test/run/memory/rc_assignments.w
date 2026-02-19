@@ -14,7 +14,7 @@ struct Line {
 }
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 impl Drop for Line {

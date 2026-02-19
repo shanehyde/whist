@@ -5,7 +5,7 @@ enum Shape {
     None,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var s = Shape::Circle("hello");
     return 0;
 }

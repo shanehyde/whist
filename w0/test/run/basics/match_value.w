@@ -8,7 +8,7 @@
 
 import std;
 
-func match_string(s: string): i64 {
+func match_string(s: string) -> i64 {
     match (s) {
         "hello" => { return 1; },
         "world" => { return 2; },
@@ -17,7 +17,7 @@ func match_string(s: string): i64 {
     return -1;
 }
 
-func match_int(x: i64): i64 {
+func match_int(x: i64) -> i64 {
     match (x) {
         1 => { return 10; },
         2 => { return 20; },
@@ -26,7 +26,7 @@ func match_int(x: i64): i64 {
     return -1;
 }
 
-func match_char(c: char): i64 {
+func match_char(c: char) -> i64 {
     match (c) {
         'a' => { return 1; },
         'b' => { return 2; },
@@ -35,7 +35,7 @@ func match_char(c: char): i64 {
     return -1;
 }
 
-func match_bool(b: bool): i64 {
+func match_bool(b: bool) -> i64 {
     match (b) {
         true => { return 1; },
         false => { return 0; },
@@ -43,7 +43,7 @@ func match_bool(b: bool): i64 {
     return -1;
 }
 
-func match_float(f: f64): i64 {
+func match_float(f: f64) -> i64 {
     match (f) {
         1.0 => { return 1; },
         2.5 => { return 2; },
@@ -52,7 +52,7 @@ func match_float(f: f64): i64 {
     return -1;
 }
 
-func match_expr(s: string): i64 {
+func match_expr(s: string) -> i64 {
     var result = match(s) {
         "hello" => 1,
         "world" => 2,
@@ -61,7 +61,7 @@ func match_expr(s: string): i64 {
     return result;
 }
 
-func match_negative(x: i64): i64 {
+func match_negative(x: i64) -> i64 {
     match (x) {
         -1 => { return 100; },
         -2 => { return 200; },

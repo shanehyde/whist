@@ -2,7 +2,7 @@
 // Expected: PASS: tuples with function return
 // Test tuple types and operations
 
-func beep(): (i64, Vec<string>) {
+func beep() -> (i64, Vec<string>) {
     return (42, new Vec<string>{ "hello", "world" });
 }
 

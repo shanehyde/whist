@@ -5,7 +5,7 @@ enum Option<T> {
     Some(T),
 }
 
-func main(): i32 {
+func main() -> i32 {
     var x = Option::None;
     return 0;
 }

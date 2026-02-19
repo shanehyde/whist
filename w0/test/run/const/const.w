@@ -24,28 +24,28 @@ struct Box {
 
 // Shared method definitions
 
-func (const Point) sum(): i64 {
+func (const Point) sum() -> i64 {
     return self.x + self.y;
 }
 
 // Function definitions for const_params
 
-func add(const a: i64, const b: i64): i64 {
+func add(const a: i64, const b: i64) -> i64 {
     return a + b;
 }
 
-func mixed(const readonly: i32, mutable: i32): i32 {
+func mixed(const readonly: i32, mutable: i32) -> i32 {
     mutable = mutable + 1;
     return readonly + mutable;
 }
 
-func identity(const x: i32): i32 {
+func identity(const x: i32) -> i32 {
     return x;
 }
 
 // Function definitions for const_return_type
 
-func make_view(): const Vec<i64> {
+func make_view() -> const Vec<i64> {
     return new Vec<i64>{1, 2, 3};
 }
 

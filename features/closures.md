@@ -23,7 +23,7 @@ var items = filter(list, |x| x > 0);
 Closures can capture variables from their enclosing scope:
 
 ```whist
-func make_adder(n: i64): func(i64): i64 {
+func make_adder(n: i64) -> func(i64) -> i64 {
     return |x| x + n;  // captures 'n'
 }
 
@@ -58,12 +58,12 @@ Need syntax for function pointer / closure types:
 
 ```whist
 // Function type syntax options:
-type Predicate = func(i64): bool;
+type Predicate = func(i64) -> bool;
 type Callback = |i64, i64| -> i64;
 type Handler = fn(Event) -> void;
 
 // In function signatures
-func filter(items: Span<i64>, pred: func(i64): bool): Vec<i64> {
+func filter(items: Span<i64>, pred: func(i64) -> bool) -> Vec<i64> {
     // ...
 }
 ```

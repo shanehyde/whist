@@ -31,7 +31,7 @@ Use LLVM's C bindings directly:
 ```whist
 import llvm;
 
-func codegen_function(f: FuncDecl): LLVMValueRef {
+func codegen_function(f: FuncDecl) -> LLVMValueRef {
     var fn_type = llvm.FunctionType(
         return_type: to_llvm_type(f.return_type),
         param_types: f.params.map(|p| to_llvm_type(p.type)),
@@ -61,7 +61,7 @@ wc → program.ll → llc → program.o → linker → program
 ```
 
 ```whist
-func emit_function(f: FuncDecl, out: StringBuilder): void {
+func emit_function(f: FuncDecl, out: StringBuilder) -> void {
     out.append("define ");
     out.append(llvm_type(f.return_type));
     out.append(" @{f.name}(");
@@ -119,7 +119,7 @@ wc → program.bc → llc → program.o → linker → program
 ### Function Declaration
 
 ```whist
-func add(a: i64, b: i64): i64 {
+func add(a: i64, b: i64) -> i64 {
     return a + b;
 }
 ```
@@ -135,7 +135,7 @@ entry:
 ### Control Flow
 
 ```whist
-func max(a: i64, b: i64): i64 {
+func max(a: i64, b: i64) -> i64 {
     if a > b {
         return a;
     }
@@ -160,7 +160,7 @@ else:
 ```whist
 struct Point { x: i64, y: i64 }
 
-func origin(): Point {
+func origin() -> Point {
     return Point { x: 0, y: 0 };
 }
 ```
@@ -177,7 +177,7 @@ entry:
 ### Method Calls
 
 ```whist
-func (Point) magnitude(): f64 {
+func (Point) magnitude() -> f64 {
     return sqrt(self.x * self.x + self.y * self.y);
 }
 ```

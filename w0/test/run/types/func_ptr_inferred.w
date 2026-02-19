@@ -1,10 +1,10 @@
 // Expected: PASS: func_ptr_inferred
 
-func greet(): void {
+func greet() -> void {
     return;
 }
 
-func add(a: i64, b: i64): i64 {
+func add(a: i64, b: i64) -> i64 {
     return a + b;
 }
 

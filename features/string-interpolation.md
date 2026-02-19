@@ -146,7 +146,7 @@ Need a standard way to convert values to strings:
 
 ```whist
 trait ToString {
-    func to_string(): string;
+    func to_string() -> string;
 }
 
 // Builtin implementations
@@ -154,7 +154,7 @@ impl ToString for i64 { ... }
 impl ToString for f64 { ... }
 impl ToString for bool { ... }
 impl ToString for string {
-    func (string) to_string(): string { return self; }
+    func (string) to_string() -> string { return self; }
 }
 ```
 
@@ -202,7 +202,7 @@ print("Count: {x:.2}");  // WARNING: precision on integer has no effect
 
 ```whist
 // Logging
-func log(level: string, msg: string): void {
+func log(level: string, msg: string) -> void {
     var timestamp = time::now().format("%Y-%m-%d %H:%M:%S");
     print("[{timestamp}] [{level}] {msg}");
 }
@@ -211,7 +211,7 @@ func log(level: string, msg: string): void {
 var query = "SELECT * FROM users WHERE id = {user_id}";
 
 // Templates
-func render_card(user: User): string {
+func render_card(user: User) -> string {
     return "
         <div class=\"card\">
             <img src=\"{user.avatar_url}\" alt=\"{user.name}\">
@@ -223,22 +223,22 @@ func render_card(user: User): string {
 }
 
 // Debug output
-func debug_point(p: Point): void {
+func debug_point(p: Point) -> void {
     print("{=p.x} {=p.y}");
     // Output: p.x = 10 p.y = 20
 }
 
 // Formatted numbers
-func format_currency(amount: f64): string {
+func format_currency(amount: f64) -> string {
     return "${amount:.2}";
 }
 
-func format_percentage(ratio: f64): string {
+func format_percentage(ratio: f64) -> string {
     return "{ratio * 100:.1}%";
 }
 
 // Tables
-func print_table(items: Span<Item>): void {
+func print_table(items: Span<Item>) -> void {
     print("{\"Name\":<20} {\"Price\":>10} {\"Qty\":>5}");
     print("{\"\":=<37}");  // separator line
     foreach item in items {

@@ -7,38 +7,38 @@
 
 // --- Supporting definitions ---
 
-func add(a: i64, b: i64): i64 {
+func add(a: i64, b: i64) -> i64 {
     return a + b;
 }
 
-func greet(): void {
+func greet() -> void {
     return;
 }
 
 struct Counter { value: i64 }
 
-func (Counter) increment(): void {
+func (Counter) increment() -> void {
     self.value = self.value + 1;
 }
 
-func noop(): void {
+func noop() -> void {
     return;
 }
 
-func apply(f: func(i64): i64, x: i64): i64 {
+func apply(f: func(i64) -> i64, x: i64) -> i64 {
     return f(x);
 }
 
-func twice(x: i64): i64 {
+func twice(x: i64) -> i64 {
     return x * 2;
 }
 
-struct Callback { handler: func(i64): i64 }
+struct Callback { handler: func(i64) -> i64 }
 
 // --- Tests ---
 
 test "func_ptr_basic" {
-    var fp: func(i64, i64): i64 = add;
+    var fp: func(i64, i64) -> i64 = add;
     var result = fp(2, 3);
     assert(result == 5);
 }
@@ -50,11 +50,11 @@ test "func_ptr_inferred" {
 }
 
 test "func_ptr_method_ref" {
-    var f: func(Counter): void = Counter.increment;
+    var f: func(Counter) -> void = Counter.increment;
 }
 
 test "func_ptr_nullable" {
-    var fp: func(): void = null;
+    var fp: func() -> void = null;
     fp = noop;
 }
 

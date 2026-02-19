@@ -6,7 +6,7 @@ enum Color {
     Blue,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var c: Color = Color::Red;
     if let Purple = c {
         return 0;

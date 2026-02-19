@@ -1,10 +1,10 @@
 // Lambda parameter type inference
 
-func apply(f: func(i64): i64, x: i64): i64 {
+func apply(f: func(i64) -> i64, x: i64) -> i64 {
     return f(x);
 }
 
-func main(): i32 {
+func main() -> i32 {
     // Infer from regular function param type
     var result = apply(|x| x + 1, 42);
 

@@ -6,7 +6,7 @@ struct Point {
     y: i64,
 }
 
-func make_point(a: i64, b: i64): Point {
+func make_point(a: i64, b: i64) -> Point {
     return new Point {x: a, y: b};
 }
 

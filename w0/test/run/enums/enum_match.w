@@ -84,7 +84,7 @@ test "match_basic" {
 
 // --- match_expr ---
 
-func describe(a: Animal): string {
+func describe(a: Animal) -> string {
     return match (a) {
         Animal::Dog => "canine",
         Animal::Cat => "feline",
@@ -92,7 +92,7 @@ func describe(a: Animal): string {
     };
 }
 
-func area_tag(s: Shape): i64 {
+func area_tag(s: Shape) -> i64 {
     return match (s) {
         Circle(r) => 1,
         Rect(w, h) => 2,
@@ -100,7 +100,7 @@ func area_tag(s: Shape): i64 {
     };
 }
 
-func add_one(v: i64): i64 {
+func add_one(v: i64) -> i64 {
     return v + 1;
 }
 

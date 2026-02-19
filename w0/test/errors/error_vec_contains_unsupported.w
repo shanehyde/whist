@@ -5,7 +5,7 @@ struct Point {
     x: i64,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var points = new Vec<Point>{};
     var p = new Point{x: 1};
     var found = points.contains(p);

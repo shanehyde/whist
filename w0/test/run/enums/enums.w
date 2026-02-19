@@ -29,7 +29,7 @@ enum Mobile {
     Enemy(i32),
 }
 
-func (Mobile) describe(): string {
+func (Mobile) describe() -> string {
     match (self) {
         Mobile::Player(name) => return $"Player: {name}";
         Mobile::Enemy(level) => return $"Enemy of level {level}";

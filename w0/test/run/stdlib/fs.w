@@ -8,7 +8,7 @@ import std;
 
 const BASE_DIR = "/tmp/whist_fs_dir_test";
 
-func cleanup(): void {
+func cleanup() -> void {
     // Remove any files/dirs from previous runs
     fs::remove_file(fs::join_path(BASE_DIR, "sub/nested/file.txt"));
     fs::rmdir(fs::join_path(BASE_DIR, "sub/nested"));
@@ -20,7 +20,7 @@ func cleanup(): void {
     fs::rmdir(BASE_DIR);
 }
 
-func test_mkdir_rmdir(): void {
+func test_mkdir_rmdir() -> void {
     var rc = fs::mkdir(BASE_DIR);
     assert(rc == 0);
     assert(fs::is_dir(BASE_DIR) == true);
@@ -39,7 +39,7 @@ func test_mkdir_rmdir(): void {
     assert(rc == -1);
 }
 
-func test_mkdir_all(): void {
+func test_mkdir_all() -> void {
     var nested = fs::join_path(BASE_DIR, "sub/nested");
     var rc = fs::mkdir_all(nested);
     assert(rc == 0);
@@ -61,7 +61,7 @@ func test_mkdir_all(): void {
     fs::rmdir(fs::join_path(BASE_DIR, "sub"));
 }
 
-func test_is_dir_is_file(): void {
+func test_is_dir_is_file() -> void {
     assert(fs::is_dir(BASE_DIR) == true);
     assert(fs::is_file(BASE_DIR) == false);
 
@@ -78,7 +78,7 @@ func test_is_dir_is_file(): void {
     fs::remove_file(file_path);
 }
 
-func test_cwd_chdir(): void {
+func test_cwd_chdir() -> void {
     var original = fs::cwd();
     assert(original != "");
 
@@ -94,7 +94,7 @@ func test_cwd_chdir(): void {
     fs::chdir(original);
 }
 
-func test_open_read_close_dir(): void {
+func test_open_read_close_dir() -> void {
     // Create some files to iterate
     fs::write_file(fs::join_path(BASE_DIR, "a.txt"), "a");
     fs::write_file(fs::join_path(BASE_DIR, "b.txt"), "b");
@@ -125,7 +125,7 @@ func test_open_read_close_dir(): void {
     fs::remove_file(fs::join_path(BASE_DIR, "c.txt"));
 }
 
-func test_join_path(): void {
+func test_join_path() -> void {
     var p1 = fs::join_path("/tmp", "file.txt");
     assert(p1 == "/tmp/file.txt");
 
@@ -142,7 +142,7 @@ func test_join_path(): void {
     assert(p4 == "/tmp/file.txt");
 }
 
-func test_dirname(): void {
+func test_dirname() -> void {
     var d1 = fs::dirname("/tmp/foo/bar.txt");
     assert(d1 == "/tmp/foo");
 
@@ -156,7 +156,7 @@ func test_dirname(): void {
     assert(d4 == "/");
 }
 
-func test_basename(): void {
+func test_basename() -> void {
     var b1 = fs::basename("/tmp/foo/bar.txt");
     assert(b1 == "bar.txt");
 
@@ -167,7 +167,7 @@ func test_basename(): void {
     assert(b3 == "file.txt");
 }
 
-func test_extension(): void {
+func test_extension() -> void {
     var e1 = fs::extension("/tmp/foo/bar.txt");
     assert(e1 == ".txt");
 
@@ -182,7 +182,7 @@ func test_extension(): void {
     assert(e4 == "");
 }
 
-func test_abs_path(): void {
+func test_abs_path() -> void {
     // abs_path of an existing dir should return non-empty
     var p = fs::abs_path(BASE_DIR);
     assert(p != "");
@@ -192,7 +192,7 @@ func test_abs_path(): void {
     assert(bad == "");
 }
 
-func test_modified_time(): void {
+func test_modified_time() -> void {
     var file_path = fs::join_path(BASE_DIR, "hello.txt");
     fs::write_file(file_path, "timestamp test");
 
@@ -206,7 +206,7 @@ func test_modified_time(): void {
     fs::remove_file(file_path);
 }
 
-func test_temp_dir(): void {
+func test_temp_dir() -> void {
     var tmp = fs::temp_dir();
     assert(tmp != "");
     // Should be a directory
@@ -237,7 +237,7 @@ test "fs_dir_operations" {
 
 // --- fs_operations ---
 
-func test_write_and_read(): void {
+func test_write_and_read() -> void {
     var rc = fs::write_file("/tmp/whist_fs_ops_test.txt", "hello whist");
     assert(rc == 0);
 
@@ -249,7 +249,7 @@ func test_write_and_read(): void {
     fs::read_file("/tmp/whist_fs_ops_test.txt");
 }
 
-func test_append(): void {
+func test_append() -> void {
     fs::write_file("/tmp/whist_fs_ops_append.txt", "first");
     var rc = fs::append_file("/tmp/whist_fs_ops_append.txt", " second");
     assert(rc == 0);
@@ -260,7 +260,7 @@ func test_append(): void {
     fs::remove_file("/tmp/whist_fs_ops_append.txt");
 }
 
-func test_file_exists(): void {
+func test_file_exists() -> void {
     fs::write_file("/tmp/whist_fs_ops_exists.txt", "x");
     assert(fs::file_exists("/tmp/whist_fs_ops_exists.txt") == true);
 
@@ -268,7 +268,7 @@ func test_file_exists(): void {
     assert(fs::file_exists("/tmp/whist_fs_ops_exists.txt") == false);
 }
 
-func test_rename(): void {
+func test_rename() -> void {
     fs::write_file("/tmp/whist_fs_ops_rename_a.txt", "data");
     var rc = fs::rename_file("/tmp/whist_fs_ops_rename_a.txt", "/tmp/whist_fs_ops_rename_b.txt");
     assert(rc == 0);
@@ -278,14 +278,14 @@ func test_rename(): void {
     fs::remove_file("/tmp/whist_fs_ops_rename_b.txt");
 }
 
-func test_remove(): void {
+func test_remove() -> void {
     fs::write_file("/tmp/whist_fs_ops_remove.txt", "gone");
     var rc = fs::remove_file("/tmp/whist_fs_ops_remove.txt");
     assert(rc == 0);
     assert(fs::file_exists("/tmp/whist_fs_ops_remove.txt") == false);
 }
 
-func test_handle_write_read(): void {
+func test_handle_write_read() -> void {
     // Write via handle
     var wh = fs::open("/tmp/whist_fs_ops_handle.txt", "w");
     assert(wh != null);
@@ -315,7 +315,7 @@ func test_handle_write_read(): void {
     fs::remove_file("/tmp/whist_fs_ops_handle.txt");
 }
 
-func test_seek_tell(): void {
+func test_seek_tell() -> void {
     fs::write_file("/tmp/whist_fs_ops_seek.txt", "abcdefghij");
 
     var h = fs::open("/tmp/whist_fs_ops_seek.txt", "r");
@@ -354,7 +354,7 @@ func test_seek_tell(): void {
     fs::remove_file("/tmp/whist_fs_ops_seek.txt");
 }
 
-func test_error_cases(): void {
+func test_error_cases() -> void {
     assert(fs::file_exists("/tmp/whist_fs_ops_nonexistent.txt") == false);
 
     var size = fs::file_size("/tmp/whist_fs_ops_nonexistent.txt");

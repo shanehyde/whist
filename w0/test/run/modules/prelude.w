@@ -1,21 +1,21 @@
 // Expected: PASS: prelude_basic
 // Expected: PASS: prelude_value_methods
 
-func maybe_parse(s: string): Option<i64> {
+func maybe_parse(s: string) -> Option<i64> {
     if (s == "42") {
         return Option::Some(42);
     }
     return Option::None;
 }
 
-func try_parse(s: string): Result<i64, string> {
+func try_parse(s: string) -> Result<i64, string> {
     if (s == "42") {
         return Result::Ok(42);
     }
     return Result::Err("bad");
 }
 
-func test_option(): i32 {
+func test_option() -> i32 {
     var opt_some: Option<i64> = Option::Some(42);
     var opt_none: Option<i64> = Option::None;
 
@@ -31,7 +31,7 @@ func test_option(): i32 {
     return 0;
 }
 
-func test_result(): i32 {
+func test_result() -> i32 {
     var res_ok: Result<i64, string> = Result::Ok(42);
     var res_err: Result<i64, string> = Result::Err("bad");
 
@@ -50,7 +50,7 @@ func test_result(): i32 {
     return 0;
 }
 
-func test_panic(): void {
+func test_panic() -> void {
     // panic is available without import
     // (not calling it here since --check only type-checks)
 }

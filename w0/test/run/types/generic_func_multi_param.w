@@ -1,10 +1,10 @@
 // Expected: PASS: generic_func_multi_param
 
-func first<A, B>(a: A, b: B): A {
+func first<A, B>(a: A, b: B) -> A {
     return a;
 }
 
-func second<A, B>(a: A, b: B): B {
+func second<A, B>(a: A, b: B) -> B {
     return b;
 }
 

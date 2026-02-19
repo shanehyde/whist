@@ -15,27 +15,27 @@ enum Option<V> {
 }
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 trait Hashable {
-    const func hash(): i32;
+    const func hash() -> i32;
 }
 
 impl Hashable for i32 {
-    const func hash(): i32 {
+    const func hash() -> i32 {
         return self;
     }
 }
 
 impl Hashable for i64 {
-    const func hash(): i32 {
+    const func hash() -> i32 {
         return self;
     }
 }
 
 impl Hashable for bool {
-    const func hash(): i32 {
+    const func hash() -> i32 {
         if (self) {
             return 1;
         }
@@ -44,7 +44,7 @@ impl Hashable for bool {
 }
 
 impl Hashable for string {
-    const func hash(): i32 {
+    const func hash() -> i32 {
         var h: i32 = 0;
         var x: string = self;
         foreach (const c in x) {
@@ -66,7 +66,7 @@ struct HashMap<K: Hashable, V> {
     capacity: i64,
 }
 
-func (HashMap<K, V>) init(cap: i64): void {
+func (HashMap<K, V>) init(cap: i64) -> void {
     self.buckets.clear();
     self.count = 0;
     self.capacity = cap;
@@ -75,7 +75,7 @@ func (HashMap<K, V>) init(cap: i64): void {
     }
 }
 
-func (HashMap<K, V>) set(key: K, value: V): void {
+func (HashMap<K, V>) set(key: K, value: V) -> void {
     var h: i32 = key.hash();
     if (h < 0) {
         h = -h;
@@ -102,7 +102,7 @@ func (HashMap<K, V>) set(key: K, value: V): void {
     self.count = self.count + 1;
 }
 
-func (HashMap<K, V>) get(key: K): Option<V> {
+func (HashMap<K, V>) get(key: K) -> Option<V> {
     var h: i32 = key.hash();
     if (h < 0) {
         h = -h;
@@ -119,7 +119,7 @@ func (HashMap<K, V>) get(key: K): Option<V> {
     return Option::None;
 }
 
-func (HashMap<K, V>) has(key: K): bool {
+func (HashMap<K, V>) has(key: K) -> bool {
     var h: i32 = key.hash();
     if (h < 0) {
         h = -h;
@@ -136,7 +136,7 @@ func (HashMap<K, V>) has(key: K): bool {
     return false;
 }
 
-func (HashMap<K, V>) delete(key: K): bool {
+func (HashMap<K, V>) delete(key: K) -> bool {
     var h: i32 = key.hash();
     if (h < 0) {
         h = -h;
@@ -162,7 +162,7 @@ func (HashMap<K, V>) delete(key: K): bool {
     return false;
 }
 
-func (HashMap<K, V>) keys(): Vec<K> {
+func (HashMap<K, V>) keys() -> Vec<K> {
     var result = new Vec<K>{};
     foreach (const i in 0..self.capacity) {
         var entry: HashEntry<K, V> = self.buckets[i];
@@ -198,7 +198,7 @@ impl Set<T> {
     }
 }
 
-// func (Set<T>) init(cap: i64): void {
+// func (Set<T>) init(cap: i64) -> void {
 //     self.buckets.clear();
 //     self.count = 0;
 //     self.capacity = cap;
@@ -207,7 +207,7 @@ impl Set<T> {
 //     }
 // }
 
-func (Set<T>) insert(value: T): void {
+func (Set<T>) insert(value: T) -> void {
     var h: i32 = value.hash();
     if (h < 0) {
         h = -h;
@@ -232,7 +232,7 @@ func (Set<T>) insert(value: T): void {
     self.count = self.count + 1;
 }
 
-func (Set<T>) contains(value: T): bool {
+func (Set<T>) contains(value: T) -> bool {
     var h: i32 = value.hash();
     if (h < 0) {
         h = -h;
@@ -249,7 +249,7 @@ func (Set<T>) contains(value: T): bool {
     return false;
 }
 
-func (Set<T>) remove(value: T): bool {
+func (Set<T>) remove(value: T) -> bool {
     var h: i32 = value.hash();
     if (h < 0) {
         h = -h;
@@ -275,7 +275,7 @@ func (Set<T>) remove(value: T): bool {
     return false;
 }
 
-func (Set<T>) values(): Vec<T> {
+func (Set<T>) values() -> Vec<T> {
     var result = new Vec<T>{};
     foreach (const i in 0..self.capacity) {
         var entry: SetEntry<T> = self.buckets[i];

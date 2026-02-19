@@ -49,7 +49,7 @@ id = 42;  // also valid
 ### Pattern Matching (Primary Method)
 
 ```whist
-func area(shape: Shape): f64 {
+func area(shape: Shape) -> f64 {
     return match shape {
         Circle(r) => 3.14159 * r * r,
         Rectangle(w, h) => w * h,
@@ -60,7 +60,7 @@ func area(shape: Shape): f64 {
     };
 }
 
-func process(value: JsonValue): void {
+func process(value: JsonValue) -> void {
     match value {
         null => print("null"),
         b: bool => print("bool: {b}"),
@@ -76,7 +76,7 @@ func process(value: JsonValue): void {
 ### Type Narrowing (Flow Typing)
 
 ```whist
-func handle(value: string | i64): void {
+func handle(value: string | i64) -> void {
     if value is string {
         // value is narrowed to string here
         print(value.to_upper());
@@ -86,7 +86,7 @@ func handle(value: string | i64): void {
     }
 }
 
-func maybe_process(opt: Option<Data>): void {
+func maybe_process(opt: Option<Data>) -> void {
     if opt is Some(data) {
         process(data);
     }
@@ -271,7 +271,7 @@ typedef Point* Option_ptr_Point;
 Pattern matching must cover all variants:
 
 ```whist
-func describe(shape: Shape): string {
+func describe(shape: Shape) -> string {
     return match shape {
         Circle(r) => "circle",
         Rectangle(w, h) => "rectangle",
@@ -285,7 +285,7 @@ func describe(shape: Shape): string {
 Infer union type from usage:
 
 ```whist
-func get_id(use_string: bool): string | i64 {
+func get_id(use_string: bool) -> string | i64 {
     if use_string {
         return "abc";   // inferred as part of return union
     }
@@ -315,7 +315,7 @@ type List<T> = Nil | Cons(T, Box<List<T>>);
 type Result<T, E> = Ok(T) | Err(E);
 type Option<T> = Some(T) | None;
 
-func map<T, U>(opt: Option<T>, f: func(T): U): Option<U> {
+func map<T, U>(opt: Option<T>, f: func(T) -> U) -> Option<U> {
     return match opt {
         Some(x) => Some(f(x)),
         None => None,
@@ -327,12 +327,12 @@ func map<T, U>(opt: Option<T>, f: func(T): U): Option<U> {
 
 ```whist
 trait Display {
-    func display(): string;
+    func display() -> string;
 }
 
 // Implement trait for union
 impl Display for Shape {
-    func (Shape) display(): string {
+    func (Shape) display() -> string {
         return match self {
             Circle(r) => "Circle({r})",
             Rectangle(w, h) => "Rectangle({w}x{h})",
@@ -399,7 +399,7 @@ type JsonValue =
     | JsonArray(Vec<JsonValue>)
     | JsonObject(HashMap<string, JsonValue>);
 
-func stringify(value: JsonValue): string {
+func stringify(value: JsonValue) -> string {
     return match value {
         JsonNull => "null",
         JsonBool(b) => if b { "true" } else { "false" },
@@ -424,7 +424,7 @@ type Expr =
     | Mul(Box<Expr>, Box<Expr>)
     | If(Box<Expr>, Box<Expr>, Box<Expr>);
 
-func eval(expr: Expr, env: HashMap<string, i64>): i64 {
+func eval(expr: Expr, env: HashMap<string, i64>) -> i64 {
     return match expr {
         Lit(n) => n,
         Var(name) => env.get(name).unwrap(),
@@ -445,7 +445,7 @@ type ParseError = UnexpectedToken(Token) | UnexpectedEof | InvalidSyntax(string)
 type IoError = NotFound(string) | PermissionDenied | Other(string);
 type AppError = Parse(ParseError) | Io(IoError) | Config(string);
 
-func run(): Result<void, AppError> {
+func run() -> Result<void, AppError> {
     var config = load_config().map_err(|e| AppError::Config(e))?;
     var source = read_file(config.input).map_err(|e| AppError::Io(e))?;
     var ast = parse(source).map_err(|e| AppError::Parse(e))?;

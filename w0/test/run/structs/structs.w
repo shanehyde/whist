@@ -32,22 +32,22 @@ impl Counter {
 }
 
 // Mutable method
-func (Point) move(dx: i64, dy: i64): void {
+func (Point) move(dx: i64, dy: i64) -> void {
     self.x = self.x + dx;
     self.y = self.y + dy;
 }
 
 // Immutable method
-func (const Point) sum(): i64 {
+func (const Point) sum() -> i64 {
     return self.x + self.y;
 }
 
 // Test passing struct reference to function
-func move_ref(p: Point): void {
+func move_ref(p: Point) -> void {
     p.move(1, 1);
 }
 
-func distance(p: SmallPoint): i32 {
+func distance(p: SmallPoint) -> i32 {
     return p.x + p.y;
 }
 

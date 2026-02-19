@@ -60,7 +60,7 @@ Finer-grained: track which symbols are used:
 // main.w
 import utils;
 
-func main(): i32 {
+func main() -> i32 {
     utils.log("hello");  // depends on utils.log
     return 0;
 }
@@ -76,7 +76,7 @@ Track type definitions used:
 // main.w
 import types;
 
-func process(p: types.Point): void {  // depends on types.Point layout
+func process(p: types.Point) -> void {  // depends on types.Point layout
     print(p.x);
 }
 ```
@@ -124,7 +124,7 @@ struct CacheEntry {
     artifact_path: string,
 }
 
-func is_valid(entry: CacheEntry, file: string): bool {
+func is_valid(entry: CacheEntry, file: string) -> bool {
     if hash_file(file) != entry.source_hash {
         return false;
     }
@@ -145,7 +145,7 @@ func is_valid(entry: CacheEntry, file: string): bool {
 ### Phase 1: Discover Changes
 
 ```whist
-func discover_changes(project: Project): Vec<string> {
+func discover_changes(project: Project) -> Vec<string> {
     var changed = Vec::new();
 
     foreach file in project.source_files {
@@ -162,7 +162,7 @@ func discover_changes(project: Project): Vec<string> {
 ### Phase 2: Compute Affected Set
 
 ```whist
-func affected_modules(changed: Vec<string>, deps: DependencyGraph): Vec<string> {
+func affected_modules(changed: Vec<string>, deps: DependencyGraph) -> Vec<string> {
     var affected = HashSet::from(changed);
     var worklist = changed.clone();
 
@@ -184,7 +184,7 @@ func affected_modules(changed: Vec<string>, deps: DependencyGraph): Vec<string> 
 ### Phase 3: Incremental Parse
 
 ```whist
-func incremental_parse(affected: Vec<string>): HashMap<string, Ast> {
+func incremental_parse(affected: Vec<string>) -> HashMap<string, Ast> {
     var asts = HashMap::new();
 
     foreach file in affected {
@@ -207,7 +207,7 @@ func incremental_parse(affected: Vec<string>): HashMap<string, Ast> {
 ### Phase 4: Incremental Type Check
 
 ```whist
-func incremental_check(affected: Vec<string>, asts: HashMap<string, Ast>): CheckResult {
+func incremental_check(affected: Vec<string>, asts: HashMap<string, Ast>) -> CheckResult {
     // Type check in dependency order
     var order = topological_sort(affected, deps);
 
@@ -223,7 +223,7 @@ func incremental_check(affected: Vec<string>, asts: HashMap<string, Ast>): Check
 ### Phase 5: Incremental Codegen
 
 ```whist
-func incremental_codegen(affected: Vec<string>, checked: CheckResult): void {
+func incremental_codegen(affected: Vec<string>, checked: CheckResult) -> void {
     foreach file in affected {
         var c_code = generate(checked.get(file));
         write_file(cache_path(file, ".c"), c_code);
@@ -234,7 +234,7 @@ func incremental_codegen(affected: Vec<string>, checked: CheckResult): void {
 ### Phase 6: Compile and Link
 
 ```whist
-func compile_and_link(affected: Vec<string>): void {
+func compile_and_link(affected: Vec<string>) -> void {
     // Compile changed C files in parallel
     parallel_for(affected, |file| {
         var c_file = cache_path(file, ".c");
@@ -271,7 +271,7 @@ Can compile in parallel:
 - Level 3: main.w
 
 ```whist
-func parallel_compile(deps: DependencyGraph): void {
+func parallel_compile(deps: DependencyGraph) -> void {
     var levels = compute_levels(deps);
 
     foreach level in levels {
@@ -288,7 +288,7 @@ func parallel_compile(deps: DependencyGraph): void {
 For better load balancing:
 
 ```whist
-func compile_with_work_stealing(files: Vec<string>): void {
+func compile_with_work_stealing(files: Vec<string>) -> void {
     var queue = ConcurrentQueue::from(files);
     var workers = spawn_workers(num_cpus());
 
@@ -317,7 +317,7 @@ wc --watch src/
 ```
 
 ```whist
-func watch_mode(project: Project): void {
+func watch_mode(project: Project) -> void {
     // Initial full build
     full_build(project);
 
@@ -351,7 +351,7 @@ Avoid rebuilding dependents when only implementation changes:
 
 ```whist
 // utils.w
-public func format(s: string): string {  // Interface: signature
+public func format(s: string) -> string {  // Interface: signature
     // Implementation can change without affecting dependents
     return "[" + s + "]";
 }
@@ -368,7 +368,7 @@ struct ModuleInterface {
     public_constants: Vec<(string, Type)>,
 }
 
-func interface_hash(module: Module): u64 {
+func interface_hash(module: Module) -> u64 {
     var iface = extract_interface(module);
     return hash(iface);
 }
@@ -377,7 +377,7 @@ func interface_hash(module: Module): u64 {
 Only rebuild dependents if interface hash changes:
 
 ```whist
-func needs_dependent_rebuild(file: string): bool {
+func needs_dependent_rebuild(file: string) -> bool {
     var old_hash = cache.get_interface_hash(file);
     var new_hash = interface_hash(parse(file));
     return old_hash != new_hash;

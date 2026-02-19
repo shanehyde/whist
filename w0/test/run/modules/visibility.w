@@ -32,17 +32,17 @@ public const COUNTER: i64 = 0;
 const LOCAL_COUNTER: i64 = 42;
 
 // Public function - external linkage
-public func add(a: i64, b: i64): i64 {
+public func add(a: i64, b: i64) -> i64 {
     return a + b;
 }
 
 // Private function - file-local (static in C)
-private func helper(): i64 {
+private func helper() -> i64 {
     return LOCAL_COUNTER;
 }
 
 // Public method on public struct
-public func (Point) magnitude_squared(): i64 {
+public func (Point) magnitude_squared() -> i64 {
     return self.x * self.x + self.y * self.y;
 }
 

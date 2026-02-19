@@ -10,19 +10,19 @@ struct Pair<K, V> {
     value: V,
 }
 
-func (Pair<i32, Box<T>>) map<U>(f: func(T): U): U {
+func (Pair<i32, Box<T>>) map<U>(f: func(T) -> U) -> U {
     return f(self.value.value);
 }
 
-func (Box<U>) apply<K>(f: func(U): K): K {
+func (Box<U>) apply<K>(f: func(U) -> K) -> K {
     return f(self.value);
 }
 
-func is_positive(x: i64): bool {
+func is_positive(x: i64) -> bool {
     return x > 0;
 }
 
-func add_one(x: i64): i64 {
+func add_one(x: i64) -> i64 {
     return x + 1;
 }
 
@@ -39,6 +39,6 @@ test "generic_method_renamed_receiver_type_param" {
     assert(v == 10);
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

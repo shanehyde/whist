@@ -4,7 +4,7 @@
 // Expected: PASS: eq_sameref
 
 trait Eq {
-    func eq(other: Self): bool;
+    func eq(other: Self) -> bool;
 }
 
 struct Point {
@@ -13,7 +13,7 @@ struct Point {
 }
 
 impl Eq for Point {
-    func eq(other: Point): bool {
+    func eq(other: Point) -> bool {
         return self.x == other.x && self.y == other.y;
     }
 }
@@ -23,7 +23,7 @@ struct Box<T> {
 }
 
 impl Eq for Box<T> {
-    func eq(other: Box<T>): bool {
+    func eq(other: Box<T>) -> bool {
         return self.value == other.value;
     }
 }
@@ -38,13 +38,13 @@ struct Outer {
 }
 
 impl Eq for Inner {
-    func eq(other: Inner): bool {
+    func eq(other: Inner) -> bool {
         return self.val == other.val;
     }
 }
 
 impl Eq for Outer {
-    func eq(other: Outer): bool {
+    func eq(other: Outer) -> bool {
         return self.inner == other.inner && self.tag == other.tag;
     }
 }

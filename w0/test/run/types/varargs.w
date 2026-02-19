@@ -1,7 +1,7 @@
 // Expected: PASS: varargs
 
 extern stdio {
-    func printf(fmt: string, ...): i32;
+    func printf(fmt: string, ...) -> i32;
 }
 
 test "varargs" {

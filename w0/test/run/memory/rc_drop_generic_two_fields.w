@@ -2,7 +2,7 @@
 // RC RUNTIME TEST: Generic Pair<A,B> where both A and B have Drop
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 struct Alpha {
@@ -10,7 +10,7 @@ struct Alpha {
 }
 
 impl Drop for Alpha {
-    func drop(): void {
+    func drop() -> void {
         // Alpha cleanup
     }
 }
@@ -20,7 +20,7 @@ struct Beta {
 }
 
 impl Drop for Beta {
-    func drop(): void {
+    func drop() -> void {
         // Beta cleanup
     }
 }

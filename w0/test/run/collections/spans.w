@@ -8,7 +8,7 @@ struct Box<T> {
     value: T,
 }
 
-func (Box<T>) get(): T {
+func (Box<T>) get() -> T {
     return self.value;
 }
 

@@ -6,12 +6,12 @@ struct Point {
 }
 
 impl Point {
-    func init(x: i64): i64 {
+    func init(x: i64) -> i64 {
         self.x = x;
         return 0;
     }
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

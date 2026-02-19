@@ -6,7 +6,7 @@ enum Shape {
     None,
 }
 
-func main(): i32 {
+func main() -> i32 {
     var s: Shape = Shape::Circle(5.0);
     if let Circle(a, b) = s {
         return 0;

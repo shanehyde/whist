@@ -3,7 +3,7 @@
 import std;
 
 trait Greetable {
-    func greet(): string;
+    func greet() -> string;
 }
 
 struct Dog {
@@ -12,23 +12,23 @@ struct Dog {
 
 // Signature-only: asserts Dog has greet() via standalone method below
 impl Greetable for Dog {
-    func greet(): string;
+    func greet() -> string;
 }
 
 // Standalone receiver method provides the actual body
-func (Dog) greet(): string {
+func (Dog) greet() -> string {
     return self.name;
 }
 
-func hello<T: Greetable>(x: T): string {
+func hello<T: Greetable>(x: T) -> string {
     return x.greet();
 }
 
 // Mixed impl block: some methods with bodies, some signature-only
 
 trait Animal {
-    func speak(): string;
-    const func legs(): i64;
+    func speak() -> string;
+    const func legs() -> i64;
 }
 
 struct Cat {
@@ -37,15 +37,15 @@ struct Cat {
 
 impl Animal for Cat {
     // Signature-only: body provided by standalone method below
-    func speak(): string;
+    func speak() -> string;
 
     // Body provided inline
-    const func legs(): i64 {
+    const func legs() -> i64 {
         return 4;
     }
 }
 
-func (Cat) speak(): string {
+func (Cat) speak() -> string {
     return self.name;
 }
 

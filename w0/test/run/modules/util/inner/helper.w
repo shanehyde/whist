@@ -2,6 +2,6 @@
 
 import "../math.w";
 
-func quadruple(x: i32): i32 {
+func quadruple(x: i32) -> i32 {
     return twice(twice(x));
 }

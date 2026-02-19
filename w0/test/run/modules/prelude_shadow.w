@@ -12,7 +12,7 @@ enum Result<T, E> {
 }
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 test "prelude_shadow" {

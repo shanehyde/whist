@@ -34,7 +34,7 @@ var err: Result<i64, string> = Result::Err("bad");
 ## Proposed Syntax
 
 ```whist
-func divide(a: i64, b: i64): Result<i64, string> {
+func divide(a: i64, b: i64) -> Result<i64, string> {
     if b == 0 {
         return Result::Err("division by zero");
     }
@@ -54,7 +54,7 @@ enum Option<T> {
     Some(T),
 }
 
-func find(items: Span<i64>, target: i64): Option<i64> {
+func find(items: Span<i64>, target: i64) -> Option<i64> {
     foreach i in 0..items.count {
         if items[i] == target {
             return Option::Some(i);
@@ -99,11 +99,11 @@ enum Result<T, E> {
     Err(E),
 }
 
-func parse_int(s: string): Result<i64, ParseError> {
+func parse_int(s: string) -> Result<i64, ParseError> {
     // ...
 }
 
-func read_file(path: string): Result<string, IoError> {
+func read_file(path: string) -> Result<string, IoError> {
     // ...
 }
 ```
@@ -137,7 +137,7 @@ var opt = result.ok();
 Automatically propagate errors up the call stack:
 
 ```whist
-func process_file(path: string): Result<Data, Error> {
+func process_file(path: string) -> Result<Data, Error> {
     var content = read_file(path)?;       // returns early if Err
     var parsed = parse_json(content)?;    // returns early if Err
     var validated = validate(parsed)?;    // returns early if Err
@@ -159,14 +159,14 @@ var content = match read_file(path) {
 When error types differ, auto-convert if `From` trait is implemented:
 
 ```whist
-func process(): Result<Data, AppError> {
+func process() -> Result<Data, AppError> {
     var file = read_file(path)?;  // IoError -> AppError
     var json = parse(file)?;      // ParseError -> AppError
     return Ok(json);
 }
 
 impl From<IoError> for AppError {
-    func from(e: IoError): AppError {
+    func from(e: IoError) -> AppError {
         return AppError::Io(e);
     }
 }
@@ -312,7 +312,7 @@ if let Ok(data) = result {
 
 ```whist
 // File processing pipeline
-func process_config(): Result<Config, Error> {
+func process_config() -> Result<Config, Error> {
     var path = env::var("CONFIG_PATH")?;
     var content = fs::read_to_string(path)?;
     var config = json::parse::<Config>(content)?;
@@ -327,7 +327,7 @@ var name = user
     .unwrap_or("Anonymous");
 
 // Combining multiple Results
-func fetch_all(urls: Span<string>): Result<Vec<Response>, Error> {
+func fetch_all(urls: Span<string>) -> Result<Vec<Response>, Error> {
     var results = Vec::new();
     foreach url in urls {
         var response = fetch(url)?;

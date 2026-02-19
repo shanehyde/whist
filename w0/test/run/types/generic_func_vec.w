@@ -1,6 +1,6 @@
 // Expected: PASS: generic_func_vec
 
-func vec_count<T>(v: Vec<T>): i64 {
+func vec_count<T>(v: Vec<T>) -> i64 {
     return v.count;
 }
 

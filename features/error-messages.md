@@ -228,13 +228,13 @@ error[E0410]: private function
 note: `internal_helper` is defined here
   --> src/utils.w:10:1
    |
-10 | func internal_helper(): void {
+10 | func internal_helper() -> void {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
 note: consider making it public if intended for external use
   --> src/utils.w:10:1
    |
-10 | public func internal_helper(): void {
+10 | public func internal_helper() -> void {
    | ++++++
 ```
 
@@ -287,7 +287,7 @@ Fixed 3 errors:
 Use edit distance to suggest alternatives:
 
 ```whist
-func suggest_similar(name: string, candidates: Vec<string>): Option<string> {
+func suggest_similar(name: string, candidates: Vec<string>) -> Option<string> {
     var best: Option<(string, i32)> = None;
 
     foreach candidate in candidates {
@@ -404,7 +404,7 @@ enum Applicability {
 ### Rendering
 
 ```whist
-func render_diagnostic(diag: Diagnostic, source: SourceMap): string {
+func render_diagnostic(diag: Diagnostic, source: SourceMap) -> string {
     var out = StringBuilder::new();
 
     // Header

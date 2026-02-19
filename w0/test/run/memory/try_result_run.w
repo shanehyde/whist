@@ -6,20 +6,20 @@ enum Result<T, E> {
     Err(E),
 }
 
-func succeed(): Result<i64, string> {
+func succeed() -> Result<i64, string> {
     return Result::Ok(42);
 }
 
-func fail_it(): Result<i64, string> {
+func fail_it() -> Result<i64, string> {
     return Result::Err("bad");
 }
 
-func unwrap_ok(): Result<i64, string> {
+func unwrap_ok() -> Result<i64, string> {
     var x = succeed()?;
     return Result::Ok(x + 1);
 }
 
-func propagate_err(): Result<i64, string> {
+func propagate_err() -> Result<i64, string> {
     var x = fail_it()?;
     return Result::Ok(x + 1);
 }

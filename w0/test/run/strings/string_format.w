@@ -3,7 +3,7 @@
 // Expected: PASS: string_interp
 import std;
 
-func twice(x: i64): i64 {
+func twice(x: i64) -> i64 {
     return x * 2;
 }
 

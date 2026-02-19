@@ -23,15 +23,15 @@ impl SimplePair<K, V> {
     }
 }
 
-func (Box<T>) get(): T {
+func (Box<T>) get() -> T {
     return self.value;
 }
 
-func (Box<T>) set(v: T): void {
+func (Box<T>) set(v: T) -> void {
     self.value = v;
 }
 
-func (Pair<i32, Box<T>>) set(k: i32, v: Box<T>): void {
+func (Pair<i32, Box<T>>) set(k: i32, v: Box<T>) -> void {
     self.key = k;
     self.value = v;
 }

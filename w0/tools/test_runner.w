@@ -18,7 +18,7 @@ impl Timer {
     }
 }
 
-func (Timer) timelapsed(): i64 {
+func (Timer) timelapsed() -> i64 {
     return time::time_ms() - self.start;
 }
 
@@ -31,32 +31,32 @@ impl Drop for Timer {
 
 // --- ANSI colors ---
 
-func red(s: string): string {
+func red(s: string) -> string {
     return $"\e[1;31m{s}\e[0m";
 }
-func green(s: string): string {
+func green(s: string) -> string {
     return $"\e[1;32m{s}\e[0m";
 }
-func blue(s: string): string {
+func blue(s: string) -> string {
     return $"\e[1;34m{s}\e[0m";
 }
-func cyan(s: string): string {
+func cyan(s: string) -> string {
     return $"\e[1;36m{s}\e[0m";
 }
-func yellow(s: string): string {
+func yellow(s: string) -> string {
     return $"\e[1;33m{s}\e[0m";
 }
-func gray(s: string): string {
+func gray(s: string) -> string {
     return $"\e[90m{s}\e[0m";
 }
 
-func ansi(code: string): string {
+func ansi(code: string) -> string {
     return $"\e[{code}m";
 }
 
 // --- RC helpers ---
 
-func extract_rc_addresses(output: string, prefix: string): Vec<string> {
+func extract_rc_addresses(output: string, prefix: string) -> Vec<string> {
     var addrs = new Vec<string>{};
     output.split("\n").filter(|line| line.starts_with(prefix)).each(|line| {
         var parts = line.split(" ");
@@ -68,7 +68,7 @@ func extract_rc_addresses(output: string, prefix: string): Vec<string> {
     return addrs;
 }
 
-func build_address_set(addrs: Vec<string>): Set<string> {
+func build_address_set(addrs: Vec<string>) -> Set<string> {
     var cap: i64 = 64;
     if (addrs.count > cap) {
         cap = addrs.count * 2;
@@ -80,7 +80,7 @@ func build_address_set(addrs: Vec<string>): Set<string> {
     return s;
 }
 
-func check_rc_leaks(stderr: string): bool {
+func check_rc_leaks(stderr: string) -> bool {
     var allocs = extract_rc_addresses(stderr, "RC_ALLOC:");
     var frees = extract_rc_addresses(stderr, "RC_FREE:");
     if (allocs.count == 0) {
@@ -95,7 +95,7 @@ func check_rc_leaks(stderr: string): bool {
     return true;
 }
 
-func get_leaked_addresses(stderr: string): Vec<string> {
+func get_leaked_addresses(stderr: string) -> Vec<string> {
     var allocs = extract_rc_addresses(stderr, "RC_ALLOC:");
     var frees = extract_rc_addresses(stderr, "RC_FREE:");
     var free_set = build_address_set(frees);
@@ -108,7 +108,7 @@ func get_leaked_addresses(stderr: string): Vec<string> {
     return leaked;
 }
 
-func check_rc_free_order(stderr: string, expected: string): bool {
+func check_rc_free_order(stderr: string, expected: string) -> bool {
     var parts = expected.split(" before ");
     if (parts.count != 2) {
         return false;
@@ -159,7 +159,7 @@ func check_rc_free_order(stderr: string, expected: string): bool {
     return left_pos <= right_pos;
 }
 
-func filter_rc_lines(output: string): string {
+func filter_rc_lines(output: string) -> string {
     var sb = new StringBuilder{};
     var first = true;
     foreach (const line in output.split("\n")) {
@@ -176,7 +176,7 @@ func filter_rc_lines(output: string): string {
 
 // --- File/output helpers ---
 
-func collect_files(dir: string, files: Vec<string>): void {
+func collect_files(dir: string, files: Vec<string>) -> void {
     var dh = fs::open_dir(dir);
     if (dh == null) {
         return;
@@ -200,7 +200,7 @@ func collect_files(dir: string, files: Vec<string>): void {
     }
 }
 
-func read_expected_lines(path: string, prefix: string): Vec<string> {
+func read_expected_lines(path: string, prefix: string) -> Vec<string> {
     var lines = new Vec<string>{};
     var marker = $"// {prefix}: ";
 
@@ -212,16 +212,16 @@ func read_expected_lines(path: string, prefix: string): Vec<string> {
     return lines;
 }
 
-func file_contains(path: string, pattern: string): bool {
+func file_contains(path: string, pattern: string) -> bool {
     var content = fs::read_file(path);
     return content.contains(pattern);
 }
 
-func display_path(file: string): string {
+func display_path(file: string) -> string {
     return file.strip_prefix("test/");
 }
 
-func check_output_contains(output: string, expected: Vec<string>): bool {
+func check_output_contains(output: string, expected: Vec<string>) -> bool {
     foreach (const line in expected) {
         if (!output.contains(line)) {
             return false;
@@ -230,7 +230,7 @@ func check_output_contains(output: string, expected: Vec<string>): bool {
     return true;
 }
 
-func extract_error_message(output: string): string {
+func extract_error_message(output: string) -> string {
     foreach (const line in output.split("\n")) {
         var idx = line.index_of("Error:");
         if (idx >= 0) {
@@ -242,7 +242,7 @@ func extract_error_message(output: string): string {
 
 // --- Test runners ---
 
-func run_program_test(file: string, w0: string, lib_path: string, verbose: bool): Result<bool, string> {
+func run_program_test(file: string, w0: string, lib_path: string, verbose: bool) -> Result<bool, string> {
     var tmp_bin = "/tmp/whist_test_bin";
 
     // Step 1: Compile with --rc-debug
@@ -334,7 +334,7 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
     return Result::Ok(true);
 }
 
-func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bool): Result<bool, string> {
+func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bool) -> Result<bool, string> {
     var cmd = $"{w0} --rc-debug --lib-path {lib_path} test {file}";
     var {output, error_output, exit_code} = std::exec(cmd);
 
@@ -380,7 +380,7 @@ func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bo
     return Result::Ok(true);
 }
 
-func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): Result<string, string> {
+func run_error_test(file: string, w0: string, lib_path: string, verbose: bool) -> Result<string, string> {
     var cmd = $"{w0} --lib-path {lib_path} --check {file}";
     var {output, error_output, exit_code} = std::exec(cmd);
 
@@ -425,7 +425,7 @@ func run_error_test(file: string, w0: string, lib_path: string, verbose: bool): 
 
 // --- Main ---
 
-func main(): i32 {
+func main() -> i32 {
     const args = std::args();
 
     var run_valid = args.any(|x| x == "--run" || x == "--valid");

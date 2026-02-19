@@ -58,7 +58,7 @@ Node* parse_type(Parser* parser) {
         return node;
     }
 
-    // Function type: func(T1, T2): ReturnType
+    // Function type: func(T1, T2) -> ReturnType
     if (match_token(parser, TOK_FUNC)) {
         Node* node = node_new(NODE_FUNC_TYPE, token.line, token.column);
         nodelist_init(&node->as.func_type.param_types);
@@ -79,7 +79,7 @@ Node* parse_type(Parser* parser) {
 
         consume_token(parser, TOK_RPAREN, "Expected ')' in function type");
 
-        if (match_token(parser, TOK_COLON)) {
+        if (match_token(parser, TOK_ARROW)) {
             node->as.func_type.return_type = parse_type(parser);
             if (!node->as.func_type.return_type) {
                 node_free(node);

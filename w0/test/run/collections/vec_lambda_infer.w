@@ -43,6 +43,6 @@ test "chain_infer" {
     assert(result[3] == 15);
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

@@ -7,15 +7,15 @@ enum Option<V> {
 }
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 trait Hashable {
-    const func hash(): i32;
+    const func hash() -> i32;
 }
 
 impl Hashable for i32 {
-    const func hash(): i32 {
+    const func hash() -> i32 {
         return self;
     }
 }
@@ -31,7 +31,7 @@ struct HashTable<K, V>  {
     size: u32,
 }
 
-func (HashTable<K,V>) init(): void {
+func (HashTable<K,V>) init() -> void {
     self.buckets.clear();
     self.size = 2;
     foreach (const i in 0..self.size) {
@@ -39,14 +39,14 @@ func (HashTable<K,V>) init(): void {
     }
 }
 
-func (HashTable<K,V>) insert(key: K, value: V): void {
+func (HashTable<K,V>) insert(key: K, value: V) -> void {
     var index: u32 = key.hash() % self.size;
     var entry: HashEntry<K,V> = new HashEntry<K,V>{next: null, value: value, key: key};
     entry.next = self.buckets[index];
     self.buckets[index] = entry;
 }
 
-func (HashTable<K,V>) get(key: K): Option<V> {
+func (HashTable<K,V>) get(key: K) -> Option<V> {
     var index: u32 = key.hash() % self.size;
     var entry: HashEntry<K,V> = self.buckets[index];
     while (entry != null) {

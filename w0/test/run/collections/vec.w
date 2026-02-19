@@ -12,7 +12,7 @@
 
 import collections;
 
-func (Vec<T>) beep(value: T): bool {
+func (Vec<T>) beep(value: T) -> bool {
     for (var i: i64 = 0; i < self.count; i += 1) {
         if (self[i] == value) {
             return true;
@@ -23,7 +23,7 @@ func (Vec<T>) beep(value: T): bool {
 
 // Shared definitions
 
-func sum(s: Span<i64>): i64 {
+func sum(s: Span<i64>) -> i64 {
     var total: i64 = 0;
     for (var i: i64 = 0; i < s.count; i += 1) {
         total = total + s[i];
@@ -293,7 +293,7 @@ test "vec_user_method" {
     assert(!words.beep("missing"));
 }
 
-func a10(f:i64): bool {
+func a10(f:i64) -> bool {
     return f % 2 == 0;
 }
 

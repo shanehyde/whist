@@ -8,7 +8,7 @@ Named aliases for complex or semantic types. Aliases are purely compile-time —
 
 ```whist
 type UserId = i64;
-type Callback = func(i32, i32): i32;
+type Callback = func(i32, i32) -> i32;
 type StringMap<V> = Map<string, V>;
 ```
 
@@ -25,8 +25,8 @@ type Timestamp = i64;
 type Email = string;
 type Url = string;
 
-func get_user(id: UserId): User { ... }
-func get_post(id: PostId): Post { ... }
+func get_user(id: UserId) -> User { ... }
+func get_post(id: PostId) -> Post { ... }
 ```
 
 ### 2. Simplifying Complex Types
@@ -35,10 +35,10 @@ Shorten verbose type expressions:
 
 ```whist
 type JsonObject = HashMap<string, JsonValue>;
-type Handler = func(Request): Response;
-type Middleware = func(Handler): Handler;
+type Handler = func(Request) -> Response;
+type Middleware = func(Handler) -> Handler;
 type Matrix = [[f64; 4]; 4];
-type Callback<T> = func(Result<T, Error>): void;
+type Callback<T> = func(Result<T, Error>) -> void;
 ```
 
 ### 3. Generic Type Partial Application
@@ -78,7 +78,7 @@ var id: UserId = 42;
 var num: i64 = id;      // OK: UserId is just i64
 var id2: UserId = num;  // OK: i64 is just UserId
 
-func double(x: i64): i64 { return x * 2; }
+func double(x: i64) -> i64 { return x * 2; }
 double(id);             // OK: UserId accepted as i64
 ```
 
@@ -220,7 +220,7 @@ type InternalId = i64;          // private to module
 ```whist
 type Result<T> = std.Result<T, Error>;
 
-func parse<T>(s: string): Result<T> {
+func parse<T>(s: string) -> Result<T> {
     // ...
 }
 ```
@@ -228,14 +228,14 @@ func parse<T>(s: string): Result<T> {
 ### With Traits
 
 ```whist
-type Handler = func(Request): Response;
+type Handler = func(Request) -> Response;
 
 // Can't impl trait for alias directly (it's just the underlying type)
 // Use newtype if you need to add methods:
-newtype Handler = func(Request): Response;
+newtype Handler = func(Request) -> Response;
 
 impl Handler {
-    func (Handler) chain(other: Handler): Handler { ... }
+    func (Handler) chain(other: Handler) -> Handler { ... }
 }
 ```
 
@@ -246,7 +246,7 @@ Aliases are transparent in patterns:
 ```whist
 type Point = (i64, i64);
 
-func origin(p: Point): bool {
+func origin(p: Point) -> bool {
     match p {
         (0, 0) => true,
         _ => false,
@@ -297,13 +297,13 @@ type JsonArray = Vec<JsonValue>;
 type JsonObject = HashMap<string, JsonValue>;
 
 // Function types
-type Predicate<T> = func(T): bool;
-type Comparator<T> = func(T, T): Ordering;
-type Reducer<T, A> = func(A, T): A;
+type Predicate<T> = func(T) -> bool;
+type Comparator<T> = func(T, T) -> Ordering;
+type Reducer<T, A> = func(A, T) -> A;
 
-func filter<T>(items: Vec<T>, pred: Predicate<T>): Vec<T> { ... }
-func sort<T>(items: Vec<T>, cmp: Comparator<T>): Vec<T> { ... }
-func fold<T, A>(items: Vec<T>, init: A, f: Reducer<T, A>): A { ... }
+func filter<T>(items: Vec<T>, pred: Predicate<T>) -> Vec<T> { ... }
+func sort<T>(items: Vec<T>, cmp: Comparator<T>) -> Vec<T> { ... }
+func fold<T, A>(items: Vec<T>, init: A, f: Reducer<T, A>) -> A { ... }
 
 // Platform abstraction
 type FileDescriptor = i32;
@@ -311,13 +311,13 @@ type SocketHandle = i32;
 type ProcessId = i32;
 
 // Complex nested types
-type RouteHandler = func(Request, Params): Response;
-type Middleware = func(RouteHandler): RouteHandler;
+type RouteHandler = func(Request, Params) -> Response;
+type Middleware = func(RouteHandler) -> RouteHandler;
 type Router = HashMap<string, RouteHandler>;
 
 // Generic utilities
 type Box<T> = struct { value: T };
-type Lazy<T> = func(): T;
+type Lazy<T> = func() -> T;
 type Cache<K, V> = HashMap<K, Lazy<V>>;
 ```
 
@@ -336,7 +336,7 @@ type Cache<K, V> = HashMap<K, Lazy<V>>;
 - Newtypes
 - Local type aliases (inside functions)
 - Associated type aliases (inside traits/impls)
-- Function type aliases (`type Handler = func(Request): Response;` — requires function types)
+- Function type aliases (`type Handler = func(Request) -> Response;` — requires function types)
 - Recursive type aliases through indirection
 
 ## Related Features

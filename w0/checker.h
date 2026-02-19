@@ -101,7 +101,7 @@ typedef struct {
 } VecInstance;
 
 // Generic free function definition (template)
-// Also used for method-level generics: func (Vec<T>) map<K>(...): Vec<K>
+// Also used for method-level generics: func (Vec<T>) map<K>(...) -> Vec<K>
 // For methods: type_params = combined receiver-bound + method params ["T", "K"].
 // receiver_param_count stores how many leading entries come from receiver pattern
 // bindings (not the receiver generic arity).

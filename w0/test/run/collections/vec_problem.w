@@ -6,7 +6,7 @@ struct ReadDirResult {
     dirs: Vec<string>
 }
 
-func main() : i32 {
+func main() -> i32 {
 
     var args = std::args();
 

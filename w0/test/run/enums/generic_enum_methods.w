@@ -6,7 +6,7 @@ enum Flag<T> {
     On(T),
 }
 
-func (const Flag<T>) has_value(): bool {
+func (const Flag<T>) has_value() -> bool {
     match (self) {
         On(_) => return true;
         Off => return false;

@@ -6,7 +6,7 @@ enum Option<T> {
     Some(T),
 }
 
-func main(): i32 {
+func main() -> i32 {
     var x: Option<i64> = Option::Some(42);
     var n: Option<i64> = Option::None;
 

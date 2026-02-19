@@ -4,13 +4,13 @@
 
 import std;
 
-func identity_string(s: string): string {
+func identity_string(s: string) -> string {
     return s;
 }
 
 struct Box { value: i64 }
 
-func identity_box(b: Box): Box {
+func identity_box(b: Box) -> Box {
     return b;
 }
 

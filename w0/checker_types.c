@@ -250,7 +250,7 @@ GenericFuncInstance* instantiate_generic_func(Checker* checker, GenericFuncDef* 
 }
 
 // =============================================================================
-// Generic method-level function helpers (func (Vec<T>) map<K>(...): Vec<K>)
+// Generic method-level function helpers (func (Vec<T>) map<K>(...) -> Vec<K>)
 // =============================================================================
 
 // Register a method-level generic function definition.

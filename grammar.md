@@ -57,7 +57,7 @@ Use statements selectively bring symbols from an imported module into unqualifie
 ### Function Declaration
 
 ```bnf
-<func-decl> ::= 'func' [ <receiver> ] <identifier> [ '<' <type-param-list> '>' ] '(' [ <param-list> ] ')' [ ':' <return-type> ]
+<func-decl> ::= 'func' [ <receiver> ] <identifier> [ '<' <type-param-list> '>' ] '(' [ <param-list> ] ')' [ '->' <return-type> ]
 <func-defn> ::= <func-decl> <block>
 
 <receiver> ::= '(' [ 'const' ] <identifier> [ '<' <type-arg-list> '>' ] ')'
@@ -77,17 +77,17 @@ Use statements selectively bring symbols from an imported module into unqualifie
 When an `extern` block has no explicit visibility modifier at top level, functions in the block default to private unless overridden per function.
 
 **Generic free functions:** Free functions (without a receiver) can have type parameters:
-- `func identity<T>(x: T): T` — single type parameter
-- `func first<A, B>(a: A, b: B): A` — multiple type parameters
-- `func get_label<T: Printable>(x: T): string` — type parameter with trait bound
+- `func identity<T>(x: T) -> T` — single type parameter
+- `func first<A, B>(a: A, b: B) -> A` — multiple type parameters
+- `func get_label<T: Printable>(x: T) -> string` — type parameter with trait bound
 
 Type arguments are inferred from call-site argument types (no explicit type arguments at call sites). Each unique instantiation produces a monomorphized C function (e.g., `identity_i64`, `identity_string`).
 
 **Generic methods:** Methods can be defined on generic structs using type arguments in the receiver:
-- `func (Box<T>) get(): T` — method on any `Box<T>` instantiation
-- `func (Pair<i32, Box<T>>) set(v: Box<T>): void` — partially specialized method
+- `func (Box<T>) get() -> T` — method on any `Box<T>` instantiation
+- `func (Pair<i32, Box<T>>) set(v: Box<T>) -> void` — partially specialized method
 
-`const` may also qualify return types (for example, `func args_view(): const Vec<string>`).
+`const` may also qualify return types (for example, `func args_view() -> const Vec<string>`).
 Current limitation: return-type const is signature-level only; type checking treats `T` and `const T`
 as compatible (no deep/shallow immutability distinction yet).
 
@@ -123,7 +123,7 @@ Generic structs are monomorphized at compile time, generating specialized C code
 ```bnf
 <trait-decl>   ::= 'trait' <identifier> '{' { <trait-method> } '}'
 
-<trait-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <return-type> ] ';'
+<trait-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ '->' <return-type> ] ';'
 ```
 
 Traits define a set of required method signatures that types can implement. Trait methods are declared without a receiver or body — just the function signature followed by a semicolon. Use `const func` to declare methods that require an immutable receiver. Impl blocks must match the const-ness exactly.
@@ -136,7 +136,7 @@ Traits define a set of required method signatures that types can implement. Trai
                | 'impl' <identifier> [ '<' <type-arg-list> '>' ]
                    '{' { <impl-method> } '}'
 
-<impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ ':' <return-type> ] <block>
+<impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ '->' <return-type> ] <block>
 ```
 
 **Trait impl:** `impl Trait for Type { ... }` provides concrete method implementations for a trait on a specific type. Methods inside `impl` blocks do not specify a receiver — it is inferred from the `for Type` clause. Use `const func` for immutable-receiver methods. For generic target types, specify the type parameters on the impl header (e.g., `impl Drop for Box<T>`). All trait methods must be implemented.
@@ -216,7 +216,7 @@ test "arithmetic" {
 ```bnf
 <type> ::= <identifier>
         | <identifier> '<' <type-arg-list> '>'
-        | 'func' '(' [ <type-list> ] ')' [ ':' <type> ]
+        | 'func' '(' [ <type-list> ] ')' [ '->' <type> ]
         | '[' [ <expression> ] ']' <type>
         | '(' <type> ',' <type> { ',' <type> } ')'
 
@@ -463,7 +463,7 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
 
 `match` can be used as a statement or expression. In expression form, each arm body must be an expression (block bodies are not allowed).
 
-**Lambda expressions:** `|x: i64| x * 2` creates an anonymous function. Lambdas have type `func(T1, T2, ...): R` and are represented as fat pointers (`__Closure { fn, env }`). Parameter type annotations are required unless inferred from context. The return type is inferred from the body for expression lambdas, or defaults to `void` for block lambdas (use `-> T` to specify explicitly). Empty-parameter lambdas use `||`: `|| 42`. Lambdas can be assigned to `func(...)` typed variables, passed as function arguments, or called directly: `(|x: i64| x + 1)(42)`.
+**Lambda expressions:** `|x: i64| x * 2` creates an anonymous function. Lambdas have type `func(T1, T2, ...) -> R` and are represented as fat pointers (`__Closure { fn, env }`). Parameter type annotations are required unless inferred from context. The return type is inferred from the body for expression lambdas, or defaults to `void` for block lambdas (use `-> T` to specify explicitly). Empty-parameter lambdas use `||`: `|| 42`. Lambdas can be assigned to `func(...)` typed variables, passed as function arguments, or called directly: `(|x: i64| x + 1)(42)`.
 
 **Closures:** Lambdas can capture variables from enclosing scopes. Captured variables are copied into a heap-allocated environment struct at lambda creation time. RC-managed captures (strings, structs, vecs) are automatically reference-counted — the environment holds its own reference, which is released when the closure's environment is freed. Non-capturing lambdas have a `NULL` environment (zero overhead). Example: `var offset = 10; var f = |x: i64| -> i64 x + offset;`
 

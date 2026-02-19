@@ -10,7 +10,7 @@ enum Result<T, E> {
     Err(E),
 }
 
-func test_option(opt: Option<i64>): i64 {
+func test_option(opt: Option<i64>) -> i64 {
     if let Some(v) = opt {
         return v;
     } else {
@@ -18,7 +18,7 @@ func test_option(opt: Option<i64>): i64 {
     }
 }
 
-func test_result(res: Result<i64, string>): i64 {
+func test_result(res: Result<i64, string>) -> i64 {
     if let Ok(v) = res {
         return v;
     } else {
@@ -27,7 +27,7 @@ func test_result(res: Result<i64, string>): i64 {
 }
 
 // No bindings (simple variant)
-func test_none_check(opt: Option<i64>): bool {
+func test_none_check(opt: Option<i64>) -> bool {
     if let None = opt {
         return true;
     }
@@ -35,7 +35,7 @@ func test_none_check(opt: Option<i64>): bool {
 }
 
 // else-if-let chain
-func test_chain(opt: Option<i64>, res: Result<i64, string>): i64 {
+func test_chain(opt: Option<i64>, res: Result<i64, string>) -> i64 {
     if let Some(v) = opt {
         return v;
     } else if let Ok(v) = res {
@@ -46,7 +46,7 @@ func test_chain(opt: Option<i64>, res: Result<i64, string>): i64 {
 }
 
 // else-if (regular) after if-let
-func test_else_if(opt: Option<i64>, flag: bool): i64 {
+func test_else_if(opt: Option<i64>, flag: bool) -> i64 {
     if let Some(v) = opt {
         return v;
     } else if (flag) {
@@ -56,6 +56,6 @@ func test_else_if(opt: Option<i64>, flag: bool): i64 {
     }
 }
 
-func main(): i32 {
+func main() -> i32 {
     return 0;
 }

@@ -3,7 +3,7 @@
 // Expected: PASS: drop_generic_impl
 
 trait Drop {
-    func drop(): void;
+    func drop() -> void;
 }
 
 struct Resource {
@@ -11,7 +11,7 @@ struct Resource {
 }
 
 impl Drop for Resource {
-    func drop(): void {
+    func drop() -> void {
         // cleanup
     }
 }
@@ -25,7 +25,7 @@ struct Box<T> {
 }
 
 impl Drop for Box<T> {
-    func drop(): void {
+    func drop() -> void {
         // cleanup
     }
 }
