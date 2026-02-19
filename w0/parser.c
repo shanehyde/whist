@@ -30,6 +30,15 @@ Node* parser_parse(Parser* parser) {
             continue;
         }
 
+        // Handle include statements (relative path imports)
+        if (match_token(parser, TOK_INCLUDE)) {
+            if (!parse_include_stmt(parser, program, main_module)) {
+                if (parser->panic_mode)
+                    synchronize(parser);
+            }
+            continue;
+        }
+
         // Handle use statements
         if (match_token(parser, TOK_USE)) {
             Node* use_node = parse_use_stmt(parser);

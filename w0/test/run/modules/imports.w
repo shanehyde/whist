@@ -6,8 +6,8 @@
 
 import std;
 import fs;
-import "./util/inner/helper.w";
-import "./util/combined_helper.w";
+include "./util/inner/helper.w";
+include "./util/combined_helper.w";
 
 test "import_fs" {
     // Convenience API

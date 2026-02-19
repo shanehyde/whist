@@ -669,33 +669,42 @@ Node* parse_use_stmt(Parser* parser) {
 }
 
 int parse_import_stmt(Parser* parser, Node* program, Node* current_module) {
-    Token       import_token = parser->current;
-    const char* module_name;
-    size_t      module_length;
-    int         is_relative = 0;
+    Token import_token = parser->current;
 
-    if (parser->current.type == TOK_STRING) {
-        advance_token(parser);
-        module_name   = import_token.start + 1;
-        module_length = import_token.length - 2;
-        is_relative   = module_loader_is_relative_path(module_name, module_length);
-        if (!is_relative) {
-            parse_error(parser, "String imports must be relative paths (start with ./ or ../)");
-            return 0;
-        }
-    } else if (parser->current.type == TOK_IDENT) {
-        advance_token(parser);
-        module_name   = import_token.start;
-        module_length = import_token.length;
-    } else {
-        parse_error(parser, "Expected module name or path after 'import'");
+    if (parser->current.type != TOK_IDENT) {
+        parse_error(parser,
+                    "Expected module name after 'import' (use 'include' for relative paths)");
         return 0;
     }
+    advance_token(parser);
 
     consume_token(parser, TOK_SEMICOLON, "Expected ';' after import statement");
 
-    return module_loader_import(parser->loader, parser, program, current_module, module_name,
-                                module_length, is_relative);
+    return module_loader_import(parser->loader, parser, program, current_module, import_token.start,
+                                import_token.length, /*is_relative=*/0);
+}
+
+int parse_include_stmt(Parser* parser, Node* program, Node* current_module) {
+    Token include_token = parser->current;
+
+    if (parser->current.type != TOK_STRING) {
+        parse_error(parser, "Expected relative path string after 'include'");
+        return 0;
+    }
+    advance_token(parser);
+
+    const char* path   = include_token.start + 1;
+    size_t      length = include_token.length - 2;
+
+    if (!module_loader_is_relative_path(path, length)) {
+        parse_error(parser, "Include paths must be relative (start with ./ or ../)");
+        return 0;
+    }
+
+    consume_token(parser, TOK_SEMICOLON, "Expected ';' after include statement");
+
+    return module_loader_import(parser->loader, parser, program, current_module, path, length,
+                                /*is_relative=*/1);
 }
 
 // ============================================================================
