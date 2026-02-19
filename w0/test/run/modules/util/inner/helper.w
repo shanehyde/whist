@@ -1,6 +1,6 @@
 // Test parent directory imports
 
-import "../math.w";
+include "../math.w";
 
 func quadruple(x: i32) -> i32 {
     return twice(twice(x));

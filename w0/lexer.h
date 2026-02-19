@@ -46,6 +46,7 @@ typedef enum {
     TOK_PRIVATE,
     TOK_EXTERN,
     TOK_IMPORT,
+    TOK_INCLUDE,
     TOK_AS,
     TOK_USE,
     TOK_TEST,

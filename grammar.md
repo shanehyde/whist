@@ -16,7 +16,7 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 ## Program Structure
 
 ```bnf
-<program> ::= { <import-stmt> | <use-stmt> | <declaration> }
+<program> ::= { <import-stmt> | <include-stmt> | <use-stmt> | <declaration> }
 
 <declaration> ::= [ 'public' | 'private' ] <func-defn>
                | [ 'public' | 'private' ] <struct-decl>
@@ -38,13 +38,15 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
 ### Import Statement
 
 ```bnf
-<import-stmt> ::= 'import' ( <identifier> | <string-literal> ) ';'
+<import-stmt> ::= 'import' <identifier> ';'
+
+<include-stmt> ::= 'include' <string-literal> ';'
 ```
 
-Import statements load declarations from external Whist source files. There are two forms:
+Import and include statements load declarations from external Whist source files:
 
 - **Module import:** `import std;` resolves the module name from the `lib/` directory (e.g., `lib/std.w`). Symbols from module imports must be accessed with module qualification: `std::print("hello")`. Unqualified access is an error unless brought into scope with `use`.
-- **Relative import:** `import "./path/to/file.w";` or `import "../file.w";` resolves the path relative to the importing file's directory. String imports must start with `./` or `../`. Symbols from relative imports are merged into the current module and accessed without qualification.
+- **Relative include:** `include "./path/to/file.w";` or `include "../file.w";` resolves the path relative to the including file's directory. Paths must start with `./` or `../`. Symbols from includes are merged into the current module and accessed without qualification.
 
 ### Use Statement
 
@@ -496,8 +498,9 @@ Examples: `'A' as i32` (yields 65), `65 as char` (yields 'A'), `x as i64`
 ```
 as       break    by          const     continue  defer
 else     enum     extern      false     for       foreach
-func     if       impl        import    in        is
-match    new      null        public    private   return
+func     if       impl        import    in        include
+is       match    new         null      public    private
+return
 self     struct   test        trait     true      type
 use      var      while
 ```

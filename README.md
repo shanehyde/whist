@@ -50,7 +50,7 @@ See [w0/README.md](w0/README.md) for full compiler usage.
 
 ### Module System
 - Library imports — `import std;` with qualified access (`std.print(...)`)
-- Relative imports — `import "./helper.w";`
+- Relative includes — `include "./helper.w";`
 - Standard library with `std` (print, abs, max, min) and `fs` (file I/O)
 
 ### C Interop

@@ -88,9 +88,9 @@ func main() -> i32 {
 }
 ```
 
-**Relative imports** merge symbols into current namespace:
+**Relative includes** merge symbols into current namespace:
 ```whist
-import "./helper.w";
+include "./helper.w";
 
 func main() -> i32 {
     helper_function();  // ✓ Correct: no qualification needed
