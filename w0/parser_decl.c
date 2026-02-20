@@ -432,124 +432,184 @@ static Node* parse_impl_decl(Parser* parser) {
     return node;
 }
 
-static Node* parse_enum_decl(Parser* parser, int is_public) {
-    Token name = parser->current;
-    consume_token(parser, TOK_IDENT, "Expected enum name");
-
-    Node* node                     = node_new(NODE_ENUM_DECL, name.line, name.column);
+// Initializes a freshly parsed enum declaration node with its default fields.
+static Node* create_enum_decl_node(Token* name, int is_public) {
+    Node* node                     = node_new(NODE_ENUM_DECL, name->line, name->column);
     node->as.enum_decl.is_public   = is_public;
-    node->as.enum_decl.name        = copy_token_string(&name);
-    node->as.enum_decl.name_length = name.length;
+    node->as.enum_decl.name        = copy_token_string(name);
+    node->as.enum_decl.name_length = name->length;
     nodelist_init(&node->as.enum_decl.values);
-
-    // Parse type parameters if present: enum Option<T> or enum Result<T, E>
     node->as.enum_decl.type_params       = NULL;
     node->as.enum_decl.type_param_bounds = NULL;
     node->as.enum_decl.type_param_count  = 0;
+    return node;
+}
 
-    if (match_token(parser, TOK_LT)) {
-        int capacity                         = 4;
-        node->as.enum_decl.type_params       = xmalloc(capacity * sizeof(char*));
-        node->as.enum_decl.type_param_bounds = xmalloc(capacity * sizeof(char*));
-
-        do {
-            Token param_name = parser->current;
-            consume_token(parser, TOK_IDENT, "Expected type parameter name");
-
-            if (node->as.enum_decl.type_param_count >= capacity) {
-                capacity *= 2;
-                node->as.enum_decl.type_params =
-                    xrealloc(node->as.enum_decl.type_params, capacity * sizeof(char*));
-                node->as.enum_decl.type_param_bounds =
-                    xrealloc(node->as.enum_decl.type_param_bounds, capacity * sizeof(char*));
-            }
-
-            node->as.enum_decl.type_params[node->as.enum_decl.type_param_count] =
-                copy_token_string(&param_name);
-
-            if (match_token(parser, TOK_COLON)) {
-                Token bound_name = parser->current;
-                consume_token(parser, TOK_IDENT, "Expected trait name after ':'");
-                node->as.enum_decl.type_param_bounds[node->as.enum_decl.type_param_count] =
-                    copy_token_string(&bound_name);
-            } else {
-                node->as.enum_decl.type_param_bounds[node->as.enum_decl.type_param_count] = NULL;
-            }
-
-            node->as.enum_decl.type_param_count++;
-        } while (match_token(parser, TOK_COMMA));
-
-        consume_token(parser, TOK_GT, "Expected '>' after type parameters");
+// Parses optional generic parameters for enum declarations like `enum Result<T, E>`.
+static void parse_enum_type_params(Parser* parser, Node* node) {
+    if (!match_token(parser, TOK_LT)) {
+        return;
     }
 
-    consume_token(parser, TOK_LBRACE, "Expected '{' after enum name");
-    while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
-        Token value_name = parser->current;
-        consume_token(parser, TOK_IDENT, "Expected enum value name");
+    int capacity                         = 4;
+    node->as.enum_decl.type_params       = xmalloc(capacity * sizeof(char*));
+    node->as.enum_decl.type_param_bounds = xmalloc(capacity * sizeof(char*));
 
-        Node* value = node_new(NODE_ENUM_VARIANT, value_name.line, value_name.column);
-        value->as.enum_variant.name        = copy_token_string(&value_name);
-        value->as.enum_variant.name_length = value_name.length;
-        nodelist_init(&value->as.enum_variant.types);
-        value->as.enum_variant.has_explicit_value = 0;
-        value->as.enum_variant.explicit_value     = 0;
+    do {
+        Token param_name = parser->current;
+        consume_token(parser, TOK_IDENT, "Expected type parameter name");
 
-        // Check for payload types: VariantName(Type1, Type2, ...)
-        if (match_token(parser, TOK_LPAREN)) {
-            while (!check_token(parser, TOK_RPAREN) && !check_token(parser, TOK_EOF)) {
-                Node* type_node = parse_type(parser);
-                if (!type_node)
-                    return NULL;
-                nodelist_push(&value->as.enum_variant.types, type_node);
-                if (!check_token(parser, TOK_RPAREN)) {
-                    consume_token(parser, TOK_COMMA, "Expected ',' or ')' after variant type");
-                }
-            }
-            consume_token(parser, TOK_RPAREN, "Expected ')' after variant types");
+        if (node->as.enum_decl.type_param_count >= capacity) {
+            capacity *= 2;
+            node->as.enum_decl.type_params =
+                xrealloc(node->as.enum_decl.type_params, capacity * sizeof(char*));
+            node->as.enum_decl.type_param_bounds =
+                xrealloc(node->as.enum_decl.type_param_bounds, capacity * sizeof(char*));
         }
-        // Optional explicit integer value: VariantName = 43
-        if (match_token(parser, TOK_EQ)) {
-            int   is_negative = match_token(parser, TOK_MINUS);
-            Token value_token = parser->current;
-            consume_token(parser, TOK_INT, "Expected integer literal after '=' in enum variant");
-            if (value_token.type != TOK_INT)
-                return NULL;
 
-            const char* start = value_token.start;
-            int         base  = 10;
-            if (value_token.length > 2) {
-                if (start[0] == '0' && (start[1] == 'x' || start[1] == 'X')) {
-                    base = 16;
-                    start += 2;
-                } else if (start[0] == '0' && (start[1] == 'b' || start[1] == 'B')) {
-                    base = 2;
-                    start += 2;
-                } else if (start[0] == '0' && (start[1] == 'o' || start[1] == 'O')) {
-                    base = 8;
-                    start += 2;
-                }
-            }
+        node->as.enum_decl.type_params[node->as.enum_decl.type_param_count] =
+            copy_token_string(&param_name);
+        if (match_token(parser, TOK_COLON)) {
+            Token bound_name = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected trait name after ':'");
+            node->as.enum_decl.type_param_bounds[node->as.enum_decl.type_param_count] =
+                copy_token_string(&bound_name);
+        } else {
+            node->as.enum_decl.type_param_bounds[node->as.enum_decl.type_param_count] = NULL;
+        }
 
-            errno = 0;
-            char* endptr;
-            long  explicit_value = strtol(start, &endptr, base);
-            if (errno == ERANGE) {
-                parse_error_at(parser, &value_token, "Enum variant value out of range");
-            }
-            if (is_negative) {
-                explicit_value = -explicit_value;
-            }
-            value->as.enum_variant.has_explicit_value = 1;
-            value->as.enum_variant.explicit_value     = explicit_value;
+        node->as.enum_decl.type_param_count++;
+    } while (match_token(parser, TOK_COMMA));
+
+    consume_token(parser, TOK_GT, "Expected '>' after type parameters");
+}
+
+// Parses the numeric base and literal digits for enum explicit-value integer tokens.
+static int parse_enum_explicit_value_base(const Token* token, const char** start) {
+    *start   = token->start;
+    int base = 10;
+
+    if (token->length > 2 && (*start)[0] == '0') {
+        if ((*start)[1] == 'x' || (*start)[1] == 'X') {
+            base = 16;
+            *start += 2;
+        } else if ((*start)[1] == 'b' || (*start)[1] == 'B') {
+            base = 2;
+            *start += 2;
+        } else if ((*start)[1] == 'o' || (*start)[1] == 'O') {
+            base = 8;
+            *start += 2;
+        }
+    }
+
+    return base;
+}
+
+// Parses optional payload types for an enum variant like `Some(T)` or `Pair(K, V)`.
+static int parse_enum_variant_payload_types(Parser* parser, Node* value) {
+    if (!match_token(parser, TOK_LPAREN)) {
+        return 1;
+    }
+
+    while (!check_token(parser, TOK_RPAREN) && !check_token(parser, TOK_EOF)) {
+        Node* type_node = parse_type(parser);
+        if (!type_node) {
+            return 0;
+        }
+        nodelist_push(&value->as.enum_variant.types, type_node);
+
+        if (!check_token(parser, TOK_RPAREN)) {
+            consume_token(parser, TOK_COMMA, "Expected ',' or ')' after variant type");
+        }
+    }
+
+    consume_token(parser, TOK_RPAREN, "Expected ')' after variant types");
+    return 1;
+}
+
+// Parses an optional explicit integer assignment for an enum variant.
+static int parse_enum_variant_explicit_value(Parser* parser, Node* value) {
+    if (!match_token(parser, TOK_EQ)) {
+        return 1;
+    }
+
+    int   is_negative = match_token(parser, TOK_MINUS);
+    Token value_token = parser->current;
+    consume_token(parser, TOK_INT, "Expected integer literal after '=' in enum variant");
+    if (value_token.type != TOK_INT) {
+        return 0;
+    }
+
+    const char* start;
+    int         base = parse_enum_explicit_value_base(&value_token, &start);
+    errno            = 0;
+    char* endptr;
+    long  explicit_value = strtol(start, &endptr, base);
+    if (errno == ERANGE) {
+        parse_error_at(parser, &value_token, "Enum variant value out of range");
+    }
+    if (is_negative) {
+        explicit_value = -explicit_value;
+    }
+
+    value->as.enum_variant.has_explicit_value = 1;
+    value->as.enum_variant.explicit_value     = explicit_value;
+    return 1;
+}
+
+// Parses one enum variant, including optional payload types and explicit numeric value.
+static Node* parse_enum_variant(Parser* parser) {
+    Token value_name = parser->current;
+    consume_token(parser, TOK_IDENT, "Expected enum value name");
+
+    Node* value                 = node_new(NODE_ENUM_VARIANT, value_name.line, value_name.column);
+    value->as.enum_variant.name = copy_token_string(&value_name);
+    value->as.enum_variant.name_length = value_name.length;
+    nodelist_init(&value->as.enum_variant.types);
+    value->as.enum_variant.has_explicit_value = 0;
+    value->as.enum_variant.explicit_value     = 0;
+
+    if (!parse_enum_variant_payload_types(parser, value)) {
+        node_free(value);
+        return NULL;
+    }
+    if (!parse_enum_variant_explicit_value(parser, value)) {
+        node_free(value);
+        return NULL;
+    }
+
+    return value;
+}
+
+// Parses the comma-separated enum variant list up to the closing brace.
+static int parse_enum_variants(Parser* parser, Node* node) {
+    while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
+        Node* value = parse_enum_variant(parser);
+        if (!value) {
+            return 0;
         }
 
         nodelist_push(&node->as.enum_decl.values, value);
-
         if (!check_token(parser, TOK_RBRACE)) {
             consume_token(parser, TOK_COMMA, "Expected ',' or '}' after enum value");
         } else {
             match_token(parser, TOK_COMMA); // Allow trailing comma
         }
+    }
+
+    return 1;
+}
+
+static Node* parse_enum_decl(Parser* parser, int is_public) {
+    Token name = parser->current;
+    consume_token(parser, TOK_IDENT, "Expected enum name");
+
+    Node* node = create_enum_decl_node(&name, is_public);
+    parse_enum_type_params(parser, node);
+
+    consume_token(parser, TOK_LBRACE, "Expected '{' after enum name");
+    if (!parse_enum_variants(parser, node)) {
+        return NULL;
     }
 
     consume_token(parser, TOK_RBRACE, "Expected '}' after enum values");
