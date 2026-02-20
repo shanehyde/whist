@@ -2652,6 +2652,112 @@ static const CheckerPassSpec k_checker_pass_specs[] = {
     },
 };
 
+// Report a missing standalone receiver method for a deferred trait check.
+static void report_missing_deferred_trait_method(Checker* checker, DeferredTraitCheck* dc) {
+    check_error(checker, dc->line, dc->col, "No standalone method '%s' found for type '%s'",
+                dc->method_name, dc->type_name);
+}
+
+// Return whether a generic definition contains a body-backed method with the given name.
+static int generic_def_has_method_with_body(GenericDef* def, const char* method_name) {
+    for (int j = 0; j < def->method_count; j++) {
+        Node* m = def->methods[j];
+        if (strcmp(m->as.func_decl.name, method_name) == 0 && m->as.func_decl.body != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Verify deferred method existence for generic impl targets.
+static void verify_generic_deferred_trait_check(Checker* checker, DeferredTraitCheck* dc) {
+    GenericDef* def = lookup_generic_def(checker, dc->type_name);
+    if (!def || !generic_def_has_method_with_body(def, dc->method_name)) {
+        report_missing_deferred_trait_method(checker, dc);
+    }
+}
+
+// Look up a non-generic standalone method symbol by its receiver-qualified mangled name.
+static Symbol* lookup_deferred_standalone_method(Checker* checker, DeferredTraitCheck* dc) {
+    char mangled[256];
+    snprintf(mangled, sizeof(mangled), "%s_%s", dc->type_name, dc->method_name);
+    return checker_lookup(checker, mangled);
+}
+
+// Verify non-generic deferred method function signature compatibility against the trait
+// expectation.
+static int verify_deferred_method_signature(Checker* checker, DeferredTraitCheck* dc,
+                                            Type* actual_type) {
+    Type* expected = dc->expected_type;
+
+    if (actual_type->kind != TYPE_FUNC || expected->kind != TYPE_FUNC) {
+        return 0;
+    }
+
+    if (!type_equals(actual_type->as.func.return_type, expected->as.func.return_type)) {
+        check_error(checker, dc->line, dc->col,
+                    "Method '%s' on '%s' return type mismatch: trait expects '%s', got '%s'",
+                    dc->method_name, dc->type_name, type_name(expected->as.func.return_type),
+                    type_name(actual_type->as.func.return_type));
+        return 0;
+    }
+
+    if (actual_type->as.func.param_count != expected->as.func.param_count) {
+        check_error(checker, dc->line, dc->col,
+                    "Method '%s' on '%s' parameter count mismatch: trait expects %d, got %d",
+                    dc->method_name, dc->type_name, expected->as.func.param_count,
+                    actual_type->as.func.param_count);
+        return 0;
+    }
+
+    for (int p = 0; p < expected->as.func.param_count; p++) {
+        if (!type_equals(actual_type->as.func.param_types[p], expected->as.func.param_types[p])) {
+            check_error(
+                checker, dc->line, dc->col,
+                "Method '%s' on '%s' parameter %d type mismatch: trait expects '%s', got '%s'",
+                dc->method_name, dc->type_name, p + 1, type_name(expected->as.func.param_types[p]),
+                type_name(actual_type->as.func.param_types[p]));
+        }
+    }
+
+    return 1;
+}
+
+// Verify receiver mutability for a deferred method against the struct method metadata.
+static void verify_deferred_method_constness(Checker* checker, DeferredTraitCheck* dc) {
+    Symbol* type_sym = checker_lookup(checker, dc->type_name);
+    if (!type_sym || type_sym->kind != SYM_TYPE || type_sym->type->kind != TYPE_STRUCT) {
+        return;
+    }
+
+    Type* st = type_sym->type;
+    for (int j = 0; j < st->as.struc.method_count; j++) {
+        if (strcmp(st->as.struc.method_names[j], dc->method_name) == 0) {
+            if (st->as.struc.method_is_const[j] != dc->is_const) {
+                check_error(checker, dc->line, dc->col,
+                            "Method '%s' on '%s' receiver mutability mismatch", dc->method_name,
+                            dc->type_name);
+            }
+            return;
+        }
+    }
+}
+
+// Verify deferred trait checks for non-generic impl targets.
+static void verify_non_generic_deferred_trait_check(Checker* checker, DeferredTraitCheck* dc) {
+    Symbol* sym = lookup_deferred_standalone_method(checker, dc);
+    if (!sym) {
+        report_missing_deferred_trait_method(checker, dc);
+        return;
+    }
+
+    if (!verify_deferred_method_signature(checker, dc, sym->type)) {
+        return;
+    }
+
+    verify_deferred_method_constness(checker, dc);
+}
+
 // Verify deferred trait checks: ensure body-less methods in impl blocks have
 // matching standalone receiver methods defined elsewhere.
 static void verify_deferred_trait_checks(Checker* checker) {
@@ -2659,96 +2765,11 @@ static void verify_deferred_trait_checks(Checker* checker) {
         DeferredTraitCheck* dc = &checker->traits.deferred_checks[i];
 
         if (dc->is_generic) {
-            // For generic types, verify the GenericDef has a method with matching name and body
-            GenericDef* def = lookup_generic_def(checker, dc->type_name);
-            if (!def) {
-                check_error(checker, dc->line, dc->col,
-                            "No standalone method '%s' found for type '%s'", dc->method_name,
-                            dc->type_name);
-                continue;
-            }
-            int found = 0;
-            for (int j = 0; j < def->method_count; j++) {
-                Node* m = def->methods[j];
-                if (strcmp(m->as.func_decl.name, dc->method_name) == 0 &&
-                    m->as.func_decl.body != NULL) {
-                    found = 1;
-                    break;
-                }
-            }
-            if (!found) {
-                check_error(checker, dc->line, dc->col,
-                            "No standalone method '%s' found for type '%s'", dc->method_name,
-                            dc->type_name);
-            }
+            verify_generic_deferred_trait_check(checker, dc);
             continue;
         }
 
-        // Non-generic: look up mangled name in symbol table
-        char mangled[256];
-        snprintf(mangled, sizeof(mangled), "%s_%s", dc->type_name, dc->method_name);
-
-        Symbol* sym = checker_lookup(checker, mangled);
-        if (!sym) {
-            check_error(checker, dc->line, dc->col, "No standalone method '%s' found for type '%s'",
-                        dc->method_name, dc->type_name);
-            continue;
-        }
-
-        // Compare function signatures
-        Type* actual_type = sym->type;
-        Type* expected    = dc->expected_type;
-
-        if (actual_type->kind != TYPE_FUNC || expected->kind != TYPE_FUNC) {
-            continue;
-        }
-
-        // Check return type
-        if (!type_equals(actual_type->as.func.return_type, expected->as.func.return_type)) {
-            check_error(checker, dc->line, dc->col,
-                        "Method '%s' on '%s' return type mismatch: trait expects '%s', got '%s'",
-                        dc->method_name, dc->type_name, type_name(expected->as.func.return_type),
-                        type_name(actual_type->as.func.return_type));
-            continue;
-        }
-
-        // Check parameter count
-        if (actual_type->as.func.param_count != expected->as.func.param_count) {
-            check_error(checker, dc->line, dc->col,
-                        "Method '%s' on '%s' parameter count mismatch: trait expects %d, got %d",
-                        dc->method_name, dc->type_name, expected->as.func.param_count,
-                        actual_type->as.func.param_count);
-            continue;
-        }
-
-        // Check parameter types
-        for (int p = 0; p < expected->as.func.param_count; p++) {
-            if (!type_equals(actual_type->as.func.param_types[p],
-                             expected->as.func.param_types[p])) {
-                check_error(
-                    checker, dc->line, dc->col,
-                    "Method '%s' on '%s' parameter %d type mismatch: trait expects '%s', got '%s'",
-                    dc->method_name, dc->type_name, p + 1,
-                    type_name(expected->as.func.param_types[p]),
-                    type_name(actual_type->as.func.param_types[p]));
-            }
-        }
-
-        // Check const-ness: look up the struct's method list
-        Symbol* type_sym = checker_lookup(checker, dc->type_name);
-        if (type_sym && type_sym->kind == SYM_TYPE && type_sym->type->kind == TYPE_STRUCT) {
-            Type* st = type_sym->type;
-            for (int j = 0; j < st->as.struc.method_count; j++) {
-                if (strcmp(st->as.struc.method_names[j], dc->method_name) == 0) {
-                    if (st->as.struc.method_is_const[j] != dc->is_const) {
-                        check_error(checker, dc->line, dc->col,
-                                    "Method '%s' on '%s' receiver mutability mismatch",
-                                    dc->method_name, dc->type_name);
-                    }
-                    break;
-                }
-            }
-        }
+        verify_non_generic_deferred_trait_check(checker, dc);
     }
 }
 
