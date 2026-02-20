@@ -533,6 +533,129 @@ static Type* check_member_enum(Checker* checker, Node* node, Type* object) {
 
 // Check Vec member access (count, capacity, data, contains, first, last, push, pop, insert,
 // remove, swap_remove, clear, reserve, shrink_to_fit, sort)
+static void set_vec_member_struct_name(Checker* checker, Node* node, Type* elem_type) {
+    char mangled[256];
+    snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
+    sem_info_set_member_struct_name(checker->sem, node, mangled);
+}
+
+static int check_mutating_member_on_const(Checker* checker, Node* node, const char* member_name) {
+    const char* const_name = get_const_binding_name(checker, node->as.member.object);
+    if (!const_name) {
+        return 0;
+    }
+    check_error(checker, node->line, node->column, "Cannot call mutating method '%s' on const '%s'",
+                member_name, const_name);
+    return 1;
+}
+
+static Type* lookup_or_instantiate_option_type(Checker* checker, Type* elem_type) {
+    GenericDef* option_def          = lookup_generic_def(checker, "Option");
+    Type**      args                = xmalloc(sizeof(Type*));
+    args[0]                         = elem_type;
+    char*            option_mangled = type_mangle_generic("Option", args, 1);
+    GenericInstance* existing       = lookup_generic_instance(checker, option_mangled);
+    if (existing) {
+        Type* option_type = existing->type;
+        free(option_mangled);
+        free(args);
+        return option_type;
+    }
+    return instantiate_generic_enum(checker, option_def, option_mangled, args, 1);
+}
+
+static Type* check_member_vec_contains(Checker* checker, Node* node, Type* elem_type) {
+    if (!type_supports_vec_contains(elem_type)) {
+        check_error(checker, node->line, node->column,
+                    "Vec.contains requires element type supporting ==, got '%s'",
+                    type_name(elem_type));
+        return type_error;
+    }
+
+    set_vec_member_struct_name(checker, node, elem_type);
+    Type** params = xmalloc(sizeof(Type*));
+    params[0]     = elem_type;
+    return type_func(params, 1, type_bool, 0);
+}
+
+static Type* check_member_vec_option_method(Checker* checker, Node* node, Type* elem_type,
+                                            int is_mutating) {
+    if (is_mutating && check_mutating_member_on_const(checker, node, node->as.member.name)) {
+        return type_error;
+    }
+    set_vec_member_struct_name(checker, node, elem_type);
+    Type* option_type = lookup_or_instantiate_option_type(checker, elem_type);
+    return type_func(NULL, 0, option_type, 0);
+}
+
+static int is_vec_builtin_mutating_method(const char* member_name) {
+    return strcmp(member_name, "push") == 0 || strcmp(member_name, "insert") == 0 ||
+           strcmp(member_name, "remove") == 0 || strcmp(member_name, "swap_remove") == 0 ||
+           strcmp(member_name, "clear") == 0 || strcmp(member_name, "reserve") == 0 ||
+           strcmp(member_name, "shrink_to_fit") == 0 || strcmp(member_name, "sort") == 0;
+}
+
+static Type* check_member_vec_mutating_method(Checker* checker, Node* node, Type* elem_type) {
+    const char* member_name = node->as.member.name;
+    if (check_mutating_member_on_const(checker, node, member_name)) {
+        return type_error;
+    }
+    if (strcmp(member_name, "sort") == 0 && !type_supports_vec_sort(elem_type)) {
+        check_error(checker, node->line, node->column,
+                    "Vec.sort requires orderable primitive element type, got '%s'",
+                    type_name(elem_type));
+        return type_error;
+    }
+
+    set_vec_member_struct_name(checker, node, elem_type);
+
+    if (strcmp(member_name, "push") == 0) {
+        Type** params = xmalloc(sizeof(Type*));
+        params[0]     = elem_type;
+        return type_func(params, 1, type_void, 0);
+    }
+    if (strcmp(member_name, "insert") == 0) {
+        Type** params = xmalloc(2 * sizeof(Type*));
+        params[0]     = type_int64;
+        params[1]     = elem_type;
+        return type_func(params, 2, type_void, 0);
+    }
+    if (strcmp(member_name, "remove") == 0 || strcmp(member_name, "swap_remove") == 0) {
+        Type** params = xmalloc(sizeof(Type*));
+        params[0]     = type_int64;
+        return type_func(params, 1, elem_type, 0);
+    }
+    if (strcmp(member_name, "reserve") == 0) {
+        Type** params = xmalloc(sizeof(Type*));
+        params[0]     = type_int64;
+        return type_func(params, 1, type_void, 0);
+    }
+    return type_func(NULL, 0, type_void, 0);
+}
+
+static Type* check_member_vec_user_method(Checker* checker, Node* node, Type* elem_type) {
+    const char* member_name = node->as.member.name;
+    char        lookup_mangled[256];
+    snprintf(lookup_mangled, sizeof(lookup_mangled), "Vec_%s", type_mangle_name(elem_type));
+    VecInstance* inst = lookup_vec_instance_pub(checker, lookup_mangled);
+    if (!inst) {
+        return NULL;
+    }
+
+    ensure_vec_user_methods(checker, inst);
+    for (int i = 0; i < inst->method_count; i++) {
+        if (strcmp(inst->method_names[i], member_name) == 0) {
+            if (!inst->method_is_const[i] &&
+                check_mutating_member_on_const(checker, node, member_name)) {
+                return type_error;
+            }
+            set_vec_member_struct_name(checker, node, elem_type);
+            return inst->method_types[i];
+        }
+    }
+    return NULL;
+}
+
 static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
     const char* member_name = node->as.member.name;
     sem_info_set_member_is_ref(checker->sem, node, 1); // Vec is a pointer (RC-managed)
@@ -550,148 +673,30 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
     }
     // Non-mutating methods: contains, first, last
     if (strcmp(member_name, "contains") == 0) {
-        if (!type_supports_vec_contains(elem_type)) {
-            check_error(checker, node->line, node->column,
-                        "Vec.contains requires element type supporting ==, got '%s'",
-                        type_name(elem_type));
-            return type_error;
-        }
-
-        char mangled[256];
-        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
-        sem_info_set_member_struct_name(checker->sem, node, mangled);
-
-        Type** params = xmalloc(1 * sizeof(Type*));
-        params[0]     = elem_type;
-        return type_func(params, 1, type_bool, 0);
+        return check_member_vec_contains(checker, node, elem_type);
     }
 
     // first/last return Option<T>
     if (strcmp(member_name, "first") == 0 || strcmp(member_name, "last") == 0) {
-        char mangled[256];
-        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
-        sem_info_set_member_struct_name(checker->sem, node, mangled);
-
-        // Look up or instantiate Option<elem_type>
-        GenericDef* option_def          = lookup_generic_def(checker, "Option");
-        Type**      args                = xmalloc(sizeof(Type*));
-        args[0]                         = elem_type;
-        char*            option_mangled = type_mangle_generic("Option", args, 1);
-        GenericInstance* existing       = lookup_generic_instance(checker, option_mangled);
-        Type*            option_type;
-        if (existing) {
-            option_type = existing->type;
-            free(option_mangled);
-            free(args);
-        } else {
-            option_type = instantiate_generic_enum(checker, option_def, option_mangled, args, 1);
-        }
-        return type_func(NULL, 0, option_type, 0);
+        return check_member_vec_option_method(checker, node, elem_type, 0);
     }
+
     // pop is mutating and returns Option<T>
     if (strcmp(member_name, "pop") == 0) {
-        const char* const_name = get_const_binding_name(checker, node->as.member.object);
-        if (const_name) {
-            check_error(checker, node->line, node->column,
-                        "Cannot call mutating method '%s' on const '%s'", member_name, const_name);
-            return type_error;
-        }
-        char mangled[256];
-        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
-        sem_info_set_member_struct_name(checker->sem, node, mangled);
-
-        // Look up or instantiate Option<elem_type>
-        GenericDef* option_def          = lookup_generic_def(checker, "Option");
-        Type**      args                = xmalloc(sizeof(Type*));
-        args[0]                         = elem_type;
-        char*            option_mangled = type_mangle_generic("Option", args, 1);
-        GenericInstance* existing       = lookup_generic_instance(checker, option_mangled);
-        Type*            option_type;
-        if (existing) {
-            option_type = existing->type;
-            free(option_mangled);
-            free(args);
-        } else {
-            option_type = instantiate_generic_enum(checker, option_def, option_mangled, args, 1);
-        }
-        return type_func(NULL, 0, option_type, 0);
+        return check_member_vec_option_method(checker, node, elem_type, 1);
     }
+
     // Mutating methods: push, insert, remove, swap_remove, clear, reserve, shrink_to_fit, sort
-    if (strcmp(member_name, "push") == 0 || strcmp(member_name, "insert") == 0 ||
-        strcmp(member_name, "remove") == 0 || strcmp(member_name, "swap_remove") == 0 ||
-        strcmp(member_name, "clear") == 0 || strcmp(member_name, "reserve") == 0 ||
-        strcmp(member_name, "shrink_to_fit") == 0 || strcmp(member_name, "sort") == 0) {
-        const char* const_name = get_const_binding_name(checker, node->as.member.object);
-        if (const_name) {
-            check_error(checker, node->line, node->column,
-                        "Cannot call mutating method '%s' on const '%s'", member_name, const_name);
-            return type_error;
-        }
-        if (strcmp(member_name, "sort") == 0 && !type_supports_vec_sort(elem_type)) {
-            check_error(checker, node->line, node->column,
-                        "Vec.sort requires orderable primitive element type, got '%s'",
-                        type_name(elem_type));
-            return type_error;
-        }
-        // Build mangled vec name for method dispatch
-        char mangled[256];
-        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
-        sem_info_set_member_struct_name(checker->sem, node, mangled);
+    if (is_vec_builtin_mutating_method(member_name)) {
+        return check_member_vec_mutating_method(checker, node, elem_type);
+    }
 
-        if (strcmp(member_name, "push") == 0) {
-            Type** params = xmalloc(1 * sizeof(Type*));
-            params[0]     = elem_type;
-            return type_func(params, 1, type_void, 0);
-        }
-        if (strcmp(member_name, "insert") == 0) {
-            Type** params = xmalloc(2 * sizeof(Type*));
-            params[0]     = type_int64;
-            params[1]     = elem_type;
-            return type_func(params, 2, type_void, 0);
-        }
-        if (strcmp(member_name, "remove") == 0 || strcmp(member_name, "swap_remove") == 0) {
-            Type** params = xmalloc(1 * sizeof(Type*));
-            params[0]     = type_int64;
-            return type_func(params, 1, elem_type, 0);
-        }
-        if (strcmp(member_name, "reserve") == 0) {
-            Type** params = xmalloc(1 * sizeof(Type*));
-            params[0]     = type_int64;
-            return type_func(params, 1, type_void, 0);
-        }
-        if (strcmp(member_name, "sort") == 0) {
-            return type_func(NULL, 0, type_void, 0);
-        }
-        // clear
-        return type_func(NULL, 0, type_void, 0);
-    }
     // Look up user-defined methods on VecInstance
-    {
-        char lookup_mangled[256];
-        snprintf(lookup_mangled, sizeof(lookup_mangled), "Vec_%s", type_mangle_name(elem_type));
-        VecInstance* inst = lookup_vec_instance_pub(checker, lookup_mangled);
-        if (inst) {
-            ensure_vec_user_methods(checker, inst);
-            for (int i = 0; i < inst->method_count; i++) {
-                if (strcmp(inst->method_names[i], member_name) == 0) {
-                    if (!inst->method_is_const[i]) {
-                        const char* const_name =
-                            get_const_binding_name(checker, node->as.member.object);
-                        if (const_name) {
-                            check_error(checker, node->line, node->column,
-                                        "Cannot call mutating method '%s' on const '%s'",
-                                        member_name, const_name);
-                            return type_error;
-                        }
-                    }
-                    char mangled[256];
-                    snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
-                    sem_info_set_member_struct_name(checker->sem, node, mangled);
-                    return inst->method_types[i];
-                }
-            }
-        }
+    Type* user_method = check_member_vec_user_method(checker, node, elem_type);
+    if (user_method) {
+        return user_method;
     }
+
     check_error(checker, node->line, node->column, "Vec has no member '%s'", member_name);
     return type_error;
 }
