@@ -344,15 +344,8 @@ static Type* check_bitwise_op(Checker* checker, Node* node, Type* left, Type* ri
     return type_int64;
 }
 
-// Type-check a binary expression: dispatch to operator-specific helpers
-static Type* check_binary_expr(Checker* checker, Node* node) {
-    Type* left  = check_expression(checker, node->as.binary.left);
-    Type* right = check_expression(checker, node->as.binary.right);
-
-    if (left->kind == TYPE_ERROR || right->kind == TYPE_ERROR) {
-        return type_error;
-    }
-
+// Dispatch a binary operator token to the correct operator-specific type checker.
+static Type* check_binary_op_by_token(Checker* checker, Node* node, Type* left, Type* right) {
     TokenType op = node->as.binary.op;
 
     if (op == TOK_EQ_EQ || op == TOK_BANG_EQ || op == TOK_LT || op == TOK_GT || op == TOK_LT_EQ ||
@@ -372,6 +365,18 @@ static Type* check_binary_expr(Checker* checker, Node* node) {
 
     check_error(checker, node->line, node->column, "Unknown binary operator");
     return type_error;
+}
+
+// Type-check a binary expression: dispatch to operator-specific helpers
+static Type* check_binary_expr(Checker* checker, Node* node) {
+    Type* left  = check_expression(checker, node->as.binary.left);
+    Type* right = check_expression(checker, node->as.binary.right);
+
+    if (left->kind == TYPE_ERROR || right->kind == TYPE_ERROR) {
+        return type_error;
+    }
+
+    return check_binary_op_by_token(checker, node, left, right);
 }
 
 // Type-check a unary expression: negation, logical not, and bitwise complement
