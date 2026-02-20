@@ -161,6 +161,12 @@ Type* type_vec(Type* elem) {
     return type;
 }
 
+Type* type_box(Type* elem) {
+    Type* type        = type_new(TYPE_BOX);
+    type->as.box.elem = elem;
+    return type;
+}
+
 void type_free(Type* type) {
     if (!type)
         return;
@@ -249,6 +255,8 @@ int type_equals(Type* a, Type* b) {
         return type_equals(a->as.span.elem, b->as.span.elem);
     case TYPE_VEC:
         return type_equals(a->as.vec.elem, b->as.vec.elem);
+    case TYPE_BOX:
+        return type_equals(a->as.box.elem, b->as.box.elem);
     case TYPE_STRUCT:
         return strcmp(a->as.struc.name, b->as.struc.name) == 0;
     case TYPE_ENUM:
@@ -405,8 +413,8 @@ int type_supports_equality(Type* type) {
 int type_is_rc_managed(Type* type) {
     if (!type)
         return 0;
-    if (type->kind == TYPE_STRUCT || type->kind == TYPE_VEC || type->kind == TYPE_STRINGBUILDER ||
-        type->kind == TYPE_STRING)
+    if (type->kind == TYPE_STRUCT || type->kind == TYPE_VEC || type->kind == TYPE_BOX ||
+        type->kind == TYPE_STRINGBUILDER || type->kind == TYPE_STRING)
         return 1;
     if (type->kind == TYPE_ENUM && type->as.enm.has_rc_fields)
         return 1;
@@ -451,6 +459,11 @@ int type_assignable(Type* target, Type* value) {
 
     // null can be assigned to vec references
     if (target->kind == TYPE_VEC && value->kind == TYPE_NULL) {
+        return 1;
+    }
+
+    // null can be assigned to Box references
+    if (target->kind == TYPE_BOX && value->kind == TYPE_NULL) {
         return 1;
     }
 
@@ -542,6 +555,11 @@ const char* type_name(Type* type) {
     case TYPE_VEC: {
         char* buf = next_type_name_buf();
         snprintf(buf, 256, "Vec<%s>", type_name(type->as.vec.elem));
+        return buf;
+    }
+    case TYPE_BOX: {
+        char* buf = next_type_name_buf();
+        snprintf(buf, 256, "Box<%s>", type_name(type->as.box.elem));
         return buf;
     }
     case TYPE_STRUCT:
@@ -698,6 +716,11 @@ const char* type_mangle_name(Type* type) {
         snprintf(buf, 256, "Vec_%s", type_mangle_name(type->as.vec.elem));
         return buf;
     }
+    case TYPE_BOX: {
+        char* buf = next_type_mangle_buf();
+        snprintf(buf, 256, "Box_%s", type_mangle_name(type->as.box.elem));
+        return buf;
+    }
     case TYPE_STRUCT:
         return type->as.struc.name;
     case TYPE_ENUM:
@@ -827,6 +850,11 @@ Type* type_from_node(Node* type_node) {
         }
         if (strcmp(base, "Span") == 0 && arg_count == 1) {
             Type* result = type_span(args[0]);
+            free(args);
+            return result;
+        }
+        if (strcmp(base, "Box") == 0 && arg_count == 1) {
+            Type* result = type_box(args[0]);
             free(args);
             return result;
         }

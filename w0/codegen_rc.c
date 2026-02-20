@@ -689,11 +689,11 @@ void emit_vec_methods(CodeGen* gen) {
     for (int i = 0; i < gen->checker.vec_count; i++) {
         VecInstance*     inst = &gen->checker.vecs[i];
         VecMethodEmitCtx ctx;
-        ctx.elem_type  = inst->elem_type;
-        ctx.elem_tname = type_mangle_name(ctx.elem_type);
-        ctx.elem_is_ptr =
-            (ctx.elem_type->kind == TYPE_STRUCT || ctx.elem_type->kind == TYPE_VEC ||
-             ctx.elem_type->kind == TYPE_STRING || ctx.elem_type->kind == TYPE_STRINGBUILDER);
+        ctx.elem_type   = inst->elem_type;
+        ctx.elem_tname  = type_mangle_name(ctx.elem_type);
+        ctx.elem_is_ptr = (ctx.elem_type->kind == TYPE_STRUCT || ctx.elem_type->kind == TYPE_VEC ||
+                           ctx.elem_type->kind == TYPE_BOX || ctx.elem_type->kind == TYPE_STRING ||
+                           ctx.elem_type->kind == TYPE_STRINGBUILDER);
         ctx.elem_is_rc_enum =
             (ctx.elem_type->kind == TYPE_ENUM && ctx.elem_type->as.enm.has_rc_fields);
 
@@ -807,7 +807,7 @@ void emit_vec_cleanup(CodeGen* gen) {
         Type*        elem_type   = inst->elem_type;
         const char*  elem_tname  = type_mangle_name(elem_type);
         int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC ||
-                           elem_type->kind == TYPE_STRINGBUILDER);
+                           elem_type->kind == TYPE_BOX || elem_type->kind == TYPE_STRINGBUILDER);
         int elem_is_rc_enum = (elem_type->kind == TYPE_ENUM && elem_type->as.enm.has_rc_fields);
 
         // Vec<string> cleanup is provided by whist_runtime.h
@@ -853,7 +853,7 @@ static void emit_generic_field_cleanup(CodeGen* gen, const char* field_name, Typ
         return;
 
     if (field_type->kind == TYPE_STRUCT || field_type->kind == TYPE_VEC ||
-        field_type->kind == TYPE_STRINGBUILDER) {
+        field_type->kind == TYPE_BOX || field_type->kind == TYPE_STRINGBUILDER) {
         emit(gen, "    __rc_dec(ptr->%s);\n", field_name);
     } else if (field_type->kind == TYPE_STRING) {
         emit(gen, "    __rc_dec((void*)ptr->%s);\n", field_name);

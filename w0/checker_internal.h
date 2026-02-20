@@ -15,6 +15,7 @@ void check_statement(Checker* checker, Node* node);
 // --- From checker_types.c: type resolution ---
 Type*        resolve_type(Checker* checker, Node* type_node);
 Type*        ensure_vec_type(Checker* checker, Type* elem_type);
+Type*        ensure_box_type(Checker* checker, Type* elem_type);
 Type*        instantiate_generic_enum(Checker* checker, GenericDef* def, char* mangled,
                                       Type** resolved_args, int arg_count);
 VecInstance* lookup_vec_instance_pub(Checker* checker, const char* mangled_name);

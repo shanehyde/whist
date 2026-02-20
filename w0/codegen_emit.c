@@ -280,12 +280,22 @@ static void emit_generic_type(CodeGen* gen, Node* type_node) {
     const char* base    = type_node->as.generic_type.base_name;
     int         is_span = (strcmp(base, "Span") == 0);
     int         is_vec  = (strcmp(base, "Vec") == 0);
+    int         is_box  = (strcmp(base, "Box") == 0);
 
     if (is_vec || is_span) {
         emit(gen, "%s", is_vec ? "__Vec_" : "__Span_");
         emit_vec_or_span_type_arg(gen, type_node->as.generic_type.type_args.nodes[0]);
         if (is_vec)
             emit(gen, "*"); // Vec is RC-managed pointer
+        return;
+    }
+
+    if (is_box && gen->checker.box_count > 0) {
+        // Only use builtin Box emission if checker produced BoxInstances
+        // (user-defined Box<T> structs go through regular generic path)
+        emit(gen, "__Box_");
+        emit_vec_or_span_type_arg(gen, type_node->as.generic_type.type_args.nodes[0]);
+        emit(gen, "*"); // Box is RC-managed pointer
         return;
     }
 
@@ -432,6 +442,9 @@ void emit_resolved_type(CodeGen* gen, Type* type) {
         break;
     case TYPE_VEC:
         emit(gen, "__Vec_%s*", type_mangle_name(type->as.vec.elem));
+        break;
+    case TYPE_BOX:
+        emit(gen, "__Box_%s*", type_mangle_name(type->as.box.elem));
         break;
     case TYPE_ENUM:
         emit(gen, "%s", type->as.enm.name);
@@ -956,6 +969,21 @@ void emit_vec_typedefs(CodeGen* gen) {
         emit(gen, "    int64_t count;\n");
         emit(gen, "    int64_t capacity;\n");
         emit(gen, "} __Vec_%s;\n\n", elem_tname);
+    }
+}
+
+// Emit struct typedefs for each instantiated Box type (__Box_T)
+void emit_box_typedefs(CodeGen* gen) {
+    for (int i = 0; i < gen->checker.box_count; i++) {
+        BoxInstance* inst       = &gen->checker.boxes[i];
+        Type*        elem_type  = inst->elem_type;
+        const char*  elem_tname = type_mangle_name(elem_type);
+
+        emit(gen, "typedef struct {\n");
+        emit(gen, "    ");
+        emit_resolved_type(gen, elem_type);
+        emit(gen, " value;\n");
+        emit(gen, "} __Box_%s;\n\n", elem_tname);
     }
 }
 

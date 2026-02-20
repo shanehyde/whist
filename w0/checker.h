@@ -100,6 +100,13 @@ typedef struct {
     int    methods_instantiated; // Whether user methods have been populated
 } VecInstance;
 
+// Instantiated box type
+typedef struct {
+    char* mangled_name; // "Box_i64"
+    Type* elem_type;    // The element type
+    Type* type;         // The TYPE_BOX instance
+} BoxInstance;
+
 // Generic free function definition (template)
 // Also used for method-level generics: func (Vec<T>) map<K>(...) -> Vec<K>
 // For methods: type_params = combined receiver-bound + method params ["T", "K"].
@@ -160,7 +167,7 @@ typedef struct {
     int                  func_instance_capacity;
 } CheckerGenerics;
 
-// Instantiated container types (Span, Vec)
+// Instantiated container types (Span, Vec, Box)
 typedef struct {
     SpanInstance* spans;
     int           span_count;
@@ -168,6 +175,9 @@ typedef struct {
     VecInstance*  vecs;
     int           vec_count;
     int           vec_capacity;
+    BoxInstance*  boxes;
+    int           box_count;
+    int           box_capacity;
 } CheckerContainers;
 
 // Deferred trait check: body-less method in impl block (duck-type conformance)

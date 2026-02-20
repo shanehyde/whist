@@ -123,6 +123,10 @@ void checker_init(Checker* checker) {
     checker->containers.vecs         = NULL;
     checker->containers.vec_count    = 0;
     checker->containers.vec_capacity = 0;
+    // Box support
+    checker->containers.boxes        = NULL;
+    checker->containers.box_count    = 0;
+    checker->containers.box_capacity = 0;
     // Trait support
     checker->traits.impls         = NULL;
     checker->traits.impl_count    = 0;
@@ -253,6 +257,11 @@ void checker_free(Checker* checker) {
         free(checker->containers.vecs[i].method_bodies);
     }
     free(checker->containers.vecs);
+    // Free box instances
+    for (int i = 0; i < checker->containers.box_count; i++) {
+        free(checker->containers.boxes[i].mangled_name);
+    }
+    free(checker->containers.boxes);
     // Free trait implementations
     for (int i = 0; i < checker->traits.impl_count; i++) {
         free(checker->traits.impls[i].trait_name);
@@ -694,6 +703,12 @@ static Type* check_var_decl_initializer(Checker* checker, Type* decl_type, Node*
 static Type* resolve_var_decl_type(Checker* checker, Node* node, const char* name, Type* decl_type,
                                    Type* init_type) {
     if (decl_type && init_type) {
+        // Auto-deref Box<T> when declared type is T
+        if (!type_assignable(decl_type, init_type) && init_type->kind == TYPE_BOX &&
+            type_assignable(decl_type, init_type->as.box.elem) && node->as.var_decl.init) {
+            node->as.var_decl.init->is_box_deref = 1;
+            init_type                            = init_type->as.box.elem;
+        }
         // Both specified - check compatibility
         if (!type_assignable(decl_type, init_type)) {
             check_error_type(checker, node->line, node->column, name, decl_type, init_type);
@@ -761,7 +776,8 @@ static void maybe_mark_var_decl_rc_from_init(Checker* checker, Node* node, Symbo
 
     if (init->type == NODE_NEW_EXPR) {
         mark_var_decl_rc(node, sym, init->as.new_expr.resolved_type);
-    } else if (init->type == NODE_IDENT) {
+    } else if (init->type == NODE_IDENT && !init->is_box_deref) {
+        // Copy from RC var (but not if auto-deref'd from Box — that's a value copy)
         Symbol* src = checker_lookup(checker, init->as.ident.name);
         if (src && src->is_rc) {
             mark_var_decl_rc(node, sym, src->type);
@@ -965,6 +981,14 @@ static void check_return_stmt(Checker* checker, Node* node) {
         }
         Type* actual              = check_expression(checker, node->as.return_stmt.value);
         checker->enum_target_hint = old_hint;
+
+        // Auto-deref Box<T> when returning T
+        if (actual && actual->kind == TYPE_BOX && !type_assignable(expected, actual) &&
+            type_assignable(expected, actual->as.box.elem)) {
+            node->as.return_stmt.value->is_box_deref = 1;
+            actual                                   = actual->as.box.elem;
+        }
+
         if (!type_assignable(expected, actual)) {
             check_error_type(checker, node->line, node->column, "Return", expected, actual);
         }
@@ -2798,6 +2822,18 @@ int checker_check(Checker* checker, Node* ast) {
         register_generic_def(checker, "Vec", vec_params, NULL, 1, NULL);
         free(vec_params[0]);
         free(vec_params);
+    }
+
+    // Register builtin Box<T> as a GenericDef (prelude so user structs can shadow it)
+    {
+        const char* saved_module        = checker->modules.current_module;
+        checker->modules.current_module = "prelude";
+        char** box_params               = xmalloc(sizeof(char*));
+        box_params[0]                   = xstrdup("T");
+        register_generic_def(checker, "Box", box_params, NULL, 1, NULL);
+        free(box_params[0]);
+        free(box_params);
+        checker->modules.current_module = saved_module;
     }
 
     for (size_t i = 0; i < sizeof(k_checker_pass_specs) / sizeof(k_checker_pass_specs[0]); i++) {

@@ -1042,6 +1042,69 @@ Type* ensure_vec_type(Checker* checker, Type* elem_type) {
     return vec_type;
 }
 
+// Look up an already-instantiated box type by mangled name
+static BoxInstance* lookup_box_instance(Checker* checker, const char* mangled_name) {
+    for (int i = 0; i < checker->containers.box_count; i++) {
+        if (strcmp(checker->containers.boxes[i].mangled_name, mangled_name) == 0) {
+            return &checker->containers.boxes[i];
+        }
+    }
+    return NULL;
+}
+
+// Register an instantiated box type
+static void register_box_instance(Checker* checker, const char* mangled_name, Type* elem_type,
+                                  Type* box_type) {
+    VEC_GROW(checker->containers.boxes, checker->containers.box_count,
+             checker->containers.box_capacity);
+    BoxInstance* inst  = &checker->containers.boxes[checker->containers.box_count++];
+    inst->mangled_name = xstrdup(mangled_name);
+    inst->elem_type    = elem_type;
+    inst->type         = box_type;
+}
+
+// Resolve Box<T> type: validate single arg, create box type, and register
+static Type* resolve_box_type(Checker* checker, Node* type_node) {
+    int arg_count = type_node->as.generic_type.type_args.count;
+    if (arg_count != 1) {
+        check_error(checker, type_node->line, type_node->column,
+                    "Box requires exactly 1 type argument, got %d", arg_count);
+        return type_error;
+    }
+
+    Type* elem_type = resolve_type(checker, type_node->as.generic_type.type_args.nodes[0]);
+    if (elem_type == type_error) {
+        return type_error;
+    }
+
+    char mangled[256];
+    snprintf(mangled, sizeof(mangled), "Box_%s", type_mangle_name(elem_type));
+
+    BoxInstance* existing = lookup_box_instance(checker, mangled);
+    if (existing) {
+        return existing->type;
+    }
+
+    Type* box_type = type_box(elem_type);
+    register_box_instance(checker, mangled, elem_type, box_type);
+    return box_type;
+}
+
+// Ensure a Box<elem_type> exists (look up or create + register)
+Type* ensure_box_type(Checker* checker, Type* elem_type) {
+    char mangled[256];
+    snprintf(mangled, sizeof(mangled), "Box_%s", type_mangle_name(elem_type));
+
+    BoxInstance* existing = lookup_box_instance(checker, mangled);
+    if (existing) {
+        return existing->type;
+    }
+
+    Type* box_type = type_box(elem_type);
+    register_box_instance(checker, mangled, elem_type, box_type);
+    return box_type;
+}
+
 // Resolve Span<T> type: validate single arg and create span type
 static Type* resolve_span_type(Checker* checker, Node* type_node) {
     int arg_count = type_node->as.generic_type.type_args.count;
@@ -1486,6 +1549,14 @@ static Type* resolve_generic_type_node(Checker* checker, Node* type_node) {
     // Handle builtin Span<T> type.
     if (strcmp(base_name, "Span") == 0) {
         return resolve_span_type(checker, type_node);
+    }
+
+    // Handle builtin Box<T> type (only if no user-defined Box struct exists).
+    if (strcmp(base_name, "Box") == 0) {
+        GenericDef* box_def = lookup_generic_def(checker, "Box");
+        if (!box_def || !box_def->decl) {
+            return resolve_box_type(checker, type_node);
+        }
     }
 
     // Look up the generic definition.

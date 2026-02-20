@@ -717,6 +717,15 @@ static Type* resolve_new_expr_type(CodeGen* gen, Node* node) {
                     }
                 }
                 free(mangled);
+            } else if (strcmp(tn->as.generic_type.base_name, "Box") == 0) {
+                char* mangled = build_mangled_name_from_generic_node(gen, tn);
+                for (int bi = 0; bi < gen->checker.box_count; bi++) {
+                    if (strcmp(gen->checker.boxes[bi].mangled_name, mangled) == 0) {
+                        rtype = gen->checker.boxes[bi].type;
+                        break;
+                    }
+                }
+                free(mangled);
             } else {
                 char* mangled = build_mangled_name_from_generic_node(gen, tn);
                 for (int gi = 0; gi < gen->checker.instance_count; gi++) {
@@ -743,6 +752,27 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
         fprintf(stderr,
                 "codegen: emit_new_expr: could not resolve type for new expression at line %d\n",
                 node->line);
+        return;
+    }
+    if (rtype->kind == TYPE_BOX) {
+        // new Box<T>{value: expr} or new Box<T>(expr) as inline expression
+        const char* elem_tname = type_mangle_name(rtype->as.box.elem);
+        int         tmp        = gen->out.temp_count++;
+        emit(gen, "({ __Box_%s* __rc_tmp%d = (__Box_%s*)__rc_alloc(sizeof(__Box_%s), NULL); ",
+             elem_tname, tmp, elem_tname, elem_tname);
+        if (node->as.new_expr.init != NULL) {
+            // Struct init form: new Box<T>{value: expr}
+            Node* field = node->as.new_expr.init->as.struct_init.fields.nodes[0];
+            emit(gen, "__rc_tmp%d->value = ", tmp);
+            emit_expr(gen, field->as.field_init.value);
+            emit(gen, ";");
+        } else {
+            // Constructor form: new Box<T>(expr)
+            emit(gen, "__rc_tmp%d->value = ", tmp);
+            emit_expr(gen, node->as.new_expr.args.nodes[0]);
+            emit(gen, ";");
+        }
+        emit(gen, " __rc_tmp%d; })", tmp);
         return;
     }
     if (rtype->kind == TYPE_STRINGBUILDER) {
@@ -845,6 +875,24 @@ void emit_hoisted_new_expr(CodeGen* gen, Node* node, const char* temp_name) {
                 "codegen: emit_hoisted_new_expr: could not resolve type for new expression at "
                 "line %d\n",
                 node->line);
+        return;
+    }
+    if (rtype->kind == TYPE_BOX) {
+        const char* elem_tname = type_mangle_name(rtype->as.box.elem);
+        emit_indent(gen);
+        emit(gen, "__Box_%s* %s = (__Box_%s*)__rc_alloc(sizeof(__Box_%s), NULL);\n", elem_tname,
+             temp_name, elem_tname, elem_tname);
+        emit_indent(gen);
+        if (node->as.new_expr.init != NULL) {
+            Node* field = node->as.new_expr.init->as.struct_init.fields.nodes[0];
+            emit(gen, "%s->value = ", temp_name);
+            emit_expr(gen, field->as.field_init.value);
+            emit(gen, ";\n");
+        } else {
+            emit(gen, "%s->value = ", temp_name);
+            emit_expr(gen, node->as.new_expr.args.nodes[0]);
+            emit(gen, ";\n");
+        }
         return;
     }
     if (rtype->kind == TYPE_STRINGBUILDER) {
@@ -1679,6 +1727,13 @@ static void emit_complex_expr(CodeGen* gen, Node* node) {
 // Dispatch expression code generation based on node type.
 void emit_expr(CodeGen* gen, Node* node) {
     if (!node) {
+        return;
+    }
+    // Auto-deref Box<T>: emit expression then append ->value
+    if (node->is_box_deref) {
+        node->is_box_deref = 0; // Clear so recursive call doesn't loop
+        emit_expr(gen, node);
+        emit(gen, "->value");
         return;
     }
     if (emit_hoisted_expr(gen, node)) {

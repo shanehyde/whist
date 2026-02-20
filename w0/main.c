@@ -73,6 +73,8 @@ static CodeGenChecker make_codegen_checker(Checker* checker) {
         .span_count          = checker->containers.span_count,
         .vecs                = checker->containers.vecs,
         .vec_count           = checker->containers.vec_count,
+        .boxes               = checker->containers.boxes,
+        .box_count           = checker->containers.box_count,
         .traits              = checker->traits.impls,
         .trait_count         = checker->traits.impl_count,
         .func_defs           = checker->generics.func_defs,
