@@ -12,6 +12,7 @@ static void emit_expr_stmt(CodeGen* gen, Node* node);
 static void emit_var_decl_stmt(CodeGen* gen, Node* node);
 static void emit_return_stmt(CodeGen* gen, Node* node);
 static void emit_match_stmt(CodeGen* gen, Node* node);
+static int  find_enum_variant_index(Type* enum_type, const char* variant);
 
 // Walk a destructuring pattern and RC-track any identifiers with RC-managed types
 static void rc_track_destruct_pattern(CodeGen* gen, DestructPattern* pattern) {
@@ -1360,6 +1361,90 @@ static void emit_value_match_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+static int match_stmt_has_wildcard(Node* node) {
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void emit_match_arm_header(CodeGen* gen, Node* arm, int first, int has_wildcard, int arm_idx,
+                                  int last_arm, int is_data, int match_id, const char* enum_name) {
+    emit_indent(gen);
+    if (arm->as.match_arm.is_wildcard) {
+        if (first) {
+            emit(gen, "{\n");
+        } else {
+            emit(gen, "else {\n");
+        }
+        return;
+    }
+
+    if (!has_wildcard && arm_idx == last_arm && !first) {
+        // Exhaustive match: emit last arm as 'else' so the C compiler
+        // knows one branch always executes.
+        emit(gen, "else {\n");
+        return;
+    }
+
+    const char* variant = arm->as.match_arm.variant_name;
+    if (first) {
+        emit(gen, "if (");
+    } else {
+        emit(gen, "else if (");
+    }
+    if (is_data) {
+        emit(gen, "__match%d.tag == %s_%s", match_id, enum_name, variant);
+    } else {
+        emit(gen, "__match%d == %s_%s", match_id, enum_name, variant);
+    }
+    emit(gen, ") {\n");
+}
+
+static void emit_match_arm_bindings(CodeGen* gen, Node* arm, Type* enum_type, int is_data,
+                                    int match_id) {
+    if (arm->as.match_arm.is_wildcard || !is_data || arm->as.match_arm.binding_count <= 0) {
+        return;
+    }
+
+    const char* variant     = arm->as.match_arm.variant_name;
+    int         variant_idx = find_enum_variant_index(enum_type, variant);
+    for (int j = 0; j < arm->as.match_arm.binding_count; j++) {
+        emit_indent(gen);
+        emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);
+        emit(gen, " %s = __match%d.%s.f%d;\n", arm->as.match_arm.bindings[j], match_id, variant, j);
+    }
+}
+
+static void emit_match_arm_body(CodeGen* gen, Node* arm) {
+    if (!arm->as.match_arm.body) {
+        return;
+    }
+
+    if (arm->as.match_arm.body->type == NODE_BLOCK) {
+        emit_block_contents(gen, arm->as.match_arm.body);
+    } else {
+        emit_stmt(gen, arm->as.match_arm.body);
+    }
+}
+
+static void cleanup_match_owned_temps(CodeGen* gen, Node* subject, int has_temps, int saved,
+                                      int subject_is_owned, int match_id) {
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+    if (!subject_is_owned) {
+        return;
+    }
+
+    subject->is_owned_temp = 1; // restore AST
+    char match_name[32];
+    snprintf(match_name, sizeof(match_name), "__match%d", match_id);
+    emit_owned_temp_dec(gen, subject, match_name);
+}
+
 // Emit a match statement as an if/else-if chain over the enum tag
 static void emit_match_stmt(CodeGen* gen, Node* node) {
     if (node->as.match_stmt.is_value_match) {
@@ -1394,94 +1479,27 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
     emit_expr(gen, node->as.match_stmt.expr);
     emit(gen, ";\n");
 
-    // Check if exhaustive (no wildcard arm) — if so, emit last arm as 'else'
-    // to suppress "control reaches end of non-void function" C compiler warnings
-    int has_wildcard = 0;
-    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
-        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
-            has_wildcard = 1;
-            break;
-        }
-    }
-    int last_arm = node->as.match_stmt.arms.count - 1;
+    int has_wildcard = match_stmt_has_wildcard(node);
+    int last_arm     = node->as.match_stmt.arms.count - 1;
 
     int first = 1;
     for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
         Node* arm = node->as.match_stmt.arms.nodes[a];
 
-        emit_indent(gen);
-        if (arm->as.match_arm.is_wildcard) {
-            if (first) {
-                emit(gen, "{\n");
-            } else {
-                emit(gen, "else {\n");
-            }
-        } else if (!has_wildcard && a == last_arm && !first) {
-            // Exhaustive match: emit last arm as 'else' so the C compiler
-            // knows one branch always executes
-            emit(gen, "else {\n");
-        } else {
-            const char* variant = arm->as.match_arm.variant_name;
-            if (first) {
-                emit(gen, "if (");
-            } else {
-                emit(gen, "else if (");
-            }
-            if (is_data) {
-                emit(gen, "__match%d.tag == %s_%s", match_id, enum_name, variant);
-            } else {
-                emit(gen, "__match%d == %s_%s", match_id, enum_name, variant);
-            }
-            emit(gen, ") {\n");
-        }
+        emit_match_arm_header(gen, arm, first, has_wildcard, a, last_arm, is_data, match_id,
+                              enum_name);
         first = 0;
 
         gen->out.indent++;
-
-        // Emit binding declarations for data enum variants
-        if (!arm->as.match_arm.is_wildcard && is_data && arm->as.match_arm.binding_count > 0) {
-            const char* variant = arm->as.match_arm.variant_name;
-            // Look up variant index to get types
-            int variant_idx = -1;
-            for (int i = 0; i < enum_type->as.enm.value_count; i++) {
-                if (strcmp(enum_type->as.enm.value_names[i], variant) == 0) {
-                    variant_idx = i;
-                    break;
-                }
-            }
-            for (int j = 0; j < arm->as.match_arm.binding_count; j++) {
-                emit_indent(gen);
-                emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);
-                emit(gen, " %s = __match%d.%s.f%d;\n", arm->as.match_arm.bindings[j], match_id,
-                     variant, j);
-            }
-        }
-
-        // Emit arm body
-        if (arm->as.match_arm.body) {
-            if (arm->as.match_arm.body->type == NODE_BLOCK) {
-                emit_block_contents(gen, arm->as.match_arm.body);
-            } else {
-                emit_stmt(gen, arm->as.match_arm.body);
-            }
-        }
+        emit_match_arm_bindings(gen, arm, enum_type, is_data, match_id);
+        emit_match_arm_body(gen, arm);
 
         gen->out.indent--;
         emit_indent(gen);
         emit(gen, "}\n");
     }
 
-    // Cleanup sub-expression owned temps
-    if (has_temps) {
-        cleanup_owned_temps(gen, saved);
-    }
-    // Cleanup subject if it was an owned temp (ownership was transferred to __matchN)
-    if (subject_is_owned) {
-        subject->is_owned_temp = 1; // restore AST
-        char match_name[32];
-        snprintf(match_name, sizeof(match_name), "__match%d", match_id);
-        emit_owned_temp_dec(gen, subject, match_name);
-    }
+    cleanup_match_owned_temps(gen, subject, has_temps, saved, subject_is_owned, match_id);
 }
 
 static int stmt_cond_has_outer_parens(Node* cond) {
