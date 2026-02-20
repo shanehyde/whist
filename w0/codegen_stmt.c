@@ -272,6 +272,110 @@ static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
     return 1;
 }
 
+static int rc_value_needs_borrow_inc(CodeGen* gen, Node* value) {
+    return (value->type == NODE_IDENT && rc_is_tracked(gen, value->as.ident.name)) ||
+           (value->type == NODE_INDEX && value->as.index.is_rc_elem);
+}
+
+static int rc_member_value_is_managed(CodeGen* gen, Node* value, Type* field_ty) {
+    int value_is_rc = rc_value_needs_borrow_inc(gen, value) || value->type == NODE_NEW_EXPR;
+    // For string fields, any assignment needs RC handling.
+    if (field_ty && field_ty->kind == TYPE_STRING) {
+        value_is_rc = 1;
+    }
+    return value_is_rc;
+}
+
+static int rc_member_field_uses_pointer_rc(Type* field_ty) {
+    return field_ty && (field_ty->kind == TYPE_STRUCT || field_ty->kind == TYPE_STRING ||
+                        field_ty->kind == TYPE_VEC || field_ty->kind == TYPE_STRINGBUILDER);
+}
+
+static void emit_member_assign_from_tmp(CodeGen* gen, Node* member, int tmp) {
+    emit_indent(gen);
+    emit_expr(gen, member);
+    emit(gen, " = __rc_tmp%d;\n", tmp);
+}
+
+static int emit_rc_member_assign_enum_field(CodeGen* gen, Node* expr, Node* member,
+                                            Type* field_ty) {
+    if (!(field_ty && field_ty->kind == TYPE_ENUM && field_ty->as.enm.has_rc_fields)) {
+        return 0;
+    }
+
+    Node* value   = expr->as.assign.value;
+    int   temp_id = gen->out.temp_count++;
+    emit_indent(gen);
+    emit(gen, "%s __rc_tmp%d = ", field_ty->as.enm.name, temp_id);
+    emit_expr(gen, value);
+    emit(gen, ";\n");
+
+    if (value->type == NODE_IDENT && rc_is_tracked(gen, value->as.ident.name)) {
+        emit_indent(gen);
+        emit(gen, "__rc_inc_%s(__rc_tmp%d);\n", field_ty->as.enm.name, temp_id);
+    }
+
+    emit_indent(gen);
+    emit(gen, "__rc_dec_%s(", field_ty->as.enm.name);
+    emit_expr(gen, member);
+    emit(gen, ");\n");
+    emit_indent(gen);
+    emit_expr(gen, member);
+    emit(gen, " = __rc_tmp%d;\n", temp_id);
+    return 1;
+}
+
+static int emit_rc_member_assign_pointer_field(CodeGen* gen, Node* expr, Node* member,
+                                               Type* field_ty) {
+    Node* value = expr->as.assign.value;
+    if (!rc_member_value_is_managed(gen, value, field_ty) ||
+        !rc_member_field_uses_pointer_rc(field_ty)) {
+        return 0;
+    }
+
+    int tmp = gen->out.temp_count++;
+    emit_indent(gen);
+    emit(gen, "void* __rc_tmp%d = (void*)", tmp);
+    emit_expr(gen, value);
+    emit(gen, ";\n");
+    // Only inc when borrowing from an existing reference.
+    // Fresh allocations (new_expr, calls) already have rc=1.
+    if (rc_value_needs_borrow_inc(gen, value)) {
+        emit_indent(gen);
+        emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
+    }
+    emit_indent(gen);
+    if (field_ty->kind == TYPE_STRING) {
+        emit(gen, "__rc_dec((void*)");
+    } else {
+        emit(gen, "__rc_dec(");
+    }
+    emit_expr(gen, member);
+    emit(gen, ");\n");
+    emit_member_assign_from_tmp(gen, member, tmp);
+    return 1;
+}
+
+static int emit_rc_self_new_member_assign(CodeGen* gen, Node* expr, Node* member, int obj_is_rc) {
+    if (obj_is_rc || member->as.member.object->type != NODE_IDENT ||
+        strcmp(member->as.member.object->as.ident.name, "self") != 0 ||
+        expr->as.assign.value->type != NODE_NEW_EXPR) {
+        return 0;
+    }
+
+    // Dec the old field value, then assign the new one.
+    emit_indent(gen);
+    emit(gen, "__rc_dec(");
+    emit_expr(gen, member);
+    emit(gen, ");\n");
+    emit_indent(gen);
+    emit_expr(gen, member);
+    emit(gen, " = ");
+    emit_expr(gen, expr->as.assign.value);
+    emit(gen, ";\n");
+    return 1;
+}
+
 static int emit_rc_member_assign_stmt(CodeGen* gen, Node* expr) {
     if (expr->type != NODE_ASSIGN || expr->as.assign.op != TOK_EQ ||
         expr->as.assign.target->type != NODE_MEMBER) {
@@ -287,86 +391,15 @@ static int emit_rc_member_assign_stmt(CodeGen* gen, Node* expr) {
         Type*       obj_type = rc_get_var_type(gen, obj_name);
         Type*       field_ty = find_struct_field_type(obj_type, member->as.member.name);
 
-        if (field_ty && field_ty->kind == TYPE_ENUM && field_ty->as.enm.has_rc_fields) {
-            int temp_id = gen->out.temp_count++;
-            emit_indent(gen);
-            emit(gen, "%s __rc_tmp%d = ", field_ty->as.enm.name, temp_id);
-            emit_expr(gen, expr->as.assign.value);
-            emit(gen, ";\n");
-
-            int needs_inc = (expr->as.assign.value->type == NODE_IDENT &&
-                             rc_is_tracked(gen, expr->as.assign.value->as.ident.name));
-            if (needs_inc) {
-                emit_indent(gen);
-                emit(gen, "__rc_inc_%s(__rc_tmp%d);\n", field_ty->as.enm.name, temp_id);
-            }
-
-            emit_indent(gen);
-            emit(gen, "__rc_dec_%s(", field_ty->as.enm.name);
-            emit_expr(gen, member);
-            emit(gen, ");\n");
-            emit_indent(gen);
-            emit_expr(gen, member);
-            emit(gen, " = __rc_tmp%d;\n", temp_id);
+        if (emit_rc_member_assign_enum_field(gen, expr, member, field_ty)) {
             return 1;
         }
-
-        int value_is_rc = (expr->as.assign.value->type == NODE_IDENT &&
-                           rc_is_tracked(gen, expr->as.assign.value->as.ident.name)) ||
-                          expr->as.assign.value->type == NODE_NEW_EXPR ||
-                          (expr->as.assign.value->type == NODE_INDEX &&
-                           expr->as.assign.value->as.index.is_rc_elem);
-        // For string fields, any value assignment needs RC handling
-        if (field_ty && field_ty->kind == TYPE_STRING) {
-            value_is_rc = 1;
-        }
-        if (value_is_rc && field_ty &&
-            (field_ty->kind == TYPE_STRUCT || field_ty->kind == TYPE_STRING ||
-             field_ty->kind == TYPE_VEC || field_ty->kind == TYPE_STRINGBUILDER)) {
-            int tmp = gen->out.temp_count++;
-            emit_indent(gen);
-            emit(gen, "void* __rc_tmp%d = (void*)", tmp);
-            emit_expr(gen, expr->as.assign.value);
-            emit(gen, ";\n");
-            // Only inc when borrowing from an existing reference.
-            // Fresh allocations (new_expr, calls) already have rc=1.
-            int needs_inc = (expr->as.assign.value->type == NODE_IDENT &&
-                             rc_is_tracked(gen, expr->as.assign.value->as.ident.name)) ||
-                            (expr->as.assign.value->type == NODE_INDEX &&
-                             expr->as.assign.value->as.index.is_rc_elem);
-            if (needs_inc) {
-                emit_indent(gen);
-                emit(gen, "__rc_inc(__rc_tmp%d);\n", tmp);
-            }
-            emit_indent(gen);
-            if (field_ty->kind == TYPE_STRING) {
-                emit(gen, "__rc_dec((void*)");
-            } else {
-                emit(gen, "__rc_dec(");
-            }
-            emit_expr(gen, member);
-            emit(gen, ");\n");
-            emit_indent(gen);
-            emit_expr(gen, member);
-            emit(gen, " = __rc_tmp%d;\n", tmp);
+        if (emit_rc_member_assign_pointer_field(gen, expr, member, field_ty)) {
             return 1;
         }
     }
 
-    // Handle self.field = new_value in method bodies (self is not RC-tracked)
-    if (!obj_is_rc && member->as.member.object->type == NODE_IDENT &&
-        strcmp(member->as.member.object->as.ident.name, "self") == 0 &&
-        expr->as.assign.value->type == NODE_NEW_EXPR) {
-        // Dec the old field value, then assign the new one
-        emit_indent(gen);
-        emit(gen, "__rc_dec(");
-        emit_expr(gen, member);
-        emit(gen, ");\n");
-        emit_indent(gen);
-        emit_expr(gen, member);
-        emit(gen, " = ");
-        emit_expr(gen, expr->as.assign.value);
-        emit(gen, ";\n");
+    if (emit_rc_self_new_member_assign(gen, expr, member, obj_is_rc)) {
         return 1;
     }
 
