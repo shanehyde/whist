@@ -39,18 +39,6 @@ static int register_tuple_type(CodeGen* gen, Type* type) {
 // Collect tuple types from a type node
 static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node);
 
-static int return_type_is_void(Node* return_type) {
-    return !return_type ||
-           (return_type->type == NODE_IDENT && strcmp(return_type->as.ident.name, "void") == 0);
-}
-
-static void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
-    if (fdn->return_is_const && !return_type_is_void(fdn->return_type)) {
-        emit(gen, "const ");
-    }
-    emit_type(gen, fdn->return_type);
-}
-
 // Build a Type* from a tuple literal (for type collection)
 static Type* type_from_tuple_lit(Node* node) {
     int    count = node->as.tuple_lit.elements.count;
@@ -381,6 +369,15 @@ char* build_mangled_name_from_generic_node(CodeGen* gen, Node* type_node) {
 //     ... preserved for potential future use
 // }
 
+// Return whether a function decl is a direct generic-receiver method for `struct_name`.
+static int is_collectible_generic_method(Node* decl, const char* struct_name) {
+    return decl && decl->type == NODE_FUNC_DECL && decl->as.func_decl.body != NULL &&
+           decl->as.func_decl.receiver_type != NULL &&
+           decl->as.func_decl.receiver_type_args.count > 0 &&
+           decl->as.func_decl.type_param_count == 0 &&
+           strcmp(decl->as.func_decl.receiver_type, struct_name) == 0;
+}
+
 // Collect all generic methods for a given struct name
 void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods_out,
                              int* count_out) {
@@ -400,29 +397,23 @@ void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods
             continue;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            // Direct generic methods: func (Box<T>) get() -> T
-            // Exclude method-level generics (type_param_count > 0) — those go through
-            // GenericFuncInstance
-            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.body != NULL &&
-                decl->as.func_decl.receiver_type != NULL &&
-                decl->as.func_decl.receiver_type_args.count > 0 &&
-                decl->as.func_decl.type_param_count == 0 &&
-                strcmp(decl->as.func_decl.receiver_type, struct_name) == 0) {
+            // Direct generic methods: func (Box<T>) get() -> T.
+            // Excludes method-level generics (type_param_count > 0), which are handled
+            // via GenericFuncInstance.
+            if (is_collectible_generic_method(decl, struct_name)) {
                 VEC_GROW(methods, count, capacity);
                 methods[count++] = decl;
             }
+
             // Methods inside impl blocks: impl Drop for Box { func (Box<T>) drop() -> void }
-            if (decl->type == NODE_IMPL_DECL) {
-                for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
-                    Node* method = decl->as.impl_decl.methods.nodes[j];
-                    if (method->type == NODE_FUNC_DECL && method->as.func_decl.body != NULL &&
-                        method->as.func_decl.receiver_type != NULL &&
-                        method->as.func_decl.receiver_type_args.count > 0 &&
-                        method->as.func_decl.type_param_count == 0 &&
-                        strcmp(method->as.func_decl.receiver_type, struct_name) == 0) {
-                        VEC_GROW(methods, count, capacity);
-                        methods[count++] = method;
-                    }
+            if (decl->type != NODE_IMPL_DECL) {
+                continue;
+            }
+            for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
+                Node* method = decl->as.impl_decl.methods.nodes[j];
+                if (is_collectible_generic_method(method, struct_name)) {
+                    VEC_GROW(methods, count, capacity);
+                    methods[count++] = method;
                 }
             }
         }
@@ -1351,105 +1342,120 @@ static void emit_main_wrapper(CodeGen* gen) {
     emit(gen, "}\n\n");
 }
 
+// Append a C string into a bounded stringify buffer.
+static void stringify_append_cstr(char* buf, int buf_size, int* pos, const char* s) {
+    while (*s && *pos < buf_size - 1) {
+        buf[(*pos)++] = *s++;
+    }
+}
+
+// Append a fixed-length byte slice into a bounded stringify buffer.
+static void stringify_append_n(char* buf, int buf_size, int* pos, const char* s, int n) {
+    for (int i = 0; i < n && *pos < buf_size - 1; i++) {
+        buf[(*pos)++] = s[i];
+    }
+}
+
+// Append a single character into a bounded stringify buffer.
+static void stringify_append_char(char* buf, int buf_size, int* pos, char c) {
+    if (*pos < buf_size - 1) {
+        buf[(*pos)++] = c;
+    }
+}
+
+// Append a string literal with escaping and surrounding quotes.
+static void stringify_append_string_lit(char* buf, int buf_size, int* pos, const char* s) {
+    stringify_append_cstr(buf, buf_size, pos, "\\\"");
+    while (*s && *pos < buf_size - 1) {
+        if (*s == '"') {
+            stringify_append_cstr(buf, buf_size, pos, "\\\"");
+        } else if (*s == '\\') {
+            stringify_append_cstr(buf, buf_size, pos, "\\\\");
+        } else if (*s == '\n') {
+            stringify_append_cstr(buf, buf_size, pos, "\\n");
+        } else if (*s == '\t') {
+            stringify_append_cstr(buf, buf_size, pos, "\\t");
+        } else if (*s == '\r') {
+            stringify_append_cstr(buf, buf_size, pos, "\\r");
+        } else {
+            stringify_append_char(buf, buf_size, pos, *s);
+        }
+        s++;
+    }
+    stringify_append_cstr(buf, buf_size, pos, "\\\"");
+}
+
 // Stringify an expression AST node into a human-readable string for assert messages
 static void stringify_expr_to(Node* node, char* buf, int buf_size, int* pos) {
     if (!node || *pos >= buf_size - 1)
         return;
 
-#define APPEND(s)                                                                                  \
-    do {                                                                                           \
-        const char* _s = (s);                                                                      \
-        while (*_s && *pos < buf_size - 1)                                                         \
-            buf[(*pos)++] = *_s++;                                                                 \
-    } while (0)
-
     switch (node->type) {
     case NODE_INT_LIT: {
         char tmp[32];
         snprintf(tmp, sizeof(tmp), "%ld", node->as.int_lit.value);
-        APPEND(tmp);
+        stringify_append_cstr(buf, buf_size, pos, tmp);
         break;
     }
     case NODE_FLOAT_LIT: {
         char tmp[32];
         snprintf(tmp, sizeof(tmp), "%g", node->as.float_lit.value);
-        APPEND(tmp);
+        stringify_append_cstr(buf, buf_size, pos, tmp);
         break;
     }
     case NODE_BOOL_LIT:
-        APPEND(node->as.bool_lit.value ? "true" : "false");
+        stringify_append_cstr(buf, buf_size, pos, node->as.bool_lit.value ? "true" : "false");
         break;
-    case NODE_STRING_LIT: {
-        APPEND("\\\"");
-        const char* s = node->as.string_lit.value;
-        while (*s && *pos < buf_size - 1) {
-            if (*s == '"') {
-                APPEND("\\\"");
-            } else if (*s == '\\') {
-                APPEND("\\\\");
-            } else if (*s == '\n') {
-                APPEND("\\n");
-            } else if (*s == '\t') {
-                APPEND("\\t");
-            } else if (*s == '\r') {
-                APPEND("\\r");
-            } else {
-                buf[(*pos)++] = *s;
-            }
-            s++;
-        }
-        APPEND("\\\"");
+    case NODE_STRING_LIT:
+        stringify_append_string_lit(buf, buf_size, pos, node->as.string_lit.value);
         break;
-    }
     case NODE_NULL_LIT:
-        APPEND("null");
+        stringify_append_cstr(buf, buf_size, pos, "null");
         break;
     case NODE_IDENT:
-        for (int i = 0; i < node->as.ident.length && *pos < buf_size - 1; i++)
-            buf[(*pos)++] = node->as.ident.name[i];
+        stringify_append_n(buf, buf_size, pos, node->as.ident.name, node->as.ident.length);
         break;
     case NODE_BINARY: {
-        APPEND("(");
+        stringify_append_cstr(buf, buf_size, pos, "(");
         stringify_expr_to(node->as.binary.left, buf, buf_size, pos);
-        APPEND(" ");
-        APPEND(token_type_symbol(node->as.binary.op));
-        APPEND(" ");
+        stringify_append_cstr(buf, buf_size, pos, " ");
+        stringify_append_cstr(buf, buf_size, pos, token_type_symbol(node->as.binary.op));
+        stringify_append_cstr(buf, buf_size, pos, " ");
         stringify_expr_to(node->as.binary.right, buf, buf_size, pos);
-        APPEND(")");
+        stringify_append_cstr(buf, buf_size, pos, ")");
         break;
     }
     case NODE_UNARY:
-        APPEND(token_type_symbol(node->as.unary.op));
+        stringify_append_cstr(buf, buf_size, pos, token_type_symbol(node->as.unary.op));
         stringify_expr_to(node->as.unary.operand, buf, buf_size, pos);
         break;
     case NODE_CALL: {
         stringify_expr_to(node->as.call.func, buf, buf_size, pos);
-        APPEND("(");
+        stringify_append_cstr(buf, buf_size, pos, "(");
         for (int i = 0; i < node->as.call.args.count; i++) {
-            if (i > 0)
-                APPEND(", ");
+            if (i > 0) {
+                stringify_append_cstr(buf, buf_size, pos, ", ");
+            }
             stringify_expr_to(node->as.call.args.nodes[i], buf, buf_size, pos);
         }
-        APPEND(")");
+        stringify_append_cstr(buf, buf_size, pos, ")");
         break;
     }
     case NODE_MEMBER:
         stringify_expr_to(node->as.member.object, buf, buf_size, pos);
-        APPEND(".");
-        for (int i = 0; i < node->as.member.length && *pos < buf_size - 1; i++)
-            buf[(*pos)++] = node->as.member.name[i];
+        stringify_append_cstr(buf, buf_size, pos, ".");
+        stringify_append_n(buf, buf_size, pos, node->as.member.name, node->as.member.length);
         break;
     case NODE_INDEX:
         stringify_expr_to(node->as.index.object, buf, buf_size, pos);
-        APPEND("[");
+        stringify_append_cstr(buf, buf_size, pos, "[");
         stringify_expr_to(node->as.index.index, buf, buf_size, pos);
-        APPEND("]");
+        stringify_append_cstr(buf, buf_size, pos, "]");
         break;
     default:
-        APPEND("...");
+        stringify_append_cstr(buf, buf_size, pos, "...");
         break;
     }
-#undef APPEND
 }
 
 char* stringify_expr(Node* node) {
@@ -1601,85 +1607,110 @@ static int struct_has_eq_impl(CodeGen* gen, const char* name) {
     return 0;
 }
 
+// Return whether any variant in a declared enum carries data fields.
+static int enum_decl_has_data(Node* decl) {
+    for (int v = 0; v < decl->as.enum_decl.values.count; v++) {
+        if (decl->as.enum_decl.values.nodes[v]->as.enum_variant.types.count > 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Return whether a struct-typed field node resolves to a struct with Eq implementation.
+static int struct_field_type_node_has_eq(CodeGen* gen, Node* tnode) {
+    if (!is_struct_type(gen, tnode)) {
+        return 1;
+    }
+
+    Node*       resolved = resolve_alias(gen, tnode);
+    const char* sname    = NULL;
+    int         owned    = 0;
+    if (resolved->type == NODE_IDENT) {
+        sname = resolved->as.ident.name;
+    } else if (resolved->type == NODE_GENERIC_TYPE) {
+        sname = build_mangled_name_from_generic_node(gen, resolved);
+        owned = 1;
+    }
+
+    int has_eq = sname && struct_has_eq_impl(gen, sname);
+    if (owned) {
+        free((char*)sname);
+    }
+    return has_eq;
+}
+
+// Return whether all struct-typed fields in a non-generic enum declaration are Eq-comparable.
+static int enum_decl_all_struct_fields_have_eq(CodeGen* gen, Node* decl) {
+    for (int v = 0; v < decl->as.enum_decl.values.count; v++) {
+        Node* var = decl->as.enum_decl.values.nodes[v];
+        for (int t = 0; t < var->as.enum_variant.types.count; t++) {
+            if (!struct_field_type_node_has_eq(gen, var->as.enum_variant.types.nodes[t])) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+// Return whether all struct payload fields in a generic enum instance are Eq-comparable.
+static int enum_instance_all_struct_fields_have_eq(GenericInstance* inst) {
+    for (int v = 0; v < inst->type->as.enm.value_count; v++) {
+        for (int f = 0; f < inst->type->as.enm.variant_type_counts[v]; f++) {
+            Type* ft = inst->type->as.enm.variant_types[v][f];
+            if (ft->kind == TYPE_STRUCT && !ft->as.struc.has_eq) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
 // Compute which data enums support equality (all struct-typed variant fields have Eq)
 static void compute_enum_eq_flags(CodeGen* gen, Node* ast) {
-    if (gen->enums.count == 0)
+    if (gen->enums.count == 0) {
         return;
+    }
     gen->enums.has_eq = xcalloc(gen->enums.count, sizeof(int));
 
     // Non-generic data enums
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
-        if (!mod || mod->type != NODE_MODULE)
+        if (!mod || mod->type != NODE_MODULE) {
             continue;
+        }
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type != NODE_ENUM_DECL)
+            if (decl->type != NODE_ENUM_DECL || decl->as.enum_decl.type_param_count > 0) {
                 continue;
-            if (decl->as.enum_decl.type_param_count > 0)
-                continue;
+            }
+
             int idx = enum_index(gen, decl->as.enum_decl.name);
-            if (idx < 0)
+            if (idx < 0 || !enum_decl_has_data(decl)) {
                 continue;
-            // Check if data enum
-            int has_data = 0;
-            for (int v = 0; v < decl->as.enum_decl.values.count; v++) {
-                if (decl->as.enum_decl.values.nodes[v]->as.enum_variant.types.count > 0) {
-                    has_data = 1;
-                    break;
-                }
             }
-            if (!has_data)
-                continue;
-            // Check all struct-typed fields have Eq
-            int all_eq = 1;
-            for (int v = 0; v < decl->as.enum_decl.values.count && all_eq; v++) {
-                Node* var = decl->as.enum_decl.values.nodes[v];
-                for (int t = 0; t < var->as.enum_variant.types.count; t++) {
-                    Node* tnode = var->as.enum_variant.types.nodes[t];
-                    if (is_struct_type(gen, tnode)) {
-                        Node*       resolved = resolve_alias(gen, tnode);
-                        const char* sname    = NULL;
-                        if (resolved->type == NODE_IDENT)
-                            sname = resolved->as.ident.name;
-                        else if (resolved->type == NODE_GENERIC_TYPE)
-                            sname = build_mangled_name_from_generic_node(gen, resolved);
-                        if (!sname || !struct_has_eq_impl(gen, sname)) {
-                            all_eq = 0;
-                            if (resolved->type == NODE_GENERIC_TYPE && sname)
-                                free((char*)sname);
-                            break;
-                        }
-                        if (resolved->type == NODE_GENERIC_TYPE)
-                            free((char*)sname);
-                    }
-                }
-            }
-            if (all_eq)
+
+            if (enum_decl_all_struct_fields_have_eq(gen, decl)) {
                 gen->enums.has_eq[idx] = 1;
+            }
         }
     }
 
     // Generic data enum instances: use checker Type info
     for (int gi = 0; gi < gen->checker.instance_count; gi++) {
         GenericInstance* inst = &gen->checker.instances[gi];
-        if (inst->type->kind != TYPE_ENUM || !inst->type->as.enm.has_data)
+        if (inst->type->kind != TYPE_ENUM || !inst->type->as.enm.has_data) {
             continue;
-        int idx = enum_index(gen, inst->mangled_name);
-        if (idx < 0)
-            continue;
-        int all_eq = 1;
-        for (int v = 0; v < inst->type->as.enm.value_count && all_eq; v++) {
-            for (int f = 0; f < inst->type->as.enm.variant_type_counts[v]; f++) {
-                Type* ft = inst->type->as.enm.variant_types[v][f];
-                if (ft->kind == TYPE_STRUCT && !ft->as.struc.has_eq) {
-                    all_eq = 0;
-                    break;
-                }
-            }
         }
-        if (all_eq)
+
+        int idx = enum_index(gen, inst->mangled_name);
+        if (idx < 0) {
+            continue;
+        }
+
+        if (enum_instance_all_struct_fields_have_eq(inst)) {
             gen->enums.has_eq[idx] = 1;
+        }
     }
 }
 
@@ -1837,7 +1868,7 @@ static void emit_generic_method_impl(CodeGen* gen, GenericInstance* info,
     GenericMethodSubst subst;
     setup_generic_method_subst(gen, info, tinfo, fdn, &subst);
 
-    int is_void = return_type_is_void(fdn->return_type);
+    int is_void = codegen_return_type_is_void(fdn->return_type);
     emit_generic_method_signature(gen, info, fdn);
 
     defer_clear(gen);
@@ -1916,8 +1947,7 @@ static void emit_generic_method_impls(CodeGen* gen, Node* ast) {
 
 // Find a method-level generic function declaration in the AST.
 // Matches func (ReceiverType<...>) MethodName<...>(...): ...
-Node* find_generic_method_func_decl(Node* ast, const char* receiver_type,
-                                    const char* method_name) {
+Node* find_generic_method_func_decl(Node* ast, const char* receiver_type, const char* method_name) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
@@ -2020,7 +2050,7 @@ static void emit_generic_method_func_impl(CodeGen* gen, Node* ast, GenericFuncIn
     subst_ctx.count       = def->type_param_count;
     gen->generics.subst   = &subst_ctx;
 
-    int is_void = return_type_is_void(fdn->return_type);
+    int is_void = codegen_return_type_is_void(fdn->return_type);
 
     // Return type
     emit_func_return_type(gen, fdn);
@@ -2050,16 +2080,7 @@ static void emit_generic_method_func_impl(CodeGen* gen, Node* ast, GenericFuncIn
     gen->generics.modules      = fdn->accessible_modules;
     gen->generics.module_count = fdn->accessible_modules_count;
 
-    int has_defers = 0;
-    if (inst->body) {
-        for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
-            Node* stmt = inst->body->as.block.stmts.nodes[s];
-            if (stmt && stmt->type == NODE_DEFER) {
-                has_defers = 1;
-                break;
-            }
-        }
-    }
+    int has_defers = block_has_top_level_defer(inst->body);
 
     gen->out.indent++;
 
@@ -2069,11 +2090,7 @@ static void emit_generic_method_func_impl(CodeGen* gen, Node* ast, GenericFuncIn
         emit(gen, " __ret;\n");
     }
 
-    if (inst->body) {
-        for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
-            emit_stmt(gen, inst->body->as.block.stmts.nodes[s]);
-        }
-    }
+    emit_block_stmts(gen, inst->body);
 
     if (gen->rc.count > 0 && inst->body) {
         int   sc   = inst->body->as.block.stmts.count;
@@ -2124,7 +2141,7 @@ static void emit_generic_func_impls(CodeGen* gen, Node* ast) {
         subst_ctx.count       = inst->type_arg_count;
         gen->generics.subst   = &subst_ctx;
 
-        int is_void = return_type_is_void(fdn->return_type);
+        int is_void = codegen_return_type_is_void(fdn->return_type);
 
         // Return type
         emit_func_return_type(gen, fdn);
@@ -2155,16 +2172,7 @@ static void emit_generic_func_impls(CodeGen* gen, Node* ast) {
         gen->generics.module_count = fdn->accessible_modules_count;
 
         // First pass: count defers to know if we need __ret
-        int has_defers = 0;
-        if (inst->body) {
-            for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
-                Node* stmt = inst->body->as.block.stmts.nodes[s];
-                if (stmt && stmt->type == NODE_DEFER) {
-                    has_defers = 1;
-                    break;
-                }
-            }
-        }
+        int has_defers = block_has_top_level_defer(inst->body);
 
         // Body
         gen->out.indent++;
@@ -2177,11 +2185,7 @@ static void emit_generic_func_impls(CodeGen* gen, Node* ast) {
         }
 
         // Emit function body
-        if (inst->body) {
-            for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
-                emit_stmt(gen, inst->body->as.block.stmts.nodes[s]);
-            }
-        }
+        emit_block_stmts(gen, inst->body);
 
         // RC cleanup for implicit void return
         if (gen->rc.count > 0 && inst->body) {

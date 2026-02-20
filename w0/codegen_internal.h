@@ -9,15 +9,20 @@ Type*           subst_lookup(CodeGen* gen, const char* name);
 char*           stringify_expr(Node* node);
 int             lookup_string_lit(CodeGen* gen, const char* value, int length);
 GenericFuncDef* lookup_generic_func_def_for_instance(CodeGen* gen, const char* base_name);
-Node*           find_generic_method_func_decl(Node* ast, const char* receiver_type,
-                                              const char* method_name);
-Node*           find_generic_func_decl(Node* ast, const char* name);
-int             parse_method_key(const char* base_name, char* recv_out, int recv_size,
-                                 char* method_out, int method_size);
-void            register_thunk(CodeGen* gen, const char* c_name, Type* func_type);
+Node* find_generic_method_func_decl(Node* ast, const char* receiver_type, const char* method_name);
+Node* find_generic_func_decl(Node* ast, const char* name);
+int   parse_method_key(const char* base_name, char* recv_out, int recv_size, char* method_out,
+                       int method_size);
+void  register_thunk(CodeGen* gen, const char* c_name, Type* func_type);
 
 // --- From codegen_emit.c: shared helpers ---
 void        defer_push(CodeGen* gen, Node* node);
+int         codegen_return_type_is_void(Node* return_type);
+void        emit_func_return_type(CodeGen* gen, func_decl_node* fdn);
+int         codegen_find_tuple_type_index(CodeGen* gen, Type* tuple_type);
+const char* codegen_enum_value_resolved_name(CodeGen* gen, Node* enum_value);
+int         codegen_enum_value_resolved_name_length(CodeGen* gen, Node* enum_value);
+void        emit_value_match_cond(CodeGen* gen, int match_id, Node* pattern, Type* expr_type);
 const char* binary_op_str(TokenType op);
 const char* unary_op_str(TokenType op);
 const char* assign_op_str(TokenType op);

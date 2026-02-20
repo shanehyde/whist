@@ -4,6 +4,7 @@
 
 #include "alloc.h"
 #include "codegen_internal.h"
+#include "sem_info.h"
 #include "types.h"
 #include "vec.h"
 
@@ -31,6 +32,42 @@ void defer_push(CodeGen* gen, Node* node) {
 // Reset the defer stack (called at function boundaries)
 void defer_clear(CodeGen* gen) {
     gen->defer.count = 0;
+}
+
+int codegen_return_type_is_void(Node* return_type) {
+    return !return_type ||
+           (return_type->type == NODE_IDENT && strcmp(return_type->as.ident.name, "void") == 0);
+}
+
+void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
+    if (fdn->return_is_const && !codegen_return_type_is_void(fdn->return_type)) {
+        emit(gen, "const ");
+    }
+    emit_type(gen, fdn->return_type);
+}
+
+int codegen_find_tuple_type_index(CodeGen* gen, Type* tuple_type) {
+    if (!tuple_type) {
+        return -1;
+    }
+    for (int i = 0; i < gen->tuple_type_count; i++) {
+        if (tuple_types_equal(gen->tuple_types[i], tuple_type)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+const char* codegen_enum_value_resolved_name(CodeGen* gen, Node* enum_value) {
+    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
+                                                             enum_value->as.enum_value.enum_name);
+    return name ? name : "";
+}
+
+int codegen_enum_value_resolved_name_length(CodeGen* gen, Node* enum_value) {
+    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
+                                                             enum_value->as.enum_value.enum_name);
+    return name ? (int)strlen(name) : 0;
 }
 
 // Extract additional type bindings from matching a method's receiver pattern against concrete args
@@ -200,6 +237,78 @@ static void emit_regular_generic_type(CodeGen* gen, Node* type_node) {
     free(mangled);
 }
 
+// Emit an array type annotation as either sized array syntax or pointer syntax.
+static void emit_array_type(CodeGen* gen, Node* type_node) {
+    emit_type(gen, type_node->as.array_type.elem_type);
+    if (type_node->as.array_type.size) {
+        emit(gen, "[");
+        emit_expr(gen, type_node->as.array_type.size);
+        emit(gen, "]");
+    } else {
+        emit(gen, "*");
+    }
+}
+
+// Return the registered tuple typedef index for a tuple type node, or -1 if missing.
+static int find_tuple_type_index(CodeGen* gen, Node* tuple_type_node) {
+    Type* tuple = type_from_node(tuple_type_node);
+    return codegen_find_tuple_type_index(gen, tuple);
+}
+
+// Emit an inline struct form for a tuple type node.
+static void emit_inline_tuple_type(CodeGen* gen, Node* tuple_type_node) {
+    emit(gen, "struct { ");
+    for (int i = 0; i < tuple_type_node->as.tuple_type.elem_types.count; i++) {
+        emit_type(gen, tuple_type_node->as.tuple_type.elem_types.nodes[i]);
+        emit(gen, " _%d; ", i);
+    }
+    emit(gen, "}");
+}
+
+// Emit a tuple type annotation as either a typedef name or inline struct fallback.
+static void emit_tuple_type(CodeGen* gen, Node* type_node) {
+    int idx = find_tuple_type_index(gen, type_node);
+    if (idx >= 0) {
+        emit(gen, "__tuple_t%d", idx);
+        return;
+    }
+    emit_inline_tuple_type(gen, type_node);
+}
+
+// Emit a generic type annotation, handling Vec/Span special cases.
+static void emit_generic_type(CodeGen* gen, Node* type_node) {
+    const char* base    = type_node->as.generic_type.base_name;
+    int         is_span = (strcmp(base, "Span") == 0);
+    int         is_vec  = (strcmp(base, "Vec") == 0);
+
+    if (is_vec || is_span) {
+        emit(gen, "%s", is_vec ? "__Vec_" : "__Span_");
+        emit_vec_or_span_type_arg(gen, type_node->as.generic_type.type_args.nodes[0]);
+        if (is_vec)
+            emit(gen, "*"); // Vec is RC-managed pointer
+        return;
+    }
+
+    emit_regular_generic_type(gen, type_node);
+}
+
+// Emit an anonymous function pointer type annotation.
+static void emit_func_type_anon(CodeGen* gen, Node* type_node) {
+    if (type_node->as.func_type.return_type)
+        emit_type(gen, type_node->as.func_type.return_type);
+    else
+        emit(gen, "void");
+    emit(gen, " (*)(");
+    for (int i = 0; i < type_node->as.func_type.param_types.count; i++) {
+        if (i > 0)
+            emit(gen, ", ");
+        emit_type(gen, type_node->as.func_type.param_types.nodes[i]);
+    }
+    if (type_node->as.func_type.param_types.count == 0)
+        emit(gen, "void");
+    emit(gen, ")");
+}
+
 // Emit a type from a type annotation node
 void emit_type(CodeGen* gen, Node* type_node) {
     if (!type_node) {
@@ -216,77 +325,17 @@ void emit_type(CodeGen* gen, Node* type_node) {
         emit(gen, "/* pointer types not supported */");
         break;
     case NODE_ARRAY_TYPE:
-        // Array type: [n]T -> T[n] or T*
-        emit_type(gen, type_node->as.array_type.elem_type);
-        if (type_node->as.array_type.size) {
-            emit(gen, "[");
-            emit_expr(gen, type_node->as.array_type.size);
-            emit(gen, "]");
-        } else {
-            emit(gen, "*");
-        }
+        emit_array_type(gen, type_node);
         break;
-    case NODE_TUPLE_TYPE: {
-        // Build a Type* and find the matching typedef
-        Type* tuple = type_from_node(type_node);
-        int   idx   = -1;
-        for (int i = 0; i < gen->tuple_type_count; i++) {
-            if (tuple_types_equal(gen->tuple_types[i], tuple)) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx >= 0) {
-            emit(gen, "__tuple_t%d", idx);
-        } else {
-            // Fallback to inline struct
-            emit(gen, "struct { ");
-            for (int i = 0; i < type_node->as.tuple_type.elem_types.count; i++) {
-                emit_type(gen, type_node->as.tuple_type.elem_types.nodes[i]);
-                emit(gen, " _%d; ", i);
-            }
-            emit(gen, "}");
-        }
+    case NODE_TUPLE_TYPE:
+        emit_tuple_type(gen, type_node);
         break;
-    }
-    case NODE_GENERIC_TYPE: {
-        // Generic type instantiation - emit the mangled name
-        // Build the mangled name: Box<i64> -> Box_i64, Box<T> -> Box_i64 (with subst)
-        const char* base = type_node->as.generic_type.base_name;
-
-        // Special case: Span<T> is a value type, not a pointer
-        int is_span = (strcmp(base, "Span") == 0);
-        int is_vec  = (strcmp(base, "Vec") == 0);
-
-        if (is_vec || is_span) {
-            emit(gen, "%s", is_vec ? "__Vec_" : "__Span_");
-            emit_vec_or_span_type_arg(gen, type_node->as.generic_type.type_args.nodes[0]);
-            if (is_vec)
-                emit(gen, "*"); // Vec is RC-managed pointer
-            break;
-        }
-
-        // Regular generic struct/enum type.
-        emit_regular_generic_type(gen, type_node);
+    case NODE_GENERIC_TYPE:
+        emit_generic_type(gen, type_node);
         break;
-    }
-    case NODE_FUNC_TYPE: {
-        // Function pointer anonymous form: ret_type (*)(param_types)
-        if (type_node->as.func_type.return_type)
-            emit_type(gen, type_node->as.func_type.return_type);
-        else
-            emit(gen, "void");
-        emit(gen, " (*)(");
-        for (int i = 0; i < type_node->as.func_type.param_types.count; i++) {
-            if (i > 0)
-                emit(gen, ", ");
-            emit_type(gen, type_node->as.func_type.param_types.nodes[i]);
-        }
-        if (type_node->as.func_type.param_types.count == 0)
-            emit(gen, "void");
-        emit(gen, ")");
+    case NODE_FUNC_TYPE:
+        emit_func_type_anon(gen, type_node);
         break;
-    }
     default:
         emit(gen, "/* unknown type */");
         break;
@@ -334,13 +383,7 @@ static const char* resolved_builtin_c_type(TypeKind kind) {
 }
 
 static void emit_resolved_tuple_type(CodeGen* gen, Type* type) {
-    int idx = -1;
-    for (int i = 0; i < gen->tuple_type_count; i++) {
-        if (tuple_types_equal(gen->tuple_types[i], type)) {
-            idx = i;
-            break;
-        }
-    }
+    int idx = codegen_find_tuple_type_index(gen, type);
     if (idx >= 0) {
         emit(gen, "__tuple_t%d", idx);
         return;
@@ -519,6 +562,17 @@ const char* assign_op_str(TokenType op) {
     }
 }
 
+void emit_value_match_cond(CodeGen* gen, int match_id, Node* pattern, Type* expr_type) {
+    if (expr_type->kind == TYPE_STRING) {
+        emit(gen, "strcmp(__match%d, ", match_id);
+        emit_expr(gen, pattern);
+        emit(gen, ") == 0");
+    } else {
+        emit(gen, "__match%d == ", match_id);
+        emit_expr(gen, pattern);
+    }
+}
+
 // Emit an extern module: #include directive and register function aliases/names
 static void emit_extern_module(CodeGen* gen, Node* node) {
     emit(gen, "\n#include <%s.h>\n", node->as.extern_module.module_name);
@@ -542,18 +596,6 @@ static void emit_extern_module(CodeGen* gen, Node* node) {
             }
         }
     }
-}
-
-static int return_type_is_void(Node* return_type) {
-    return !return_type ||
-           (return_type->type == NODE_IDENT && strcmp(return_type->as.ident.name, "void") == 0);
-}
-
-static void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
-    if (fdn->return_is_const && !return_type_is_void(fdn->return_type)) {
-        emit(gen, "const ");
-    }
-    emit_type(gen, fdn->return_type);
 }
 
 static int should_skip_func_decl(CodeGen* gen, func_decl_node* fdn, int is_method) {
@@ -676,7 +718,7 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
         return;
     }
 
-    int is_void = return_type_is_void(fdn->return_type);
+    int is_void = codegen_return_type_is_void(fdn->return_type);
 
     if (gen->line_directives && node->line > 0) {
         emit(gen, "#line %d \"%s\"\n", node->line, gen->source_file);

@@ -6,74 +6,80 @@
 #include "alloc.h"
 #include "parser_internal.h"
 
+// Converts one hexadecimal digit to its numeric value, or -1 if invalid.
+static int hex_digit_value(char c) {
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+// Decodes non-numeric escapes like `\n`, `\t`, `\\`, and unknown escaped chars.
+static char decode_simple_escape(const char** src, char c) {
+    (*src)++;
+    switch (c) {
+    case 'n':
+        return '\n';
+    case 't':
+        return '\t';
+    case 'r':
+        return '\r';
+    case '\\':
+        return '\\';
+    case '"':
+        return '"';
+    case '\'':
+        return '\'';
+    case 'e':
+        return '\x1b';
+    default:
+        return c;
+    }
+}
+
+// Decodes hexadecimal escape sequences of the form `\xNN` (up to two digits).
+static char decode_hex_escape(const char** src, const char* end) {
+    (*src)++; // skip 'x'
+    int value = 0;
+    for (int i = 0; i < 2 && *src < end; i++) {
+        int digit = hex_digit_value(**src);
+        if (digit < 0) {
+            break;
+        }
+        value = value * 16 + digit;
+        (*src)++;
+    }
+    return (char)value;
+}
+
+// Decodes octal escapes (up to three octal digits starting at the current source char).
+static char decode_octal_escape(const char** src, const char* end) {
+    int value = 0;
+    for (int i = 0; i < 3 && *src < end; i++) {
+        char o = **src;
+        if (o < '0' || o > '7') {
+            break;
+        }
+        value = value * 8 + (o - '0');
+        (*src)++;
+    }
+    return (char)value;
+}
+
 // Decode an escape sequence starting at *src (just past the backslash).
 // Advances *src past the consumed escape characters. Returns the decoded char value.
 static char decode_escape(const char** src, const char* end) {
     char c = **src;
-    switch (c) {
-    case 'n':
-        (*src)++;
-        return '\n';
-    case 't':
-        (*src)++;
-        return '\t';
-    case 'r':
-        (*src)++;
-        return '\r';
-    case '\\':
-        (*src)++;
-        return '\\';
-    case '"':
-        (*src)++;
-        return '"';
-    case '\'':
-        (*src)++;
-        return '\'';
-    case 'e':
-        (*src)++;
-        return '\x1b';
-    case 'x': {
-        // Hex escape: \xNN
-        (*src)++; // skip 'x'
-        int value = 0;
-        for (int i = 0; i < 2 && *src < end; i++) {
-            char h = **src;
-            if (h >= '0' && h <= '9')
-                value = value * 16 + (h - '0');
-            else if (h >= 'a' && h <= 'f')
-                value = value * 16 + (h - 'a' + 10);
-            else if (h >= 'A' && h <= 'F')
-                value = value * 16 + (h - 'A' + 10);
-            else
-                break;
-            (*src)++;
-        }
-        return (char)value;
+    if (c == 'x') {
+        return decode_hex_escape(src, end);
     }
-    case '0':
-    case '1':
-    case '2':
-    case '3':
-    case '4':
-    case '5':
-    case '6':
-    case '7': {
-        // Octal escape: up to 3 digits
-        int value = 0;
-        for (int i = 0; i < 3 && *src < end; i++) {
-            char o = **src;
-            if (o >= '0' && o <= '7')
-                value = value * 8 + (o - '0');
-            else
-                break;
-            (*src)++;
-        }
-        return (char)value;
+    if (c >= '0' && c <= '7') {
+        return decode_octal_escape(src, end);
     }
-    default:
-        (*src)++;
-        return c;
-    }
+    return decode_simple_escape(src, c);
 }
 
 static Node* parse_struct_init(Parser* parser) {
@@ -170,6 +176,100 @@ static void flush_text_part(NodeList* parts, char* buf, int* buf_len, int line, 
     *buf_len = 0;
 }
 
+// Reports an empty `{}` interpolation segment and marks the parser as failed.
+static void report_empty_interp_expr(Parser* parser, Token* token) {
+    if (!parser->panic_mode) {
+        parser->panic_mode = 1;
+        parser->had_error  = 1;
+        fprintf(stderr, "[line %d:%d] Error: Empty expression in string interpolation\n",
+                token->line, token->column);
+    }
+}
+
+// Skips a quoted string literal while scanning inside an interpolation expression.
+static void skip_interp_expr_string(const char** src, const char* end) {
+    (*src)++;
+    while (*src < end && **src != '"') {
+        if (**src == '\\' && *src + 1 < end) {
+            (*src)++;
+        }
+        (*src)++;
+    }
+    if (*src < end) {
+        (*src)++; // skip closing "
+    }
+}
+
+// Scans interpolation source after `{` and returns the enclosed expression bounds.
+static void scan_interp_expr_bounds(const char** src, const char* end, const char** expr_start,
+                                    int* expr_len) {
+    *expr_start = *src;
+    int depth   = 1;
+    while (*src < end && depth > 0) {
+        if (**src == '{') {
+            depth++;
+        } else if (**src == '}') {
+            depth--;
+            if (depth == 0) {
+                break;
+            }
+        } else if (**src == '"') {
+            skip_interp_expr_string(src, end);
+            continue;
+        }
+        (*src)++;
+    }
+
+    *expr_len = (int)(*src - *expr_start);
+    if (*src < end) {
+        (*src)++; // skip '}'
+    }
+}
+
+// Parses one interpolation expression fragment with a sub-parser and returns its AST node.
+static Node* parse_interp_expr_node(Parser* parser, Token* token, const char* expr_start,
+                                    int expr_len) {
+    if (expr_len == 0) {
+        report_empty_interp_expr(parser, token);
+        return NULL;
+    }
+
+    char* expr_source = xmalloc(expr_len + 2); // +1 for ';', +1 for '\0'
+    memcpy(expr_source, expr_start, expr_len);
+    expr_source[expr_len]     = ';';
+    expr_source[expr_len + 1] = '\0';
+
+    Parser sub_parser;
+    parser_init(&sub_parser, expr_source);
+    Node* expr_node = parse_expression(&sub_parser);
+    free(expr_source);
+
+    if (sub_parser.had_error || !expr_node) {
+        parse_error_at(parser, token, "Invalid expression in string interpolation");
+        node_free(expr_node);
+        return NULL;
+    }
+
+    // Sub-parser coordinates are local; normalize to interpolation token location.
+    expr_node->line   = token->line;
+    expr_node->column = token->column;
+    return expr_node;
+}
+
+// Flushes pending text, parses an interpolation expression, and appends it to parts.
+static int append_interp_expr_part(Parser* parser, Node* node, char* buf, int* buf_len,
+                                   Token* token, const char* expr_start, int expr_len) {
+    flush_text_part(&node->as.string_interp.parts, buf, buf_len, token->line, token->column);
+
+    Node* expr_node = parse_interp_expr_node(parser, token, expr_start, expr_len);
+    if (!expr_node) {
+        return 0;
+    }
+
+    nodelist_push(&node->as.string_interp.parts, expr_node);
+    return 1;
+}
+
 static Node* parse_interp_string(Parser* parser) {
     Token token = parser->previous; // TOK_INTERP_STRING already consumed
 
@@ -198,85 +298,18 @@ static Node* parse_interp_string(Parser* parser) {
                 buf[buf_len++] = '{';
                 src += 2;
             } else {
-                // Expression: {expr}
                 src++; // skip '{'
 
-                // Find matching '}' tracking brace depth
-                const char* expr_start = src;
-                int         depth      = 1;
-                while (src < end && depth > 0) {
-                    if (*src == '{') {
-                        depth++;
-                    } else if (*src == '}') {
-                        depth--;
-                        if (depth == 0)
-                            break;
-                    } else if (*src == '"') {
-                        // Skip string literals inside expressions
-                        src++;
-                        while (src < end && *src != '"') {
-                            if (*src == '\\' && src + 1 < end)
-                                src++;
-                            src++;
-                        }
-                        if (src < end)
-                            src++; // skip closing "
-                        continue;
-                    }
-                    src++;
-                }
+                const char* expr_start = NULL;
+                int         expr_len   = 0;
+                scan_interp_expr_bounds(&src, end, &expr_start, &expr_len);
 
-                int expr_len = (int)(src - expr_start);
-                if (src < end)
-                    src++; // skip '}'
-
-                // Check for empty expression
-                if (expr_len == 0) {
-                    if (!parser->panic_mode) {
-                        parser->panic_mode = 1;
-                        parser->had_error  = 1;
-                        fprintf(stderr,
-                                "[line %d:%d] Error: Empty expression in string interpolation\n",
-                                token.line, token.column);
-                    }
+                if (!append_interp_expr_part(parser, node, buf, &buf_len, &token, expr_start,
+                                             expr_len)) {
                     free(buf);
                     node_free(node);
                     return NULL;
                 }
-
-                // Flush any accumulated text
-                flush_text_part(&node->as.string_interp.parts, buf, &buf_len, token.line,
-                                token.column);
-
-                // Create a null-terminated copy of the expression source
-                char* expr_source = xmalloc(expr_len + 2); // +1 for ';', +1 for '\0'
-                memcpy(expr_source, expr_start, expr_len);
-                expr_source[expr_len]     = ';';
-                expr_source[expr_len + 1] = '\0';
-
-                // Parse the expression with a sub-parser
-                Parser sub_parser;
-                parser_init(&sub_parser, expr_source);
-                Node* expr_node = parse_expression(&sub_parser);
-
-                if (sub_parser.had_error || !expr_node) {
-                    char error_msg[256];
-                    snprintf(error_msg, sizeof(error_msg),
-                             "Invalid expression in string interpolation");
-                    parse_error_at(parser, &token, error_msg);
-                    free(expr_source);
-                    free(buf);
-                    node_free(expr_node);
-                    node_free(node);
-                    return NULL;
-                }
-
-                // Fix line/column info (sub-parser uses line 1, col 1)
-                expr_node->line   = token.line;
-                expr_node->column = token.column;
-
-                nodelist_push(&node->as.string_interp.parts, expr_node);
-                free(expr_source);
             }
         } else if (*src == '}' && src + 1 < end && src[1] == '}') {
             // Escaped brace: }} -> literal }
@@ -334,35 +367,124 @@ static Node* parse_float_lit(Token token) {
     return node;
 }
 
-static Node* parse_string_lit(Token token) {
-    Node* node = node_new(NODE_STRING_LIT, token.line, token.column);
+// Returns whether a string token uses triple-quote delimiters.
+static int is_triple_string_token(const Token* token) {
+    return token->length >= 6 && token->start[0] == '"' && token->start[1] == '"' &&
+           token->start[2] == '"';
+}
 
-    int is_triple = token.length >= 6 && token.start[0] == '"' && token.start[1] == '"' &&
-                    token.start[2] == '"';
-
-    const char* src;
-    const char* end;
+// Computes source bounds for the body of a normal or triple-quoted string token.
+static void get_string_token_bounds(const Token* token, int is_triple, const char** src,
+                                    const char** end) {
     if (is_triple) {
-        src = token.start + 3;
-        end = token.start + token.length - 3;
+        *src = token->start + 3;
+        *end = token->start + token->length - 3;
     } else {
-        src = token.start + 1;
-        end = token.start + token.length - 1;
+        *src = token->start + 1;
+        *end = token->start + token->length - 1;
     }
+}
 
-    // Phase 1: Decode escape sequences into a raw buffer
+// Decodes escape sequences from raw token text into a newly allocated UTF-8 byte buffer.
+static char* decode_string_raw(const char* src, const char* end, size_t* raw_len) {
     size_t max_len = end - src;
     char*  raw     = xmalloc(max_len + 1);
-    size_t raw_len = 0;
+    *raw_len       = 0;
+
     while (src < end) {
         if (*src == '\\' && src + 1 < end) {
             src++;
-            raw[raw_len++] = decode_escape(&src, end);
+            raw[(*raw_len)++] = decode_escape(&src, end);
         } else {
-            raw[raw_len++] = *src++;
+            raw[(*raw_len)++] = *src++;
         }
     }
-    raw[raw_len] = '\0';
+    raw[*raw_len] = '\0';
+    return raw;
+}
+
+// Drops the optional first newline that immediately follows a triple-quote opener.
+static void trim_triple_leading_newline(const char** content, size_t* content_len) {
+    if (*content_len > 0 && (*content)[0] == '\n') {
+        (*content)++;
+        (*content_len)--;
+    }
+}
+
+// Returns whether a line contains only spaces and tabs.
+static int is_all_ws_line(const char* line, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (line[i] != ' ' && line[i] != '\t') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// Detects indentation prefix from the trailing whitespace-only line in a triple-quoted string.
+static void detect_triple_indent_prefix(const char* content, size_t* content_len,
+                                        const char** prefix, size_t* prefix_len) {
+    const char* last_newline = NULL;
+    for (size_t i = *content_len; i > 0; i--) {
+        if (content[i - 1] == '\n') {
+            last_newline = &content[i - 1];
+            break;
+        }
+    }
+
+    *prefix     = NULL;
+    *prefix_len = 0;
+    if (!last_newline) {
+        return;
+    }
+
+    const char* last_line     = last_newline + 1;
+    size_t      last_line_len = *content_len - (size_t)(last_line - content);
+    if (!is_all_ws_line(last_line, last_line_len)) {
+        return;
+    }
+
+    *prefix      = last_line;
+    *prefix_len  = last_line_len;
+    *content_len = (size_t)(last_newline - content);
+}
+
+// Builds triple-quoted string output by stripping the computed indent prefix per line.
+static char* strip_triple_indent_prefix(const char* content, size_t content_len, const char* prefix,
+                                        size_t prefix_len, size_t* result_len) {
+    char* result = xmalloc(content_len + 1);
+    *result_len  = 0;
+    size_t i     = 0;
+
+    while (i < content_len) {
+        if (prefix_len > 0 && i + prefix_len <= content_len &&
+            memcmp(&content[i], prefix, prefix_len) == 0) {
+            i += prefix_len;
+        }
+
+        while (i < content_len && content[i] != '\n') {
+            result[(*result_len)++] = content[i++];
+        }
+
+        if (i < content_len && content[i] == '\n') {
+            result[(*result_len)++] = content[i++];
+        }
+    }
+
+    result[*result_len] = '\0';
+    return result;
+}
+
+static Node* parse_string_lit(Token token) {
+    Node* node = node_new(NODE_STRING_LIT, token.line, token.column);
+
+    int         is_triple = is_triple_string_token(&token);
+    const char* src       = NULL;
+    const char* end       = NULL;
+    get_string_token_bounds(&token, is_triple, &src, &end);
+
+    size_t raw_len = 0;
+    char*  raw     = decode_string_raw(src, end, &raw_len);
 
     if (!is_triple) {
         node->as.string_lit.value  = raw;
@@ -370,66 +492,17 @@ static Node* parse_string_lit(Token token) {
         return node;
     }
 
-    // Phase 2: Triple-quoted indentation stripping
-    // Skip leading newline after opening """
     const char* content     = raw;
     size_t      content_len = raw_len;
-    if (content_len > 0 && content[0] == '\n') {
-        content++;
-        content_len--;
-    }
+    trim_triple_leading_newline(&content, &content_len);
 
-    // Find the last line (after final newline) to determine indent prefix
-    const char* last_newline = NULL;
-    for (size_t i = content_len; i > 0; i--) {
-        if (content[i - 1] == '\n') {
-            last_newline = &content[i - 1];
-            break;
-        }
-    }
-
-    size_t      prefix_len = 0;
     const char* prefix     = NULL;
-    if (last_newline) {
-        // Last line is everything after the final newline
-        const char* last_line     = last_newline + 1;
-        size_t      last_line_len = content_len - (last_line - content);
-        // Check if last line is all whitespace
-        int all_ws = 1;
-        for (size_t i = 0; i < last_line_len; i++) {
-            if (last_line[i] != ' ' && last_line[i] != '\t') {
-                all_ws = 0;
-                break;
-            }
-        }
-        if (all_ws) {
-            prefix     = last_line;
-            prefix_len = last_line_len;
-            // Remove the trailing whitespace-only line (and its preceding newline)
-            content_len = last_newline - content;
-        }
-    }
+    size_t      prefix_len = 0;
+    detect_triple_indent_prefix(content, &content_len, &prefix, &prefix_len);
 
-    // Build result by stripping prefix from start of each line
-    char*  result     = xmalloc(content_len + 1);
     size_t result_len = 0;
-    size_t i          = 0;
-    while (i < content_len) {
-        // Strip prefix at start of line
-        if (prefix_len > 0 && i + prefix_len <= content_len &&
-            memcmp(&content[i], prefix, prefix_len) == 0) {
-            i += prefix_len;
-        }
-        // Copy until end of line
-        while (i < content_len && content[i] != '\n') {
-            result[result_len++] = content[i++];
-        }
-        // Copy the newline
-        if (i < content_len && content[i] == '\n') {
-            result[result_len++] = content[i++];
-        }
-    }
-    result[result_len] = '\0';
+    char*  result =
+        strip_triple_indent_prefix(content, content_len, prefix, prefix_len, &result_len);
 
     free(raw);
     node->as.string_lit.value  = result;

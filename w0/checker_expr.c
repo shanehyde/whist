@@ -10,6 +10,111 @@
 // Forward declaration for check_struct_init (called by check_new_expr)
 static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
 
+static void infer_type_param(Checker* checker, GenericFuncDef* def, Node* param_type,
+                             Type* arg_type, Type** inferred);
+
+static void infer_direct_type_param(GenericFuncDef* def, const char* name, Type* arg_type,
+                                    Type** inferred) {
+    for (int i = 0; i < def->type_param_count; i++) {
+        if (strcmp(name, def->type_params[i]) == 0) {
+            if (!inferred[i]) {
+                inferred[i] = arg_type;
+            }
+            return;
+        }
+    }
+}
+
+static void infer_type_arg_list(Checker* checker, GenericFuncDef* def, NodeList* param_type_args,
+                                Type** concrete_type_args, int concrete_type_arg_count,
+                                Type** inferred) {
+    if (param_type_args->count != concrete_type_arg_count) {
+        return;
+    }
+
+    for (int i = 0; i < param_type_args->count; i++) {
+        infer_type_param(checker, def, param_type_args->nodes[i], concrete_type_args[i], inferred);
+    }
+}
+
+static int infer_from_generic_instance(Checker* checker, GenericFuncDef* def,
+                                       NodeList* param_type_args, const char* mangled_name,
+                                       Type** inferred) {
+    for (int i = 0; i < checker->generics.instance_count; i++) {
+        GenericInstance* inst = &checker->generics.instances[i];
+        if (strcmp(inst->mangled_name, mangled_name) == 0) {
+            infer_type_arg_list(checker, def, param_type_args, inst->type_args,
+                                inst->type_arg_count, inferred);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Infer type params from generic type syntax like Vec<T>, Span<T>, or generic struct/enum
+// instances.
+static void infer_from_generic_param_type(Checker* checker, GenericFuncDef* def, Node* param_type,
+                                          Type* arg_type, Type** inferred) {
+    const char* base      = param_type->as.generic_type.base_name;
+    NodeList*   type_args = &param_type->as.generic_type.type_args;
+
+    if (strcmp(base, "Vec") == 0 && arg_type->kind == TYPE_VEC && type_args->count == 1) {
+        infer_type_param(checker, def, type_args->nodes[0], arg_type->as.vec.elem, inferred);
+        return;
+    }
+
+    if (strcmp(base, "Span") == 0 && arg_type->kind == TYPE_SPAN && type_args->count == 1) {
+        infer_type_param(checker, def, type_args->nodes[0], arg_type->as.span.elem, inferred);
+        return;
+    }
+
+    if (arg_type->kind == TYPE_STRUCT) {
+        infer_from_generic_instance(checker, def, type_args, arg_type->as.struc.name, inferred);
+        return;
+    }
+    if (arg_type->kind == TYPE_ENUM) {
+        infer_from_generic_instance(checker, def, type_args, arg_type->as.enm.name, inferred);
+    }
+}
+
+// Infer type params from function type syntax by matching parameter and return types.
+static void infer_from_func_param_type(Checker* checker, GenericFuncDef* def, Node* param_type,
+                                       Type* arg_type, Type** inferred) {
+    if (arg_type->kind != TYPE_FUNC) {
+        return;
+    }
+
+    infer_type_arg_list(checker, def, &param_type->as.func_type.param_types,
+                        arg_type->as.func.param_types, arg_type->as.func.param_count, inferred);
+    if (param_type->as.func_type.return_type) {
+        infer_type_param(checker, def, param_type->as.func_type.return_type,
+                         arg_type->as.func.return_type, inferred);
+    }
+}
+
+// Infer type params from tuple type syntax by inferring each tuple element pair.
+static void infer_from_tuple_param_type(Checker* checker, GenericFuncDef* def, Node* param_type,
+                                        Type* arg_type, Type** inferred) {
+    if (arg_type->kind != TYPE_TUPLE) {
+        return;
+    }
+
+    infer_type_arg_list(checker, def, &param_type->as.tuple_type.elem_types,
+                        arg_type->as.tuple.elem_types, arg_type->as.tuple.elem_count, inferred);
+}
+
+// Infer type params from array-like syntax by accepting both arrays and spans as argument types.
+static void infer_from_array_param_type(Checker* checker, GenericFuncDef* def, Node* param_type,
+                                        Type* arg_type, Type** inferred) {
+    if (arg_type->kind == TYPE_ARRAY) {
+        infer_type_param(checker, def, param_type->as.array_type.elem_type, arg_type->as.array.elem,
+                         inferred);
+    } else if (arg_type->kind == TYPE_SPAN) {
+        infer_type_param(checker, def, param_type->as.array_type.elem_type, arg_type->as.span.elem,
+                         inferred);
+    }
+}
+
 // Infer type parameters from a parameter type node and the actual argument type.
 // Recursively walks the parameter type AST and binds type parameter names to
 // concrete types from the argument. `inferred` array is parallel to def->type_params.
@@ -18,116 +123,23 @@ static void infer_type_param(Checker* checker, GenericFuncDef* def, Node* param_
     if (!param_type || !arg_type || arg_type->kind == TYPE_ERROR)
         return;
 
-    // Direct type parameter reference: T
-    if (param_type->type == NODE_IDENT) {
-        for (int i = 0; i < def->type_param_count; i++) {
-            if (strcmp(param_type->as.ident.name, def->type_params[i]) == 0) {
-                if (!inferred[i]) {
-                    inferred[i] = arg_type;
-                }
-                return;
-            }
-        }
+    switch (param_type->type) {
+    case NODE_IDENT:
+        infer_direct_type_param(def, param_type->as.ident.name, arg_type, inferred);
         return;
-    }
-
-    // Generic type: Vec<T>, Span<T>, Box<T>, Pair<K, V>, etc.
-    if (param_type->type == NODE_GENERIC_TYPE) {
-        const char* base = param_type->as.generic_type.base_name;
-
-        // Vec<T> → recurse on element type
-        if (strcmp(base, "Vec") == 0 && arg_type->kind == TYPE_VEC &&
-            param_type->as.generic_type.type_args.count == 1) {
-            infer_type_param(checker, def, param_type->as.generic_type.type_args.nodes[0],
-                             arg_type->as.vec.elem, inferred);
-            return;
-        }
-
-        // Span<T> → recurse on element type
-        if (strcmp(base, "Span") == 0 && arg_type->kind == TYPE_SPAN &&
-            param_type->as.generic_type.type_args.count == 1) {
-            infer_type_param(checker, def, param_type->as.generic_type.type_args.nodes[0],
-                             arg_type->as.span.elem, inferred);
-            return;
-        }
-
-        // User-defined generic struct: Box<T>, Pair<K, V>
-        if (arg_type->kind == TYPE_STRUCT) {
-            // Find the generic instance matching the arg type
-            for (int i = 0; i < checker->generics.instance_count; i++) {
-                GenericInstance* inst = &checker->generics.instances[i];
-                if (strcmp(inst->mangled_name, arg_type->as.struc.name) == 0) {
-                    int n = param_type->as.generic_type.type_args.count;
-                    if (n == inst->type_arg_count) {
-                        for (int j = 0; j < n; j++) {
-                            infer_type_param(checker, def,
-                                             param_type->as.generic_type.type_args.nodes[j],
-                                             inst->type_args[j], inferred);
-                        }
-                    }
-                    return;
-                }
-            }
-        }
-
-        // Generic enum: Option<T>, Result<T, E>
-        if (arg_type->kind == TYPE_ENUM) {
-            for (int i = 0; i < checker->generics.instance_count; i++) {
-                GenericInstance* inst = &checker->generics.instances[i];
-                if (strcmp(inst->mangled_name, arg_type->as.enm.name) == 0) {
-                    int n = param_type->as.generic_type.type_args.count;
-                    if (n == inst->type_arg_count) {
-                        for (int j = 0; j < n; j++) {
-                            infer_type_param(checker, def,
-                                             param_type->as.generic_type.type_args.nodes[j],
-                                             inst->type_args[j], inferred);
-                        }
-                    }
-                    return;
-                }
-            }
-        }
-
+    case NODE_GENERIC_TYPE:
+        infer_from_generic_param_type(checker, def, param_type, arg_type, inferred);
         return;
-    }
-
-    // Function type: func(T1, T2) -> R
-    if (param_type->type == NODE_FUNC_TYPE && arg_type->kind == TYPE_FUNC) {
-        int n = param_type->as.func_type.param_types.count;
-        if (n == arg_type->as.func.param_count) {
-            for (int i = 0; i < n; i++) {
-                infer_type_param(checker, def, param_type->as.func_type.param_types.nodes[i],
-                                 arg_type->as.func.param_types[i], inferred);
-            }
-        }
-        if (param_type->as.func_type.return_type) {
-            infer_type_param(checker, def, param_type->as.func_type.return_type,
-                             arg_type->as.func.return_type, inferred);
-        }
+    case NODE_FUNC_TYPE:
+        infer_from_func_param_type(checker, def, param_type, arg_type, inferred);
         return;
-    }
-
-    // Tuple type: (T1, T2, ...)
-    if (param_type->type == NODE_TUPLE_TYPE && arg_type->kind == TYPE_TUPLE) {
-        int n = param_type->as.tuple_type.elem_types.count;
-        if (n == arg_type->as.tuple.elem_count) {
-            for (int i = 0; i < n; i++) {
-                infer_type_param(checker, def, param_type->as.tuple_type.elem_types.nodes[i],
-                                 arg_type->as.tuple.elem_types[i], inferred);
-            }
-        }
+    case NODE_TUPLE_TYPE:
+        infer_from_tuple_param_type(checker, def, param_type, arg_type, inferred);
         return;
-    }
-
-    // Array type: [n]T or []T
-    if (param_type->type == NODE_ARRAY_TYPE) {
-        if (arg_type->kind == TYPE_ARRAY) {
-            infer_type_param(checker, def, param_type->as.array_type.elem_type,
-                             arg_type->as.array.elem, inferred);
-        } else if (arg_type->kind == TYPE_SPAN) {
-            infer_type_param(checker, def, param_type->as.array_type.elem_type,
-                             arg_type->as.span.elem, inferred);
-        }
+    case NODE_ARRAY_TYPE:
+        infer_from_array_param_type(checker, def, param_type, arg_type, inferred);
+        return;
+    default:
         return;
     }
 }
@@ -149,94 +161,137 @@ static const char* get_const_binding_name(Checker* checker, Node* node) {
 // Expression checking helpers
 // =============================================================================
 
-// Check comparison operators: == != < > <= >=
-static Type* check_comparison_op(Checker* checker, Node* node, Type* left, Type* right) {
-    TokenType op = node->as.binary.op;
+static int is_equality_op(TokenType op) {
+    return op == TOK_EQ_EQ || op == TOK_BANG_EQ;
+}
 
-    // String comparison
-    if (left->kind == TYPE_STRING && right->kind == TYPE_STRING) {
-        node->as.binary.is_string_op = 1;
-        return type_bool;
+static int is_numeric_comparable_type(Type* type) {
+    return type_is_integer(type) || type->kind == TYPE_F32 || type->kind == TYPE_F64;
+}
+
+static int is_nullable_comparison_pair(Type* left, Type* right) {
+    return (left->kind == TYPE_VOIDPTR && right->kind == TYPE_NULL) ||
+           (left->kind == TYPE_NULL && right->kind == TYPE_VOIDPTR) ||
+           (left->kind == TYPE_STRUCT && right->kind == TYPE_NULL) ||
+           (left->kind == TYPE_NULL && right->kind == TYPE_STRUCT);
+}
+
+static int try_check_string_comparison(Node* node, Type* left, Type* right, Type** out_type) {
+    if (left->kind != TYPE_STRING || right->kind != TYPE_STRING) {
+        return 0;
     }
-    // Vec comparison: only == and != allowed, element type must support equality
-    if (left->kind == TYPE_VEC && right->kind == TYPE_VEC) {
-        if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
-            if (!type_equals(left->as.vec.elem, right->as.vec.elem)) {
-                check_error(checker, node->line, node->column,
-                            "Cannot compare Vec with different element types");
-                return type_error;
-            }
-            Type* elem = left->as.vec.elem;
-            if (!type_supports_equality(elem)) {
-                check_error(checker, node->line, node->column,
-                            "Vec element type '%s' does not support ==", type_name(elem));
-                return type_error;
-            }
-            char buf[256];
-            snprintf(buf, sizeof(buf), "__Vec_%s", type_mangle_name(elem));
-            node->as.binary.is_eq_op     = 1;
-            node->as.binary.eq_type_name = xstrdup(buf);
-            return type_bool;
-        }
+    node->as.binary.is_string_op = 1;
+    *out_type                    = type_bool;
+    return 1;
+}
+
+static int try_check_vec_comparison(Checker* checker, Node* node, Type* left, Type* right,
+                                    TokenType op, Type** out_type) {
+    if (left->kind != TYPE_VEC || right->kind != TYPE_VEC) {
+        return 0;
+    }
+
+    if (!is_equality_op(op)) {
         check_error(checker, node->line, node->column,
                     "Vec types only support == and != comparison");
+        *out_type = type_error;
+        return 1;
+    }
+
+    if (!type_equals(left->as.vec.elem, right->as.vec.elem)) {
+        check_error(checker, node->line, node->column,
+                    "Cannot compare Vec with different element types");
+        *out_type = type_error;
+        return 1;
+    }
+
+    Type* elem = left->as.vec.elem;
+    if (!type_supports_equality(elem)) {
+        check_error(checker, node->line, node->column,
+                    "Vec element type '%s' does not support ==", type_name(elem));
+        *out_type = type_error;
+        return 1;
+    }
+
+    char buf[256];
+    snprintf(buf, sizeof(buf), "__Vec_%s", type_mangle_name(elem));
+    node->as.binary.is_eq_op     = 1;
+    node->as.binary.eq_type_name = xstrdup(buf);
+    *out_type                    = type_bool;
+    return 1;
+}
+
+static int validate_data_enum_equality(Checker* checker, Node* node, Type* enum_type) {
+    for (int v = 0; v < enum_type->as.enm.value_count; v++) {
+        for (int f = 0; f < enum_type->as.enm.variant_type_counts[v]; f++) {
+            Type* field_type = enum_type->as.enm.variant_types[v][f];
+            if (field_type->kind == TYPE_STRUCT && !field_type->as.struc.has_eq) {
+                check_error(
+                    checker, node->line, node->column,
+                    "Cannot compare enum '%s': variant '%s' contains struct '%s' without Eq impl",
+                    enum_type->as.enm.name, enum_type->as.enm.value_names[v],
+                    field_type->as.struc.name);
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static Type* check_equal_types_comparison(Checker* checker, Node* node, Type* left, TokenType op) {
+    if (left->kind == TYPE_STRUCT && is_equality_op(op)) {
+        if (!left->as.struc.has_eq) {
+            check_error(checker, node->line, node->column,
+                        "Cannot compare struct '%s' with == (no Eq impl)", left->as.struc.name);
+            return type_error;
+        }
+        node->as.binary.is_eq_op     = 1;
+        node->as.binary.eq_type_name = left->as.struc.name;
+        return type_bool;
+    }
+
+    if (left->kind == TYPE_STRUCT) {
+        check_error(checker, node->line, node->column, "Cannot compare struct '%s' with '%s'",
+                    left->as.struc.name, token_type_symbol(op));
         return type_error;
     }
 
-    if (type_equals(left, right)) {
-        // Struct == requires Eq trait impl
-        if (left->kind == TYPE_STRUCT && (op == TOK_EQ_EQ || op == TOK_BANG_EQ)) {
-            if (!left->as.struc.has_eq) {
-                check_error(checker, node->line, node->column,
-                            "Cannot compare struct '%s' with == (no Eq impl)", left->as.struc.name);
-                return type_error;
-            }
-            node->as.binary.is_eq_op     = 1;
-            node->as.binary.eq_type_name = left->as.struc.name;
-            return type_bool;
-        }
-        // Struct < > <= >= still disallowed
-        if (left->kind == TYPE_STRUCT) {
-            check_error(checker, node->line, node->column, "Cannot compare struct '%s' with '%s'",
-                        left->as.struc.name, token_type_symbol(op));
+    if (left->kind == TYPE_ENUM && left->as.enm.has_data && is_equality_op(op)) {
+        if (!validate_data_enum_equality(checker, node, left)) {
             return type_error;
         }
-        // Data enum == requires struct variants to have Eq
-        if (left->kind == TYPE_ENUM && left->as.enm.has_data &&
-            (op == TOK_EQ_EQ || op == TOK_BANG_EQ)) {
-            for (int v = 0; v < left->as.enm.value_count; v++) {
-                for (int f = 0; f < left->as.enm.variant_type_counts[v]; f++) {
-                    Type* ft = left->as.enm.variant_types[v][f];
-                    if (ft->kind == TYPE_STRUCT && !ft->as.struc.has_eq) {
-                        check_error(checker, node->line, node->column,
-                                    "Cannot compare enum '%s': variant '%s' contains struct '%s' "
-                                    "without Eq impl",
-                                    left->as.enm.name, left->as.enm.value_names[v],
-                                    ft->as.struc.name);
-                        return type_error;
-                    }
-                }
-            }
-            node->as.binary.is_eq_op     = 1;
-            node->as.binary.is_enum_eq   = 1;
-            node->as.binary.eq_type_name = left->as.enm.name;
-            return type_bool;
-        }
+        node->as.binary.is_eq_op     = 1;
+        node->as.binary.is_enum_eq   = 1;
+        node->as.binary.eq_type_name = left->as.enm.name;
         return type_bool;
     }
-    // voidptr/struct == null and null == voidptr/struct (only for == and !=)
-    if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
-        if ((left->kind == TYPE_VOIDPTR && right->kind == TYPE_NULL) ||
-            (left->kind == TYPE_NULL && right->kind == TYPE_VOIDPTR) ||
-            (left->kind == TYPE_STRUCT && right->kind == TYPE_NULL) ||
-            (left->kind == TYPE_NULL && right->kind == TYPE_STRUCT)) {
-            return type_bool;
-        }
+
+    return type_bool;
+}
+
+// Check comparison operators: == != < > <= >=
+static Type* check_comparison_op(Checker* checker, Node* node, Type* left, Type* right) {
+    TokenType op = node->as.binary.op;
+    Type*     result;
+
+    if (try_check_string_comparison(node, left, right, &result)) {
+        return result;
     }
-    if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
-        (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
+    if (try_check_vec_comparison(checker, node, left, right, op, &result)) {
+        return result;
+    }
+
+    if (type_equals(left, right)) {
+        return check_equal_types_comparison(checker, node, left, op);
+    }
+
+    if (is_equality_op(op) && is_nullable_comparison_pair(left, right)) {
         return type_bool;
     }
+    if (is_numeric_comparable_type(left) && is_numeric_comparable_type(right)) {
+        return type_bool;
+    }
+
     check_error(checker, node->line, node->column, "Cannot compare '%s' and '%s'", type_name(left),
                 type_name(right));
     return type_error;
@@ -289,15 +344,8 @@ static Type* check_bitwise_op(Checker* checker, Node* node, Type* left, Type* ri
     return type_int64;
 }
 
-// Type-check a binary expression: dispatch to operator-specific helpers
-static Type* check_binary_expr(Checker* checker, Node* node) {
-    Type* left  = check_expression(checker, node->as.binary.left);
-    Type* right = check_expression(checker, node->as.binary.right);
-
-    if (left->kind == TYPE_ERROR || right->kind == TYPE_ERROR) {
-        return type_error;
-    }
-
+// Dispatch a binary operator token to the correct operator-specific type checker.
+static Type* check_binary_op_by_token(Checker* checker, Node* node, Type* left, Type* right) {
     TokenType op = node->as.binary.op;
 
     if (op == TOK_EQ_EQ || op == TOK_BANG_EQ || op == TOK_LT || op == TOK_GT || op == TOK_LT_EQ ||
@@ -317,6 +365,18 @@ static Type* check_binary_expr(Checker* checker, Node* node) {
 
     check_error(checker, node->line, node->column, "Unknown binary operator");
     return type_error;
+}
+
+// Type-check a binary expression: dispatch to operator-specific helpers
+static Type* check_binary_expr(Checker* checker, Node* node) {
+    Type* left  = check_expression(checker, node->as.binary.left);
+    Type* right = check_expression(checker, node->as.binary.right);
+
+    if (left->kind == TYPE_ERROR || right->kind == TYPE_ERROR) {
+        return type_error;
+    }
+
+    return check_binary_op_by_token(checker, node, left, right);
 }
 
 // Type-check a unary expression: negation, logical not, and bitwise complement
@@ -533,6 +593,129 @@ static Type* check_member_enum(Checker* checker, Node* node, Type* object) {
 
 // Check Vec member access (count, capacity, data, contains, first, last, push, pop, insert,
 // remove, swap_remove, clear, reserve, shrink_to_fit, sort)
+static void set_vec_member_struct_name(Checker* checker, Node* node, Type* elem_type) {
+    char mangled[256];
+    snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
+    sem_info_set_member_struct_name(checker->sem, node, mangled);
+}
+
+static int check_mutating_member_on_const(Checker* checker, Node* node, const char* member_name) {
+    const char* const_name = get_const_binding_name(checker, node->as.member.object);
+    if (!const_name) {
+        return 0;
+    }
+    check_error(checker, node->line, node->column, "Cannot call mutating method '%s' on const '%s'",
+                member_name, const_name);
+    return 1;
+}
+
+static Type* lookup_or_instantiate_option_type(Checker* checker, Type* elem_type) {
+    GenericDef* option_def          = lookup_generic_def(checker, "Option");
+    Type**      args                = xmalloc(sizeof(Type*));
+    args[0]                         = elem_type;
+    char*            option_mangled = type_mangle_generic("Option", args, 1);
+    GenericInstance* existing       = lookup_generic_instance(checker, option_mangled);
+    if (existing) {
+        Type* option_type = existing->type;
+        free(option_mangled);
+        free(args);
+        return option_type;
+    }
+    return instantiate_generic_enum(checker, option_def, option_mangled, args, 1);
+}
+
+static Type* check_member_vec_contains(Checker* checker, Node* node, Type* elem_type) {
+    if (!type_supports_vec_contains(elem_type)) {
+        check_error(checker, node->line, node->column,
+                    "Vec.contains requires element type supporting ==, got '%s'",
+                    type_name(elem_type));
+        return type_error;
+    }
+
+    set_vec_member_struct_name(checker, node, elem_type);
+    Type** params = xmalloc(sizeof(Type*));
+    params[0]     = elem_type;
+    return type_func(params, 1, type_bool, 0);
+}
+
+static Type* check_member_vec_option_method(Checker* checker, Node* node, Type* elem_type,
+                                            int is_mutating) {
+    if (is_mutating && check_mutating_member_on_const(checker, node, node->as.member.name)) {
+        return type_error;
+    }
+    set_vec_member_struct_name(checker, node, elem_type);
+    Type* option_type = lookup_or_instantiate_option_type(checker, elem_type);
+    return type_func(NULL, 0, option_type, 0);
+}
+
+static int is_vec_builtin_mutating_method(const char* member_name) {
+    return strcmp(member_name, "push") == 0 || strcmp(member_name, "insert") == 0 ||
+           strcmp(member_name, "remove") == 0 || strcmp(member_name, "swap_remove") == 0 ||
+           strcmp(member_name, "clear") == 0 || strcmp(member_name, "reserve") == 0 ||
+           strcmp(member_name, "shrink_to_fit") == 0 || strcmp(member_name, "sort") == 0;
+}
+
+static Type* check_member_vec_mutating_method(Checker* checker, Node* node, Type* elem_type) {
+    const char* member_name = node->as.member.name;
+    if (check_mutating_member_on_const(checker, node, member_name)) {
+        return type_error;
+    }
+    if (strcmp(member_name, "sort") == 0 && !type_supports_vec_sort(elem_type)) {
+        check_error(checker, node->line, node->column,
+                    "Vec.sort requires orderable primitive element type, got '%s'",
+                    type_name(elem_type));
+        return type_error;
+    }
+
+    set_vec_member_struct_name(checker, node, elem_type);
+
+    if (strcmp(member_name, "push") == 0) {
+        Type** params = xmalloc(sizeof(Type*));
+        params[0]     = elem_type;
+        return type_func(params, 1, type_void, 0);
+    }
+    if (strcmp(member_name, "insert") == 0) {
+        Type** params = xmalloc(2 * sizeof(Type*));
+        params[0]     = type_int64;
+        params[1]     = elem_type;
+        return type_func(params, 2, type_void, 0);
+    }
+    if (strcmp(member_name, "remove") == 0 || strcmp(member_name, "swap_remove") == 0) {
+        Type** params = xmalloc(sizeof(Type*));
+        params[0]     = type_int64;
+        return type_func(params, 1, elem_type, 0);
+    }
+    if (strcmp(member_name, "reserve") == 0) {
+        Type** params = xmalloc(sizeof(Type*));
+        params[0]     = type_int64;
+        return type_func(params, 1, type_void, 0);
+    }
+    return type_func(NULL, 0, type_void, 0);
+}
+
+static Type* check_member_vec_user_method(Checker* checker, Node* node, Type* elem_type) {
+    const char* member_name = node->as.member.name;
+    char        lookup_mangled[256];
+    snprintf(lookup_mangled, sizeof(lookup_mangled), "Vec_%s", type_mangle_name(elem_type));
+    VecInstance* inst = lookup_vec_instance_pub(checker, lookup_mangled);
+    if (!inst) {
+        return NULL;
+    }
+
+    ensure_vec_user_methods(checker, inst);
+    for (int i = 0; i < inst->method_count; i++) {
+        if (strcmp(inst->method_names[i], member_name) == 0) {
+            if (!inst->method_is_const[i] &&
+                check_mutating_member_on_const(checker, node, member_name)) {
+                return type_error;
+            }
+            set_vec_member_struct_name(checker, node, elem_type);
+            return inst->method_types[i];
+        }
+    }
+    return NULL;
+}
+
 static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
     const char* member_name = node->as.member.name;
     sem_info_set_member_is_ref(checker->sem, node, 1); // Vec is a pointer (RC-managed)
@@ -550,148 +733,30 @@ static Type* check_member_vec(Checker* checker, Node* node, Type* object) {
     }
     // Non-mutating methods: contains, first, last
     if (strcmp(member_name, "contains") == 0) {
-        if (!type_supports_vec_contains(elem_type)) {
-            check_error(checker, node->line, node->column,
-                        "Vec.contains requires element type supporting ==, got '%s'",
-                        type_name(elem_type));
-            return type_error;
-        }
-
-        char mangled[256];
-        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
-        sem_info_set_member_struct_name(checker->sem, node, mangled);
-
-        Type** params = xmalloc(1 * sizeof(Type*));
-        params[0]     = elem_type;
-        return type_func(params, 1, type_bool, 0);
+        return check_member_vec_contains(checker, node, elem_type);
     }
 
     // first/last return Option<T>
     if (strcmp(member_name, "first") == 0 || strcmp(member_name, "last") == 0) {
-        char mangled[256];
-        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
-        sem_info_set_member_struct_name(checker->sem, node, mangled);
-
-        // Look up or instantiate Option<elem_type>
-        GenericDef* option_def          = lookup_generic_def(checker, "Option");
-        Type**      args                = xmalloc(sizeof(Type*));
-        args[0]                         = elem_type;
-        char*            option_mangled = type_mangle_generic("Option", args, 1);
-        GenericInstance* existing       = lookup_generic_instance(checker, option_mangled);
-        Type*            option_type;
-        if (existing) {
-            option_type = existing->type;
-            free(option_mangled);
-            free(args);
-        } else {
-            option_type = instantiate_generic_enum(checker, option_def, option_mangled, args, 1);
-        }
-        return type_func(NULL, 0, option_type, 0);
+        return check_member_vec_option_method(checker, node, elem_type, 0);
     }
+
     // pop is mutating and returns Option<T>
     if (strcmp(member_name, "pop") == 0) {
-        const char* const_name = get_const_binding_name(checker, node->as.member.object);
-        if (const_name) {
-            check_error(checker, node->line, node->column,
-                        "Cannot call mutating method '%s' on const '%s'", member_name, const_name);
-            return type_error;
-        }
-        char mangled[256];
-        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
-        sem_info_set_member_struct_name(checker->sem, node, mangled);
-
-        // Look up or instantiate Option<elem_type>
-        GenericDef* option_def          = lookup_generic_def(checker, "Option");
-        Type**      args                = xmalloc(sizeof(Type*));
-        args[0]                         = elem_type;
-        char*            option_mangled = type_mangle_generic("Option", args, 1);
-        GenericInstance* existing       = lookup_generic_instance(checker, option_mangled);
-        Type*            option_type;
-        if (existing) {
-            option_type = existing->type;
-            free(option_mangled);
-            free(args);
-        } else {
-            option_type = instantiate_generic_enum(checker, option_def, option_mangled, args, 1);
-        }
-        return type_func(NULL, 0, option_type, 0);
+        return check_member_vec_option_method(checker, node, elem_type, 1);
     }
+
     // Mutating methods: push, insert, remove, swap_remove, clear, reserve, shrink_to_fit, sort
-    if (strcmp(member_name, "push") == 0 || strcmp(member_name, "insert") == 0 ||
-        strcmp(member_name, "remove") == 0 || strcmp(member_name, "swap_remove") == 0 ||
-        strcmp(member_name, "clear") == 0 || strcmp(member_name, "reserve") == 0 ||
-        strcmp(member_name, "shrink_to_fit") == 0 || strcmp(member_name, "sort") == 0) {
-        const char* const_name = get_const_binding_name(checker, node->as.member.object);
-        if (const_name) {
-            check_error(checker, node->line, node->column,
-                        "Cannot call mutating method '%s' on const '%s'", member_name, const_name);
-            return type_error;
-        }
-        if (strcmp(member_name, "sort") == 0 && !type_supports_vec_sort(elem_type)) {
-            check_error(checker, node->line, node->column,
-                        "Vec.sort requires orderable primitive element type, got '%s'",
-                        type_name(elem_type));
-            return type_error;
-        }
-        // Build mangled vec name for method dispatch
-        char mangled[256];
-        snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
-        sem_info_set_member_struct_name(checker->sem, node, mangled);
+    if (is_vec_builtin_mutating_method(member_name)) {
+        return check_member_vec_mutating_method(checker, node, elem_type);
+    }
 
-        if (strcmp(member_name, "push") == 0) {
-            Type** params = xmalloc(1 * sizeof(Type*));
-            params[0]     = elem_type;
-            return type_func(params, 1, type_void, 0);
-        }
-        if (strcmp(member_name, "insert") == 0) {
-            Type** params = xmalloc(2 * sizeof(Type*));
-            params[0]     = type_int64;
-            params[1]     = elem_type;
-            return type_func(params, 2, type_void, 0);
-        }
-        if (strcmp(member_name, "remove") == 0 || strcmp(member_name, "swap_remove") == 0) {
-            Type** params = xmalloc(1 * sizeof(Type*));
-            params[0]     = type_int64;
-            return type_func(params, 1, elem_type, 0);
-        }
-        if (strcmp(member_name, "reserve") == 0) {
-            Type** params = xmalloc(1 * sizeof(Type*));
-            params[0]     = type_int64;
-            return type_func(params, 1, type_void, 0);
-        }
-        if (strcmp(member_name, "sort") == 0) {
-            return type_func(NULL, 0, type_void, 0);
-        }
-        // clear
-        return type_func(NULL, 0, type_void, 0);
-    }
     // Look up user-defined methods on VecInstance
-    {
-        char lookup_mangled[256];
-        snprintf(lookup_mangled, sizeof(lookup_mangled), "Vec_%s", type_mangle_name(elem_type));
-        VecInstance* inst = lookup_vec_instance_pub(checker, lookup_mangled);
-        if (inst) {
-            ensure_vec_user_methods(checker, inst);
-            for (int i = 0; i < inst->method_count; i++) {
-                if (strcmp(inst->method_names[i], member_name) == 0) {
-                    if (!inst->method_is_const[i]) {
-                        const char* const_name =
-                            get_const_binding_name(checker, node->as.member.object);
-                        if (const_name) {
-                            check_error(checker, node->line, node->column,
-                                        "Cannot call mutating method '%s' on const '%s'",
-                                        member_name, const_name);
-                            return type_error;
-                        }
-                    }
-                    char mangled[256];
-                    snprintf(mangled, sizeof(mangled), "__Vec_%s", type_mangle_name(elem_type));
-                    sem_info_set_member_struct_name(checker->sem, node, mangled);
-                    return inst->method_types[i];
-                }
-            }
-        }
+    Type* user_method = check_member_vec_user_method(checker, node, elem_type);
+    if (user_method) {
+        return user_method;
     }
+
     check_error(checker, node->line, node->column, "Vec has no member '%s'", member_name);
     return type_error;
 }
@@ -993,6 +1058,100 @@ static int is_lvalue(Node* node) {
     }
 }
 
+// Check that assigning to an identifier target does not mutate a const binding.
+static int check_ident_assignment_mutability(Checker* checker, Node* target, int line, int column) {
+    Symbol* sym = checker_lookup(checker, target->as.ident.name);
+    if (sym && sym->is_const) {
+        check_error(checker, line, column, "Cannot assign to const '%s'", target->as.ident.name);
+        return 0;
+    }
+    return 1;
+}
+
+// Check that assigning through a member target does not mutate const state.
+static int check_member_assignment_mutability(Checker* checker, Node* target, int line,
+                                              int column) {
+    Node* obj = target->as.member.object;
+    if (obj->type == NODE_IDENT) {
+        Symbol* sym = checker_lookup(checker, obj->as.ident.name);
+        if (sym && sym->is_const) {
+            check_error(checker, line, column, "Cannot modify field '%s' through const '%s'",
+                        target->as.member.name, obj->as.ident.name);
+            return 0;
+        }
+    }
+    if (sem_info_get_member_is_const_access(checker->sem, target,
+                                            target->as.member.is_const_access)) {
+        check_error(checker, line, column, "Cannot assign to const field '%s'",
+                    target->as.member.name);
+        return 0;
+    }
+    return 1;
+}
+
+// Check that assigning through an index target does not write to a const binding.
+static int check_index_assignment_mutability(Checker* checker, Node* target, int line, int column) {
+    const char* const_name = get_const_binding_name(checker, target->as.index.object);
+    if (const_name) {
+        check_error(checker, line, column, "Cannot write to index of const '%s'", const_name);
+        return 0;
+    }
+    return 1;
+}
+
+// Validate assignment target shape and mutability rules for lvalue writes.
+static int check_assignment_target_writable(Checker* checker, Node* assign_node) {
+    Node* target = assign_node->as.assign.target;
+    if (!is_lvalue(target)) {
+        check_error(checker, assign_node->line, assign_node->column, "Invalid assignment target");
+        return 0;
+    }
+
+    switch (target->type) {
+    case NODE_IDENT:
+        return check_ident_assignment_mutability(checker, target, assign_node->line,
+                                                 assign_node->column);
+    case NODE_MEMBER:
+        return check_member_assignment_mutability(checker, target, assign_node->line,
+                                                  assign_node->column);
+    case NODE_INDEX:
+        return check_index_assignment_mutability(checker, target, assign_node->line,
+                                                 assign_node->column);
+    default:
+        return 1;
+    }
+}
+
+// Disallow writes to .tag on data enums, which is a read-only synthesized field.
+static int check_assignment_enum_tag_writable(Checker* checker, Node* assign_node) {
+    Node* target = assign_node->as.assign.target;
+    if (target->type != NODE_MEMBER || strcmp(target->as.member.name, "tag") != 0) {
+        return 1;
+    }
+
+    Type* obj_type = check_expression(checker, target->as.member.object);
+    if (obj_type && obj_type->kind == TYPE_ENUM && obj_type->as.enm.has_data) {
+        check_error(checker, assign_node->line, assign_node->column,
+                    "Enum tag is read-only; cannot assign to '%s.tag'", obj_type->as.enm.name);
+        return 0;
+    }
+    return 1;
+}
+
+// Validate that compound assignment uses numeric operands on both sides.
+static int check_compound_assignment_operands(Checker* checker, Node* assign_node, Type* target,
+                                              Type* value) {
+    if (assign_node->as.assign.op == TOK_EQ) {
+        return 1;
+    }
+    if (!is_numeric_comparable_type(target) || !is_numeric_comparable_type(value)) {
+        check_error(checker, assign_node->line, assign_node->column,
+                    "Invalid operands for compound assignment");
+        return 0;
+    }
+    return 1;
+}
+
 // Type-check an assignment: validate lvalue, const, enum tag, and type compatibility
 static Type* check_assign_expr(Checker* checker, Node* node) {
     Type* target = check_expression(checker, node->as.assign.target);
@@ -1008,63 +1167,16 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
     if (target->kind == TYPE_ERROR || value->kind == TYPE_ERROR)
         return type_error;
 
-    // Check if target is assignable (lvalue check)
-    Node* t = node->as.assign.target;
-    if (!is_lvalue(t)) {
-        check_error(checker, node->line, node->column, "Invalid assignment target");
+    if (!check_assignment_target_writable(checker, node)) {
         return type_error;
     }
-    if (t->type == NODE_IDENT) {
-        Symbol* sym = checker_lookup(checker, t->as.ident.name);
-        if (sym && sym->is_const) {
-            check_error(checker, node->line, node->column, "Cannot assign to const '%s'",
-                        t->as.ident.name);
-            return type_error;
-        }
-    } else if (t->type == NODE_MEMBER) {
-        Node* obj = t->as.member.object;
-        if (obj->type == NODE_IDENT) {
-            Symbol* sym = checker_lookup(checker, obj->as.ident.name);
-            if (sym && sym->is_const) {
-                check_error(checker, node->line, node->column,
-                            "Cannot modify field '%s' through const '%s'", t->as.member.name,
-                            obj->as.ident.name);
-                return type_error;
-            }
-        }
-        if (sem_info_get_member_is_const_access(checker->sem, t, t->as.member.is_const_access)) {
-            check_error(checker, node->line, node->column, "Cannot assign to const field '%s'",
-                        t->as.member.name);
-            return type_error;
-        }
-    } else if (t->type == NODE_INDEX) {
-        const char* const_name = get_const_binding_name(checker, t->as.index.object);
-        if (const_name) {
-            check_error(checker, node->line, node->column, "Cannot write to index of const '%s'",
-                        const_name);
-            return type_error;
-        }
+
+    if (!check_assignment_enum_tag_writable(checker, node)) {
+        return type_error;
     }
 
-    // Disallow assignments to data enum tags
-    if (t->type == NODE_MEMBER && strcmp(t->as.member.name, "tag") == 0) {
-        Type* obj_type = check_expression(checker, t->as.member.object);
-        if (obj_type && obj_type->kind == TYPE_ENUM && obj_type->as.enm.has_data) {
-            check_error(checker, node->line, node->column,
-                        "Enum tag is read-only; cannot assign to '%s.tag'", obj_type->as.enm.name);
-            return type_error;
-        }
-    }
-
-    // For compound assignment, check operation is valid
-    TokenType op = node->as.assign.op;
-    if (op != TOK_EQ) {
-        if ((!type_is_integer(target) && target->kind != TYPE_F32 && target->kind != TYPE_F64) ||
-            (!type_is_integer(value) && value->kind != TYPE_F32 && value->kind != TYPE_F64)) {
-            check_error(checker, node->line, node->column,
-                        "Invalid operands for compound assignment");
-            return type_error;
-        }
+    if (!check_compound_assignment_operands(checker, node, target, value)) {
+        return type_error;
     }
 
     if (!type_assignable(target, value)) {
@@ -1508,56 +1620,44 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
 
     int    arg_count = node->as.call.args.count;
     Type** arg_types = xcalloc(arg_count, sizeof(Type*));
-    int    has_error = 0;
+    Type** inferred  = xcalloc(gdef->type_param_count, sizeof(Type*));
+    Type*  result    = type_error;
 
     // Pass 1: Check non-lambda-with-untyped-params arguments
     for (int i = 0; i < arg_count; i++) {
-        if (!has_untyped_lambda_params(node->as.call.args.nodes[i])) {
-            arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
-            if (arg_types[i]->kind == TYPE_ERROR)
-                has_error = 1;
+        if (has_untyped_lambda_params(node->as.call.args.nodes[i])) {
+            continue;
         }
-    }
-    if (has_error) {
-        free(arg_types);
-        return type_error;
-    }
 
-    // Partial inference from pass 1 args
-    Type** inferred = xcalloc(gdef->type_param_count, sizeof(Type*));
-    for (int i = 0; i < arg_count; i++) {
-        if (arg_types[i]) {
-            infer_type_param(checker, gdef, fdn->params.nodes[i]->as.param.type, arg_types[i],
-                             inferred);
+        arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
+        if (arg_types[i]->kind == TYPE_ERROR) {
+            goto cleanup;
         }
+        infer_type_param(checker, gdef, fdn->params.nodes[i]->as.param.type, arg_types[i],
+                         inferred);
     }
 
     // Pass 2: Check lambda args with expected types built from partial inference
     for (int i = 0; i < arg_count; i++) {
-        if (!arg_types[i]) {
-            Type* old_expected = checker->expected_func_type;
-            Type* expected = build_expected_func_type(checker, fdn->params.nodes[i]->as.param.type,
-                                                      gdef, inferred);
-            if (expected)
-                checker->expected_func_type = expected;
-
-            arg_types[i]                = check_expression(checker, node->as.call.args.nodes[i]);
-            checker->expected_func_type = old_expected;
-
-            if (arg_types[i]->kind == TYPE_ERROR)
-                has_error = 1;
-
-            // Infer from the now-resolved lambda type
-            if (!has_error) {
-                infer_type_param(checker, gdef, fdn->params.nodes[i]->as.param.type, arg_types[i],
-                                 inferred);
-            }
+        if (arg_types[i]) {
+            continue;
         }
-    }
-    if (has_error) {
-        free(arg_types);
-        free(inferred);
-        return type_error;
+
+        Type* old_expected = checker->expected_func_type;
+        Type* expected =
+            build_expected_func_type(checker, fdn->params.nodes[i]->as.param.type, gdef, inferred);
+        if (expected) {
+            checker->expected_func_type = expected;
+        }
+
+        arg_types[i]                = check_expression(checker, node->as.call.args.nodes[i]);
+        checker->expected_func_type = old_expected;
+        if (arg_types[i]->kind == TYPE_ERROR) {
+            goto cleanup;
+        }
+
+        infer_type_param(checker, gdef, fdn->params.nodes[i]->as.param.type, arg_types[i],
+                         inferred);
     }
 
     for (int i = 0; i < gdef->type_param_count; i++) {
@@ -1565,9 +1665,7 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
             check_error(checker, node->line, node->column,
                         "Cannot infer type parameter '%s' for generic function '%s'",
                         gdef->type_params[i], gdef->name);
-            free(arg_types);
-            free(inferred);
-            return type_error;
+            goto cleanup;
         }
     }
 
@@ -1580,19 +1678,14 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
             check_error(checker, node->line, node->column,
                         "Type '%s' does not implement trait '%s' required by '%s'",
                         type_name(inferred[i]), bound, gdef->name);
-            free(arg_types);
-            free(inferred);
-            return type_error;
+            goto cleanup;
         }
     }
 
     GenericFuncInstance* inst = instantiate_generic_func(
         checker, gdef, inferred, gdef->type_param_count, node->line, node->column);
-    free(arg_types);
-    free(inferred);
-
     if (!inst) {
-        return type_error;
+        goto cleanup;
     }
 
     node->as.call.resolved_name = xstrdup(inst->mangled_name);
@@ -1601,7 +1694,12 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
         node->is_owned_temp   = 1;
         node->owned_temp_type = ret;
     }
-    return ret;
+    result = ret;
+
+cleanup:
+    free(arg_types);
+    free(inferred);
+    return result;
 }
 
 // Determine the base receiver type name and type arguments for method-level generics.
@@ -1646,24 +1744,122 @@ static const char* get_receiver_info(Checker* checker, Type* recv_type, Type*** 
 
 // Try to resolve a method-level generic call: items.map(|x| x * 2)
 // Returns the return type if this is a method-level generic call, or NULL if not.
+static int should_skip_generic_method_call(Checker* checker, Node* callee) {
+    // Skip module-qualified calls (e.g., std.print) and type references (e.g., Point.move).
+    // These are not method calls on a receiver object.
+    if (callee->as.member.object->type != NODE_IDENT) {
+        return 0;
+    }
+
+    const char* name = callee->as.member.object->as.ident.name;
+    if (is_imported_module(checker, name)) {
+        return 1;
+    }
+
+    Symbol* sym = checker_lookup(checker, name);
+    return sym && sym->kind == SYM_TYPE;
+}
+
+static int check_generic_method_arg_count(Checker* checker, Node* node, func_decl_node* fdn,
+                                          const char* method_name) {
+    if (node->as.call.args.count == fdn->params.count) {
+        return 1;
+    }
+
+    check_error(checker, node->line, node->column, "Method '%s' expects %d arguments, got %d",
+                method_name, fdn->params.count, node->as.call.args.count);
+    return 0;
+}
+
+static void infer_method_type_params_from_receiver(Checker* checker, GenericFuncDef* gdef,
+                                                   func_decl_node* fdn, Type** recv_args,
+                                                   int recv_arg_count, Type** inferred) {
+    int recv_pattern_count = fdn->receiver_type_args.count;
+    for (int i = 0; i < recv_arg_count && i < recv_pattern_count; i++) {
+        infer_type_param(checker, gdef, fdn->receiver_type_args.nodes[i], recv_args[i], inferred);
+    }
+}
+
+static Type** check_generic_method_args(Checker* checker, Node* node, GenericFuncDef* gdef,
+                                        func_decl_node* fdn, Type** inferred) {
+    int    arg_count = node->as.call.args.count;
+    Type** arg_types = xmalloc(arg_count * sizeof(Type*));
+    int    has_error = 0;
+
+    for (int i = 0; i < arg_count; i++) {
+        // Build expected type for lambda args from partially-inferred params.
+        Type* old_expected    = checker->expected_func_type;
+        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
+        Type* expected        = build_expected_func_type(checker, param_type_node, gdef, inferred);
+        if (expected) {
+            checker->expected_func_type = expected;
+        }
+
+        arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
+
+        checker->expected_func_type = old_expected;
+
+        if (arg_types[i]->kind == TYPE_ERROR) {
+            has_error = 1;
+        }
+    }
+
+    if (has_error) {
+        free(arg_types);
+        return NULL;
+    }
+    return arg_types;
+}
+
+static void infer_method_type_params_from_args(Checker* checker, GenericFuncDef* gdef,
+                                               func_decl_node* fdn, Type** arg_types, int arg_count,
+                                               Type** inferred) {
+    for (int i = 0; i < arg_count; i++) {
+        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
+        infer_type_param(checker, gdef, param_type_node, arg_types[i], inferred);
+    }
+}
+
+static int ensure_generic_method_inference_complete(Checker* checker, Node* node,
+                                                    GenericFuncDef* gdef, const char* base_name,
+                                                    const char* method_name, Type** inferred) {
+    for (int i = 0; i < gdef->type_param_count; i++) {
+        if (!inferred[i]) {
+            check_error(checker, node->line, node->column,
+                        "Cannot infer type parameter '%s' for generic method '%s.%s'",
+                        gdef->type_params[i], base_name, method_name);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int check_generic_method_trait_bounds(Checker* checker, Node* node, GenericFuncDef* gdef,
+                                             const char* base_name, const char* method_name,
+                                             Type** inferred) {
+    for (int i = 0; i < gdef->type_param_count; i++) {
+        const char* bound = gdef->type_param_bounds[i];
+        if (!bound) {
+            continue;
+        }
+        if (!type_satisfies_trait_bound(checker, inferred[i], bound)) {
+            check_error(checker, node->line, node->column,
+                        "Type '%s' does not implement trait '%s' required by '%s.%s'",
+                        type_name(inferred[i]), bound, base_name, method_name);
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static Type* try_check_generic_method_call(Checker* checker, Node* node) {
     Node* callee = node->as.call.func;
     if (callee->type != NODE_MEMBER) {
         return NULL;
     }
 
-    // Skip module-qualified calls (e.g., std.print) and type references (e.g., Point.move)
-    // These are not method calls on a receiver object. We must check this BEFORE calling
-    // check_expression on the object, because module names are not variables in scope.
-    if (callee->as.member.object->type == NODE_IDENT) {
-        const char* name = callee->as.member.object->as.ident.name;
-        if (is_imported_module(checker, name)) {
-            return NULL;
-        }
-        Symbol* sym = checker_lookup(checker, name);
-        if (sym && sym->kind == SYM_TYPE) {
-            return NULL;
-        }
+    if (should_skip_generic_method_call(checker, callee)) {
+        return NULL;
     }
 
     // Type-check the receiver object
@@ -1690,79 +1886,39 @@ static Type* try_check_generic_method_call(Checker* checker, Node* node) {
     func_decl_node* fdn = &gdef->decl->as.func_decl;
 
     // Validate argument count (method params, not counting self)
-    if (node->as.call.args.count != fdn->params.count) {
-        check_error(checker, node->line, node->column, "Method '%s' expects %d arguments, got %d",
-                    method_name, fdn->params.count, node->as.call.args.count);
+    if (!check_generic_method_arg_count(checker, node, fdn, method_name)) {
         free(recv_args);
         return type_error;
     }
 
     // Pre-fill inference array from receiver pattern BEFORE checking args
-    Type** inferred           = xcalloc(gdef->type_param_count, sizeof(Type*));
-    int    recv_pattern_count = fdn->receiver_type_args.count;
-    for (int i = 0; i < recv_arg_count && i < recv_pattern_count; i++) {
-        infer_type_param(checker, gdef, fdn->receiver_type_args.nodes[i], recv_args[i], inferred);
-    }
+    Type** inferred = xcalloc(gdef->type_param_count, sizeof(Type*));
+    infer_method_type_params_from_receiver(checker, gdef, fdn, recv_args, recv_arg_count, inferred);
     free(recv_args);
 
-    // Type-check all arguments (with expected types for lambda inference)
-    int    arg_count = node->as.call.args.count;
-    Type** arg_types = xmalloc(arg_count * sizeof(Type*));
-    int    has_error = 0;
-    for (int i = 0; i < arg_count; i++) {
-        // Build expected type for lambda args from partially-inferred params
-        Type* old_expected    = checker->expected_func_type;
-        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
-        Type* expected        = build_expected_func_type(checker, param_type_node, gdef, inferred);
-        if (expected)
-            checker->expected_func_type = expected;
-
-        arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
-
-        checker->expected_func_type = old_expected;
-
-        if (arg_types[i]->kind == TYPE_ERROR) {
-            has_error = 1;
-        }
-    }
-    if (has_error) {
-        free(arg_types);
+    Type** arg_types = check_generic_method_args(checker, node, gdef, fdn, inferred);
+    if (!arg_types) {
         free(inferred);
         return type_error;
     }
 
     // Infer remaining type params from arguments
-    for (int i = 0; i < arg_count; i++) {
-        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
-        infer_type_param(checker, gdef, param_type_node, arg_types[i], inferred);
-    }
+    int arg_count = node->as.call.args.count;
+    infer_method_type_params_from_args(checker, gdef, fdn, arg_types, arg_count, inferred);
 
     // Check all type params were inferred
-    for (int i = 0; i < gdef->type_param_count; i++) {
-        if (!inferred[i]) {
-            check_error(checker, node->line, node->column,
-                        "Cannot infer type parameter '%s' for generic method '%s.%s'",
-                        gdef->type_params[i], base_name, method_name);
-            free(arg_types);
-            free(inferred);
-            return type_error;
-        }
+    if (!ensure_generic_method_inference_complete(checker, node, gdef, base_name, method_name,
+                                                  inferred)) {
+        free(arg_types);
+        free(inferred);
+        return type_error;
     }
 
     // Check trait bounds
-    for (int i = 0; i < gdef->type_param_count; i++) {
-        const char* bound = gdef->type_param_bounds[i];
-        if (!bound) {
-            continue;
-        }
-        if (!type_satisfies_trait_bound(checker, inferred[i], bound)) {
-            check_error(checker, node->line, node->column,
-                        "Type '%s' does not implement trait '%s' required by '%s.%s'",
-                        type_name(inferred[i]), bound, base_name, method_name);
-            free(arg_types);
-            free(inferred);
-            return type_error;
-        }
+    if (!check_generic_method_trait_bounds(checker, node, gdef, base_name, method_name, inferred)) {
+        free(arg_types);
+        free(inferred);
+        return type_error;
     }
 
     // Instantiate
@@ -1889,117 +2045,145 @@ static Type* check_call_expr(Checker* checker, Node* node) {
     return ret;
 }
 
-// Type-check a `new` expression: resolve type, validate struct init, Vec elements, or init call
-static Type* check_new_expr(Checker* checker, Node* node) {
-    Type* resolved = resolve_type(checker, node->as.new_expr.type_node);
-    if (resolved == type_error)
+static void set_new_expr_result(Node* node, Type* resolved) {
+    node->as.new_expr.resolved_type = resolved;
+    node->is_owned_temp             = 1;
+    node->owned_temp_type           = resolved;
+}
+
+static Type* lookup_struct_init_method(Type* struct_type) {
+    for (int i = 0; i < struct_type->as.struc.method_count; i++) {
+        if (strcmp(struct_type->as.struc.method_names[i], "init") == 0) {
+            return struct_type->as.struc.method_types[i];
+        }
+    }
+    return NULL;
+}
+
+static Type* check_new_constructor_call_expr(Checker* checker, Node* node, Type* resolved) {
+    if (resolved->kind != TYPE_STRUCT) {
+        check_error(checker, node->line, node->column,
+                    "'new' constructor call requires a struct type");
         return type_error;
-
-    // Init-call form: new Type(args)
-    if (node->as.new_expr.init == NULL) {
-        if (resolved->kind != TYPE_STRUCT) {
-            check_error(checker, node->line, node->column,
-                        "'new' constructor call requires a struct type");
-            return type_error;
-        }
-        if (!resolved->as.struc.has_init) {
-            check_error(checker, node->line, node->column, "Type '%s' does not have an init method",
-                        resolved->as.struc.name);
-            return type_error;
-        }
-        // Look up init method type from struct's method list
-        Type* init_func_type = NULL;
-        for (int j = 0; j < resolved->as.struc.method_count; j++) {
-            if (strcmp(resolved->as.struc.method_names[j], "init") == 0) {
-                init_func_type = resolved->as.struc.method_types[j];
-                break;
-            }
-        }
-        if (!init_func_type) {
-            check_error(checker, node->line, node->column, "Type '%s' does not have an init method",
-                        resolved->as.struc.name);
-            return type_error;
-        }
-        // Validate arg count matches init param count
-        int expected_params = init_func_type->as.func.param_count;
-        int actual_args     = node->as.new_expr.args.count;
-        if (actual_args != expected_params) {
-            check_error(checker, node->line, node->column, "init expects %d argument(s), got %d",
-                        expected_params, actual_args);
-            return type_error;
-        }
-        // Type-check each arg against init's param types
-        for (int i = 0; i < actual_args; i++) {
-            Type* arg_type = check_expression(checker, node->as.new_expr.args.nodes[i]);
-            if (arg_type->kind == TYPE_ERROR)
-                continue;
-            Type* param_type = init_func_type->as.func.param_types[i];
-            if (!type_assignable(param_type, arg_type)) {
-                check_error(checker, node->as.new_expr.args.nodes[i]->line,
-                            node->as.new_expr.args.nodes[i]->column,
-                            "init argument %d: expected '%s', got '%s'", i + 1,
-                            type_name(param_type), type_name(arg_type));
-            }
-        }
-        node->as.new_expr.resolved_type = resolved;
-        node->is_owned_temp             = 1;
-        node->owned_temp_type           = resolved;
-        return resolved;
+    }
+    if (!resolved->as.struc.has_init) {
+        check_error(checker, node->line, node->column, "Type '%s' does not have an init method",
+                    resolved->as.struc.name);
+        return type_error;
     }
 
-    // Struct literal form below: new Type { fields }
-    if (resolved->kind == TYPE_VEC) {
-        // new Vec<T>{} or new Vec<T>{1, 2, 3}
-        Type* elem_type = resolved->as.vec.elem;
-        Node* init      = node->as.new_expr.init;
-        // Check each element expression against the element type
-        for (int i = 0; i < init->as.struct_init.fields.count; i++) {
-            Node* field = init->as.struct_init.fields.nodes[i];
-            if (field->type != NODE_FIELD_INIT)
-                continue;
-            Type* val_type = check_expression(checker, field->as.field_init.value);
-            if (val_type->kind != TYPE_ERROR && !type_assignable(elem_type, val_type)) {
-                check_error_type(checker, field->line, field->column, "Vec element", elem_type,
-                                 val_type);
-            }
-        }
-        node->as.new_expr.resolved_type = resolved;
-        node->is_owned_temp             = 1;
-        node->owned_temp_type           = resolved;
-        return resolved;
+    Type* init_func_type = lookup_struct_init_method(resolved);
+    if (!init_func_type) {
+        check_error(checker, node->line, node->column, "Type '%s' does not have an init method",
+                    resolved->as.struc.name);
+        return type_error;
     }
-    if (resolved->kind == TYPE_STRINGBUILDER) {
-        // new StringBuilder{} — no field inits allowed
-        Node* init = node->as.new_expr.init;
-        if (init->as.struct_init.fields.count > 0) {
-            check_error(checker, node->line, node->column,
-                        "StringBuilder does not accept field initializers");
-            return type_error;
-        }
-        node->as.new_expr.resolved_type = resolved;
-        node->is_owned_temp             = 1;
-        node->owned_temp_type           = resolved;
-        return resolved;
+
+    int expected_params = init_func_type->as.func.param_count;
+    int actual_args     = node->as.new_expr.args.count;
+    if (actual_args != expected_params) {
+        check_error(checker, node->line, node->column, "init expects %d argument(s), got %d",
+                    expected_params, actual_args);
+        return type_error;
     }
+
+    for (int i = 0; i < actual_args; i++) {
+        Type* arg_type = check_expression(checker, node->as.new_expr.args.nodes[i]);
+        if (arg_type->kind == TYPE_ERROR) {
+            continue;
+        }
+
+        Type* param_type = init_func_type->as.func.param_types[i];
+        if (!type_assignable(param_type, arg_type)) {
+            check_error(checker, node->as.new_expr.args.nodes[i]->line,
+                        node->as.new_expr.args.nodes[i]->column,
+                        "init argument %d: expected '%s', got '%s'", i + 1, type_name(param_type),
+                        type_name(arg_type));
+        }
+    }
+
+    set_new_expr_result(node, resolved);
+    return resolved;
+}
+
+static Type* check_new_vec_literal_expr(Checker* checker, Node* node, Type* resolved) {
+    Type* elem_type = resolved->as.vec.elem;
+    Node* init      = node->as.new_expr.init;
+
+    // Check each element expression against the element type.
+    for (int i = 0; i < init->as.struct_init.fields.count; i++) {
+        Node* field = init->as.struct_init.fields.nodes[i];
+        if (field->type != NODE_FIELD_INIT) {
+            continue;
+        }
+
+        Type* val_type = check_expression(checker, field->as.field_init.value);
+        if (val_type->kind != TYPE_ERROR && !type_assignable(elem_type, val_type)) {
+            check_error_type(checker, field->line, field->column, "Vec element", elem_type,
+                             val_type);
+        }
+    }
+
+    set_new_expr_result(node, resolved);
+    return resolved;
+}
+
+static Type* check_new_stringbuilder_literal_expr(Checker* checker, Node* node, Type* resolved) {
+    Node* init = node->as.new_expr.init;
+    if (init->as.struct_init.fields.count > 0) {
+        check_error(checker, node->line, node->column,
+                    "StringBuilder does not accept field initializers");
+        return type_error;
+    }
+
+    set_new_expr_result(node, resolved);
+    return resolved;
+}
+
+static Type* check_new_struct_literal_expr(Checker* checker, Node* node, Type* resolved) {
     if (resolved->kind != TYPE_STRUCT) {
         check_error(checker, node->line, node->column, "'new' requires a struct type, got '%s'",
                     type_name(resolved));
         return type_error;
     }
-    // Error if struct has init but user uses literal form
+
+    // Error if struct has init but user uses literal form.
     if (resolved->as.struc.has_init) {
         check_error(checker, node->line, node->column,
                     "Type '%s' has an init method; use 'new %s(args)' instead of 'new %s { ... }'",
                     resolved->as.struc.name, resolved->as.struc.name, resolved->as.struc.name);
         return type_error;
     }
+
     Type* init_type = check_struct_init(checker, node->as.new_expr.init, resolved);
-    if (init_type == type_error)
+    if (init_type == type_error) {
         return type_error;
-    node->as.new_expr.resolved_type = resolved;
-    node->is_owned_temp             = 1;
-    node->owned_temp_type           = resolved;
+    }
+
+    set_new_expr_result(node, resolved);
     return resolved;
+}
+
+// Type-check a `new` expression: resolve type, validate struct init, Vec elements, or init call
+static Type* check_new_expr(Checker* checker, Node* node) {
+    Type* resolved = resolve_type(checker, node->as.new_expr.type_node);
+    if (resolved == type_error) {
+        return type_error;
+    }
+
+    // Init-call form: new Type(args)
+    if (node->as.new_expr.init == NULL) {
+        return check_new_constructor_call_expr(checker, node, resolved);
+    }
+
+    // Struct literal form below: new Type { fields }
+    if (resolved->kind == TYPE_VEC) {
+        return check_new_vec_literal_expr(checker, node, resolved);
+    }
+    if (resolved->kind == TYPE_STRINGBUILDER) {
+        return check_new_stringbuilder_literal_expr(checker, node, resolved);
+    }
+    return check_new_struct_literal_expr(checker, node, resolved);
 }
 
 // Type-check an array literal: infer element type from first element, validate the rest
@@ -2134,6 +2318,83 @@ static Type* check_string_interp_expr(Checker* checker, Node* node) {
 // Try expression checking (? operator)
 // =============================================================================
 
+static int classify_try_enum(Type* enum_type, int* is_option, int* success_idx, int* err_idx) {
+    int ok_idx   = find_resolved_enum_variant(enum_type, "Ok");
+    int err      = find_resolved_enum_variant(enum_type, "Err");
+    int some_idx = find_resolved_enum_variant(enum_type, "Some");
+    int none_idx = find_resolved_enum_variant(enum_type, "None");
+
+    int is_result = (ok_idx >= 0 && err >= 0);
+    int option    = (some_idx >= 0 && none_idx >= 0);
+    if (is_result) {
+        option = 0;
+    }
+
+    if (!is_result && !option) {
+        return 0;
+    }
+
+    *is_option   = option;
+    *success_idx = is_result ? ok_idx : some_idx;
+    *err_idx     = is_result ? err : -1;
+    return 1;
+}
+
+static int check_try_return_type_compatibility(Checker* checker, Node* node, Type* expr_type,
+                                               Type* ret_type, int is_option, int expr_err_idx) {
+    if (ret_type->kind != TYPE_ENUM || !ret_type->as.enm.has_data) {
+        check_error(checker, node->line, node->column,
+                    "'?' used in function returning '%s', but must return a Result or Option type",
+                    type_name(ret_type));
+        return 0;
+    }
+
+    if (is_option) {
+        if (find_resolved_enum_variant(ret_type, "None") < 0) {
+            check_error(checker, node->line, node->column,
+                        "'?' on Option requires function return type to have 'None' variant, "
+                        "got '%s'",
+                        type_name(ret_type));
+            return 0;
+        }
+        return 1;
+    }
+
+    int ret_err_idx = find_resolved_enum_variant(ret_type, "Err");
+    if (ret_err_idx < 0) {
+        check_error(checker, node->line, node->column,
+                    "'?' on Result requires function return type to have 'Err' variant, got '%s'",
+                    type_name(ret_type));
+        return 0;
+    }
+
+    if (expr_type->as.enm.variant_type_counts[expr_err_idx] != 1 ||
+        ret_type->as.enm.variant_type_counts[ret_err_idx] != 1) {
+        check_error(checker, node->line, node->column,
+                    "'?' requires 'Err' variant to have exactly one payload field");
+        return 0;
+    }
+
+    Type* expr_err_type = expr_type->as.enm.variant_types[expr_err_idx][0];
+    Type* ret_err_type  = ret_type->as.enm.variant_types[ret_err_idx][0];
+    if (!type_assignable(ret_err_type, expr_err_type)) {
+        check_error(checker, node->line, node->column,
+                    "'?' error type mismatch: expression has Err(%s) but function returns Err(%s)",
+                    type_name(expr_err_type), type_name(ret_err_type));
+        return 0;
+    }
+    return 1;
+}
+
+static void set_try_expr_info(Node* node, Type* expr_type, Type* ret_type, Type* unwrapped_type,
+                              int is_option) {
+    node->as.try_expr.resolved_type  = expr_type;
+    node->as.try_expr.unwrapped_type = unwrapped_type;
+    node->as.try_expr.is_option      = is_option ? 1 : 0;
+    node->as.try_expr.enum_name      = xstrdup(expr_type->as.enm.name);
+    node->as.try_expr.ret_enum_name  = xstrdup(ret_type->as.enm.name);
+}
+
 // Type-check a try expression (expr?): validates Result/Option pattern,
 // extracts unwrapped type, and checks return type compatibility
 static Type* check_try_expr(Checker* checker, Node* node) {
@@ -2156,29 +2417,10 @@ static Type* check_try_expr(Checker* checker, Node* node) {
         return type_error;
     }
 
-    // Detect Option pattern: has Some(T) + None variants
-    // Detect Result pattern: has Ok(T) + Err(E) variants
-    int ok_idx = -1, err_idx = -1, some_idx = -1, none_idx = -1;
-    for (int i = 0; i < expr_type->as.enm.value_count; i++) {
-        const char* vname = expr_type->as.enm.value_names[i];
-        if (strcmp(vname, "Ok") == 0)
-            ok_idx = i;
-        else if (strcmp(vname, "Err") == 0)
-            err_idx = i;
-        else if (strcmp(vname, "Some") == 0)
-            some_idx = i;
-        else if (strcmp(vname, "None") == 0)
-            none_idx = i;
-    }
-
-    int is_result = (ok_idx >= 0 && err_idx >= 0);
-    int is_option = (some_idx >= 0 && none_idx >= 0);
-
-    // Result takes priority if enum has both Ok/Err and Some/None
-    if (is_result)
-        is_option = 0;
-
-    if (!is_result && !is_option) {
+    int is_option   = 0;
+    int success_idx = -1;
+    int err_idx     = -1;
+    if (!classify_try_enum(expr_type, &is_option, &success_idx, &err_idx)) {
         check_error(checker, node->line, node->column,
                     "'?' operator requires a Result (Ok/Err) or Option (Some/None) enum, got '%s'",
                     type_name(expr_type));
@@ -2186,81 +2428,22 @@ static Type* check_try_expr(Checker* checker, Node* node) {
     }
 
     // Extract unwrapped type T from Ok(T) or Some(T)
-    int success_idx = is_result ? ok_idx : some_idx;
     if (expr_type->as.enm.variant_type_counts[success_idx] != 1) {
         check_error(checker, node->line, node->column,
                     "'?' requires '%s' variant to have exactly one payload field",
-                    is_result ? "Ok" : "Some");
+                    is_option ? "Some" : "Ok");
         return type_error;
     }
     Type* unwrapped_type = expr_type->as.enm.variant_types[success_idx][0];
 
     // Validate function return type compatibility
     Type* ret_type = checker->current_func_return;
-    if (ret_type->kind != TYPE_ENUM || !ret_type->as.enm.has_data) {
-        check_error(checker, node->line, node->column,
-                    "'?' used in function returning '%s', but must return a Result or Option type",
-                    type_name(ret_type));
+    if (!check_try_return_type_compatibility(checker, node, expr_type, ret_type, is_option,
+                                             err_idx)) {
         return type_error;
     }
 
-    if (is_option) {
-        // Option: return type must have a None variant
-        int ret_has_none = 0;
-        for (int i = 0; i < ret_type->as.enm.value_count; i++) {
-            if (strcmp(ret_type->as.enm.value_names[i], "None") == 0) {
-                ret_has_none = 1;
-                break;
-            }
-        }
-        if (!ret_has_none) {
-            check_error(checker, node->line, node->column,
-                        "'?' on Option requires function return type to have 'None' variant, "
-                        "got '%s'",
-                        type_name(ret_type));
-            return type_error;
-        }
-    } else {
-        // Result: return type must have an Err variant with matching error type
-        int ret_err_idx = -1;
-        for (int i = 0; i < ret_type->as.enm.value_count; i++) {
-            if (strcmp(ret_type->as.enm.value_names[i], "Err") == 0) {
-                ret_err_idx = i;
-                break;
-            }
-        }
-        if (ret_err_idx < 0) {
-            check_error(checker, node->line, node->column,
-                        "'?' on Result requires function return type to have 'Err' variant, "
-                        "got '%s'",
-                        type_name(ret_type));
-            return type_error;
-        }
-        // Check error type compatibility
-        if (expr_type->as.enm.variant_type_counts[err_idx] != 1 ||
-            ret_type->as.enm.variant_type_counts[ret_err_idx] != 1) {
-            check_error(checker, node->line, node->column,
-                        "'?' requires 'Err' variant to have exactly one payload field");
-            return type_error;
-        }
-        Type* expr_err_type = expr_type->as.enm.variant_types[err_idx][0];
-        Type* ret_err_type  = ret_type->as.enm.variant_types[ret_err_idx][0];
-        if (!type_assignable(ret_err_type, expr_err_type)) {
-            check_error(checker, node->line, node->column,
-                        "'?' error type mismatch: expression has Err(%s) but function returns "
-                        "Err(%s)",
-                        type_name(expr_err_type), type_name(ret_err_type));
-            return type_error;
-        }
-    }
-
-    // Set checker fields on the node
-    node->as.try_expr.resolved_type  = expr_type;
-    node->as.try_expr.unwrapped_type = unwrapped_type;
-    node->as.try_expr.is_option      = is_option ? 1 : 0;
-    node->as.try_expr.enum_name      = xstrdup(expr_type->as.enm.name);
-    node->as.try_expr.ret_enum_name  = xstrdup(ret_type->as.enm.name);
-
+    set_try_expr_info(node, expr_type, ret_type, unwrapped_type, is_option);
     return unwrapped_type;
 }
 
@@ -2328,18 +2511,16 @@ static void collect_captures(Checker* checker, const char* name, Type* type, int
     }
 }
 
-static Type* check_lambda_expr(Checker* checker, Node* node) {
-    // Assign unique ID
-    node->as.lambda.lambda_id = checker->lambda_next_id++;
-
-    NodeList* params      = &node->as.lambda.params;
+// Resolve lambda parameter types from annotations or the expected function type.
+static int resolve_lambda_param_types(Checker* checker, Node* lambda, Type*** out_param_types,
+                                      int* out_param_count) {
+    NodeList* params      = &lambda->as.lambda.params;
     int       param_count = params->count;
-
-    // Resolve parameter types
-    Type** param_types = NULL;
+    Type**    param_types = NULL;
     if (param_count > 0) {
         param_types = xmalloc(param_count * sizeof(Type*));
     }
+
     for (int i = 0; i < param_count; i++) {
         Node* p = params->nodes[i];
         if (p->as.param.type) {
@@ -2352,22 +2533,84 @@ static Type* check_lambda_expr(Checker* checker, Node* node) {
             check_error(checker, p->line, p->column, "Cannot infer type for lambda parameter '%s'",
                         p->as.param.name);
             free(param_types);
-            return type_error;
+            return 0;
         }
+
         if (param_types[i]->kind == TYPE_ERROR) {
             free(param_types);
-            return type_error;
+            return 0;
         }
     }
 
-    // Resolve explicit return type
-    Type* return_type = NULL;
-    if (node->as.lambda.return_type) {
-        return_type = resolve_type(checker, node->as.lambda.return_type);
-        if (return_type->kind == TYPE_ERROR) {
-            free(param_types);
-            return type_error;
+    *out_param_types = param_types;
+    *out_param_count = param_count;
+    return 1;
+}
+
+// Resolve an explicitly declared lambda return type, if present.
+static Type* resolve_lambda_return_type(Checker* checker, Node* lambda) {
+    if (!lambda->as.lambda.return_type) {
+        return NULL;
+    }
+    return resolve_type(checker, lambda->as.lambda.return_type);
+}
+
+// Define lambda parameters in the current scope.
+static void define_lambda_params_in_scope(Checker* checker, Node* lambda, Type** param_types,
+                                          int param_count) {
+    NodeList* params = &lambda->as.lambda.params;
+    for (int i = 0; i < param_count; i++) {
+        Node* p = params->nodes[i];
+        checker_define(checker, p->as.param.name, SYM_VAR, param_types[i], p->as.param.is_const, 0,
+                       NULL);
+    }
+}
+
+// Type-check a lambda body and return the effective lambda return type.
+static Type* check_lambda_body(Checker* checker, Node* lambda, Type* declared_return_type) {
+    Type* return_type = declared_return_type;
+
+    if (lambda->as.lambda.is_expr_body) {
+        checker->current_func_return = return_type ? return_type : type_void;
+        Type* body_type              = check_expression(checker, lambda->as.lambda.body);
+        if (!return_type) {
+            return_type = body_type;
+        } else if (!type_assignable(return_type, body_type)) {
+            check_error(checker, lambda->as.lambda.body->line, lambda->as.lambda.body->column,
+                        "Lambda body type '%s' doesn't match return type '%s'",
+                        type_name(body_type), type_name(return_type));
         }
+        return return_type;
+    }
+
+    if (!return_type) {
+        return_type = type_void;
+    }
+    checker->current_func_return = return_type;
+    Node* body                   = lambda->as.lambda.body;
+    if (body && body->type == NODE_BLOCK) {
+        for (int i = 0; i < body->as.block.stmts.count; i++) {
+            check_statement(checker, body->as.block.stmts.nodes[i]);
+        }
+    }
+    return return_type;
+}
+
+static Type* check_lambda_expr(Checker* checker, Node* node) {
+    // Assign unique ID
+    node->as.lambda.lambda_id = checker->lambda_next_id++;
+
+    Type** param_types = NULL;
+    int    param_count = 0;
+    if (!resolve_lambda_param_types(checker, node, &param_types, &param_count)) {
+        return type_error;
+    }
+
+    // Resolve explicit return type
+    Type* return_type = resolve_lambda_return_type(checker, node);
+    if (return_type && return_type->kind == TYPE_ERROR) {
+        free(param_types);
+        return type_error;
     }
 
     // Push lambda scope
@@ -2382,43 +2625,8 @@ static Type* check_lambda_expr(Checker* checker, Node* node) {
     VEC_GROW(checker->lambda_stack, checker->lambda_stack_count, checker->lambda_stack_capacity);
     checker->lambda_stack[checker->lambda_stack_count++] = node;
 
-    // Define params in lambda scope
-    for (int i = 0; i < param_count; i++) {
-        Node* p = params->nodes[i];
-        checker_define(checker, p->as.param.name, SYM_VAR, param_types[i], p->as.param.is_const, 0,
-                       NULL);
-    }
-
-    if (node->as.lambda.is_expr_body) {
-        // Expression body: infer return type
-        if (!return_type) {
-            // Set return type temporarily to NULL to allow checking
-            checker->current_func_return = type_void;
-        } else {
-            checker->current_func_return = return_type;
-        }
-        Type* body_type = check_expression(checker, node->as.lambda.body);
-        if (!return_type) {
-            return_type = body_type;
-        } else if (!type_assignable(return_type, body_type)) {
-            check_error(checker, node->as.lambda.body->line, node->as.lambda.body->column,
-                        "Lambda body type '%s' doesn't match return type '%s'",
-                        type_name(body_type), type_name(return_type));
-        }
-    } else {
-        // Block body
-        if (!return_type) {
-            return_type = type_void;
-        }
-        checker->current_func_return = return_type;
-        // Check block statements (like check_function_body)
-        Node* body = node->as.lambda.body;
-        if (body && body->type == NODE_BLOCK) {
-            for (int i = 0; i < body->as.block.stmts.count; i++) {
-                check_statement(checker, body->as.block.stmts.nodes[i]);
-            }
-        }
-    }
+    define_lambda_params_in_scope(checker, node, param_types, param_count);
+    return_type = check_lambda_body(checker, node, return_type);
 
     // Restore state
     checker->lambda_stack_count--;
@@ -2444,52 +2652,67 @@ static Type* check_lambda_expr(Checker* checker, Node* node) {
 // Expression checking
 // =============================================================================
 
-// Dispatch expression type-checking based on node type, returning the resolved type
-Type* check_expression(Checker* checker, Node* node) {
-    if (!node)
-        return type_error;
-
-    switch (node->type) {
+// Return the built-in type for literal expression nodes, or NULL otherwise.
+static Type* get_literal_expr_type(int node_type) {
+    switch (node_type) {
     case NODE_INT_LIT:
         return type_int64;
-
     case NODE_FLOAT_LIT:
         return type_f32;
-
     case NODE_STRING_LIT:
         return type_string;
-
     case NODE_CHAR_LIT:
         return type_char;
-
     case NODE_BOOL_LIT:
         return type_bool;
-
     case NODE_NULL_LIT:
         return type_null; // null reference
-
-    case NODE_IDENT: {
-        if (checker->lambda_depth > 0) {
-            int boundaries = count_captured_boundaries(checker, node->as.ident.name);
-            if (boundaries > 0) {
-                // Variable crosses lambda boundaries — collect captures
-                Symbol* sym = checker_lookup(checker, node->as.ident.name);
-                if (sym && sym->kind == SYM_VAR) {
-                    collect_captures(checker, node->as.ident.name, sym->type, boundaries);
-                }
-            }
-        }
-        Symbol* sym = checker_lookup(checker, node->as.ident.name);
-        if (!sym) {
-            check_error(checker, node->line, node->column, "Undefined identifier '%s'",
-                        node->as.ident.name);
-            return type_error;
-        }
-        if (sym->kind == SYM_FUNC && sym->type->kind == TYPE_FUNC) {
-            node->as.ident.resolved_func_type = sym->type;
-        }
-        return sym->type;
+    default:
+        return NULL;
     }
+}
+
+// Collect lambda captures when an identifier resolves to a variable across boundaries.
+static void maybe_collect_ident_capture(Checker* checker, Node* node, Symbol* sym) {
+    if (checker->lambda_depth <= 0 || !sym || sym->kind != SYM_VAR) {
+        return;
+    }
+
+    int boundaries = count_captured_boundaries(checker, node->as.ident.name);
+    if (boundaries > 0) {
+        collect_captures(checker, node->as.ident.name, sym->type, boundaries);
+    }
+}
+
+// Type-check an identifier expression and record resolved function type metadata.
+static Type* check_ident_expr(Checker* checker, Node* node) {
+    Symbol* sym = checker_lookup(checker, node->as.ident.name);
+    if (!sym) {
+        check_error(checker, node->line, node->column, "Undefined identifier '%s'",
+                    node->as.ident.name);
+        return type_error;
+    }
+
+    maybe_collect_ident_capture(checker, node, sym);
+
+    if (sym->kind == SYM_FUNC && sym->type->kind == TYPE_FUNC) {
+        node->as.ident.resolved_func_type = sym->type;
+    }
+    return sym->type;
+}
+
+// Report use of a struct initializer where a contextual struct type is required.
+static Type* check_contextless_struct_init_expr(Checker* checker, Node* node) {
+    check_error(checker, node->line, node->column,
+                "Struct initializer requires a contextual struct type");
+    return type_error;
+}
+
+// Dispatch non-literal expression nodes to their dedicated type-checking routines.
+static Type* check_non_literal_expression(Checker* checker, Node* node) {
+    switch (node->type) {
+    case NODE_IDENT:
+        return check_ident_expr(checker, node);
 
     case NODE_ENUM_VALUE:
         return check_enum_value_expr(checker, node);
@@ -2528,9 +2751,7 @@ Type* check_expression(Checker* checker, Node* node) {
         return check_match_expr(checker, node);
 
     case NODE_STRUCT_INIT:
-        check_error(checker, node->line, node->column,
-                    "Struct initializer requires a contextual struct type");
-        return type_error;
+        return check_contextless_struct_init_expr(checker, node);
 
     case NODE_TUPLE_LIT:
         return check_tuple_lit_expr(checker, node);
@@ -2548,6 +2769,19 @@ Type* check_expression(Checker* checker, Node* node) {
         check_error(checker, node->line, node->column, "Unknown expression type %d", node->type);
         return type_error;
     }
+}
+
+// Dispatch expression type-checking based on node type, returning the resolved type
+Type* check_expression(Checker* checker, Node* node) {
+    if (!node)
+        return type_error;
+
+    Type* literal_type = get_literal_expr_type(node->type);
+    if (literal_type) {
+        return literal_type;
+    }
+
+    return check_non_literal_expression(checker, node);
 }
 
 // =============================================================================

@@ -538,6 +538,82 @@ static int check_destruct_pattern_redefinitions_internal(Checker* checker, Destr
     return 0;
 }
 
+// Propagate tuple-pattern child types as type_error when parent type checking already failed.
+static void propagate_tuple_pattern_error(Checker* checker, DestructPattern* pattern, int line,
+                                          int col) {
+    for (int i = 0; i < pattern->as.tuple.count; i++) {
+        check_destruct_pattern_against_type(checker, pattern->as.tuple.elements[i], type_error,
+                                            line, col);
+    }
+}
+
+// Validate tuple destructuring arity and recursively validate each element type.
+static int check_tuple_destruct_pattern_against_type(Checker* checker, DestructPattern* pattern,
+                                                     Type* type, int line, int col) {
+    if (type->kind != TYPE_TUPLE && type->kind != TYPE_ERROR) {
+        check_error(checker, line, col, "Nested pattern requires a tuple, got '%s'",
+                    type_name(type));
+        return 1;
+    }
+
+    if (type->kind == TYPE_ERROR) {
+        propagate_tuple_pattern_error(checker, pattern, line, col);
+        return 0;
+    }
+
+    if (type->as.tuple.elem_count != pattern->as.tuple.count) {
+        check_error(checker, line, col, "Nested pattern has %d elements, but tuple has %d elements",
+                    pattern->as.tuple.count, type->as.tuple.elem_count);
+        return 1;
+    }
+
+    for (int i = 0; i < pattern->as.tuple.count; i++) {
+        if (check_destruct_pattern_against_type(checker, pattern->as.tuple.elements[i],
+                                                type->as.tuple.elem_types[i], line, col)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Return the index of a struct field by name, or -1 if not found.
+static int find_struct_field_index(Type* type, const char* field_name) {
+    for (int j = 0; j < type->as.struc.field_count; j++) {
+        if (strcmp(field_name, type->as.struc.field_names[j]) == 0) {
+            return j;
+        }
+    }
+    return -1;
+}
+
+// Validate struct destructuring fields and record resolved field types.
+static int check_struct_destruct_pattern_against_type(Checker* checker, DestructPattern* pattern,
+                                                      Type* type, int line, int col) {
+    if (type->kind != TYPE_STRUCT && type->kind != TYPE_ERROR) {
+        check_error(checker, line, col, "Struct destructuring requires a struct type, got '%s'",
+                    type_name(type));
+        return 1;
+    }
+
+    if (type->kind == TYPE_ERROR) {
+        for (int i = 0; i < pattern->as.struc.count; i++) {
+            pattern->as.struc.field_types[i] = type_error;
+        }
+        return 0;
+    }
+
+    for (int i = 0; i < pattern->as.struc.count; i++) {
+        int field_idx = find_struct_field_index(type, pattern->as.struc.field_names[i]);
+        if (field_idx < 0) {
+            check_error(checker, line, col, "Struct '%s' has no field '%s'", type->as.struc.name,
+                        pattern->as.struc.field_names[i]);
+            return 1;
+        }
+        pattern->as.struc.field_types[i] = type->as.struc.field_types[field_idx];
+    }
+    return 0;
+}
+
 // Check that a destructuring pattern matches a type (recursive)
 // Also sets resolved_type on each pattern node
 // Returns 1 if error found, 0 otherwise
@@ -550,70 +626,11 @@ static int check_destruct_pattern_against_type(Checker* checker, DestructPattern
 
     switch (pattern->kind) {
     case PATTERN_IDENT:
-        // Any type is valid for an identifier pattern
         return 0;
-
     case PATTERN_TUPLE:
-        // Pattern must match a tuple type
-        if (type->kind != TYPE_TUPLE && type->kind != TYPE_ERROR) {
-            check_error(checker, line, col, "Nested pattern requires a tuple, got '%s'",
-                        type_name(type));
-            return 1;
-        }
-
-        if (type->kind == TYPE_ERROR) {
-            // Propagate error type to all children
-            for (int i = 0; i < pattern->as.tuple.count; i++) {
-                check_destruct_pattern_against_type(checker, pattern->as.tuple.elements[i],
-                                                    type_error, line, col);
-            }
-            return 0;
-        }
-
-        // Check arity
-        if (type->as.tuple.elem_count != pattern->as.tuple.count) {
-            check_error(checker, line, col,
-                        "Nested pattern has %d elements, but tuple has %d elements",
-                        pattern->as.tuple.count, type->as.tuple.elem_count);
-            return 1;
-        }
-
-        // Recursively check each element
-        for (int i = 0; i < pattern->as.tuple.count; i++) {
-            if (check_destruct_pattern_against_type(checker, pattern->as.tuple.elements[i],
-                                                    type->as.tuple.elem_types[i], line, col)) {
-                return 1;
-            }
-        }
-        return 0;
-
+        return check_tuple_destruct_pattern_against_type(checker, pattern, type, line, col);
     case PATTERN_STRUCT:
-        if (type->kind != TYPE_STRUCT && type->kind != TYPE_ERROR) {
-            check_error(checker, line, col, "Struct destructuring requires a struct type, got '%s'",
-                        type_name(type));
-            return 1;
-        }
-        if (type->kind == TYPE_ERROR) {
-            for (int i = 0; i < pattern->as.struc.count; i++)
-                pattern->as.struc.field_types[i] = type_error;
-            return 0;
-        }
-        for (int i = 0; i < pattern->as.struc.count; i++) {
-            int found = 0;
-            for (int j = 0; j < type->as.struc.field_count; j++) {
-                if (strcmp(pattern->as.struc.field_names[i], type->as.struc.field_names[j]) == 0) {
-                    pattern->as.struc.field_types[i] = type->as.struc.field_types[j];
-                    found                            = 1;
-                    break;
-                }
-            }
-            if (!found) {
-                check_error(checker, line, col, "Struct '%s' has no field '%s'",
-                            type->as.struc.name, pattern->as.struc.field_names[i]);
-                return 1;
-            }
-        }
-        return 0;
+        return check_struct_destruct_pattern_against_type(checker, pattern, type, line, col);
     }
     return 0;
 }
@@ -657,55 +674,157 @@ static void define_destruct_pattern_vars(Checker* checker, DestructPattern* patt
 
 // --- Statement case helpers ---
 
-// Type-check a variable declaration: handles destructuring, type inference, and RC tracking
-static void check_var_decl_stmt(Checker* checker, Node* node) {
-    // Check if this is a destructuring declaration
-    DestructPattern* pattern = node->as.var_decl.destruct_pattern;
-    if (pattern) {
-        // Destructuring: var (a, b) = tuple; or var (a, (b, c)) = nested;
+static int is_module_call_enum_value(Node* init) {
+    return init->type == NODE_ENUM_VALUE && init->as.enum_value.is_module_call;
+}
 
-        // Check for redefinitions
-        if (check_destruct_pattern_redefinitions(checker, pattern, node->line, node->column)) {
-            return;
+static void mark_var_decl_rc(Node* node, Symbol* sym, Type* resolved_type) {
+    node->as.var_decl.is_rc         = 1;
+    node->as.var_decl.resolved_type = resolved_type;
+    if (sym) {
+        sym->is_rc = 1;
+    }
+}
+
+static Type* check_var_decl_initializer(Checker* checker, Type* decl_type, Node* init) {
+    if (!init) {
+        return NULL;
+    }
+
+    // Set enum_target_hint for generic enum inference (e.g., var x: Option<i64> = Option::None)
+    Type* old_hint = checker->enum_target_hint;
+    if (decl_type && decl_type->kind == TYPE_ENUM) {
+        checker->enum_target_hint = decl_type;
+    }
+    Type* init_type           = check_expression(checker, init);
+    checker->enum_target_hint = old_hint;
+    return init_type;
+}
+
+static Type* resolve_var_decl_type(Checker* checker, Node* node, const char* name, Type* decl_type,
+                                   Type* init_type) {
+    if (decl_type && init_type) {
+        // Both specified - check compatibility
+        if (!type_assignable(decl_type, init_type)) {
+            check_error_type(checker, node->line, node->column, name, decl_type, init_type);
         }
+        return decl_type;
+    }
+    if (decl_type) {
+        return decl_type;
+    }
+    if (init_type) {
+        return init_type;
+    }
 
-        // Initializer is required (parser enforces this)
-        Type* init_type = check_expression(checker, node->as.var_decl.init);
+    check_error(checker, node->line, node->column,
+                "Variable '%s' needs type annotation or initializer", name);
+    return type_error;
+}
 
-        // Check pattern against initializer type
-        if (check_destruct_pattern_against_type(checker, pattern, init_type, node->line,
-                                                node->column)) {
-            return;
-        }
-
-        // Define all variables in the pattern
-        define_destruct_pattern_vars(checker, pattern, init_type, node->as.var_decl.is_const,
-                                     node->as.var_decl.is_public);
-
-        // RC tracking for struct destructuring (the temp struct must stay alive)
-        if (pattern->kind == PATTERN_STRUCT && init_type->kind == TYPE_STRUCT) {
-            Node* init = node->as.var_decl.init;
-            if (init->type == NODE_NEW_EXPR) {
-                node->as.var_decl.is_rc         = 1;
-                node->as.var_decl.resolved_type = init->as.new_expr.resolved_type;
-            } else if (init->type == NODE_IDENT) {
-                Symbol* src = checker_lookup(checker, init->as.ident.name);
-                if (src && src->is_rc) {
-                    node->as.var_decl.is_rc         = 1;
-                    node->as.var_decl.resolved_type = src->type;
-                }
-            } else if (init->type == NODE_CALL) {
-                node->as.var_decl.is_rc         = 1;
-                node->as.var_decl.resolved_type = init_type;
-            } else if (init->type == NODE_ENUM_VALUE && init->as.enum_value.is_module_call) {
-                node->as.var_decl.is_rc         = 1;
-                node->as.var_decl.resolved_type = init_type;
-            }
-        }
+static void record_inferred_var_decl_type(Node* node, Type* init_type) {
+    if (node->as.var_decl.type || !init_type) {
         return;
     }
 
-    // Normal variable declaration
+    // Store resolved type for codegen when type is inferred from non-literal expressions
+    if (init_type->kind == TYPE_STRING && node->as.var_decl.init->type != NODE_STRING_LIT) {
+        node->as.var_decl.resolved_type = init_type;
+    }
+
+    // Store resolved type for function pointer inference (var fp = some_func)
+    if (init_type->kind == TYPE_FUNC) {
+        node->as.var_decl.resolved_type = init_type;
+    }
+}
+
+static void maybe_mark_struct_destructuring_rc(Checker* checker, Node* node, Type* init_type) {
+    DestructPattern* pattern = node->as.var_decl.destruct_pattern;
+    if (pattern->kind != PATTERN_STRUCT || init_type->kind != TYPE_STRUCT) {
+        return;
+    }
+
+    // RC tracking for struct destructuring (the temp struct must stay alive)
+    Node* init = node->as.var_decl.init;
+    if (init->type == NODE_NEW_EXPR) {
+        mark_var_decl_rc(node, NULL, init->as.new_expr.resolved_type);
+    } else if (init->type == NODE_IDENT) {
+        Symbol* src = checker_lookup(checker, init->as.ident.name);
+        if (src && src->is_rc) {
+            mark_var_decl_rc(node, NULL, src->type);
+        }
+    } else if (init->type == NODE_CALL || is_module_call_enum_value(init)) {
+        mark_var_decl_rc(node, NULL, init_type);
+    }
+}
+
+static void maybe_mark_var_decl_rc_from_init(Checker* checker, Node* node, Symbol* sym,
+                                             Type* var_type) {
+    Node* init = node->as.var_decl.init;
+    if (!sym || !init) {
+        return;
+    }
+
+    if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
+        mark_var_decl_rc(node, sym, var_type);
+    }
+
+    if (init->type == NODE_NEW_EXPR) {
+        mark_var_decl_rc(node, sym, init->as.new_expr.resolved_type);
+    } else if (init->type == NODE_IDENT) {
+        Symbol* src = checker_lookup(checker, init->as.ident.name);
+        if (src && src->is_rc) {
+            mark_var_decl_rc(node, sym, src->type);
+        }
+    } else if (init->type == NODE_CALL && var_type) {
+        // Store resolved type for codegen type inference
+        node->as.var_decl.resolved_type = var_type;
+        if (type_is_rc_managed(var_type)) {
+            // Function call returning an RC-managed type transfers ownership
+            node->as.var_decl.is_rc = 1;
+            sym->is_rc              = 1;
+        }
+    } else if (is_module_call_enum_value(init) && var_type) {
+        // Module call (parsed as enum value): store resolved type for codegen
+        node->as.var_decl.resolved_type = var_type;
+        if (type_is_rc_managed(var_type)) {
+            node->as.var_decl.is_rc = 1;
+            sym->is_rc              = 1;
+        }
+    }
+}
+
+static void maybe_mark_string_var_decl_rc(Node* node, Symbol* sym, Type* var_type) {
+    // All string variables are RC-managed (immortal literals are no-ops for inc/dec)
+    if (sym && var_type && var_type->kind == TYPE_STRING && !node->as.var_decl.is_rc) {
+        mark_var_decl_rc(node, sym, type_string);
+    }
+}
+
+static void check_destructuring_var_decl_stmt(Checker* checker, Node* node) {
+    DestructPattern* pattern = node->as.var_decl.destruct_pattern;
+
+    // Check for redefinitions
+    if (check_destruct_pattern_redefinitions(checker, pattern, node->line, node->column)) {
+        return;
+    }
+
+    // Initializer is required (parser enforces this)
+    Type* init_type = check_expression(checker, node->as.var_decl.init);
+
+    // Check pattern against initializer type
+    if (check_destruct_pattern_against_type(checker, pattern, init_type, node->line,
+                                            node->column)) {
+        return;
+    }
+
+    // Define all variables in the pattern
+    define_destruct_pattern_vars(checker, pattern, init_type, node->as.var_decl.is_const,
+                                 node->as.var_decl.is_public);
+    maybe_mark_struct_destructuring_rc(checker, node, init_type);
+}
+
+static void check_normal_var_decl_stmt(Checker* checker, Node* node) {
     const char* name = node->as.var_decl.name;
 
     // Check for redefinition
@@ -715,97 +834,29 @@ static void check_var_decl_stmt(Checker* checker, Node* node) {
     }
 
     Type* decl_type = NULL;
-    Type* init_type = NULL;
-
     if (node->as.var_decl.type) {
         decl_type = resolve_type(checker, node->as.var_decl.type);
     }
 
-    if (node->as.var_decl.init) {
-        // Set enum_target_hint for generic enum inference (e.g., var x: Option<i64> =
-        // Option::None)
-        Type* old_hint = checker->enum_target_hint;
-        if (decl_type && decl_type->kind == TYPE_ENUM) {
-            checker->enum_target_hint = decl_type;
-        }
-        init_type                 = check_expression(checker, node->as.var_decl.init);
-        checker->enum_target_hint = old_hint;
-    }
-
-    Type* var_type;
-    if (decl_type && init_type) {
-        // Both specified - check compatibility
-        if (!type_assignable(decl_type, init_type)) {
-            check_error_type(checker, node->line, node->column, name, decl_type, init_type);
-        }
-        var_type = decl_type;
-    } else if (decl_type) {
-        var_type = decl_type;
-    } else if (init_type) {
-        var_type = init_type;
-    } else {
-        check_error(checker, node->line, node->column,
-                    "Variable '%s' needs type annotation or initializer", name);
-        var_type = type_error;
-    }
+    Type* init_type = check_var_decl_initializer(checker, decl_type, node->as.var_decl.init);
+    Type* var_type  = resolve_var_decl_type(checker, node, name, decl_type, init_type);
 
     Symbol* sym = checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const,
                                  node->as.var_decl.is_public, checker->modules.current_module);
 
-    // Store resolved type for codegen when type is inferred from non-literal expressions
-    if (!node->as.var_decl.type && init_type && init_type->kind == TYPE_STRING &&
-        node->as.var_decl.init->type != NODE_STRING_LIT) {
-        node->as.var_decl.resolved_type = init_type;
+    record_inferred_var_decl_type(node, init_type);
+    maybe_mark_var_decl_rc_from_init(checker, node, sym, var_type);
+    maybe_mark_string_var_decl_rc(node, sym, var_type);
+}
+
+// Type-check a variable declaration: handles destructuring, type inference, and RC tracking
+static void check_var_decl_stmt(Checker* checker, Node* node) {
+    if (node->as.var_decl.destruct_pattern) {
+        check_destructuring_var_decl_stmt(checker, node);
+        return;
     }
 
-    // Store resolved type for function pointer inference (var fp = some_func)
-    if (!node->as.var_decl.type && init_type && init_type->kind == TYPE_FUNC) {
-        node->as.var_decl.resolved_type = init_type;
-    }
-
-    // Propagate RC tracking
-    if (sym && node->as.var_decl.init) {
-        if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
-            node->as.var_decl.is_rc         = 1;
-            node->as.var_decl.resolved_type = var_type;
-            sym->is_rc                      = 1;
-        }
-        if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
-            node->as.var_decl.is_rc         = 1;
-            node->as.var_decl.resolved_type = node->as.var_decl.init->as.new_expr.resolved_type;
-            sym->is_rc                      = 1;
-        } else if (node->as.var_decl.init->type == NODE_IDENT) {
-            Symbol* src = checker_lookup(checker, node->as.var_decl.init->as.ident.name);
-            if (src && src->is_rc) {
-                node->as.var_decl.is_rc         = 1;
-                node->as.var_decl.resolved_type = src->type;
-                sym->is_rc                      = 1;
-            }
-        } else if (node->as.var_decl.init->type == NODE_CALL && var_type) {
-            // Store resolved type for codegen type inference
-            node->as.var_decl.resolved_type = var_type;
-            if (type_is_rc_managed(var_type)) {
-                // Function call returning an RC-managed type transfers ownership
-                node->as.var_decl.is_rc = 1;
-                sym->is_rc              = 1;
-            }
-        } else if (node->as.var_decl.init->type == NODE_ENUM_VALUE &&
-                   node->as.var_decl.init->as.enum_value.is_module_call && var_type) {
-            // Module call (parsed as enum value): store resolved type for codegen
-            node->as.var_decl.resolved_type = var_type;
-            if (type_is_rc_managed(var_type)) {
-                node->as.var_decl.is_rc = 1;
-                sym->is_rc              = 1;
-            }
-        }
-    }
-
-    // All string variables are RC-managed (immortal literals are no-ops for inc/dec)
-    if (sym && var_type && var_type->kind == TYPE_STRING && !node->as.var_decl.is_rc) {
-        node->as.var_decl.is_rc         = 1;
-        node->as.var_decl.resolved_type = type_string;
-        sym->is_rc                      = 1;
-    }
+    check_normal_var_decl_stmt(checker, node);
 }
 
 // Type-check a for loop: init, condition, post-expression, and body
@@ -1003,6 +1054,18 @@ static int check_match_arm_body(Checker* checker, Node* arm, int is_expr_context
     return 1;
 }
 
+// Return 1 if any non-wildcard arm references the given enum variant name.
+static int match_has_variant_arm(Node* node, const char* variant_name) {
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        Node* arm = node->as.match_stmt.arms.nodes[a];
+        if (!arm->as.match_arm.is_wildcard && arm->as.match_arm.variant_name &&
+            strcmp(arm->as.match_arm.variant_name, variant_name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int is_expr_context) {
     Type* match_value_type = NULL;
     int   had_expr_error   = 0;
@@ -1023,17 +1086,8 @@ static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int
             continue;
         }
 
-        // Look up variant in enum type
         const char* variant_name = arm->as.match_arm.variant_name;
-        int         variant_idx  = -1;
-
-        for (int i = 0; i < expr_type->as.enm.value_count; i++) {
-            if (strcmp(expr_type->as.enm.value_names[i], variant_name) == 0) {
-                variant_idx = i;
-                break;
-            }
-        }
-
+        int         variant_idx  = type_enum_variant_index(expr_type, variant_name);
         if (variant_idx < 0) {
             check_error(checker, arm->line, arm->column, "'%s' is not a variant of enum '%s'",
                         variant_name, expr_type->as.enm.name);
@@ -1071,26 +1125,9 @@ static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int
     }
 
     // Exhaustiveness check: if no wildcard arm, every variant must be covered
-    int has_wildcard = 0;
-    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
-        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
-            has_wildcard = 1;
-            break;
-        }
-    }
-
-    if (!has_wildcard) {
+    if (!match_stmt_has_wildcard_arm(node)) {
         for (int i = 0; i < expr_type->as.enm.value_count; i++) {
-            int found = 0;
-            for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
-                Node* arm = node->as.match_stmt.arms.nodes[a];
-                if (!arm->as.match_arm.is_wildcard && arm->as.match_arm.variant_name &&
-                    strcmp(arm->as.match_arm.variant_name, expr_type->as.enm.value_names[i]) == 0) {
-                    found = 1;
-                    break;
-                }
-            }
-            if (!found) {
+            if (!match_has_variant_arm(node, expr_type->as.enm.value_names[i])) {
                 check_error(checker, node->line, node->column,
                             "Match is not exhaustive: missing variant '%s'",
                             expr_type->as.enm.value_names[i]);
@@ -1098,16 +1135,16 @@ static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int
         }
     }
 
-    if (is_expr_context) {
-        if (!match_value_type || had_expr_error) {
-            node->as.match_stmt.resolved_value_type = type_error;
-            return type_error;
-        }
-        node->as.match_stmt.resolved_value_type = match_value_type;
-        return match_value_type;
+    if (!is_expr_context) {
+        return type_void;
     }
 
-    return type_void;
+    if (!match_value_type || had_expr_error) {
+        node->as.match_stmt.resolved_value_type = type_error;
+        return type_error;
+    }
+    node->as.match_stmt.resolved_value_type = match_value_type;
+    return match_value_type;
 }
 
 // Compare two literal pattern nodes for duplicate detection
@@ -1249,6 +1286,155 @@ static void check_match_stmt(Checker* checker, Node* node) {
 // Statement checking
 // =============================================================================
 
+static void check_block_stmt(Checker* checker, Node* node) {
+    checker_push_scope(checker);
+    for (int i = 0; i < node->as.block.stmts.count; i++) {
+        check_statement(checker, node->as.block.stmts.nodes[i]);
+    }
+    checker_pop_scope(checker);
+}
+
+static void check_if_stmt(Checker* checker, Node* node) {
+    Type* cond = check_expression(checker, node->as.if_stmt.cond);
+    if (cond->kind != TYPE_BOOL && cond->kind != TYPE_ERROR) {
+        check_error(checker, node->as.if_stmt.cond->line, node->as.if_stmt.cond->column,
+                    "If condition must be bool, got '%s'", type_name(cond));
+    }
+
+    check_statement(checker, node->as.if_stmt.then_block);
+    if (node->as.if_stmt.else_block) {
+        check_statement(checker, node->as.if_stmt.else_block);
+    }
+}
+
+static void check_while_stmt(Checker* checker, Node* node) {
+    Type* cond = check_expression(checker, node->as.while_stmt.cond);
+    if (cond->kind != TYPE_BOOL && cond->kind != TYPE_ERROR) {
+        check_error(checker, node->as.while_stmt.cond->line, node->as.while_stmt.cond->column,
+                    "While condition must be bool, got '%s'", type_name(cond));
+    }
+
+    int was_in_loop  = checker->in_loop;
+    checker->in_loop = 1;
+    check_statement(checker, node->as.while_stmt.body);
+    checker->in_loop = was_in_loop;
+}
+
+static void check_break_stmt(Checker* checker, Node* node) {
+    if (!checker->in_loop) {
+        check_error(checker, node->line, node->column, "Break outside of loop");
+    }
+}
+
+static void check_continue_stmt(Checker* checker, Node* node) {
+    if (!checker->in_loop) {
+        check_error(checker, node->line, node->column, "Continue outside of loop");
+    }
+}
+
+static void check_defer_stmt(Checker* checker, Node* node) {
+    if (!checker->current_func_return) {
+        check_error(checker, node->line, node->column, "Defer outside of function");
+        return;
+    }
+    check_statement(checker, node->as.defer_stmt.stmt);
+}
+
+static int check_if_let_variant(Checker* checker, Node* node, Type* expr_type,
+                                int* variant_idx_out) {
+    const char* variant_name = node->as.if_let_stmt.variant_name;
+    int         variant_idx  = type_enum_variant_index(expr_type, variant_name);
+    if (variant_idx < 0) {
+        check_error(checker, node->line, node->column, "'%s' is not a variant of enum '%s'",
+                    variant_name, expr_type->as.enm.name);
+        return 0;
+    }
+
+    // If qualified name given, verify it matches
+    if (node->as.if_let_stmt.enum_name &&
+        strcmp(node->as.if_let_stmt.enum_name, expr_type->as.enm.name) != 0) {
+        check_error(checker, node->line, node->column,
+                    "Enum name '%s' does not match expression type '%s'",
+                    node->as.if_let_stmt.enum_name, expr_type->as.enm.name);
+        return 0;
+    }
+
+    *variant_idx_out = variant_idx;
+    return 1;
+}
+
+static int check_if_let_binding_count(Checker* checker, Node* node, Type* expr_type,
+                                      int variant_idx) {
+    // Check binding count: allow bare check (0 bindings) or exact match
+    int         expected_bindings = expr_type->as.enm.variant_type_counts[variant_idx];
+    const char* variant_name      = node->as.if_let_stmt.variant_name;
+    if (node->as.if_let_stmt.binding_count != 0 &&
+        node->as.if_let_stmt.binding_count != expected_bindings) {
+        check_error(checker, node->line, node->column, "Variant '%s' expects %d binding(s), got %d",
+                    variant_name, expected_bindings, node->as.if_let_stmt.binding_count);
+        return 0;
+    }
+    return 1;
+}
+
+static void check_if_let_extra_cond(Checker* checker, Node* node) {
+    // Type-check optional && condition (bindings are in scope)
+    if (node->as.if_let_stmt.extra_cond) {
+        Type* cond_type = check_expression(checker, node->as.if_let_stmt.extra_cond);
+        if (cond_type->kind != TYPE_ERROR && cond_type->kind != TYPE_BOOL) {
+            check_error(checker, node->as.if_let_stmt.extra_cond->line,
+                        node->as.if_let_stmt.extra_cond->column,
+                        "'is' pattern '&&' condition must be bool, got '%s'", type_name(cond_type));
+        }
+    }
+}
+
+static void check_if_let_then_scope(Checker* checker, Node* node, Type* expr_type,
+                                    int variant_idx) {
+    checker_push_scope(checker);
+    for (int j = 0; j < node->as.if_let_stmt.binding_count; j++) {
+        Type* binding_type = expr_type->as.enm.variant_types[variant_idx][j];
+        checker_define(checker, node->as.if_let_stmt.bindings[j], SYM_VAR, binding_type, 0, 0,
+                       NULL);
+    }
+
+    check_if_let_extra_cond(checker, node);
+    check_statement(checker, node->as.if_let_stmt.then_block);
+    checker_pop_scope(checker);
+}
+
+static void check_if_let_stmt(Checker* checker, Node* node) {
+    // Type-check expression
+    Type* expr_type = check_expression(checker, node->as.if_let_stmt.expr);
+    if (expr_type->kind == TYPE_ERROR) {
+        return;
+    }
+
+    // Must be an enum type
+    if (expr_type->kind != TYPE_ENUM) {
+        check_error(checker, node->line, node->column,
+                    "'is' pattern requires an enum type, got '%s'", type_name(expr_type));
+        return;
+    }
+
+    node->as.if_let_stmt.resolved_type = expr_type;
+
+    int variant_idx = -1;
+    if (!check_if_let_variant(checker, node, expr_type, &variant_idx)) {
+        return;
+    }
+    if (!check_if_let_binding_count(checker, node, expr_type, variant_idx)) {
+        return;
+    }
+
+    check_if_let_then_scope(checker, node, expr_type, variant_idx);
+
+    // Check else_block (no bindings in scope)
+    if (node->as.if_let_stmt.else_block) {
+        check_statement(checker, node->as.if_let_stmt.else_block);
+    }
+}
+
 // Dispatch statement type-checking based on node type
 void check_statement(Checker* checker, Node* node) {
     if (!node)
@@ -1264,38 +1450,16 @@ void check_statement(Checker* checker, Node* node) {
         break;
 
     case NODE_BLOCK:
-        checker_push_scope(checker);
-        for (int i = 0; i < node->as.block.stmts.count; i++) {
-            check_statement(checker, node->as.block.stmts.nodes[i]);
-        }
-        checker_pop_scope(checker);
+        check_block_stmt(checker, node);
         break;
 
-    case NODE_IF: {
-        Type* cond = check_expression(checker, node->as.if_stmt.cond);
-        if (cond->kind != TYPE_BOOL && cond->kind != TYPE_ERROR) {
-            check_error(checker, node->as.if_stmt.cond->line, node->as.if_stmt.cond->column,
-                        "If condition must be bool, got '%s'", type_name(cond));
-        }
-        check_statement(checker, node->as.if_stmt.then_block);
-        if (node->as.if_stmt.else_block) {
-            check_statement(checker, node->as.if_stmt.else_block);
-        }
+    case NODE_IF:
+        check_if_stmt(checker, node);
         break;
-    }
 
-    case NODE_WHILE: {
-        Type* cond = check_expression(checker, node->as.while_stmt.cond);
-        if (cond->kind != TYPE_BOOL && cond->kind != TYPE_ERROR) {
-            check_error(checker, node->as.while_stmt.cond->line, node->as.while_stmt.cond->column,
-                        "While condition must be bool, got '%s'", type_name(cond));
-        }
-        int was_in_loop  = checker->in_loop;
-        checker->in_loop = 1;
-        check_statement(checker, node->as.while_stmt.body);
-        checker->in_loop = was_in_loop;
+    case NODE_WHILE:
+        check_while_stmt(checker, node);
         break;
-    }
 
     case NODE_FOR:
         check_for_stmt(checker, node);
@@ -1310,105 +1474,24 @@ void check_statement(Checker* checker, Node* node) {
         break;
 
     case NODE_BREAK:
-        if (!checker->in_loop) {
-            check_error(checker, node->line, node->column, "Break outside of loop");
-        }
+        check_break_stmt(checker, node);
         break;
 
     case NODE_CONTINUE:
-        if (!checker->in_loop) {
-            check_error(checker, node->line, node->column, "Continue outside of loop");
-        }
+        check_continue_stmt(checker, node);
         break;
 
     case NODE_DEFER:
-        if (!checker->current_func_return) {
-            check_error(checker, node->line, node->column, "Defer outside of function");
-            return;
-        }
-        check_statement(checker, node->as.defer_stmt.stmt);
+        check_defer_stmt(checker, node);
         break;
 
     case NODE_MATCH:
         check_match_stmt(checker, node);
         break;
 
-    case NODE_IF_LET: {
-        // Type-check expression
-        Type* expr_type = check_expression(checker, node->as.if_let_stmt.expr);
-        if (expr_type->kind == TYPE_ERROR)
-            break;
-
-        // Must be an enum type
-        if (expr_type->kind != TYPE_ENUM) {
-            check_error(checker, node->line, node->column,
-                        "'is' pattern requires an enum type, got '%s'", type_name(expr_type));
-            break;
-        }
-
-        node->as.if_let_stmt.resolved_type = expr_type;
-
-        // Look up variant in enum type
-        const char* variant_name = node->as.if_let_stmt.variant_name;
-        int         variant_idx  = -1;
-        for (int i = 0; i < expr_type->as.enm.value_count; i++) {
-            if (strcmp(expr_type->as.enm.value_names[i], variant_name) == 0) {
-                variant_idx = i;
-                break;
-            }
-        }
-        if (variant_idx < 0) {
-            check_error(checker, node->line, node->column, "'%s' is not a variant of enum '%s'",
-                        variant_name, expr_type->as.enm.name);
-            break;
-        }
-
-        // If qualified name given, verify it matches
-        if (node->as.if_let_stmt.enum_name) {
-            if (strcmp(node->as.if_let_stmt.enum_name, expr_type->as.enm.name) != 0) {
-                check_error(checker, node->line, node->column,
-                            "Enum name '%s' does not match expression type '%s'",
-                            node->as.if_let_stmt.enum_name, expr_type->as.enm.name);
-                break;
-            }
-        }
-
-        // Check binding count: allow bare check (0 bindings) or exact match
-        int expected_bindings = expr_type->as.enm.variant_type_counts[variant_idx];
-        if (node->as.if_let_stmt.binding_count != 0 &&
-            node->as.if_let_stmt.binding_count != expected_bindings) {
-            check_error(checker, node->line, node->column,
-                        "Variant '%s' expects %d binding(s), got %d", variant_name,
-                        expected_bindings, node->as.if_let_stmt.binding_count);
-            break;
-        }
-
-        // Push scope, define bindings, check extra_cond and then_block, pop scope
-        checker_push_scope(checker);
-        for (int j = 0; j < node->as.if_let_stmt.binding_count; j++) {
-            Type* binding_type = expr_type->as.enm.variant_types[variant_idx][j];
-            checker_define(checker, node->as.if_let_stmt.bindings[j], SYM_VAR, binding_type, 0, 0,
-                           NULL);
-        }
-        // Type-check optional && condition (bindings are in scope)
-        if (node->as.if_let_stmt.extra_cond) {
-            Type* cond_type = check_expression(checker, node->as.if_let_stmt.extra_cond);
-            if (cond_type->kind != TYPE_ERROR && cond_type->kind != TYPE_BOOL) {
-                check_error(checker, node->as.if_let_stmt.extra_cond->line,
-                            node->as.if_let_stmt.extra_cond->column,
-                            "'is' pattern '&&' condition must be bool, got '%s'",
-                            type_name(cond_type));
-            }
-        }
-        check_statement(checker, node->as.if_let_stmt.then_block);
-        checker_pop_scope(checker);
-
-        // Check else_block (no bindings in scope)
-        if (node->as.if_let_stmt.else_block) {
-            check_statement(checker, node->as.if_let_stmt.else_block);
-        }
+    case NODE_IF_LET:
+        check_if_let_stmt(checker, node);
         break;
-    }
 
     default:
         check_error(checker, node->line, node->column, "Unknown statement type %d", node->type);
@@ -2566,6 +2649,112 @@ static const CheckerPassSpec k_checker_pass_specs[] = {
     },
 };
 
+// Report a missing standalone receiver method for a deferred trait check.
+static void report_missing_deferred_trait_method(Checker* checker, DeferredTraitCheck* dc) {
+    check_error(checker, dc->line, dc->col, "No standalone method '%s' found for type '%s'",
+                dc->method_name, dc->type_name);
+}
+
+// Return whether a generic definition contains a body-backed method with the given name.
+static int generic_def_has_method_with_body(GenericDef* def, const char* method_name) {
+    for (int j = 0; j < def->method_count; j++) {
+        Node* m = def->methods[j];
+        if (strcmp(m->as.func_decl.name, method_name) == 0 && m->as.func_decl.body != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Verify deferred method existence for generic impl targets.
+static void verify_generic_deferred_trait_check(Checker* checker, DeferredTraitCheck* dc) {
+    GenericDef* def = lookup_generic_def(checker, dc->type_name);
+    if (!def || !generic_def_has_method_with_body(def, dc->method_name)) {
+        report_missing_deferred_trait_method(checker, dc);
+    }
+}
+
+// Look up a non-generic standalone method symbol by its receiver-qualified mangled name.
+static Symbol* lookup_deferred_standalone_method(Checker* checker, DeferredTraitCheck* dc) {
+    char mangled[256];
+    snprintf(mangled, sizeof(mangled), "%s_%s", dc->type_name, dc->method_name);
+    return checker_lookup(checker, mangled);
+}
+
+// Verify non-generic deferred method function signature compatibility against the trait
+// expectation.
+static int verify_deferred_method_signature(Checker* checker, DeferredTraitCheck* dc,
+                                            Type* actual_type) {
+    Type* expected = dc->expected_type;
+
+    if (actual_type->kind != TYPE_FUNC || expected->kind != TYPE_FUNC) {
+        return 0;
+    }
+
+    if (!type_equals(actual_type->as.func.return_type, expected->as.func.return_type)) {
+        check_error(checker, dc->line, dc->col,
+                    "Method '%s' on '%s' return type mismatch: trait expects '%s', got '%s'",
+                    dc->method_name, dc->type_name, type_name(expected->as.func.return_type),
+                    type_name(actual_type->as.func.return_type));
+        return 0;
+    }
+
+    if (actual_type->as.func.param_count != expected->as.func.param_count) {
+        check_error(checker, dc->line, dc->col,
+                    "Method '%s' on '%s' parameter count mismatch: trait expects %d, got %d",
+                    dc->method_name, dc->type_name, expected->as.func.param_count,
+                    actual_type->as.func.param_count);
+        return 0;
+    }
+
+    for (int p = 0; p < expected->as.func.param_count; p++) {
+        if (!type_equals(actual_type->as.func.param_types[p], expected->as.func.param_types[p])) {
+            check_error(
+                checker, dc->line, dc->col,
+                "Method '%s' on '%s' parameter %d type mismatch: trait expects '%s', got '%s'",
+                dc->method_name, dc->type_name, p + 1, type_name(expected->as.func.param_types[p]),
+                type_name(actual_type->as.func.param_types[p]));
+        }
+    }
+
+    return 1;
+}
+
+// Verify receiver mutability for a deferred method against the struct method metadata.
+static void verify_deferred_method_constness(Checker* checker, DeferredTraitCheck* dc) {
+    Symbol* type_sym = checker_lookup(checker, dc->type_name);
+    if (!type_sym || type_sym->kind != SYM_TYPE || type_sym->type->kind != TYPE_STRUCT) {
+        return;
+    }
+
+    Type* st = type_sym->type;
+    for (int j = 0; j < st->as.struc.method_count; j++) {
+        if (strcmp(st->as.struc.method_names[j], dc->method_name) == 0) {
+            if (st->as.struc.method_is_const[j] != dc->is_const) {
+                check_error(checker, dc->line, dc->col,
+                            "Method '%s' on '%s' receiver mutability mismatch", dc->method_name,
+                            dc->type_name);
+            }
+            return;
+        }
+    }
+}
+
+// Verify deferred trait checks for non-generic impl targets.
+static void verify_non_generic_deferred_trait_check(Checker* checker, DeferredTraitCheck* dc) {
+    Symbol* sym = lookup_deferred_standalone_method(checker, dc);
+    if (!sym) {
+        report_missing_deferred_trait_method(checker, dc);
+        return;
+    }
+
+    if (!verify_deferred_method_signature(checker, dc, sym->type)) {
+        return;
+    }
+
+    verify_deferred_method_constness(checker, dc);
+}
+
 // Verify deferred trait checks: ensure body-less methods in impl blocks have
 // matching standalone receiver methods defined elsewhere.
 static void verify_deferred_trait_checks(Checker* checker) {
@@ -2573,96 +2762,11 @@ static void verify_deferred_trait_checks(Checker* checker) {
         DeferredTraitCheck* dc = &checker->traits.deferred_checks[i];
 
         if (dc->is_generic) {
-            // For generic types, verify the GenericDef has a method with matching name and body
-            GenericDef* def = lookup_generic_def(checker, dc->type_name);
-            if (!def) {
-                check_error(checker, dc->line, dc->col,
-                            "No standalone method '%s' found for type '%s'", dc->method_name,
-                            dc->type_name);
-                continue;
-            }
-            int found = 0;
-            for (int j = 0; j < def->method_count; j++) {
-                Node* m = def->methods[j];
-                if (strcmp(m->as.func_decl.name, dc->method_name) == 0 &&
-                    m->as.func_decl.body != NULL) {
-                    found = 1;
-                    break;
-                }
-            }
-            if (!found) {
-                check_error(checker, dc->line, dc->col,
-                            "No standalone method '%s' found for type '%s'", dc->method_name,
-                            dc->type_name);
-            }
+            verify_generic_deferred_trait_check(checker, dc);
             continue;
         }
 
-        // Non-generic: look up mangled name in symbol table
-        char mangled[256];
-        snprintf(mangled, sizeof(mangled), "%s_%s", dc->type_name, dc->method_name);
-
-        Symbol* sym = checker_lookup(checker, mangled);
-        if (!sym) {
-            check_error(checker, dc->line, dc->col, "No standalone method '%s' found for type '%s'",
-                        dc->method_name, dc->type_name);
-            continue;
-        }
-
-        // Compare function signatures
-        Type* actual_type = sym->type;
-        Type* expected    = dc->expected_type;
-
-        if (actual_type->kind != TYPE_FUNC || expected->kind != TYPE_FUNC) {
-            continue;
-        }
-
-        // Check return type
-        if (!type_equals(actual_type->as.func.return_type, expected->as.func.return_type)) {
-            check_error(checker, dc->line, dc->col,
-                        "Method '%s' on '%s' return type mismatch: trait expects '%s', got '%s'",
-                        dc->method_name, dc->type_name, type_name(expected->as.func.return_type),
-                        type_name(actual_type->as.func.return_type));
-            continue;
-        }
-
-        // Check parameter count
-        if (actual_type->as.func.param_count != expected->as.func.param_count) {
-            check_error(checker, dc->line, dc->col,
-                        "Method '%s' on '%s' parameter count mismatch: trait expects %d, got %d",
-                        dc->method_name, dc->type_name, expected->as.func.param_count,
-                        actual_type->as.func.param_count);
-            continue;
-        }
-
-        // Check parameter types
-        for (int p = 0; p < expected->as.func.param_count; p++) {
-            if (!type_equals(actual_type->as.func.param_types[p],
-                             expected->as.func.param_types[p])) {
-                check_error(
-                    checker, dc->line, dc->col,
-                    "Method '%s' on '%s' parameter %d type mismatch: trait expects '%s', got '%s'",
-                    dc->method_name, dc->type_name, p + 1,
-                    type_name(expected->as.func.param_types[p]),
-                    type_name(actual_type->as.func.param_types[p]));
-            }
-        }
-
-        // Check const-ness: look up the struct's method list
-        Symbol* type_sym = checker_lookup(checker, dc->type_name);
-        if (type_sym && type_sym->kind == SYM_TYPE && type_sym->type->kind == TYPE_STRUCT) {
-            Type* st = type_sym->type;
-            for (int j = 0; j < st->as.struc.method_count; j++) {
-                if (strcmp(st->as.struc.method_names[j], dc->method_name) == 0) {
-                    if (st->as.struc.method_is_const[j] != dc->is_const) {
-                        check_error(checker, dc->line, dc->col,
-                                    "Method '%s' on '%s' receiver mutability mismatch",
-                                    dc->method_name, dc->type_name);
-                    }
-                    break;
-                }
-            }
-        }
+        verify_non_generic_deferred_trait_check(checker, dc);
     }
 }
 

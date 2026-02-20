@@ -178,6 +178,19 @@ void nodelist_free(NodeList* list) {
     list->capacity = 0;
 }
 
+int match_stmt_has_wildcard_arm(Node* node) {
+    if (!node || node->type != NODE_MATCH) {
+        return 0;
+    }
+    for (int i = 0; i < node->as.match_stmt.arms.count; i++) {
+        Node* arm = node->as.match_stmt.arms.nodes[i];
+        if (arm && arm->type == NODE_MATCH_ARM && arm->as.match_arm.is_wildcard) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void node_free(Node* node) {
     if (!node)
         return;
