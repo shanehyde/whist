@@ -1114,6 +1114,200 @@ static Type* resolve_generic_type_alias(Checker* checker, Node* type_node, Gener
     return result;
 }
 
+static int base_generic_has_trait_impl(Checker* checker, const char* trait_name,
+                                       const char* base_name) {
+    for (int ti = 0; ti < checker->traits.impl_count; ti++) {
+        if (strcmp(checker->traits.impls[ti].trait_name, trait_name) == 0 &&
+            strcmp(checker->traits.impls[ti].type_name, base_name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void instantiate_struct_fields(Checker* checker, Node* decl, Type* struct_type) {
+    int field_count = decl->as.struct_decl.fields.count;
+
+    struct_type->as.struc.field_count      = field_count;
+    struct_type->as.struc.field_names      = xmalloc(field_count * sizeof(char*));
+    struct_type->as.struc.field_types      = xmalloc(field_count * sizeof(Type*));
+    struct_type->as.struc.field_is_const   = xmalloc(field_count * sizeof(int));
+    struct_type->as.struc.field_is_private = xmalloc(field_count * sizeof(int));
+
+    for (int i = 0; i < field_count; i++) {
+        Node* field                               = decl->as.struct_decl.fields.nodes[i];
+        struct_type->as.struc.field_names[i]      = xstrdup(field->as.field.name);
+        struct_type->as.struc.field_types[i]      = resolve_type(checker, field->as.field.type);
+        struct_type->as.struc.field_is_const[i]   = field->as.field.is_const;
+        struct_type->as.struc.field_is_private[i] = field->as.field.is_private;
+    }
+}
+
+static void propagate_struct_instance_flags(Checker* checker, GenericDef* def,
+                                            const char* base_name, Type* struct_type) {
+    for (int i = 0; i < struct_type->as.struc.field_count; i++) {
+        Type* ftype = struct_type->as.struc.field_types[i];
+        if (type_is_rc_managed(ftype)) {
+            struct_type->as.struc.has_rc_fields = 1;
+            break;
+        }
+    }
+
+    if (base_generic_has_trait_impl(checker, "Drop", base_name)) {
+        struct_type->as.struc.has_drop = 1;
+    }
+    if (base_generic_has_trait_impl(checker, "Eq", base_name)) {
+        struct_type->as.struc.has_eq = 1;
+    }
+    if (def->has_init) {
+        struct_type->as.struc.has_init = 1;
+    }
+}
+
+static void allocate_instance_method_bodies(GenericInstance* inst, int method_count) {
+    if (inst && method_count > 0) {
+        inst->method_bodies     = xcalloc(method_count, sizeof(Node*));
+        inst->method_body_count = method_count;
+    }
+}
+
+static void build_combined_method_substitution(GenericDef* def, Type** resolved_args,
+                                               char** method_params, Type** method_args,
+                                               int method_count, char*** out_params,
+                                               Type*** out_args, int* out_count) {
+    int    combined_count  = def->type_param_count + method_count;
+    char** combined_params = xmalloc(combined_count * sizeof(char*));
+    Type** combined_args   = xmalloc(combined_count * sizeof(Type*));
+
+    for (int i = 0; i < def->type_param_count; i++) {
+        combined_params[i] = def->type_params[i];
+        combined_args[i]   = resolved_args[i];
+    }
+    for (int i = 0; i < method_count; i++) {
+        combined_params[def->type_param_count + i] = method_params[i];
+        combined_args[def->type_param_count + i]   = method_args[i];
+    }
+
+    *out_params = combined_params;
+    *out_args   = combined_args;
+    *out_count  = combined_count;
+}
+
+static void resolve_method_signature(Checker* checker, func_decl_node* mfdn,
+                                     Type*** out_param_types, int* out_param_count,
+                                     Type** out_return_type) {
+    int    param_count = mfdn->params.count;
+    Type** param_types = NULL;
+    if (param_count > 0) {
+        param_types = xmalloc(param_count * sizeof(Type*));
+        for (int p = 0; p < param_count; p++) {
+            Node* param = mfdn->params.nodes[p];
+            param_types[p] =
+                param->as.param.type ? resolve_type(checker, param->as.param.type) : type_void;
+        }
+    }
+
+    *out_param_types = param_types;
+    *out_param_count = param_count;
+    *out_return_type = mfdn->return_type ? resolve_type(checker, mfdn->return_type) : type_void;
+}
+
+static void check_instantiated_struct_method_body(Checker* checker, GenericInstance* inst,
+                                                  int index, func_decl_node* mfdn,
+                                                  Type* struct_type, Type** param_types,
+                                                  int param_count, Type* return_type,
+                                                  const char* base_name) {
+    if (!mfdn->body) {
+        return;
+    }
+
+    // Clone the method body so each instantiation gets its own copy.
+    // This prevents checker-set flags (is_string_op, struct_name, etc.)
+    // from one instantiation affecting another.
+    Node* body_clone = node_clone(mfdn->body);
+
+    // Store cloned body on the instance for codegen to use.
+    if (inst && index < inst->method_body_count) {
+        inst->method_bodies[index] = body_clone;
+    }
+
+    checker_push_scope(checker);
+    Type* old_return             = checker->current_func_return;
+    checker->current_func_return = return_type;
+
+    char** old_accessible_modules               = checker->modules.current_accessible_modules;
+    int    old_accessible_modules_count         = checker->modules.current_accessible_modules_count;
+    checker->modules.current_accessible_modules = mfdn->accessible_modules;
+    checker->modules.current_accessible_modules_count = mfdn->accessible_modules_count;
+
+    // Set private field access context for generic method body.
+    const char* old_receiver         = checker->current_method_receiver;
+    checker->current_method_receiver = base_name;
+
+    // Inject 'self' into scope.
+    checker_define(checker, "self", SYM_VAR, struct_type, mfdn->receiver_is_const, 0, NULL);
+
+    // Define parameters.
+    for (int p = 0; p < param_count; p++) {
+        Node* param = mfdn->params.nodes[p];
+        checker_define(checker, param->as.param.name, SYM_VAR, param_types[p],
+                       param->as.param.is_const, 0, NULL);
+    }
+
+    // Check body statements on the cloned body.
+    for (int s = 0; s < body_clone->as.block.stmts.count; s++) {
+        check_statement(checker, body_clone->as.block.stmts.nodes[s]);
+    }
+
+    checker->modules.current_accessible_modules       = old_accessible_modules;
+    checker->modules.current_accessible_modules_count = old_accessible_modules_count;
+    checker->current_method_receiver                  = old_receiver;
+    checker->current_func_return                      = old_return;
+    checker_pop_scope(checker);
+}
+
+static Type* register_struct_method_type(Type* struct_type, func_decl_node* mfdn,
+                                         Type** param_types, int param_count, Type* return_type) {
+    Type* method_type = type_func(param_types, param_count, return_type, 0);
+
+    int n = struct_type->as.struc.method_count;
+    struct_type->as.struc.method_names =
+        xrealloc(struct_type->as.struc.method_names, (n + 1) * sizeof(char*));
+    struct_type->as.struc.method_types =
+        xrealloc(struct_type->as.struc.method_types, (n + 1) * sizeof(Type*));
+    struct_type->as.struc.method_is_const =
+        xrealloc(struct_type->as.struc.method_is_const, (n + 1) * sizeof(int));
+
+    struct_type->as.struc.method_names[n]    = xstrdup(mfdn->name);
+    struct_type->as.struc.method_types[n]    = method_type;
+    struct_type->as.struc.method_is_const[n] = mfdn->receiver_is_const;
+    struct_type->as.struc.method_count       = n + 1;
+    return method_type;
+}
+
+static void register_struct_method_symbol(Checker* checker, func_decl_node* mfdn,
+                                          Type** resolved_args, int arg_count, Type* method_type) {
+    char*  method_mangled   = type_mangle_generic(mfdn->receiver_type, resolved_args, arg_count);
+    size_t method_name_len  = strlen(method_mangled) + 1 + strlen(mfdn->name) + 1;
+    char*  full_method_name = xmalloc(method_name_len);
+    snprintf(full_method_name, method_name_len, "%s_%s", method_mangled, mfdn->name);
+
+    checker_define(checker, full_method_name, SYM_FUNC, method_type, 1, mfdn->is_public,
+                   checker->modules.current_module);
+
+    free(method_mangled);
+    free(full_method_name);
+}
+
+static void free_method_pattern_bindings(char** method_params, Type** method_args,
+                                         int method_count) {
+    for (int i = 0; i < method_count; i++) {
+        free(method_params[i]);
+    }
+    free(method_params);
+    free(method_args);
+}
+
 // Instantiate a generic struct: substitute type params into fields and methods,
 // type-check method bodies, and register the concrete struct in the symbol table
 static Type* instantiate_generic_struct(Checker* checker, Node* type_node, GenericDef* def,
@@ -1138,69 +1332,17 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
     checker->generics.current_type_args        = resolved_args;
     checker->generics.current_type_param_count = def->type_param_count;
 
-    // Resolve field types with substitution
-    Node* decl        = def->decl;
-    int   field_count = decl->as.struct_decl.fields.count;
+    Node* decl = def->decl;
+    instantiate_struct_fields(checker, decl, struct_type);
+    propagate_struct_instance_flags(checker, def, base_name, struct_type);
 
-    struct_type->as.struc.field_count      = field_count;
-    struct_type->as.struc.field_names      = xmalloc(field_count * sizeof(char*));
-    struct_type->as.struc.field_types      = xmalloc(field_count * sizeof(Type*));
-    struct_type->as.struc.field_is_const   = xmalloc(field_count * sizeof(int));
-    struct_type->as.struc.field_is_private = xmalloc(field_count * sizeof(int));
-
-    for (int i = 0; i < field_count; i++) {
-        Node* field                               = decl->as.struct_decl.fields.nodes[i];
-        struct_type->as.struc.field_names[i]      = xstrdup(field->as.field.name);
-        struct_type->as.struc.field_types[i]      = resolve_type(checker, field->as.field.type);
-        struct_type->as.struc.field_is_const[i]   = field->as.field.is_const;
-        struct_type->as.struc.field_is_private[i] = field->as.field.is_private;
-    }
-
-    // Check if any field is an RC-managed type (struct, Vec, or enum with RC fields)
-    for (int i = 0; i < field_count; i++) {
-        Type* ftype = struct_type->as.struc.field_types[i];
-        if (type_is_rc_managed(ftype)) {
-            struct_type->as.struc.has_rc_fields = 1;
-            break;
-        }
-    }
-
-    // Check if the base generic has a Drop trait impl and propagate to instantiation
-    for (int ti = 0; ti < checker->traits.impl_count; ti++) {
-        if (strcmp(checker->traits.impls[ti].trait_name, "Drop") == 0 &&
-            strcmp(checker->traits.impls[ti].type_name, base_name) == 0) {
-            struct_type->as.struc.has_drop = 1;
-            break;
-        }
-    }
-
-    // Check if the base generic has an Eq trait impl and propagate to instantiation
-    for (int ti = 0; ti < checker->traits.impl_count; ti++) {
-        if (strcmp(checker->traits.impls[ti].trait_name, "Eq") == 0 &&
-            strcmp(checker->traits.impls[ti].type_name, base_name) == 0) {
-            struct_type->as.struc.has_eq = 1;
-            break;
-        }
-    }
-
-    // Propagate has_init from generic def to instantiation
-    if (def->has_init) {
-        struct_type->as.struc.has_init = 1;
-    }
-
-    // Allocate per-instantiation method body storage
     GenericInstance* inst = lookup_generic_instance(checker, mangled);
-    if (inst && def->method_count > 0) {
-        inst->method_bodies     = xcalloc(def->method_count, sizeof(Node*));
-        inst->method_body_count = def->method_count;
-    }
+    allocate_instance_method_bodies(inst, def->method_count);
 
-    // Instantiate methods on the generic struct
     for (int m = 0; m < def->method_count; m++) {
         Node*           method_decl = def->methods[m];
         func_decl_node* mfdn        = &method_decl->as.func_decl;
 
-        // Try to match method's receiver pattern against concrete args
         char** method_params = NULL;
         Type** method_args   = NULL;
         int    method_count  = 0;
@@ -1211,130 +1353,37 @@ static Type* instantiate_generic_struct(Checker* checker, Node* type_node, Gener
             continue;
         }
 
-        // Combine struct params with method-specific bindings for substitution
-        int    combined_count  = def->type_param_count + method_count;
-        char** combined_params = xmalloc(combined_count * sizeof(char*));
-        Type** combined_args   = xmalloc(combined_count * sizeof(Type*));
+        char** combined_params = NULL;
+        Type** combined_args   = NULL;
+        int    combined_count  = 0;
+        build_combined_method_substitution(def, resolved_args, method_params, method_args,
+                                           method_count, &combined_params, &combined_args,
+                                           &combined_count);
 
-        // First, add the struct's type params
-        for (int i = 0; i < def->type_param_count; i++) {
-            combined_params[i] = def->type_params[i];
-            combined_args[i]   = resolved_args[i];
-        }
-        // Then add method-specific bindings
-        for (int i = 0; i < method_count; i++) {
-            combined_params[def->type_param_count + i] = method_params[i];
-            combined_args[def->type_param_count + i]   = method_args[i];
-        }
-
-        // Set up combined substitution context
         checker->generics.current_type_params      = combined_params;
         checker->generics.current_type_args        = combined_args;
         checker->generics.current_type_param_count = combined_count;
 
-        // Build function type with substituted types
-        int    param_count = mfdn->params.count;
         Type** param_types = NULL;
-        if (param_count > 0) {
-            param_types = xmalloc(param_count * sizeof(Type*));
-            for (int p = 0; p < param_count; p++) {
-                Node* param = mfdn->params.nodes[p];
-                param_types[p] =
-                    param->as.param.type ? resolve_type(checker, param->as.param.type) : type_void;
-            }
-        }
+        int    param_count = 0;
+        Type*  return_type = NULL;
+        resolve_method_signature(checker, mfdn, &param_types, &param_count, &return_type);
 
-        Type* return_type =
-            mfdn->return_type ? resolve_type(checker, mfdn->return_type) : type_void;
-
-        // Type-check the method body with the combined substitution context
-        if (mfdn->body) {
-            // Clone the method body so each instantiation gets its own copy.
-            // This prevents checker-set flags (is_string_op, struct_name, etc.)
-            // from one instantiation affecting another.
-            Node* body_clone = node_clone(mfdn->body);
-
-            // Store cloned body on the instance for codegen to use
-            if (inst && m < inst->method_body_count) {
-                inst->method_bodies[m] = body_clone;
-            }
-
-            checker_push_scope(checker);
-            Type* old_return             = checker->current_func_return;
-            checker->current_func_return = return_type;
-
-            char** old_accessible_modules       = checker->modules.current_accessible_modules;
-            int    old_accessible_modules_count = checker->modules.current_accessible_modules_count;
-            checker->modules.current_accessible_modules       = mfdn->accessible_modules;
-            checker->modules.current_accessible_modules_count = mfdn->accessible_modules_count;
-
-            // Set private field access context for generic method body
-            const char* old_receiver         = checker->current_method_receiver;
-            checker->current_method_receiver = base_name;
-
-            // Inject 'self' into scope
-            checker_define(checker, "self", SYM_VAR, struct_type, mfdn->receiver_is_const, 0, NULL);
-
-            // Define parameters
-            for (int p = 0; p < param_count; p++) {
-                Node* param = mfdn->params.nodes[p];
-                checker_define(checker, param->as.param.name, SYM_VAR, param_types[p],
-                               param->as.param.is_const, 0, NULL);
-            }
-
-            // Check body statements on the cloned body
-            for (int s = 0; s < body_clone->as.block.stmts.count; s++) {
-                check_statement(checker, body_clone->as.block.stmts.nodes[s]);
-            }
-
-            checker->modules.current_accessible_modules       = old_accessible_modules;
-            checker->modules.current_accessible_modules_count = old_accessible_modules_count;
-            checker->current_method_receiver                  = old_receiver;
-            checker->current_func_return                      = old_return;
-            checker_pop_scope(checker);
-        }
+        check_instantiated_struct_method_body(checker, inst, m, mfdn, struct_type, param_types,
+                                              param_count, return_type, base_name);
 
         // Restore struct-only context
         checker->generics.current_type_params      = def->type_params;
         checker->generics.current_type_args        = resolved_args;
         checker->generics.current_type_param_count = def->type_param_count;
 
-        // Free combined arrays (but not the strings - they're borrowed or will be freed later)
         free(combined_params);
         free(combined_args);
-        for (int i = 0; i < method_count; i++) {
-            free(method_params[i]);
-        }
-        free(method_params);
-        free(method_args);
+        free_method_pattern_bindings(method_params, method_args, method_count);
 
-        Type* method_type = type_func(param_types, param_count, return_type, 0);
-
-        // Register the method on the struct type
-        int n = struct_type->as.struc.method_count;
-        struct_type->as.struc.method_names =
-            xrealloc(struct_type->as.struc.method_names, (n + 1) * sizeof(char*));
-        struct_type->as.struc.method_types =
-            xrealloc(struct_type->as.struc.method_types, (n + 1) * sizeof(Type*));
-        struct_type->as.struc.method_is_const =
-            xrealloc(struct_type->as.struc.method_is_const, (n + 1) * sizeof(int));
-
-        struct_type->as.struc.method_names[n]    = xstrdup(mfdn->name);
-        struct_type->as.struc.method_types[n]    = method_type;
-        struct_type->as.struc.method_is_const[n] = mfdn->receiver_is_const;
-        struct_type->as.struc.method_count       = n + 1;
-
-        // Also register the mangled function name in the symbol table
-        char*  method_mangled  = type_mangle_generic(mfdn->receiver_type, resolved_args, arg_count);
-        size_t method_name_len = strlen(method_mangled) + 1 + strlen(mfdn->name) + 1;
-        char*  full_method_name = xmalloc(method_name_len);
-        snprintf(full_method_name, method_name_len, "%s_%s", method_mangled, mfdn->name);
-
-        checker_define(checker, full_method_name, SYM_FUNC, method_type, 1, mfdn->is_public,
-                       checker->modules.current_module);
-
-        free(method_mangled);
-        free(full_method_name);
+        Type* method_type =
+            register_struct_method_type(struct_type, mfdn, param_types, param_count, return_type);
+        register_struct_method_symbol(checker, mfdn, resolved_args, arg_count, method_type);
     }
 
     // Restore substitution context
