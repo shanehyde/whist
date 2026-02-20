@@ -1589,85 +1589,110 @@ static int struct_has_eq_impl(CodeGen* gen, const char* name) {
     return 0;
 }
 
+// Return whether any variant in a declared enum carries data fields.
+static int enum_decl_has_data(Node* decl) {
+    for (int v = 0; v < decl->as.enum_decl.values.count; v++) {
+        if (decl->as.enum_decl.values.nodes[v]->as.enum_variant.types.count > 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Return whether a struct-typed field node resolves to a struct with Eq implementation.
+static int struct_field_type_node_has_eq(CodeGen* gen, Node* tnode) {
+    if (!is_struct_type(gen, tnode)) {
+        return 1;
+    }
+
+    Node*       resolved = resolve_alias(gen, tnode);
+    const char* sname    = NULL;
+    int         owned    = 0;
+    if (resolved->type == NODE_IDENT) {
+        sname = resolved->as.ident.name;
+    } else if (resolved->type == NODE_GENERIC_TYPE) {
+        sname = build_mangled_name_from_generic_node(gen, resolved);
+        owned = 1;
+    }
+
+    int has_eq = sname && struct_has_eq_impl(gen, sname);
+    if (owned) {
+        free((char*)sname);
+    }
+    return has_eq;
+}
+
+// Return whether all struct-typed fields in a non-generic enum declaration are Eq-comparable.
+static int enum_decl_all_struct_fields_have_eq(CodeGen* gen, Node* decl) {
+    for (int v = 0; v < decl->as.enum_decl.values.count; v++) {
+        Node* var = decl->as.enum_decl.values.nodes[v];
+        for (int t = 0; t < var->as.enum_variant.types.count; t++) {
+            if (!struct_field_type_node_has_eq(gen, var->as.enum_variant.types.nodes[t])) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+// Return whether all struct payload fields in a generic enum instance are Eq-comparable.
+static int enum_instance_all_struct_fields_have_eq(GenericInstance* inst) {
+    for (int v = 0; v < inst->type->as.enm.value_count; v++) {
+        for (int f = 0; f < inst->type->as.enm.variant_type_counts[v]; f++) {
+            Type* ft = inst->type->as.enm.variant_types[v][f];
+            if (ft->kind == TYPE_STRUCT && !ft->as.struc.has_eq) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
 // Compute which data enums support equality (all struct-typed variant fields have Eq)
 static void compute_enum_eq_flags(CodeGen* gen, Node* ast) {
-    if (gen->enums.count == 0)
+    if (gen->enums.count == 0) {
         return;
+    }
     gen->enums.has_eq = xcalloc(gen->enums.count, sizeof(int));
 
     // Non-generic data enums
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
-        if (!mod || mod->type != NODE_MODULE)
+        if (!mod || mod->type != NODE_MODULE) {
             continue;
+        }
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type != NODE_ENUM_DECL)
+            if (decl->type != NODE_ENUM_DECL || decl->as.enum_decl.type_param_count > 0) {
                 continue;
-            if (decl->as.enum_decl.type_param_count > 0)
-                continue;
+            }
+
             int idx = enum_index(gen, decl->as.enum_decl.name);
-            if (idx < 0)
+            if (idx < 0 || !enum_decl_has_data(decl)) {
                 continue;
-            // Check if data enum
-            int has_data = 0;
-            for (int v = 0; v < decl->as.enum_decl.values.count; v++) {
-                if (decl->as.enum_decl.values.nodes[v]->as.enum_variant.types.count > 0) {
-                    has_data = 1;
-                    break;
-                }
             }
-            if (!has_data)
-                continue;
-            // Check all struct-typed fields have Eq
-            int all_eq = 1;
-            for (int v = 0; v < decl->as.enum_decl.values.count && all_eq; v++) {
-                Node* var = decl->as.enum_decl.values.nodes[v];
-                for (int t = 0; t < var->as.enum_variant.types.count; t++) {
-                    Node* tnode = var->as.enum_variant.types.nodes[t];
-                    if (is_struct_type(gen, tnode)) {
-                        Node*       resolved = resolve_alias(gen, tnode);
-                        const char* sname    = NULL;
-                        if (resolved->type == NODE_IDENT)
-                            sname = resolved->as.ident.name;
-                        else if (resolved->type == NODE_GENERIC_TYPE)
-                            sname = build_mangled_name_from_generic_node(gen, resolved);
-                        if (!sname || !struct_has_eq_impl(gen, sname)) {
-                            all_eq = 0;
-                            if (resolved->type == NODE_GENERIC_TYPE && sname)
-                                free((char*)sname);
-                            break;
-                        }
-                        if (resolved->type == NODE_GENERIC_TYPE)
-                            free((char*)sname);
-                    }
-                }
-            }
-            if (all_eq)
+
+            if (enum_decl_all_struct_fields_have_eq(gen, decl)) {
                 gen->enums.has_eq[idx] = 1;
+            }
         }
     }
 
     // Generic data enum instances: use checker Type info
     for (int gi = 0; gi < gen->checker.instance_count; gi++) {
         GenericInstance* inst = &gen->checker.instances[gi];
-        if (inst->type->kind != TYPE_ENUM || !inst->type->as.enm.has_data)
+        if (inst->type->kind != TYPE_ENUM || !inst->type->as.enm.has_data) {
             continue;
-        int idx = enum_index(gen, inst->mangled_name);
-        if (idx < 0)
-            continue;
-        int all_eq = 1;
-        for (int v = 0; v < inst->type->as.enm.value_count && all_eq; v++) {
-            for (int f = 0; f < inst->type->as.enm.variant_type_counts[v]; f++) {
-                Type* ft = inst->type->as.enm.variant_types[v][f];
-                if (ft->kind == TYPE_STRUCT && !ft->as.struc.has_eq) {
-                    all_eq = 0;
-                    break;
-                }
-            }
         }
-        if (all_eq)
+
+        int idx = enum_index(gen, inst->mangled_name);
+        if (idx < 0) {
+            continue;
+        }
+
+        if (enum_instance_all_struct_fields_have_eq(inst)) {
             gen->enums.has_eq[idx] = 1;
+        }
     }
 }
 
