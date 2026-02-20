@@ -5,159 +5,177 @@
 #include "alloc.h"
 #include "parser_internal.h"
 
-static Node* parse_func_decl(Parser* parser, int is_public) {
-    // Check for method receiver: func (Type) or func (const Type) or func (Box<T>)
-    // or func (Pair<i32, Box<T>>)
-    char*    receiver_type     = NULL;
-    int      receiver_type_len = 0;
-    int      receiver_is_const = 0;
-    NodeList receiver_type_args;
-    nodelist_init(&receiver_type_args);
+typedef struct FuncReceiverInfo {
+    char*    type;
+    int      type_len;
+    int      is_const;
+    NodeList type_args;
+} FuncReceiverInfo;
 
-    if (check_token(parser, TOK_LPAREN)) {
-        advance_token(parser); // consume '('
+// Initializes receiver parsing state used while reading an optional method receiver.
+static void init_func_receiver_info(FuncReceiverInfo* receiver) {
+    receiver->type     = NULL;
+    receiver->type_len = 0;
+    receiver->is_const = 0;
+    nodelist_init(&receiver->type_args);
+}
 
-        // Check for 'const' modifier
-        if (match_token(parser, TOK_CONST)) {
-            receiver_is_const = 1;
-        }
-
-        // Expect struct type name
-        Token recv_type = parser->current;
-        consume_token(parser, TOK_IDENT, "Expected receiver type name");
-        receiver_type     = copy_token_string(&recv_type);
-        receiver_type_len = recv_type.length;
-
-        // Check for generic type args: Box<T> or Pair<K, V> or Pair<i32, Box<T>>
-        if (match_token(parser, TOK_LT)) {
-            do {
-                // Parse full type (can be identifier, generic type, etc.)
-                Node* type_arg = parse_type(parser);
-                if (!type_arg) {
-                    free(receiver_type);
-                    return NULL;
-                }
-                nodelist_push(&receiver_type_args, type_arg);
-            } while (match_token(parser, TOK_COMMA));
-
-            consume_token(parser, TOK_GT, "Expected '>' after type arguments");
-        }
-
-        consume_token(parser, TOK_RPAREN, "Expected ')' after receiver type");
+// Parses an optional method receiver like `(Type)`, `(const Type)`, or `(Box<T>)`.
+static int parse_optional_func_receiver(Parser* parser, FuncReceiverInfo* receiver) {
+    if (!check_token(parser, TOK_LPAREN)) {
+        return 1;
     }
 
-    Token name = parser->current;
-    consume_token(parser, TOK_IDENT, "Expected function name");
+    advance_token(parser); // consume '('
+    if (match_token(parser, TOK_CONST)) {
+        receiver->is_const = 1;
+    }
 
-    Node*           node = node_new(NODE_FUNC_DECL, name.line, name.column);
-    func_decl_node* fdn  = &node->as.func_decl;
+    Token recv_type = parser->current;
+    consume_token(parser, TOK_IDENT, "Expected receiver type name");
+    receiver->type     = copy_token_string(&recv_type);
+    receiver->type_len = recv_type.length;
 
-    fdn->is_public          = is_public;
-    fdn->is_extern          = 0;
-    fdn->receiver_type      = receiver_type;
-    fdn->receiver_type_len  = receiver_type_len;
-    fdn->receiver_is_const  = receiver_is_const;
-    fdn->receiver_type_args = receiver_type_args;
-    fdn->name               = copy_token_string(&name);
-    fdn->name_length        = name.length;
-    fdn->type_params        = NULL;
-    fdn->type_param_bounds  = NULL;
-    fdn->type_param_count   = 0;
-    fdn->extern_name        = NULL;
-    fdn->extern_name_length = 0;
-    fdn->is_varargs         = 0;
-    fdn->return_is_const    = 0;
-    nodelist_init(&fdn->params);
-
-    // Parse type parameters for generic functions: func identity<T>(x: T) -> T
-    // Also for method-level generics: func (Vec<T>) map<K>(pred: func(T) -> K) -> Vec<K>
     if (match_token(parser, TOK_LT)) {
-        int capacity           = 4;
-        fdn->type_params       = xmalloc(capacity * sizeof(char*));
-        fdn->type_param_bounds = xmalloc(capacity * sizeof(char*));
-
         do {
-            Token param_name = parser->current;
-            consume_token(parser, TOK_IDENT, "Expected type parameter name");
-
-            if (fdn->type_param_count >= capacity) {
-                capacity *= 2;
-                fdn->type_params       = xrealloc(fdn->type_params, capacity * sizeof(char*));
-                fdn->type_param_bounds = xrealloc(fdn->type_param_bounds, capacity * sizeof(char*));
+            Node* type_arg = parse_type(parser);
+            if (!type_arg) {
+                free(receiver->type);
+                nodelist_free(&receiver->type_args);
+                return 0;
             }
-
-            fdn->type_params[fdn->type_param_count] = copy_token_string(&param_name);
-
-            // Check for trait bound: T: TraitName
-            if (match_token(parser, TOK_COLON)) {
-                Token bound_name = parser->current;
-                consume_token(parser, TOK_IDENT, "Expected trait name after ':'");
-                fdn->type_param_bounds[fdn->type_param_count] = copy_token_string(&bound_name);
-            } else {
-                fdn->type_param_bounds[fdn->type_param_count] = NULL;
-            }
-
-            fdn->type_param_count++;
+            nodelist_push(&receiver->type_args, type_arg);
         } while (match_token(parser, TOK_COMMA));
 
-        consume_token(parser, TOK_GT, "Expected '>' after type parameters");
+        consume_token(parser, TOK_GT, "Expected '>' after type arguments");
     }
 
-    consume_token(parser, TOK_LPAREN, "Expected '(' after function name");
+    consume_token(parser, TOK_RPAREN, "Expected ')' after receiver type");
+    return 1;
+}
 
-    // Parameters
-    if (!check_token(parser, TOK_RPAREN)) {
-        // Check for leading ... (no named params)
+// Initializes function-declaration fields that are common to all parsed functions.
+static void init_func_decl_defaults(func_decl_node* fdn, int is_public) {
+    fdn->is_public                = is_public;
+    fdn->is_extern                = 0;
+    fdn->type_params              = NULL;
+    fdn->type_param_bounds        = NULL;
+    fdn->type_param_count         = 0;
+    fdn->extern_name              = NULL;
+    fdn->extern_name_length       = 0;
+    fdn->is_varargs               = 0;
+    fdn->return_type              = NULL;
+    fdn->return_is_const          = 0;
+    fdn->body                     = NULL;
+    fdn->accessible_modules       = NULL;
+    fdn->accessible_modules_count = 0;
+    nodelist_init(&fdn->params);
+}
+
+// Parses generic type parameters declared directly on a function.
+static void parse_func_type_params(Parser* parser, func_decl_node* fdn) {
+    if (!match_token(parser, TOK_LT)) {
+        return;
+    }
+
+    int capacity           = 4;
+    fdn->type_params       = xmalloc(capacity * sizeof(char*));
+    fdn->type_param_bounds = xmalloc(capacity * sizeof(char*));
+
+    do {
+        Token param_name = parser->current;
+        consume_token(parser, TOK_IDENT, "Expected type parameter name");
+
+        if (fdn->type_param_count >= capacity) {
+            capacity *= 2;
+            fdn->type_params       = xrealloc(fdn->type_params, capacity * sizeof(char*));
+            fdn->type_param_bounds = xrealloc(fdn->type_param_bounds, capacity * sizeof(char*));
+        }
+
+        fdn->type_params[fdn->type_param_count] = copy_token_string(&param_name);
+        if (match_token(parser, TOK_COLON)) {
+            Token bound_name = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected trait name after ':'");
+            fdn->type_param_bounds[fdn->type_param_count] = copy_token_string(&bound_name);
+        } else {
+            fdn->type_param_bounds[fdn->type_param_count] = NULL;
+        }
+
+        fdn->type_param_count++;
+    } while (match_token(parser, TOK_COMMA));
+
+    consume_token(parser, TOK_GT, "Expected '>' after type parameters");
+}
+
+// Parses function parameters, including optional `const` and trailing varargs.
+static void parse_func_params(Parser* parser, func_decl_node* fdn) {
+    if (check_token(parser, TOK_RPAREN)) {
+        return;
+    }
+
+    if (check_token(parser, TOK_ELLIPSIS)) {
+        fdn->is_varargs = 1;
+        advance_token(parser);
+        return;
+    }
+
+    do {
         if (check_token(parser, TOK_ELLIPSIS)) {
             fdn->is_varargs = 1;
             advance_token(parser);
-        } else {
-            do {
-                // Check for ... after a comma (varargs after named params)
-                if (check_token(parser, TOK_ELLIPSIS)) {
-                    fdn->is_varargs = 1;
-                    advance_token(parser);
-                    break;
-                }
-
-                // Check for 'const' modifier
-                int param_is_const = 0;
-                if (match_token(parser, TOK_CONST)) {
-                    param_is_const = 1;
-                }
-
-                Token param_name = parser->current;
-                consume_token(parser, TOK_IDENT, "Expected parameter name");
-
-                Node* param          = node_new(NODE_PARAM, param_name.line, param_name.column);
-                param->as.param.name = copy_token_string(&param_name);
-                param->as.param.name_length = param_name.length;
-                param->as.param.type        = NULL;
-                param->as.param.is_const    = param_is_const;
-
-                if (match_token(parser, TOK_COLON)) {
-                    param->as.param.type = parse_type(parser);
-                }
-
-                nodelist_push(&fdn->params, param);
-            } while (match_token(parser, TOK_COMMA));
+            break;
         }
+
+        int   param_is_const = match_token(parser, TOK_CONST);
+        Token param_name     = parser->current;
+        consume_token(parser, TOK_IDENT, "Expected parameter name");
+
+        Node* param                 = node_new(NODE_PARAM, param_name.line, param_name.column);
+        param->as.param.name        = copy_token_string(&param_name);
+        param->as.param.name_length = param_name.length;
+        param->as.param.type        = NULL;
+        param->as.param.is_const    = param_is_const;
+
+        if (match_token(parser, TOK_COLON)) {
+            param->as.param.type = parse_type(parser);
+        }
+
+        nodelist_push(&fdn->params, param);
+    } while (match_token(parser, TOK_COMMA));
+}
+
+// Parses an optional `->` return type and tracks `const` return modifiers.
+static void parse_func_return_type(Parser* parser, func_decl_node* fdn) {
+    if (!match_token(parser, TOK_ARROW)) {
+        return;
     }
 
-    consume_token(parser, TOK_RPAREN, "Expected ')' after parameters");
+    if (match_token(parser, TOK_CONST)) {
+        fdn->return_is_const = 1;
+    }
+    fdn->return_type = parse_type(parser);
+}
 
-    // Return type
-    fdn->return_type = NULL;
-    if (match_token(parser, TOK_ARROW)) {
-        if (match_token(parser, TOK_CONST)) {
-            fdn->return_is_const = 1;
-        }
-        fdn->return_type = parse_type(parser);
+// Copies file-level imports so this function can resolve accessible modules during checking.
+static void copy_func_accessible_modules(Parser* parser, func_decl_node* fdn) {
+    ModuleLoader* loader   = parser->loader;
+    int           fi_count = loader ? loader->file_imports_count : 0;
+
+    fdn->accessible_modules_count = fi_count;
+    if (fi_count <= 0) {
+        fdn->accessible_modules = NULL;
+        return;
     }
 
-    // Body
-    if (check_token(parser, TOK_LBRACE) == 0) {
-        // Check for 'as <alias>' renaming (extern functions only)
+    fdn->accessible_modules = xmalloc(fi_count * sizeof(char*));
+    for (int i = 0; i < fi_count; i++) {
+        fdn->accessible_modules[i] = xstrdup(loader->file_imports[i]);
+    }
+}
+
+// Parses either an extern-style declaration tail or an in-file function body block.
+static void parse_func_body_or_extern(Parser* parser, func_decl_node* fdn) {
+    if (!check_token(parser, TOK_LBRACE)) {
         if (match_token(parser, TOK_AS)) {
             Token alias = parser->current;
             consume_token(parser, TOK_IDENT, "Expected identifier after 'as'");
@@ -166,29 +184,46 @@ static Node* parse_func_decl(Parser* parser, int is_public) {
             fdn->name               = copy_token_string(&alias);
             fdn->name_length        = alias.length;
         }
+
         consume_token(parser, TOK_SEMICOLON, "Expected ';' after function declaration");
-        // extern function declaration
         fdn->body = NULL;
-        return node;
+        return;
     }
 
     consume_token(parser, TOK_LBRACE, "Expected '{' before function body");
     fdn->body = parse_block(parser);
+    copy_func_accessible_modules(parser, fdn);
+}
 
-    // Copy current file's imports to accessible_modules
-    // This determines which library modules this function can access
-    ModuleLoader* loader          = parser->loader;
-    int           fi_count        = loader ? loader->file_imports_count : 0;
-    fdn->accessible_modules_count = fi_count;
-    if (fi_count > 0) {
-        fdn->accessible_modules = xmalloc(fi_count * sizeof(char*));
-        for (int i = 0; i < fi_count; i++) {
-            fdn->accessible_modules[i] = xstrdup(loader->file_imports[i]);
-        }
-    } else {
-        fdn->accessible_modules = NULL;
+static Node* parse_func_decl(Parser* parser, int is_public) {
+    FuncReceiverInfo receiver;
+    init_func_receiver_info(&receiver);
+    if (!parse_optional_func_receiver(parser, &receiver)) {
+        return NULL;
     }
 
+    Token name = parser->current;
+    consume_token(parser, TOK_IDENT, "Expected function name");
+
+    Node*           node = node_new(NODE_FUNC_DECL, name.line, name.column);
+    func_decl_node* fdn  = &node->as.func_decl;
+    init_func_decl_defaults(fdn, is_public);
+
+    fdn->receiver_type      = receiver.type;
+    fdn->receiver_type_len  = receiver.type_len;
+    fdn->receiver_is_const  = receiver.is_const;
+    fdn->receiver_type_args = receiver.type_args;
+    fdn->name               = copy_token_string(&name);
+    fdn->name_length        = name.length;
+
+    parse_func_type_params(parser, fdn);
+
+    consume_token(parser, TOK_LPAREN, "Expected '(' after function name");
+    parse_func_params(parser, fdn);
+    consume_token(parser, TOK_RPAREN, "Expected ')' after parameters");
+
+    parse_func_return_type(parser, fdn);
+    parse_func_body_or_extern(parser, fdn);
     return node;
 }
 
