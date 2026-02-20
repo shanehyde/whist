@@ -519,6 +519,113 @@ static int is_type_variable(Checker* checker, const char* name) {
     return 1;
 }
 
+static void free_method_pattern_bindings(char** method_params, Type** method_args,
+                                         int method_count) {
+    for (int i = 0; i < method_count; i++) {
+        free(method_params[i]);
+    }
+    free(method_params);
+    free(method_args);
+}
+
+static int find_method_pattern_binding(char** bound_names, int binding_count, const char* name) {
+    for (int i = 0; i < binding_count; i++) {
+        if (strcmp(bound_names[i], name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void grow_method_pattern_bindings(char*** bound_names, Type*** bound_types,
+                                         int* binding_capacity) {
+    *binding_capacity *= 2;
+    *bound_names = xrealloc(*bound_names, (*binding_capacity) * sizeof(char*));
+    *bound_types = xrealloc(*bound_types, (*binding_capacity) * sizeof(Type*));
+}
+
+static int bind_method_pattern_type(char*** bound_names, Type*** bound_types, int* binding_count,
+                                    int* binding_capacity, const char* name, Type* concrete) {
+    int existing = find_method_pattern_binding(*bound_names, *binding_count, name);
+    if (existing >= 0) {
+        return type_equals((*bound_types)[existing], concrete);
+    }
+
+    if (*binding_count >= *binding_capacity) {
+        grow_method_pattern_bindings(bound_names, bound_types, binding_capacity);
+    }
+
+    (*bound_names)[*binding_count] = xstrdup(name);
+    (*bound_types)[*binding_count] = concrete;
+    (*binding_count)++;
+    return 1;
+}
+
+static int unify_method_ident_pattern(Checker* checker, const char* name, Type* concrete,
+                                      char*** bound_names, Type*** bound_types, int* binding_count,
+                                      int* binding_capacity) {
+    Type* builtin = type_builtin_from_name(name);
+    if (builtin) {
+        return type_equals(builtin, concrete);
+    }
+
+    Symbol* sym = checker_lookup_any(checker, name);
+    if (sym && sym->kind == SYM_TYPE) {
+        return type_equals(sym->type, concrete);
+    }
+
+    return bind_method_pattern_type(bound_names, bound_types, binding_count, binding_capacity, name,
+                                    concrete);
+}
+
+static Type* resolve_method_pattern_suffix_type(Checker* checker, const char* pattern_base,
+                                                Type* concrete) {
+    size_t      base_len    = strlen(pattern_base);
+    const char* type_suffix = concrete->as.struc.name + base_len + 1;
+
+    Type* extracted = type_builtin_from_name(type_suffix);
+    if (extracted) {
+        return extracted;
+    }
+
+    Symbol* sym = checker_lookup_any(checker, type_suffix);
+    if (sym && sym->kind == SYM_TYPE) {
+        return sym->type;
+    }
+
+    return type_struct(type_suffix);
+}
+
+static int unify_method_generic_pattern(Checker* checker, Node* pattern, Type* concrete,
+                                        char*** bound_names, Type*** bound_types,
+                                        int* binding_count, int* binding_capacity) {
+    if (concrete->kind != TYPE_STRUCT) {
+        return 0;
+    }
+
+    const char* pattern_base = pattern->as.generic_type.base_name;
+    size_t      base_len     = strlen(pattern_base);
+    if (strncmp(concrete->as.struc.name, pattern_base, base_len) != 0 ||
+        concrete->as.struc.name[base_len] != '_') {
+        return 0;
+    }
+
+    int nested_arg_count = pattern->as.generic_type.type_args.count;
+    if (nested_arg_count != 1) {
+        return 1;
+    }
+
+    Node* nested_pattern = pattern->as.generic_type.type_args.nodes[0];
+    if (nested_pattern->type != NODE_IDENT ||
+        !is_type_variable(checker, nested_pattern->as.ident.name)) {
+        return 1;
+    }
+
+    Type* extracted = resolve_method_pattern_suffix_type(checker, pattern_base, concrete);
+    return bind_method_pattern_type(bound_names, bound_types, binding_count, binding_capacity,
+                                    nested_pattern->as.ident.name, extracted);
+}
+
 // Try to match a method's receiver type args against concrete instantiation args.
 // pattern_args: the method's receiver_type_args (e.g., <i32, Box<T>>)
 // concrete_args: the resolved types for instantiation (e.g., [i32, Box_i64])
@@ -528,139 +635,28 @@ static int is_type_variable(Checker* checker, const char* name) {
 static int unify_method_pattern(Checker* checker, NodeList* pattern_args, Type** concrete_args,
                                 int arg_count, char*** out_params, Type*** out_args,
                                 int* out_count) {
-    // Collect type variable bindings
     int    binding_capacity = 4;
     int    binding_count    = 0;
     char** bound_names      = xmalloc(binding_capacity * sizeof(char*));
     Type** bound_types      = xmalloc(binding_capacity * sizeof(Type*));
 
-    // Process each argument position
     for (int i = 0; i < arg_count; i++) {
         Node* pattern  = pattern_args->nodes[i];
         Type* concrete = concrete_args[i];
+        int   matched  = 1;
 
-        // Case 1: Pattern is a simple identifier
         if (pattern->type == NODE_IDENT) {
-            const char* name = pattern->as.ident.name;
-
-            // Check if it's a concrete type (builtin or defined)
-            Type* builtin = type_builtin_from_name(name);
-            if (builtin) {
-                // Must match exactly
-                if (!type_equals(builtin, concrete)) {
-                    free(bound_names);
-                    free(bound_types);
-                    return 0;
-                }
-                continue;
-            }
-
-            // Check if it's a defined type
-            Symbol* sym = checker_lookup_any(checker, name);
-            if (sym && sym->kind == SYM_TYPE) {
-                // Must match exactly
-                if (!type_equals(sym->type, concrete)) {
-                    free(bound_names);
-                    free(bound_types);
-                    return 0;
-                }
-                continue;
-            }
-
-            // It's a type variable - bind it
-            // Check if already bound
-            int found = 0;
-            for (int b = 0; b < binding_count; b++) {
-                if (strcmp(bound_names[b], name) == 0) {
-                    // Already bound - must match
-                    if (!type_equals(bound_types[b], concrete)) {
-                        free(bound_names);
-                        free(bound_types);
-                        return 0;
-                    }
-                    found = 1;
-                    break;
-                }
-            }
-            if (!found) {
-                // New binding
-                if (binding_count >= binding_capacity) {
-                    binding_capacity *= 2;
-                    bound_names = xrealloc(bound_names, binding_capacity * sizeof(char*));
-                    bound_types = xrealloc(bound_types, binding_capacity * sizeof(Type*));
-                }
-                bound_names[binding_count] = xstrdup(name);
-                bound_types[binding_count] = concrete;
-                binding_count++;
-            }
+            matched =
+                unify_method_ident_pattern(checker, pattern->as.ident.name, concrete, &bound_names,
+                                           &bound_types, &binding_count, &binding_capacity);
+        } else if (pattern->type == NODE_GENERIC_TYPE) {
+            matched = unify_method_generic_pattern(checker, pattern, concrete, &bound_names,
+                                                   &bound_types, &binding_count, &binding_capacity);
         }
-        // Case 2: Pattern is a generic type (e.g., Box<T>)
-        else if (pattern->type == NODE_GENERIC_TYPE) {
-            // Concrete must be a struct with matching base name
-            if (concrete->kind != TYPE_STRUCT) {
-                free(bound_names);
-                free(bound_types);
-                return 0;
-            }
 
-            // Build expected mangled name prefix
-            const char* pattern_base = pattern->as.generic_type.base_name;
-
-            // Check if concrete struct name starts with pattern base
-            if (strncmp(concrete->as.struc.name, pattern_base, strlen(pattern_base)) != 0 ||
-                concrete->as.struc.name[strlen(pattern_base)] != '_') {
-                free(bound_names);
-                free(bound_types);
-                return 0;
-            }
-
-            // For now, handle simple case: Box<T> matching Box_i64
-            // Extract the type argument from the mangled name
-            int nested_arg_count = pattern->as.generic_type.type_args.count;
-            if (nested_arg_count == 1) {
-                Node* nested_pattern = pattern->as.generic_type.type_args.nodes[0];
-                if (nested_pattern->type == NODE_IDENT &&
-                    is_type_variable(checker, nested_pattern->as.ident.name)) {
-                    // Extract the type from mangled name
-                    const char* type_suffix = concrete->as.struc.name + strlen(pattern_base) + 1;
-                    Type*       extracted   = type_builtin_from_name(type_suffix);
-                    if (!extracted) {
-                        // Could be a user-defined type or another struct
-                        Symbol* sym = checker_lookup_any(checker, type_suffix);
-                        if (sym && sym->kind == SYM_TYPE) {
-                            extracted = sym->type;
-                        } else {
-                            // Try as a mangled struct name
-                            extracted = type_struct(type_suffix);
-                        }
-                    }
-
-                    // Bind the type variable
-                    const char* var_name = nested_pattern->as.ident.name;
-                    int         found    = 0;
-                    for (int b = 0; b < binding_count; b++) {
-                        if (strcmp(bound_names[b], var_name) == 0) {
-                            if (!type_equals(bound_types[b], extracted)) {
-                                free(bound_names);
-                                free(bound_types);
-                                return 0;
-                            }
-                            found = 1;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        if (binding_count >= binding_capacity) {
-                            binding_capacity *= 2;
-                            bound_names = xrealloc(bound_names, binding_capacity * sizeof(char*));
-                            bound_types = xrealloc(bound_types, binding_capacity * sizeof(Type*));
-                        }
-                        bound_names[binding_count] = xstrdup(var_name);
-                        bound_types[binding_count] = extracted;
-                        binding_count++;
-                    }
-                }
-            }
+        if (!matched) {
+            free_method_pattern_bindings(bound_names, bound_types, binding_count);
+            return 0;
         }
     }
 
@@ -1297,15 +1293,6 @@ static void register_struct_method_symbol(Checker* checker, func_decl_node* mfdn
 
     free(method_mangled);
     free(full_method_name);
-}
-
-static void free_method_pattern_bindings(char** method_params, Type** method_args,
-                                         int method_count) {
-    for (int i = 0; i < method_count; i++) {
-        free(method_params[i]);
-    }
-    free(method_params);
-    free(method_args);
 }
 
 // Instantiate a generic struct: substitute type params into fields and methods,
