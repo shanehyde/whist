@@ -489,6 +489,7 @@ static void node_reset_checker_flags(Node* node) {
     // Top-level flags (apply to all expression node types)
     node->is_owned_temp   = 0;
     node->owned_temp_type = NULL;
+    node->is_box_deref    = 0;
 
     switch (node->type) {
     case NODE_BINARY:

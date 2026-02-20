@@ -10,6 +10,15 @@
 // Forward declaration for check_struct_init (called by check_new_expr)
 static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
 
+// Auto-deref Box<T> to T: if type is TYPE_BOX, set is_box_deref flag and return elem type.
+static Type* auto_deref_box(Node* node, Type* type) {
+    if (type && type->kind == TYPE_BOX) {
+        node->is_box_deref = 1;
+        return type->as.box.elem;
+    }
+    return type;
+}
+
 static void infer_type_param(Checker* checker, GenericFuncDef* def, Node* param_type,
                              Type* arg_type, Type** inferred);
 
@@ -376,6 +385,10 @@ static Type* check_binary_expr(Checker* checker, Node* node) {
         return type_error;
     }
 
+    // Auto-deref Box<T> operands
+    left  = auto_deref_box(node->as.binary.left, left);
+    right = auto_deref_box(node->as.binary.right, right);
+
     return check_binary_op_by_token(checker, node, left, right);
 }
 
@@ -386,6 +399,9 @@ static Type* check_unary_expr(Checker* checker, Node* node) {
 
     if (operand->kind == TYPE_ERROR)
         return type_error;
+
+    // Auto-deref Box<T> operand
+    operand = auto_deref_box(node->as.unary.operand, operand);
 
     switch (op) {
     case TOK_MINUS:
@@ -1173,6 +1189,16 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
 
     if (!check_assignment_enum_tag_writable(checker, node)) {
         return type_error;
+    }
+
+    // Auto-deref Box<T> target: `b = 20` becomes `b->value = 20`
+    if (target->kind == TYPE_BOX) {
+        target = auto_deref_box(node->as.assign.target, target);
+    }
+
+    // Auto-deref Box<T> value when assigning to T
+    if (value->kind == TYPE_BOX && type_assignable(target, value->as.box.elem)) {
+        value = auto_deref_box(node->as.assign.value, value);
     }
 
     if (!check_compound_assignment_operands(checker, node, target, value)) {
@@ -1964,6 +1990,12 @@ static void check_call_named_args(Checker* checker, Node* node, Type* func_type)
 
         checker->expected_func_type = old_expected;
 
+        // Auto-deref Box<T> argument when parameter expects T
+        if (!type_assignable(param_type, arg_type) && arg_type->kind == TYPE_BOX &&
+            type_assignable(param_type, arg_type->as.box.elem)) {
+            arg_type = auto_deref_box(node->as.call.args.nodes[i], arg_type);
+        }
+
         if (!type_assignable(param_type, arg_type)) {
             char ctx[32];
             snprintf(ctx, sizeof(ctx), "Argument %d", i + 1);
@@ -2052,6 +2084,26 @@ static Type* lookup_struct_init_method(Type* struct_type) {
 }
 
 static Type* check_new_constructor_call_expr(Checker* checker, Node* node, Type* resolved) {
+    // Box<T>(expr) constructor form
+    if (resolved->kind == TYPE_BOX) {
+        if (node->as.new_expr.args.count != 1) {
+            check_error(checker, node->line, node->column,
+                        "Box constructor requires exactly 1 argument");
+            return type_error;
+        }
+        Type* arg_type = check_expression(checker, node->as.new_expr.args.nodes[0]);
+        if (arg_type->kind == TYPE_ERROR) {
+            return type_error;
+        }
+        if (!type_assignable(resolved->as.box.elem, arg_type)) {
+            check_error_type(checker, node->line, node->column, "Box value", resolved->as.box.elem,
+                             arg_type);
+            return type_error;
+        }
+        set_new_expr_result(node, resolved);
+        return resolved;
+    }
+
     if (resolved->kind != TYPE_STRUCT) {
         check_error(checker, node->line, node->column,
                     "'new' constructor call requires a struct type");
@@ -2165,6 +2217,34 @@ static Type* check_new_expr(Checker* checker, Node* node) {
     // Init-call form: new Type(args)
     if (node->as.new_expr.init == NULL) {
         return check_new_constructor_call_expr(checker, node, resolved);
+    }
+
+    // Box<T> literal form: new Box<T>{value: expr}
+    if (resolved->kind == TYPE_BOX) {
+        Node* init = node->as.new_expr.init;
+        if (init->as.struct_init.fields.count != 1) {
+            check_error(checker, node->line, node->column,
+                        "Box initializer requires exactly 1 field 'value'");
+            return type_error;
+        }
+        Node* field = init->as.struct_init.fields.nodes[0];
+        if (!field || field->type != NODE_FIELD_INIT ||
+            strcmp(field->as.field_init.name, "value") != 0) {
+            check_error(checker, node->line, node->column,
+                        "Box initializer requires field named 'value'");
+            return type_error;
+        }
+        Type* val_type = check_expression(checker, field->as.field_init.value);
+        if (val_type->kind == TYPE_ERROR) {
+            return type_error;
+        }
+        if (!type_assignable(resolved->as.box.elem, val_type)) {
+            check_error_type(checker, field->line, field->column, "Box value",
+                             resolved->as.box.elem, val_type);
+            return type_error;
+        }
+        set_new_expr_result(node, resolved);
+        return resolved;
     }
 
     // Struct literal form below: new Type { fields }

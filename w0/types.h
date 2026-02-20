@@ -25,6 +25,7 @@ typedef enum {
     TYPE_ARRAY,
     TYPE_SPAN,
     TYPE_VEC,
+    TYPE_BOX,
     TYPE_STRINGBUILDER,
     TYPE_STRUCT,
     TYPE_ENUM,
@@ -66,6 +67,11 @@ struct Type {
         struct {
             Type* elem; // Element type T
         } vec;
+
+        // Box: Box<T>
+        struct {
+            Type* elem; // Wrapped value type T
+        } box;
 
         // Struct
         struct {
@@ -167,6 +173,7 @@ Type* type_tuple(Type** elems, int count);
 Type* type_generic_param(const char* name);
 Type* type_span(Type* elem);
 Type* type_vec(Type* elem);
+Type* type_box(Type* elem);
 
 // Type name mangling for C identifiers (no angle brackets or special chars)
 const char* type_mangle_name(Type* type);

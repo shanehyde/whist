@@ -64,6 +64,8 @@ typedef struct {
     int                  span_count;
     VecInstance*         vecs;
     int                  vec_count;
+    BoxInstance*         boxes;
+    int                  box_count;
     TraitImpl*           traits;
     int                  trait_count;
     GenericFuncDef*      func_defs;

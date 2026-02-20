@@ -58,12 +58,16 @@ int is_struct_type(CodeGen* gen, Node* type_node) {
     if (!type_node)
         return 0;
     type_node = resolve_alias(gen, type_node);
-    // Generic types (Box<i64>) are always struct types, except Span<T>, Vec<T>, and generic enums
+    // Generic types are always struct types, except Span<T>, Vec<T>, Box<T>, and generic enums
     if (type_node->type == NODE_GENERIC_TYPE) {
         if (strcmp(type_node->as.generic_type.base_name, "Span") == 0) {
             return 0;
         }
         if (strcmp(type_node->as.generic_type.base_name, "Vec") == 0) {
+            return 0;
+        }
+        if (strcmp(type_node->as.generic_type.base_name, "Box") == 0 &&
+            gen->checker.box_count > 0) {
             return 0;
         }
         // Check if the mangled name is a registered enum
@@ -91,6 +95,8 @@ int type_node_has_rc(CodeGen* gen, Node* type_node) {
             return 0;
         if (strcmp(type_node->as.generic_type.base_name, "Vec") == 0)
             return 1; // Vec is always RC-managed
+        if (strcmp(type_node->as.generic_type.base_name, "Box") == 0 && gen->checker.box_count > 0)
+            return 1; // Box is always RC-managed
         // Check if this is a generic enum
         char* mangled = build_mangled_name_from_generic_node(gen, type_node);
         if (is_enum_type_name(gen, mangled)) {

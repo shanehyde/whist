@@ -185,6 +185,7 @@ struct Node {
     int      column;
     int      is_owned_temp;   // Set by checker: expression produces an owned RC value
     Type*    owned_temp_type; // Set by checker: the RC type of the owned temporary
+    int      is_box_deref;    // Set by checker: auto-deref Box<T> to T (emit ->value)
 
     union {
         // Literals

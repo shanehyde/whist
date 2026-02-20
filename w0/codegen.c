@@ -1897,6 +1897,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     compute_enum_eq_flags(gen, ast);
     emit_struct_forward_decls(gen, ast);
     emit_vec_typedefs(gen);
+    emit_box_typedefs(gen);
     emit_span_typedefs(gen);
     emit_enum_typedefs(gen, ast);
     emit_generic_enum_typedefs(gen, ast);

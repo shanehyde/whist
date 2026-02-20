@@ -203,7 +203,7 @@ static int closure_ident_needs_env_inc(Node* expr) {
 // Emit RC-safe assignment for tracked identifier targets; returns whether it handled the statement.
 static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
     if (expr->type != NODE_ASSIGN || expr->as.assign.op != TOK_EQ ||
-        expr->as.assign.target->type != NODE_IDENT ||
+        expr->as.assign.target->type != NODE_IDENT || expr->as.assign.target->is_box_deref ||
         !rc_is_tracked(gen, expr->as.assign.target->as.ident.name)) {
         return 0;
     }
@@ -878,9 +878,34 @@ static int emit_var_decl_destructuring(CodeGen* gen, Node* node) {
 }
 
 // Dispatch RC-managed `new` declaration emission by allocated type.
+static void emit_var_decl_rc_new_box(CodeGen* gen, Node* node) {
+    Type*       rtype      = node->as.var_decl.init->as.new_expr.resolved_type;
+    const char* elem_tname = type_mangle_name(rtype->as.box.elem);
+    emit_indent(gen);
+    emit(gen, "__Box_%s* %s = (__Box_%s*)__rc_alloc(sizeof(__Box_%s), NULL);\n", elem_tname,
+         node->as.var_decl.name, elem_tname, elem_tname);
+    emit_indent(gen);
+    Node* init_node = node->as.var_decl.init;
+    if (init_node->as.new_expr.init != NULL) {
+        // Struct init form: new Box<T>{value: expr}
+        Node* field = init_node->as.new_expr.init->as.struct_init.fields.nodes[0];
+        emit(gen, "%s->value = ", node->as.var_decl.name);
+        emit_expr(gen, field->as.field_init.value);
+        emit(gen, ";\n");
+    } else {
+        // Constructor form: new Box<T>(expr)
+        emit(gen, "%s->value = ", node->as.var_decl.name);
+        emit_expr(gen, init_node->as.new_expr.args.nodes[0]);
+        emit(gen, ";\n");
+    }
+    rc_push_var(gen, node->as.var_decl.name, rtype);
+}
+
 static void emit_var_decl_rc_new(CodeGen* gen, Node* node) {
     Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
-    if (rtype && rtype->kind == TYPE_VEC) {
+    if (rtype && rtype->kind == TYPE_BOX) {
+        emit_var_decl_rc_new_box(gen, node);
+    } else if (rtype && rtype->kind == TYPE_VEC) {
         emit_var_decl_rc_new_vec(gen, node);
     } else if (rtype && rtype->kind == TYPE_STRINGBUILDER) {
         emit_var_decl_rc_new_stringbuilder(gen, node);
