@@ -11,6 +11,7 @@ static void emit_expr_stmt(CodeGen* gen, Node* node);
 static void emit_var_decl_stmt(CodeGen* gen, Node* node);
 static void emit_return_stmt(CodeGen* gen, Node* node);
 static void emit_match_stmt(CodeGen* gen, Node* node);
+static void collect_owned_temps(Node* node, Node*** temps, int* count, int* cap);
 
 // Walk a destructuring pattern and RC-track any identifiers with RC-managed types
 static void rc_track_destruct_pattern(CodeGen* gen, DestructPattern* pattern) {
@@ -72,13 +73,23 @@ static void hoist_push_new_arg(CodeGen* gen, Node* arg, const char* temp_name) {
     gen->hoist.count++;
 }
 
-// Recursively collect all is_owned_temp nodes in an expression tree (depth-first).
-// Children are collected before parents so inner temps are evaluated first.
-static void collect_owned_temps(Node* node, Node*** temps, int* count, int* cap) {
-    if (!node)
-        return;
+// Collect owned temps from struct init fields and call args inside a new expression.
+static void collect_owned_temps_new_expr(Node* node, Node*** temps, int* count, int* cap) {
+    if (node->as.new_expr.init) {
+        for (int i = 0; i < node->as.new_expr.init->as.struct_init.fields.count; i++) {
+            Node* field = node->as.new_expr.init->as.struct_init.fields.nodes[i];
+            if (field && field->type == NODE_FIELD_INIT) {
+                collect_owned_temps(field->as.field_init.value, temps, count, cap);
+            }
+        }
+    }
+    for (int i = 0; i < node->as.new_expr.args.count; i++) {
+        collect_owned_temps(node->as.new_expr.args.nodes[i], temps, count, cap);
+    }
+}
 
-    // Walk children first (evaluation order: inner before outer)
+// Collect owned temps from all child expression nodes for one expression node.
+static void collect_owned_temps_children(Node* node, Node*** temps, int* count, int* cap) {
     switch (node->type) {
     case NODE_CALL:
         collect_owned_temps(node->as.call.func, temps, count, cap);
@@ -106,18 +117,7 @@ static void collect_owned_temps(Node* node, Node*** temps, int* count, int* cap)
         collect_owned_temps(node->as.slice.end, temps, count, cap);
         break;
     case NODE_NEW_EXPR:
-        // Walk new expr args and field init values
-        if (node->as.new_expr.init) {
-            for (int i = 0; i < node->as.new_expr.init->as.struct_init.fields.count; i++) {
-                Node* field = node->as.new_expr.init->as.struct_init.fields.nodes[i];
-                if (field && field->type == NODE_FIELD_INIT) {
-                    collect_owned_temps(field->as.field_init.value, temps, count, cap);
-                }
-            }
-        }
-        for (int i = 0; i < node->as.new_expr.args.count; i++) {
-            collect_owned_temps(node->as.new_expr.args.nodes[i], temps, count, cap);
-        }
+        collect_owned_temps_new_expr(node, temps, count, cap);
         break;
     case NODE_CAST:
         collect_owned_temps(node->as.cast_expr.expr, temps, count, cap);
@@ -140,6 +140,16 @@ static void collect_owned_temps(Node* node, Node*** temps, int* count, int* cap)
     default:
         break;
     }
+}
+
+// Recursively collect all is_owned_temp nodes in an expression tree (depth-first).
+// Children are collected before parents so inner temps are evaluated first.
+static void collect_owned_temps(Node* node, Node*** temps, int* count, int* cap) {
+    if (!node)
+        return;
+
+    // Walk children first (evaluation order: inner before outer)
+    collect_owned_temps_children(node, temps, count, cap);
 
     // Then collect this node if it's an owned temp
     if (node->is_owned_temp) {
