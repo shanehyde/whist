@@ -151,7 +151,8 @@ static void print_var_decl(Node* node, int depth) {
         print_destruct_pattern(node->as.var_decl.destruct_pattern);
         printf("%s\n", node->as.var_decl.is_const ? " (const)" : "");
     } else {
-        printf("VarDecl: %.*s%s\n", node->as.var_decl.name_length, node->as.var_decl.name,
+        printf("VarDecl: %s%.*s%s\n", node->as.var_decl.is_boxed ? "^" : "",
+               node->as.var_decl.name_length, node->as.var_decl.name,
                node->as.var_decl.is_const ? " (const)" : "");
     }
     if (node->as.var_decl.type) {

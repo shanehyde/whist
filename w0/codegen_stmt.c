@@ -877,6 +877,32 @@ static int emit_var_decl_destructuring(CodeGen* gen, Node* node) {
     return 1;
 }
 
+// Emit autoboxed variable declaration: var ^x = expr → Box<T> allocation with value assignment.
+static void emit_var_decl_autobox(CodeGen* gen, Node* node) {
+    Type*       box_type   = node->as.var_decl.resolved_type;
+    const char* elem_tname = type_mangle_name(box_type->as.box.elem);
+
+    // Hoist owned temps in the init expression
+    int has_temps = has_owned_temps(node->as.var_decl.init);
+    int saved     = 0;
+    if (has_temps) {
+        saved = hoist_owned_temps(gen, node->as.var_decl.init);
+    }
+
+    emit_indent(gen);
+    emit(gen, "__Box_%s* %s = (__Box_%s*)__rc_alloc(sizeof(__Box_%s), NULL);\n", elem_tname,
+         node->as.var_decl.name, elem_tname, elem_tname);
+    emit_indent(gen);
+    emit(gen, "%s->value = ", node->as.var_decl.name);
+    emit_expr(gen, node->as.var_decl.init);
+    emit(gen, ";\n");
+    rc_push_var(gen, node->as.var_decl.name, box_type);
+
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+}
+
 // Dispatch RC-managed `new` declaration emission by allocated type.
 static void emit_var_decl_rc_new_box(CodeGen* gen, Node* node) {
     Type*       rtype      = node->as.var_decl.init->as.new_expr.resolved_type;
@@ -936,6 +962,12 @@ static void emit_var_decl_rc_copy_with_temps(CodeGen* gen, Node* node) {
 static int emit_var_decl_rc_managed(CodeGen* gen, Node* node) {
     if (!node->as.var_decl.is_rc || !node->as.var_decl.init) {
         return 0;
+    }
+
+    // Autoboxing: var ^x = expr → allocate Box<T> and store value
+    if (node->as.var_decl.is_boxed) {
+        emit_var_decl_autobox(gen, node);
+        return 1;
     }
 
     // Direct RC assignment: ownership transfers to the variable, don't hoist the init itself

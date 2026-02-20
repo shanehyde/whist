@@ -174,7 +174,7 @@ Aliases are fully interchangeable with the underlying type: `var id: UserId = 42
 ### Variable Declaration
 
 ```bnf
-<var-decl> ::= ( 'var' | 'const' ) <identifier> [ ':' <type> ] [ '=' <expression> ] ';'
+<var-decl> ::= ( 'var' | 'const' ) '^'? <identifier> [ ':' <type> ] [ '=' <expression> ] ';'
             | ( 'var' | 'const' ) <destruct-pattern> [ ':' <type> ] '=' <expression> ';'
             | ( 'var' | 'const' ) <struct-destruct> '=' <expression> ';'
 
