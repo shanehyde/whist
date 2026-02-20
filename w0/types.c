@@ -680,6 +680,33 @@ const char* type_mangle_name(Type* type) {
         return type->as.trait.name;
     case TYPE_GENERIC_PARAM:
         return type->as.generic_param.name;
+    case TYPE_ARRAY: {
+        char* buf = next_type_mangle_buf();
+        snprintf(buf, 256, "arr%d_%s", type->as.array.size, type_mangle_name(type->as.array.elem));
+        return buf;
+    }
+    case TYPE_TUPLE: {
+        char* buf = next_type_mangle_buf();
+        int   pos = snprintf(buf, 256, "tup");
+        for (int i = 0; i < type->as.tuple.elem_count && pos < 255; i++) {
+            pos += snprintf(buf + pos, 256 - pos, "_%s",
+                            type_mangle_name(type->as.tuple.elem_types[i]));
+        }
+        return buf;
+    }
+    case TYPE_FUNC: {
+        char* buf = next_type_mangle_buf();
+        int   pos = snprintf(buf, 256, "fn");
+        for (int i = 0; i < type->as.func.param_count && pos < 255; i++) {
+            pos += snprintf(buf + pos, 256 - pos, "_%s",
+                            type_mangle_name(type->as.func.param_types[i]));
+        }
+        if (type->as.func.return_type) {
+            pos += snprintf(buf + pos, 256 - pos, "_r_%s",
+                            type_mangle_name(type->as.func.return_type));
+        }
+        return buf;
+    }
     default:
         return "unknown";
     }
