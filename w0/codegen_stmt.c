@@ -1051,137 +1051,169 @@ static void emit_rc_inc_for_return(CodeGen* gen, const char* value_name) {
     }
 }
 
-// Emit a return statement (NODE_RETURN).
-// Handles RC cleanup, defer integration, and return value evaluation.
-static void emit_return_stmt(CodeGen* gen, Node* node) {
-    // Determine if we're returning an RC var (skip it in cleanup)
-    const char* skip_name    = NULL;
-    char        env_buf[256] = {0};
-    if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_IDENT) {
-        // Check if the returned identifier is an RC var
-        const char* ret_name = node->as.return_stmt.value->as.ident.name;
-        for (int i = 0; i < gen->rc.count; i++) {
-            if (strcmp(gen->rc.vars[i].name, ret_name) == 0) {
-                skip_name = ret_name;
-                break;
-            }
-        }
-        // If returning a closure variable, skip its .env cleanup (ownership transfer)
-        if (!skip_name) {
-            snprintf(env_buf, sizeof(env_buf), "%s.env", ret_name);
-            if (rc_is_tracked(gen, env_buf)) {
-                skip_name = env_buf;
-            }
+static const char* find_return_skip_name(CodeGen* gen, Node* return_value, char* env_buf,
+                                         size_t env_buf_size) {
+    if (!return_value || return_value->type != NODE_IDENT) {
+        return NULL;
+    }
+
+    // Check if the returned identifier is an RC var
+    const char* ret_name = return_value->as.ident.name;
+    for (int i = 0; i < gen->rc.count; i++) {
+        if (strcmp(gen->rc.vars[i].name, ret_name) == 0) {
+            return ret_name;
         }
     }
 
+    // If returning a closure variable, skip its .env cleanup (ownership transfer)
+    snprintf(env_buf, env_buf_size, "%s.env", ret_name);
+    if (rc_is_tracked(gen, env_buf)) {
+        return env_buf;
+    }
+    return NULL;
+}
+
+static int return_needs_borrow_inc(CodeGen* gen, Node* return_value, const char* skip_name) {
     // When returning an identifier that's not RC-tracked (e.g., a function parameter)
     // and the return type is RC-managed, we must __rc_inc to give caller ownership.
     // Parameters are borrowed references; return values must be owned.
-    int needs_borrow_inc = 0;
-    if (!skip_name && node->as.return_stmt.value &&
-        node->as.return_stmt.value->type == NODE_IDENT && gen->defer.return_type &&
-        type_node_has_rc(gen, gen->defer.return_type)) {
-        needs_borrow_inc = 1;
+    return !skip_name && return_value && return_value->type == NODE_IDENT &&
+           gen->defer.return_type && type_node_has_rc(gen, gen->defer.return_type);
+}
+
+static void hoist_return_value_temps(CodeGen* gen, Node* return_value, int* has_temps, int* saved) {
+    *has_temps = 0;
+    *saved     = 0;
+    if (!return_value) {
+        return;
     }
+
+    // If the return value itself is an owned temp (e.g., return new Box{...}),
+    // ownership transfers to the caller — exclude it from hoisting.
+    int ret_is_owned = return_value->is_owned_temp;
+    if (ret_is_owned) {
+        return_value->is_owned_temp = 0;
+    }
+    *has_temps = has_owned_temps(return_value);
+    if (*has_temps) {
+        *saved = hoist_owned_temps(gen, return_value);
+    }
+    if (ret_is_owned) {
+        return_value->is_owned_temp = 1; // restore AST
+    }
+}
+
+static void emit_enclosing_hoists_cleanup(CodeGen* gen, int enclosing_hoists) {
+    for (int i = 0; i < enclosing_hoists; i++) {
+        emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
+    }
+}
+
+static void emit_return_expr_stmt(CodeGen* gen, Node* return_value) {
+    emit_indent(gen);
+    emit(gen, "return");
+    if (return_value) {
+        emit(gen, " ");
+        emit_expr(gen, return_value);
+    }
+    emit(gen, ";\n");
+}
+
+static void emit_return_with_defer(CodeGen* gen, Node* return_value, const char* skip_name,
+                                   int needs_borrow_inc, int has_temps, int saved,
+                                   int enclosing_hoists) {
+    // With defers: store value in __ret, cleanup RC + owned temps, goto cleanup
+    emit_indent(gen);
+    if (return_value) {
+        emit(gen, "__ret = ");
+        emit_expr(gen, return_value);
+        emit(gen, ";\n");
+    }
+    if (needs_borrow_inc) {
+        emit_rc_inc_for_return(gen, "__ret");
+    }
+    if (gen->rc.count > 0) {
+        rc_cleanup_all(gen, skip_name);
+    }
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+    emit_enclosing_hoists_cleanup(gen, enclosing_hoists);
+    emit_indent(gen);
+    emit(gen, "goto __cleanup;\n");
+}
+
+static void emit_return_with_cleanup_temp(CodeGen* gen, Node* return_value, int needs_borrow_inc,
+                                          int has_temps, int saved, int enclosing_hoists) {
+    // Complex expression: evaluate to temp first
+    emit_indent(gen);
+    emit(gen, "typeof(");
+    emit_expr(gen, return_value);
+    emit(gen, ") __rc_ret = ");
+    emit_expr(gen, return_value);
+    emit(gen, ";\n");
+    if (needs_borrow_inc) {
+        emit_rc_inc_for_return(gen, "__rc_ret");
+    }
+    if (gen->rc.count > 0) {
+        rc_cleanup_all(gen, NULL);
+    }
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+    emit_enclosing_hoists_cleanup(gen, enclosing_hoists);
+    emit_indent(gen);
+    emit(gen, "return __rc_ret;\n");
+}
+
+static void emit_return_with_cleanup_expr(CodeGen* gen, Node* return_value, const char* skip_name,
+                                          int has_temps, int saved, int enclosing_hoists) {
+    if (gen->rc.count > 0) {
+        rc_cleanup_all(gen, skip_name);
+    }
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+    emit_enclosing_hoists_cleanup(gen, enclosing_hoists);
+    emit_return_expr_stmt(gen, return_value);
+}
+
+// Emit a return statement (NODE_RETURN).
+// Handles RC cleanup, defer integration, and return value evaluation.
+static void emit_return_stmt(CodeGen* gen, Node* node) {
+    Node*       return_value = node->as.return_stmt.value;
+    char        env_buf[256] = {0};
+    const char* skip_name    = find_return_skip_name(gen, return_value, env_buf, sizeof(env_buf));
+    int         needs_borrow_inc = return_needs_borrow_inc(gen, return_value, skip_name);
 
     // Capture enclosing hoisted temps (e.g., from foreach collection expression).
     // These must be cleaned up on return but NOT removed from the hoist list,
     // since the non-returning path's cleanup_owned_temps still needs them.
     int enclosing_hoists = gen->hoist.count;
 
-    // Handle owned temps in return expression.
-    // If the return value itself is an owned temp (e.g., return new Box{...}),
-    // ownership transfers to the caller — exclude it from hoisting.
-    int has_temps    = 0;
-    int saved        = 0;
-    int ret_is_owned = 0;
-    if (node->as.return_stmt.value) {
-        ret_is_owned = node->as.return_stmt.value->is_owned_temp;
-        if (ret_is_owned)
-            node->as.return_stmt.value->is_owned_temp = 0;
-        has_temps = has_owned_temps(node->as.return_stmt.value);
-        if (has_temps)
-            saved = hoist_owned_temps(gen, node->as.return_stmt.value);
-        if (ret_is_owned)
-            node->as.return_stmt.value->is_owned_temp = 1; // restore AST
-    }
+    int has_temps = 0;
+    int saved     = 0;
+    hoist_return_value_temps(gen, return_value, &has_temps, &saved);
 
     if (gen->defer.count > 0) {
-        // With defers: store value in __ret, cleanup RC + owned temps, goto cleanup
-        emit_indent(gen);
-        if (node->as.return_stmt.value) {
-            emit(gen, "__ret = ");
-            emit_expr(gen, node->as.return_stmt.value);
-            emit(gen, ";\n");
-        }
-        if (needs_borrow_inc) {
-            emit_rc_inc_for_return(gen, "__ret");
-        }
-        if (gen->rc.count > 0) {
-            rc_cleanup_all(gen, skip_name);
-        }
-        if (has_temps) {
-            cleanup_owned_temps(gen, saved);
-        }
-        for (int i = 0; i < enclosing_hoists; i++) {
-            emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
-        }
-        emit_indent(gen);
-        emit(gen, "goto __cleanup;\n");
-    } else {
-        // No defers: cleanup RC + owned temps, then return
-        if (gen->rc.count > 0 || has_temps || needs_borrow_inc || enclosing_hoists > 0) {
-            if (node->as.return_stmt.value && !skip_name) {
-                // Complex expression: evaluate to temp first
-                emit_indent(gen);
-                emit(gen, "typeof(");
-                emit_expr(gen, node->as.return_stmt.value);
-                emit(gen, ") __rc_ret = ");
-                emit_expr(gen, node->as.return_stmt.value);
-                emit(gen, ";\n");
-                if (needs_borrow_inc) {
-                    emit_rc_inc_for_return(gen, "__rc_ret");
-                }
-                if (gen->rc.count > 0) {
-                    rc_cleanup_all(gen, NULL);
-                }
-                if (has_temps) {
-                    cleanup_owned_temps(gen, saved);
-                }
-                for (int i = 0; i < enclosing_hoists; i++) {
-                    emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
-                }
-                emit_indent(gen);
-                emit(gen, "return __rc_ret;\n");
-            } else {
-                if (gen->rc.count > 0) {
-                    rc_cleanup_all(gen, skip_name);
-                }
-                if (has_temps) {
-                    cleanup_owned_temps(gen, saved);
-                }
-                for (int i = 0; i < enclosing_hoists; i++) {
-                    emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
-                }
-                emit_indent(gen);
-                emit(gen, "return");
-                if (node->as.return_stmt.value) {
-                    emit(gen, " ");
-                    emit_expr(gen, node->as.return_stmt.value);
-                }
-                emit(gen, ";\n");
-            }
-        } else {
-            emit_indent(gen);
-            emit(gen, "return");
-            if (node->as.return_stmt.value) {
-                emit(gen, " ");
-                emit_expr(gen, node->as.return_stmt.value);
-            }
-            emit(gen, ";\n");
-        }
+        emit_return_with_defer(gen, return_value, skip_name, needs_borrow_inc, has_temps, saved,
+                               enclosing_hoists);
+        return;
     }
+
+    // No defers: cleanup RC + owned temps, then return
+    if (gen->rc.count > 0 || has_temps || needs_borrow_inc || enclosing_hoists > 0) {
+        if (return_value && !skip_name) {
+            emit_return_with_cleanup_temp(gen, return_value, needs_borrow_inc, has_temps, saved,
+                                          enclosing_hoists);
+        } else {
+            emit_return_with_cleanup_expr(gen, return_value, skip_name, has_temps, saved,
+                                          enclosing_hoists);
+        }
+        return;
+    }
+
+    emit_return_expr_stmt(gen, return_value);
 }
 
 // Emit a comparison for a value match arm pattern
