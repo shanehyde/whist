@@ -8,7 +8,7 @@ DEPS = $(SRC:.c=.d)
 BIN = bin
 TARGET = $(BIN)/w0
 
-.PHONY: all clean test test-verbose test-valid test-run test-errors test-whist format metrics complexity
+.PHONY: all clean test test-verbose test-valid test-run test-errors format metrics complexity
 
 all: $(TARGET)
 
@@ -25,24 +25,23 @@ clean:
 	rm -f $(OBJ) $(DEPS)
 	rm -rf $(BIN)
 
-test: $(TARGET)
-	@./scripts/run_tests.sh
+$(BIN)/test_runner: $(TARGET) tools/test_runner.w
+	@$(TARGET) --lib-path ../lib tools/test_runner.w | cc -x c -I../lib/include -o $@ - ../lib/whist_runtime.c
 
-test-verbose: $(TARGET)
-	@./scripts/run_tests.sh --verbose
+test: $(BIN)/test_runner
+	@$(BIN)/test_runner
 
-test-run: $(TARGET)
-	@./scripts/run_tests.sh --run
+test-verbose: $(BIN)/test_runner
+	@$(BIN)/test_runner --verbose
 
-test-valid: $(TARGET)
-	@./scripts/run_tests.sh --run
+test-run: $(BIN)/test_runner
+	@$(BIN)/test_runner --run
 
-test-errors: $(TARGET)
-	@./scripts/run_tests.sh --errors
+test-valid: $(BIN)/test_runner
+	@$(BIN)/test_runner --run
 
-test-whist: $(TARGET)
-	@$(TARGET) --lib-path ../lib tools/test_runner.w | cc -x c -I../lib/include -o $(BIN)/test_runner - ../lib/whist_runtime.c
-	@cd . && $(BIN)/test_runner
+test-errors: $(BIN)/test_runner
+	@$(BIN)/test_runner --errors
 
 format:
 	clang-format -i *.c *.h

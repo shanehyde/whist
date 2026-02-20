@@ -154,7 +154,7 @@ static inline void __w0_vec_check(int64_t count, int64_t idx, int line, int col)
 }
 
 /* --- Panic --- */
-static inline void __whist_panic(const char* msg) {
+_Noreturn static inline void __whist_panic(const char* msg) {
     fprintf(stderr, "Panic: %s\n", msg);
     exit(1);
 }

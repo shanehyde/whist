@@ -223,7 +223,11 @@ static void emit_enum_value(CodeGen* gen, Node* node) {
                 if (arg->type == NODE_IDENT && rc_is_tracked(gen, arg->as.ident.name)) {
                     Type*       arg_type = rc_get_var_type(gen, arg->as.ident.name);
                     const char* inc_fn   = get_inc_func_for_type(arg_type);
-                    emit(gen, "%s(%s); ", inc_fn, arg->as.ident.name);
+                    if (arg_type && arg_type->kind == TYPE_STRING) {
+                        emit(gen, "%s((void*)%s); ", inc_fn, arg->as.ident.name);
+                    } else {
+                        emit(gen, "%s(%s); ", inc_fn, arg->as.ident.name);
+                    }
                     free((char*)inc_fn);
                 }
             }
@@ -1144,6 +1148,8 @@ static void emit_try_expr(CodeGen* gen, Node* node) {
         Type* t = gen->rc.vars[i].type;
         if (t && t->kind == TYPE_ENUM && t->as.enm.has_rc_fields) {
             emit(gen, "__rc_dec_%s(%s); ", t->as.enm.name, gen->rc.vars[i].name);
+        } else if (t && t->kind == TYPE_STRING) {
+            emit(gen, "__rc_dec((void*)%s); ", gen->rc.vars[i].name);
         } else {
             emit(gen, "__rc_dec(%s); ", gen->rc.vars[i].name);
         }

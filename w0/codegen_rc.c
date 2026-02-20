@@ -172,12 +172,24 @@ static void emit_enum_rc_func(CodeGen* gen, const char* ename, Node* enum_decl, 
             if (enum_nm) {
                 emit(gen, "        __rc_%s_%s(v.%.*s.f%d);\n", op, enum_nm,
                      var->as.enum_variant.name_length, var->as.enum_variant.name, t);
-            } else if (tnode->type == NODE_IDENT && strcmp(tnode->as.ident.name, "string") == 0) {
-                emit(gen, "        __rc_%s((void*)v.%.*s.f%d);\n", op,
-                     var->as.enum_variant.name_length, var->as.enum_variant.name, t);
             } else {
-                emit(gen, "        __rc_%s(v.%.*s.f%d);\n", op, var->as.enum_variant.name_length,
-                     var->as.enum_variant.name, t);
+                // Check if this field resolves to a string (directly or via substitution)
+                int is_str = 0;
+                if (tnode->type == NODE_IDENT) {
+                    if (strcmp(tnode->as.ident.name, "string") == 0) {
+                        is_str = 1;
+                    } else {
+                        Type* resolved = subst_lookup(gen, tnode->as.ident.name);
+                        is_str         = (resolved && resolved->kind == TYPE_STRING);
+                    }
+                }
+                if (is_str) {
+                    emit(gen, "        __rc_%s((void*)v.%.*s.f%d);\n", op,
+                         var->as.enum_variant.name_length, var->as.enum_variant.name, t);
+                } else {
+                    emit(gen, "        __rc_%s(v.%.*s.f%d);\n", op,
+                         var->as.enum_variant.name_length, var->as.enum_variant.name, t);
+                }
             }
         }
         emit(gen, "        break;\n");
