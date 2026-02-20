@@ -6,74 +6,80 @@
 #include "alloc.h"
 #include "parser_internal.h"
 
+// Converts one hexadecimal digit to its numeric value, or -1 if invalid.
+static int hex_digit_value(char c) {
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+// Decodes non-numeric escapes like `\n`, `\t`, `\\`, and unknown escaped chars.
+static char decode_simple_escape(const char** src, char c) {
+    (*src)++;
+    switch (c) {
+    case 'n':
+        return '\n';
+    case 't':
+        return '\t';
+    case 'r':
+        return '\r';
+    case '\\':
+        return '\\';
+    case '"':
+        return '"';
+    case '\'':
+        return '\'';
+    case 'e':
+        return '\x1b';
+    default:
+        return c;
+    }
+}
+
+// Decodes hexadecimal escape sequences of the form `\xNN` (up to two digits).
+static char decode_hex_escape(const char** src, const char* end) {
+    (*src)++; // skip 'x'
+    int value = 0;
+    for (int i = 0; i < 2 && *src < end; i++) {
+        int digit = hex_digit_value(**src);
+        if (digit < 0) {
+            break;
+        }
+        value = value * 16 + digit;
+        (*src)++;
+    }
+    return (char)value;
+}
+
+// Decodes octal escapes (up to three octal digits starting at the current source char).
+static char decode_octal_escape(const char** src, const char* end) {
+    int value = 0;
+    for (int i = 0; i < 3 && *src < end; i++) {
+        char o = **src;
+        if (o < '0' || o > '7') {
+            break;
+        }
+        value = value * 8 + (o - '0');
+        (*src)++;
+    }
+    return (char)value;
+}
+
 // Decode an escape sequence starting at *src (just past the backslash).
 // Advances *src past the consumed escape characters. Returns the decoded char value.
 static char decode_escape(const char** src, const char* end) {
     char c = **src;
-    switch (c) {
-    case 'n':
-        (*src)++;
-        return '\n';
-    case 't':
-        (*src)++;
-        return '\t';
-    case 'r':
-        (*src)++;
-        return '\r';
-    case '\\':
-        (*src)++;
-        return '\\';
-    case '"':
-        (*src)++;
-        return '"';
-    case '\'':
-        (*src)++;
-        return '\'';
-    case 'e':
-        (*src)++;
-        return '\x1b';
-    case 'x': {
-        // Hex escape: \xNN
-        (*src)++; // skip 'x'
-        int value = 0;
-        for (int i = 0; i < 2 && *src < end; i++) {
-            char h = **src;
-            if (h >= '0' && h <= '9')
-                value = value * 16 + (h - '0');
-            else if (h >= 'a' && h <= 'f')
-                value = value * 16 + (h - 'a' + 10);
-            else if (h >= 'A' && h <= 'F')
-                value = value * 16 + (h - 'A' + 10);
-            else
-                break;
-            (*src)++;
-        }
-        return (char)value;
+    if (c == 'x') {
+        return decode_hex_escape(src, end);
     }
-    case '0':
-    case '1':
-    case '2':
-    case '3':
-    case '4':
-    case '5':
-    case '6':
-    case '7': {
-        // Octal escape: up to 3 digits
-        int value = 0;
-        for (int i = 0; i < 3 && *src < end; i++) {
-            char o = **src;
-            if (o >= '0' && o <= '7')
-                value = value * 8 + (o - '0');
-            else
-                break;
-            (*src)++;
-        }
-        return (char)value;
+    if (c >= '0' && c <= '7') {
+        return decode_octal_escape(src, end);
     }
-    default:
-        (*src)++;
-        return c;
-    }
+    return decode_simple_escape(src, c);
 }
 
 static Node* parse_struct_init(Parser* parser) {
