@@ -719,111 +719,136 @@ static void emit_var_decl_rc_copy(CodeGen* gen, Node* node) {
     rc_push_var(gen, node->as.var_decl.name, rc_type);
 }
 
-// Emit a type-and-name declaration inferred from the initializer expression.
-static void emit_var_decl_inferred_type(CodeGen* gen, Node* node) {
-    if (!node->as.var_decl.init) {
-        emit(gen, "int64_t %s", node->as.var_decl.name);
+static void emit_var_decl_default_int(CodeGen* gen, const char* name) {
+    emit(gen, "int64_t %s", name);
+}
+
+static Type* tuple_literal_elem_type(Node* elem) {
+    switch (elem->type) {
+    case NODE_INT_LIT:
+        return type_int64;
+    case NODE_FLOAT_LIT:
+        return type_f32;
+    case NODE_BOOL_LIT:
+        return type_bool;
+    case NODE_STRING_LIT:
+        return type_string;
+    case NODE_CHAR_LIT:
+        return type_char;
+    case NODE_TUPLE_LIT:
+        return type_int64; // Fallback
+    default:
+        return type_int64; // Default
+    }
+}
+
+static int find_tuple_type_index(CodeGen* gen, Type* tuple) {
+    for (int i = 0; i < gen->tuple_type_count; i++) {
+        if (tuple_types_equal(gen->tuple_types[i], tuple)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void emit_var_decl_inferred_tuple_lit(CodeGen* gen, Node* node, const char* name) {
+    int    count = node->as.var_decl.init->as.tuple_lit.elements.count;
+    Type** elems = xmalloc(count * sizeof(Type*));
+    for (int i = 0; i < count; i++) {
+        Node* elem = node->as.var_decl.init->as.tuple_lit.elements.nodes[i];
+        elems[i]   = tuple_literal_elem_type(elem);
+    }
+
+    Type* tuple = type_tuple(elems, count);
+    int   idx   = find_tuple_type_index(gen, tuple);
+    if (idx >= 0) {
+        emit(gen, "__tuple_t%d %s", idx, name);
         return;
     }
-    switch (node->as.var_decl.init->type) {
+
+    emit(gen, "struct { ");
+    for (int i = 0; i < count; i++) {
+        emit_resolved_type(gen, elems[i]);
+        emit(gen, " _%d; ", i);
+    }
+    emit(gen, "} %s", name);
+}
+
+static void emit_var_decl_inferred_array_lit(CodeGen* gen, Node* init, const char* name) {
+    Type* elem_type = init->as.array_lit.resolved_type;
+    int   count     = init->as.array_lit.elements.count;
+    emit_resolved_type(gen, elem_type);
+    emit(gen, " %s[%d]", name, count);
+}
+
+static void emit_var_decl_resolved_or_default(CodeGen* gen, Node* node, const char* name) {
+    if (!node->as.var_decl.resolved_type) {
+        emit_var_decl_default_int(gen, name);
+        return;
+    }
+
+    Type* rt = node->as.var_decl.resolved_type;
+    if (rt->kind == TYPE_FUNC) {
+        emit(gen, "__Closure %s", name);
+    } else {
+        emit_resolved_type(gen, rt);
+        emit(gen, " %s", name);
+    }
+}
+
+static void emit_var_decl_inferred_enum_value(CodeGen* gen, Node* node, const char* name) {
+    Node* init = node->as.var_decl.init;
+    if (init->as.enum_value.is_module_call) {
+        if (node->as.var_decl.resolved_type) {
+            emit_resolved_type(gen, node->as.var_decl.resolved_type);
+            emit(gen, " %s", name);
+        } else {
+            emit_var_decl_default_int(gen, name);
+        }
+        return;
+    }
+
+    emit(gen, "%.*s %s", enum_value_resolved_name_length(gen, init),
+         enum_value_resolved_name(gen, init), name);
+}
+
+// Emit a type-and-name declaration inferred from the initializer expression.
+static void emit_var_decl_inferred_type(CodeGen* gen, Node* node) {
+    const char* name = node->as.var_decl.name;
+    Node*       init = node->as.var_decl.init;
+
+    if (!init) {
+        emit_var_decl_default_int(gen, name);
+        return;
+    }
+
+    switch (init->type) {
     case NODE_INT_LIT:
-        emit(gen, "int64_t %s", node->as.var_decl.name);
+        emit_var_decl_default_int(gen, name);
         break;
     case NODE_FLOAT_LIT:
-        emit(gen, "float %s", node->as.var_decl.name);
+        emit(gen, "float %s", name);
         break;
     case NODE_BOOL_LIT:
-        emit(gen, "bool %s", node->as.var_decl.name);
+        emit(gen, "bool %s", name);
         break;
     case NODE_STRING_LIT:
-        emit(gen, "const char* %s", node->as.var_decl.name);
+        emit(gen, "const char* %s", name);
         break;
     case NODE_CHAR_LIT:
-        emit(gen, "char %s", node->as.var_decl.name);
+        emit(gen, "char %s", name);
         break;
-    case NODE_TUPLE_LIT: {
-        int    count = node->as.var_decl.init->as.tuple_lit.elements.count;
-        Type** elems = xmalloc(count * sizeof(Type*));
-        for (int i = 0; i < count; i++) {
-            Node* elem = node->as.var_decl.init->as.tuple_lit.elements.nodes[i];
-            switch (elem->type) {
-            case NODE_INT_LIT:
-                elems[i] = type_int64;
-                break;
-            case NODE_FLOAT_LIT:
-                elems[i] = type_f32;
-                break;
-            case NODE_BOOL_LIT:
-                elems[i] = type_bool;
-                break;
-            case NODE_STRING_LIT:
-                elems[i] = type_string;
-                break;
-            case NODE_CHAR_LIT:
-                elems[i] = type_char;
-                break;
-            case NODE_TUPLE_LIT:
-                elems[i] = type_int64; // Fallback
-                break;
-            default:
-                elems[i] = type_int64; // Default
-                break;
-            }
-        }
-        Type* tuple = type_tuple(elems, count);
-        int   idx   = -1;
-        for (int i = 0; i < gen->tuple_type_count; i++) {
-            if (tuple_types_equal(gen->tuple_types[i], tuple)) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx >= 0) {
-            emit(gen, "__tuple_t%d %s", idx, node->as.var_decl.name);
-        } else {
-            emit(gen, "struct { ");
-            for (int i = 0; i < count; i++) {
-                emit_resolved_type(gen, elems[i]);
-                emit(gen, " _%d; ", i);
-            }
-            emit(gen, "} %s", node->as.var_decl.name);
-        }
+    case NODE_TUPLE_LIT:
+        emit_var_decl_inferred_tuple_lit(gen, node, name);
         break;
-    }
-    case NODE_ARRAY_LIT: {
-        Node* init      = node->as.var_decl.init;
-        Type* elem_type = init->as.array_lit.resolved_type;
-        int   count     = init->as.array_lit.elements.count;
-        emit_resolved_type(gen, elem_type);
-        emit(gen, " %s[%d]", node->as.var_decl.name, count);
+    case NODE_ARRAY_LIT:
+        emit_var_decl_inferred_array_lit(gen, init, name);
         break;
-    }
     case NODE_ENUM_VALUE:
-        if (node->as.var_decl.init->as.enum_value.is_module_call) {
-            // Module call: use resolved_type from checker
-            if (node->as.var_decl.resolved_type) {
-                emit_resolved_type(gen, node->as.var_decl.resolved_type);
-                emit(gen, " %s", node->as.var_decl.name);
-            } else {
-                emit(gen, "int64_t %s", node->as.var_decl.name);
-            }
-        } else {
-            emit(gen, "%.*s %s", enum_value_resolved_name_length(gen, node->as.var_decl.init),
-                 enum_value_resolved_name(gen, node->as.var_decl.init), node->as.var_decl.name);
-        }
+        emit_var_decl_inferred_enum_value(gen, node, name);
         break;
     default:
-        if (node->as.var_decl.resolved_type) {
-            Type* rt = node->as.var_decl.resolved_type;
-            if (rt->kind == TYPE_FUNC) {
-                emit(gen, "__Closure %s", node->as.var_decl.name);
-            } else {
-                emit_resolved_type(gen, rt);
-                emit(gen, " %s", node->as.var_decl.name);
-            }
-        } else {
-            emit(gen, "int64_t %s", node->as.var_decl.name);
-        }
+        emit_var_decl_resolved_or_default(gen, node, name);
         break;
     }
 }
