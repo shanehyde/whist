@@ -1225,6 +1225,77 @@ static void emit_value_match_expr(CodeGen* gen, Node* node) {
     emit(gen, "__matchv%d; })", match_id);
 }
 
+// Return whether a match expression contains a wildcard arm.
+static int match_expr_has_wildcard(Node* node) {
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Return the variant index for a variant name in an enum type, or -1 if missing.
+static int find_enum_variant_index(Type* enum_type, const char* variant) {
+    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
+        if (strcmp(enum_type->as.enm.value_names[i], variant) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Emit the opening branch header for one match arm.
+static void emit_match_expr_arm_head(CodeGen* gen, Node* arm, int is_first, int has_wildcard,
+                                     int arm_index, int last_arm, int is_data,
+                                     const char* enum_name, int match_id) {
+    if (arm->as.match_arm.is_wildcard) {
+        if (is_first) {
+            emit(gen, "{ ");
+        } else {
+            emit(gen, "else { ");
+        }
+        return;
+    }
+
+    if (!has_wildcard && arm_index == last_arm && !is_first) {
+        emit(gen, "else { ");
+        return;
+    }
+
+    const char* variant = arm->as.match_arm.variant_name;
+    if (is_first) {
+        emit(gen, "if (");
+    } else {
+        emit(gen, "else if (");
+    }
+    if (is_data) {
+        emit(gen, "__match%d.tag == %s_%s", match_id, enum_name, variant);
+    } else {
+        emit(gen, "__match%d == %s_%s", match_id, enum_name, variant);
+    }
+    emit(gen, ") { ");
+}
+
+// Emit local bindings for a data-enum match arm.
+static void emit_match_expr_arm_bindings(CodeGen* gen, Node* arm, Type* enum_type, int is_data,
+                                         int match_id) {
+    if (arm->as.match_arm.is_wildcard || !is_data || arm->as.match_arm.binding_count <= 0) {
+        return;
+    }
+
+    const char* variant     = arm->as.match_arm.variant_name;
+    int         variant_idx = find_enum_variant_index(enum_type, variant);
+    if (variant_idx < 0) {
+        return;
+    }
+
+    for (int j = 0; j < arm->as.match_arm.binding_count; j++) {
+        emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);
+        emit(gen, " %s = __match%d.%s.f%d; ", arm->as.match_arm.bindings[j], match_id, variant, j);
+    }
+}
+
 // Emit match-as-expression via GCC statement expression:
 // ({ Enum __matchN = <expr>; Result __matchvN; if (...) { __matchvN = ...; } ... __matchvN; })
 static void emit_match_expr(CodeGen* gen, Node* node) {
@@ -1251,61 +1322,17 @@ static void emit_match_expr(CodeGen* gen, Node* node) {
     emit_resolved_type(gen, value_type);
     emit(gen, " __matchv%d; ", match_id);
 
-    int has_wildcard = 0;
-    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
-        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
-            has_wildcard = 1;
-            break;
-        }
-    }
-    int last_arm = node->as.match_stmt.arms.count - 1;
+    int has_wildcard = match_expr_has_wildcard(node);
+    int last_arm     = node->as.match_stmt.arms.count - 1;
 
     int first = 1;
     for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
         Node* arm = node->as.match_stmt.arms.nodes[a];
-
-        if (arm->as.match_arm.is_wildcard) {
-            if (first) {
-                emit(gen, "{ ");
-            } else {
-                emit(gen, "else { ");
-            }
-        } else if (!has_wildcard && a == last_arm && !first) {
-            emit(gen, "else { ");
-        } else {
-            const char* variant = arm->as.match_arm.variant_name;
-            if (first) {
-                emit(gen, "if (");
-            } else {
-                emit(gen, "else if (");
-            }
-            if (is_data) {
-                emit(gen, "__match%d.tag == %s_%s", match_id, enum_name, variant);
-            } else {
-                emit(gen, "__match%d == %s_%s", match_id, enum_name, variant);
-            }
-            emit(gen, ") { ");
-        }
+        emit_match_expr_arm_head(gen, arm, first, has_wildcard, a, last_arm, is_data, enum_name,
+                                 match_id);
         first = 0;
 
-        if (!arm->as.match_arm.is_wildcard && is_data && arm->as.match_arm.binding_count > 0) {
-            const char* variant     = arm->as.match_arm.variant_name;
-            int         variant_idx = -1;
-            for (int i = 0; i < enum_type->as.enm.value_count; i++) {
-                if (strcmp(enum_type->as.enm.value_names[i], variant) == 0) {
-                    variant_idx = i;
-                    break;
-                }
-            }
-            if (variant_idx >= 0) {
-                for (int j = 0; j < arm->as.match_arm.binding_count; j++) {
-                    emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);
-                    emit(gen, " %s = __match%d.%s.f%d; ", arm->as.match_arm.bindings[j], match_id,
-                         variant, j);
-                }
-            }
-        }
-
+        emit_match_expr_arm_bindings(gen, arm, enum_type, is_data, match_id);
         emit(gen, "__matchv%d = ", match_id);
         emit_expr(gen, arm->as.match_arm.body);
         emit(gen, "; } ");
