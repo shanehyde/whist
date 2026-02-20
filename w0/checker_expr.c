@@ -1546,56 +1546,44 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
 
     int    arg_count = node->as.call.args.count;
     Type** arg_types = xcalloc(arg_count, sizeof(Type*));
-    int    has_error = 0;
+    Type** inferred  = xcalloc(gdef->type_param_count, sizeof(Type*));
+    Type*  result    = type_error;
 
     // Pass 1: Check non-lambda-with-untyped-params arguments
     for (int i = 0; i < arg_count; i++) {
-        if (!has_untyped_lambda_params(node->as.call.args.nodes[i])) {
-            arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
-            if (arg_types[i]->kind == TYPE_ERROR)
-                has_error = 1;
+        if (has_untyped_lambda_params(node->as.call.args.nodes[i])) {
+            continue;
         }
-    }
-    if (has_error) {
-        free(arg_types);
-        return type_error;
-    }
 
-    // Partial inference from pass 1 args
-    Type** inferred = xcalloc(gdef->type_param_count, sizeof(Type*));
-    for (int i = 0; i < arg_count; i++) {
-        if (arg_types[i]) {
-            infer_type_param(checker, gdef, fdn->params.nodes[i]->as.param.type, arg_types[i],
-                             inferred);
+        arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
+        if (arg_types[i]->kind == TYPE_ERROR) {
+            goto cleanup;
         }
+        infer_type_param(checker, gdef, fdn->params.nodes[i]->as.param.type, arg_types[i],
+                         inferred);
     }
 
     // Pass 2: Check lambda args with expected types built from partial inference
     for (int i = 0; i < arg_count; i++) {
-        if (!arg_types[i]) {
-            Type* old_expected = checker->expected_func_type;
-            Type* expected = build_expected_func_type(checker, fdn->params.nodes[i]->as.param.type,
-                                                      gdef, inferred);
-            if (expected)
-                checker->expected_func_type = expected;
-
-            arg_types[i]                = check_expression(checker, node->as.call.args.nodes[i]);
-            checker->expected_func_type = old_expected;
-
-            if (arg_types[i]->kind == TYPE_ERROR)
-                has_error = 1;
-
-            // Infer from the now-resolved lambda type
-            if (!has_error) {
-                infer_type_param(checker, gdef, fdn->params.nodes[i]->as.param.type, arg_types[i],
-                                 inferred);
-            }
+        if (arg_types[i]) {
+            continue;
         }
-    }
-    if (has_error) {
-        free(arg_types);
-        free(inferred);
-        return type_error;
+
+        Type* old_expected = checker->expected_func_type;
+        Type* expected =
+            build_expected_func_type(checker, fdn->params.nodes[i]->as.param.type, gdef, inferred);
+        if (expected) {
+            checker->expected_func_type = expected;
+        }
+
+        arg_types[i]                = check_expression(checker, node->as.call.args.nodes[i]);
+        checker->expected_func_type = old_expected;
+        if (arg_types[i]->kind == TYPE_ERROR) {
+            goto cleanup;
+        }
+
+        infer_type_param(checker, gdef, fdn->params.nodes[i]->as.param.type, arg_types[i],
+                         inferred);
     }
 
     for (int i = 0; i < gdef->type_param_count; i++) {
@@ -1603,9 +1591,7 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
             check_error(checker, node->line, node->column,
                         "Cannot infer type parameter '%s' for generic function '%s'",
                         gdef->type_params[i], gdef->name);
-            free(arg_types);
-            free(inferred);
-            return type_error;
+            goto cleanup;
         }
     }
 
@@ -1618,19 +1604,14 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
             check_error(checker, node->line, node->column,
                         "Type '%s' does not implement trait '%s' required by '%s'",
                         type_name(inferred[i]), bound, gdef->name);
-            free(arg_types);
-            free(inferred);
-            return type_error;
+            goto cleanup;
         }
     }
 
     GenericFuncInstance* inst = instantiate_generic_func(
         checker, gdef, inferred, gdef->type_param_count, node->line, node->column);
-    free(arg_types);
-    free(inferred);
-
     if (!inst) {
-        return type_error;
+        goto cleanup;
     }
 
     node->as.call.resolved_name = xstrdup(inst->mangled_name);
@@ -1639,7 +1620,12 @@ static Type* try_check_generic_free_function_call(Checker* checker, Node* node) 
         node->is_owned_temp   = 1;
         node->owned_temp_type = ret;
     }
-    return ret;
+    result = ret;
+
+cleanup:
+    free(arg_types);
+    free(inferred);
+    return result;
 }
 
 // Determine the base receiver type name and type arguments for method-level generics.
