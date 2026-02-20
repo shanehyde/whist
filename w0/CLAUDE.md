@@ -44,14 +44,16 @@ Compile and run:
 bin/w0 --lib-path ../lib program.w | cc -x c -Ilib/include -o program - lib/whist_runtime.c
 ```
 
-The `--rc-debug` flag adds `fprintf(stderr, ...)` calls to the generated `__rc_alloc`, `__rc_inc`, and `__rc_dec` functions, producing a trace like:
+The `--rc-debug` flag adds `fprintf(stderr, ...)` calls to the generated `__rc_alloc`, `__rc_inc`, and `__rc_dec` functions, producing a trace with Whist source locations:
 
 ```
-RC_ALLOC: 0x600003a04010 (size=16, rc=1)
-RC_INC: 0x600003a04010 (rc=2)
-RC_DEC: 0x600003a04010 (rc=1)
-RC_FREE: 0x600003a04010
+RC_ALLOC: 0x600003a04010 (size=16, rc=1) at program.w:10
+RC_INC: 0x600003a04010 (rc=2) at program.w:12
+RC_DEC: 0x600003a04010 (rc=1) at program.w:15
+RC_FREE: 0x600003a04010 at program.w:15
 ```
+
+This also auto-enables `#line` directives so that RC trace messages reference Whist source lines. Allocations inside runtime helpers (string concat, format, etc.) will show `whist_runtime.h` as their source.
 
 ## Whist Language
 

@@ -658,9 +658,7 @@ static void emit_var_decl_rc_new_struct(CodeGen* gen, Node* node) {
                 for (int j = 0; j < rtype->as.struc.field_count; j++) {
                     if (strcmp(rtype->as.struc.field_names[j], fname) == 0) {
                         Type* ftype = rtype->as.struc.field_types[j];
-                        if (ftype && (ftype->kind == TYPE_STRING || ftype->kind == TYPE_STRUCT ||
-                                      ftype->kind == TYPE_VEC ||
-                                      (ftype->kind == TYPE_ENUM && ftype->as.enm.has_rc_fields))) {
+                        if (type_is_rc_managed(ftype)) {
                             const char* inc_fn = get_inc_func_for_type(ftype);
                             emit_indent(gen);
                             if (ftype->kind == TYPE_STRING) {
@@ -1034,6 +1032,11 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
         needs_borrow_inc = 1;
     }
 
+    // Capture enclosing hoisted temps (e.g., from foreach collection expression).
+    // These must be cleaned up on return but NOT removed from the hoist list,
+    // since the non-returning path's cleanup_owned_temps still needs them.
+    int enclosing_hoists = gen->hoist.count;
+
     // Handle owned temps in return expression.
     // If the return value itself is an owned temp (e.g., return new Box{...}),
     // ownership transfers to the caller — exclude it from hoisting.
@@ -1068,11 +1071,14 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
         if (has_temps) {
             cleanup_owned_temps(gen, saved);
         }
+        for (int i = 0; i < enclosing_hoists; i++) {
+            emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
+        }
         emit_indent(gen);
         emit(gen, "goto __cleanup;\n");
     } else {
         // No defers: cleanup RC + owned temps, then return
-        if (gen->rc.count > 0 || has_temps || needs_borrow_inc) {
+        if (gen->rc.count > 0 || has_temps || needs_borrow_inc || enclosing_hoists > 0) {
             if (node->as.return_stmt.value && !skip_name) {
                 // Complex expression: evaluate to temp first
                 emit_indent(gen);
@@ -1090,6 +1096,9 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
                 if (has_temps) {
                     cleanup_owned_temps(gen, saved);
                 }
+                for (int i = 0; i < enclosing_hoists; i++) {
+                    emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
+                }
                 emit_indent(gen);
                 emit(gen, "return __rc_ret;\n");
             } else {
@@ -1098,6 +1107,9 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
                 }
                 if (has_temps) {
                     cleanup_owned_temps(gen, saved);
+                }
+                for (int i = 0; i < enclosing_hoists; i++) {
+                    emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
                 }
                 emit_indent(gen);
                 emit(gen, "return");
@@ -1398,9 +1410,18 @@ static void emit_if_stmt(CodeGen* gen, Node* node) {
                 emit(gen, "}\n");
             } else {
                 emit(gen, " else ");
-                gen->out.indent--;
-                emit_stmt(gen, node->as.if_stmt.else_block);
-                gen->out.indent++;
+                if (gen->line_directives) {
+                    emit(gen, "{\n");
+                    gen->out.indent++;
+                    emit_stmt(gen, node->as.if_stmt.else_block);
+                    gen->out.indent--;
+                    emit_indent(gen);
+                    emit(gen, "}\n");
+                } else {
+                    gen->out.indent--;
+                    emit_stmt(gen, node->as.if_stmt.else_block);
+                    gen->out.indent++;
+                }
             }
         } else {
             emit(gen, " else {\n");
@@ -1516,7 +1537,7 @@ static void emit_for_stmt(CodeGen* gen, Node* node) {
 
 static void emit_foreach_collection_stmt(CodeGen* gen, Node* node) {
     // Hoist owned temps in collection expression (evaluated once before the loop)
-    int saved = 0;
+    int saved = gen->hoist.count;
     if (has_owned_temps(node->as.foreach_stmt.collection)) {
         saved = hoist_owned_temps(gen, node->as.foreach_stmt.collection);
     }

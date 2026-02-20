@@ -601,6 +601,8 @@ static int run_debug_pipeline(const MainOptions* opts, const char* source,
 int main(int argc, char** argv) {
     MainOptions opts = {0};
     prescan_global_options(argc, argv, &opts);
+    if (opts.rc_debug)
+        opts.line_directives = 1;
 
     int subcommand_result = try_handle_subcommand(argc, argv, &opts);
     if (subcommand_result >= 0) {
@@ -609,6 +611,8 @@ int main(int argc, char** argv) {
 
     int arg_idx = 1;
     parse_main_options(argc, argv, &opts, &arg_idx);
+    if (opts.rc_debug)
+        opts.line_directives = 1;
 
     if (arg_idx >= argc) {
         print_usage(argv[0]);

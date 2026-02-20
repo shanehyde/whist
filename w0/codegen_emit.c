@@ -802,14 +802,21 @@ void emit_decl(CodeGen* gen, Node* node) {
         emit_func_decl(gen, node);
         break;
 
-    case NODE_VAR_DECL:
-        // Global variable - emit static for private vars
+    case NODE_VAR_DECL: {
+        // Global variable - emit #line before static to avoid "static #line" in output
+        int saved_ld = gen->line_directives;
+        if (gen->line_directives && node->line > 0) {
+            emit(gen, "#line %d \"%s\"\n", node->line, gen->source_file);
+            gen->line_directives = 0;
+        }
         if (!node->as.var_decl.is_public) {
             emit(gen, "static ");
         }
         emit_stmt(gen, node);
+        gen->line_directives = saved_ld;
         emit(gen, "\n");
         break;
+    }
 
     default:
         emit(gen, "/* unknown decl %d */\n", node->type);

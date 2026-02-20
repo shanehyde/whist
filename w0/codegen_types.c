@@ -108,13 +108,8 @@ int type_node_has_rc(CodeGen* gen, Node* type_node) {
 
     // Handle type parameter substitution
     Type* resolved = subst_lookup(gen, name);
-    if (resolved) {
-        if (resolved->kind == TYPE_ENUM)
-            return resolved->as.enm.has_rc_fields;
-        if (resolved->kind == TYPE_STRUCT)
-            return 1; // Structs are always RC (heap-allocated pointers)
-        return 0;     // Primitives, etc.
-    }
+    if (resolved)
+        return type_is_rc_managed(resolved);
 
     if (strcmp(name, "string") == 0)
         return 1;

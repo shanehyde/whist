@@ -74,8 +74,7 @@ func check_rc_leaks(stderr: string) -> bool {
     if (allocs.is_empty()) {
         return true;
     }
-    var cap = std::max_i64(64, frees.count * 2);
-    var free_set = new Set<string>(cap);
+    var free_set = new Set<string>(std::max_i64(64, frees.count * 2));
     free_set.insert_all(frees);
     foreach (const addr in allocs) {
         if (!free_set.contains(addr)) {
@@ -88,8 +87,7 @@ func check_rc_leaks(stderr: string) -> bool {
 func get_leaked_addresses(stderr: string) -> Vec<string> {
     var allocs = extract_rc_addresses(stderr, "RC_ALLOC:");
     var frees = extract_rc_addresses(stderr, "RC_FREE:");
-    var cap = std::max_i64(64, frees.count * 2);
-    var free_set = new Set<string>(cap);
+    var free_set = new Set<string>(std::max_i64(64, frees.count * 2));
     free_set.insert_all(frees);
     var leaked = new Vec<string>{};
     foreach (const addr in allocs) {
@@ -169,14 +167,19 @@ func filter_rc_lines(output: string) -> string {
 // --- File/output helpers ---
 
 func read_expected_lines(path: string, prefix: string) -> Vec<string> {
-    var lines = new Vec<string>{};
+    // var lines = new Vec<string>{};
     var marker = $"// {prefix}: ";
 
-    foreach (const line in fs::read_file(path).split("\n")) {
-        if (line.starts_with(marker)) {
-            lines.push(line.strip_prefix(marker));
-        }
-    }
+    var lines = fs::read_file(path)
+        .split("\n")
+        .filter(|line| line.starts_with(marker))
+        .map(|line| line.strip_prefix(marker));
+
+    // foreach (const line in fs::read_file(path).split("\n")) {
+    //     if (line.starts_with(marker)) {
+    //         lines.push(line.strip_prefix(marker));
+    //     }
+    // }
     return lines;
 }
 
