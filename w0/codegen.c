@@ -1342,105 +1342,120 @@ static void emit_main_wrapper(CodeGen* gen) {
     emit(gen, "}\n\n");
 }
 
+// Append a C string into a bounded stringify buffer.
+static void stringify_append_cstr(char* buf, int buf_size, int* pos, const char* s) {
+    while (*s && *pos < buf_size - 1) {
+        buf[(*pos)++] = *s++;
+    }
+}
+
+// Append a fixed-length byte slice into a bounded stringify buffer.
+static void stringify_append_n(char* buf, int buf_size, int* pos, const char* s, int n) {
+    for (int i = 0; i < n && *pos < buf_size - 1; i++) {
+        buf[(*pos)++] = s[i];
+    }
+}
+
+// Append a single character into a bounded stringify buffer.
+static void stringify_append_char(char* buf, int buf_size, int* pos, char c) {
+    if (*pos < buf_size - 1) {
+        buf[(*pos)++] = c;
+    }
+}
+
+// Append a string literal with escaping and surrounding quotes.
+static void stringify_append_string_lit(char* buf, int buf_size, int* pos, const char* s) {
+    stringify_append_cstr(buf, buf_size, pos, "\\\"");
+    while (*s && *pos < buf_size - 1) {
+        if (*s == '"') {
+            stringify_append_cstr(buf, buf_size, pos, "\\\"");
+        } else if (*s == '\\') {
+            stringify_append_cstr(buf, buf_size, pos, "\\\\");
+        } else if (*s == '\n') {
+            stringify_append_cstr(buf, buf_size, pos, "\\n");
+        } else if (*s == '\t') {
+            stringify_append_cstr(buf, buf_size, pos, "\\t");
+        } else if (*s == '\r') {
+            stringify_append_cstr(buf, buf_size, pos, "\\r");
+        } else {
+            stringify_append_char(buf, buf_size, pos, *s);
+        }
+        s++;
+    }
+    stringify_append_cstr(buf, buf_size, pos, "\\\"");
+}
+
 // Stringify an expression AST node into a human-readable string for assert messages
 static void stringify_expr_to(Node* node, char* buf, int buf_size, int* pos) {
     if (!node || *pos >= buf_size - 1)
         return;
 
-#define APPEND(s)                                                                                  \
-    do {                                                                                           \
-        const char* _s = (s);                                                                      \
-        while (*_s && *pos < buf_size - 1)                                                         \
-            buf[(*pos)++] = *_s++;                                                                 \
-    } while (0)
-
     switch (node->type) {
     case NODE_INT_LIT: {
         char tmp[32];
         snprintf(tmp, sizeof(tmp), "%ld", node->as.int_lit.value);
-        APPEND(tmp);
+        stringify_append_cstr(buf, buf_size, pos, tmp);
         break;
     }
     case NODE_FLOAT_LIT: {
         char tmp[32];
         snprintf(tmp, sizeof(tmp), "%g", node->as.float_lit.value);
-        APPEND(tmp);
+        stringify_append_cstr(buf, buf_size, pos, tmp);
         break;
     }
     case NODE_BOOL_LIT:
-        APPEND(node->as.bool_lit.value ? "true" : "false");
+        stringify_append_cstr(buf, buf_size, pos, node->as.bool_lit.value ? "true" : "false");
         break;
-    case NODE_STRING_LIT: {
-        APPEND("\\\"");
-        const char* s = node->as.string_lit.value;
-        while (*s && *pos < buf_size - 1) {
-            if (*s == '"') {
-                APPEND("\\\"");
-            } else if (*s == '\\') {
-                APPEND("\\\\");
-            } else if (*s == '\n') {
-                APPEND("\\n");
-            } else if (*s == '\t') {
-                APPEND("\\t");
-            } else if (*s == '\r') {
-                APPEND("\\r");
-            } else {
-                buf[(*pos)++] = *s;
-            }
-            s++;
-        }
-        APPEND("\\\"");
+    case NODE_STRING_LIT:
+        stringify_append_string_lit(buf, buf_size, pos, node->as.string_lit.value);
         break;
-    }
     case NODE_NULL_LIT:
-        APPEND("null");
+        stringify_append_cstr(buf, buf_size, pos, "null");
         break;
     case NODE_IDENT:
-        for (int i = 0; i < node->as.ident.length && *pos < buf_size - 1; i++)
-            buf[(*pos)++] = node->as.ident.name[i];
+        stringify_append_n(buf, buf_size, pos, node->as.ident.name, node->as.ident.length);
         break;
     case NODE_BINARY: {
-        APPEND("(");
+        stringify_append_cstr(buf, buf_size, pos, "(");
         stringify_expr_to(node->as.binary.left, buf, buf_size, pos);
-        APPEND(" ");
-        APPEND(token_type_symbol(node->as.binary.op));
-        APPEND(" ");
+        stringify_append_cstr(buf, buf_size, pos, " ");
+        stringify_append_cstr(buf, buf_size, pos, token_type_symbol(node->as.binary.op));
+        stringify_append_cstr(buf, buf_size, pos, " ");
         stringify_expr_to(node->as.binary.right, buf, buf_size, pos);
-        APPEND(")");
+        stringify_append_cstr(buf, buf_size, pos, ")");
         break;
     }
     case NODE_UNARY:
-        APPEND(token_type_symbol(node->as.unary.op));
+        stringify_append_cstr(buf, buf_size, pos, token_type_symbol(node->as.unary.op));
         stringify_expr_to(node->as.unary.operand, buf, buf_size, pos);
         break;
     case NODE_CALL: {
         stringify_expr_to(node->as.call.func, buf, buf_size, pos);
-        APPEND("(");
+        stringify_append_cstr(buf, buf_size, pos, "(");
         for (int i = 0; i < node->as.call.args.count; i++) {
-            if (i > 0)
-                APPEND(", ");
+            if (i > 0) {
+                stringify_append_cstr(buf, buf_size, pos, ", ");
+            }
             stringify_expr_to(node->as.call.args.nodes[i], buf, buf_size, pos);
         }
-        APPEND(")");
+        stringify_append_cstr(buf, buf_size, pos, ")");
         break;
     }
     case NODE_MEMBER:
         stringify_expr_to(node->as.member.object, buf, buf_size, pos);
-        APPEND(".");
-        for (int i = 0; i < node->as.member.length && *pos < buf_size - 1; i++)
-            buf[(*pos)++] = node->as.member.name[i];
+        stringify_append_cstr(buf, buf_size, pos, ".");
+        stringify_append_n(buf, buf_size, pos, node->as.member.name, node->as.member.length);
         break;
     case NODE_INDEX:
         stringify_expr_to(node->as.index.object, buf, buf_size, pos);
-        APPEND("[");
+        stringify_append_cstr(buf, buf_size, pos, "[");
         stringify_expr_to(node->as.index.index, buf, buf_size, pos);
-        APPEND("]");
+        stringify_append_cstr(buf, buf_size, pos, "]");
         break;
     default:
-        APPEND("...");
+        stringify_append_cstr(buf, buf_size, pos, "...");
         break;
     }
-#undef APPEND
 }
 
 char* stringify_expr(Node* node) {
