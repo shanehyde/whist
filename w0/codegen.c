@@ -1916,8 +1916,8 @@ static void emit_generic_method_impls(CodeGen* gen, Node* ast) {
 
 // Find a method-level generic function declaration in the AST.
 // Matches func (ReceiverType<...>) MethodName<...>(...): ...
-static Node* find_generic_method_func_decl(Node* ast, const char* receiver_type,
-                                           const char* method_name) {
+Node* find_generic_method_func_decl(Node* ast, const char* receiver_type,
+                                    const char* method_name) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
@@ -1950,7 +1950,7 @@ static Node* find_generic_method_func_decl(Node* ast, const char* receiver_type,
 }
 
 // Find a generic free function declaration in the AST by name
-static Node* find_generic_func_decl(Node* ast, const char* name) {
+Node* find_generic_func_decl(Node* ast, const char* name) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
@@ -1978,8 +1978,8 @@ GenericFuncDef* lookup_generic_func_def_for_instance(CodeGen* gen, const char* b
 
 // Parse a "Type.method" base_name to extract receiver_type and method_name.
 // Returns 1 if found, 0 if not a method key.
-static int parse_method_key(const char* base_name, char* recv_out, int recv_size, char* method_out,
-                            int method_size) {
+int parse_method_key(const char* base_name, char* recv_out, int recv_size, char* method_out,
+                     int method_size) {
     const char* dot = strchr(base_name, '.');
     if (!dot)
         return 0;
