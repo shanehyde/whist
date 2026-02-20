@@ -39,18 +39,6 @@ static int register_tuple_type(CodeGen* gen, Type* type) {
 // Collect tuple types from a type node
 static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node);
 
-static int return_type_is_void(Node* return_type) {
-    return !return_type ||
-           (return_type->type == NODE_IDENT && strcmp(return_type->as.ident.name, "void") == 0);
-}
-
-static void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
-    if (fdn->return_is_const && !return_type_is_void(fdn->return_type)) {
-        emit(gen, "const ");
-    }
-    emit_type(gen, fdn->return_type);
-}
-
 // Build a Type* from a tuple literal (for type collection)
 static Type* type_from_tuple_lit(Node* node) {
     int    count = node->as.tuple_lit.elements.count;
@@ -1837,7 +1825,7 @@ static void emit_generic_method_impl(CodeGen* gen, GenericInstance* info,
     GenericMethodSubst subst;
     setup_generic_method_subst(gen, info, tinfo, fdn, &subst);
 
-    int is_void = return_type_is_void(fdn->return_type);
+    int is_void = codegen_return_type_is_void(fdn->return_type);
     emit_generic_method_signature(gen, info, fdn);
 
     defer_clear(gen);
@@ -2019,7 +2007,7 @@ static void emit_generic_method_func_impl(CodeGen* gen, Node* ast, GenericFuncIn
     subst_ctx.count       = def->type_param_count;
     gen->generics.subst   = &subst_ctx;
 
-    int is_void = return_type_is_void(fdn->return_type);
+    int is_void = codegen_return_type_is_void(fdn->return_type);
 
     // Return type
     emit_func_return_type(gen, fdn);
@@ -2049,16 +2037,7 @@ static void emit_generic_method_func_impl(CodeGen* gen, Node* ast, GenericFuncIn
     gen->generics.modules      = fdn->accessible_modules;
     gen->generics.module_count = fdn->accessible_modules_count;
 
-    int has_defers = 0;
-    if (inst->body) {
-        for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
-            Node* stmt = inst->body->as.block.stmts.nodes[s];
-            if (stmt && stmt->type == NODE_DEFER) {
-                has_defers = 1;
-                break;
-            }
-        }
-    }
+    int has_defers = block_has_top_level_defer(inst->body);
 
     gen->out.indent++;
 
@@ -2068,11 +2047,7 @@ static void emit_generic_method_func_impl(CodeGen* gen, Node* ast, GenericFuncIn
         emit(gen, " __ret;\n");
     }
 
-    if (inst->body) {
-        for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
-            emit_stmt(gen, inst->body->as.block.stmts.nodes[s]);
-        }
-    }
+    emit_block_stmts(gen, inst->body);
 
     if (gen->rc.count > 0 && inst->body) {
         int   sc   = inst->body->as.block.stmts.count;
@@ -2123,7 +2098,7 @@ static void emit_generic_func_impls(CodeGen* gen, Node* ast) {
         subst_ctx.count       = inst->type_arg_count;
         gen->generics.subst   = &subst_ctx;
 
-        int is_void = return_type_is_void(fdn->return_type);
+        int is_void = codegen_return_type_is_void(fdn->return_type);
 
         // Return type
         emit_func_return_type(gen, fdn);
@@ -2154,16 +2129,7 @@ static void emit_generic_func_impls(CodeGen* gen, Node* ast) {
         gen->generics.module_count = fdn->accessible_modules_count;
 
         // First pass: count defers to know if we need __ret
-        int has_defers = 0;
-        if (inst->body) {
-            for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
-                Node* stmt = inst->body->as.block.stmts.nodes[s];
-                if (stmt && stmt->type == NODE_DEFER) {
-                    has_defers = 1;
-                    break;
-                }
-            }
-        }
+        int has_defers = block_has_top_level_defer(inst->body);
 
         // Body
         gen->out.indent++;
@@ -2176,11 +2142,7 @@ static void emit_generic_func_impls(CodeGen* gen, Node* ast) {
         }
 
         // Emit function body
-        if (inst->body) {
-            for (int s = 0; s < inst->body->as.block.stmts.count; s++) {
-                emit_stmt(gen, inst->body->as.block.stmts.nodes[s]);
-            }
-        }
+        emit_block_stmts(gen, inst->body);
 
         // RC cleanup for implicit void return
         if (gen->rc.count > 0 && inst->body) {

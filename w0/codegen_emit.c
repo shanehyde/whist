@@ -4,6 +4,7 @@
 
 #include "alloc.h"
 #include "codegen_internal.h"
+#include "sem_info.h"
 #include "types.h"
 #include "vec.h"
 
@@ -31,6 +32,30 @@ void defer_push(CodeGen* gen, Node* node) {
 // Reset the defer stack (called at function boundaries)
 void defer_clear(CodeGen* gen) {
     gen->defer.count = 0;
+}
+
+int codegen_return_type_is_void(Node* return_type) {
+    return !return_type ||
+           (return_type->type == NODE_IDENT && strcmp(return_type->as.ident.name, "void") == 0);
+}
+
+void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
+    if (fdn->return_is_const && !codegen_return_type_is_void(fdn->return_type)) {
+        emit(gen, "const ");
+    }
+    emit_type(gen, fdn->return_type);
+}
+
+const char* codegen_enum_value_resolved_name(CodeGen* gen, Node* enum_value) {
+    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
+                                                             enum_value->as.enum_value.enum_name);
+    return name ? name : "";
+}
+
+int codegen_enum_value_resolved_name_length(CodeGen* gen, Node* enum_value) {
+    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
+                                                             enum_value->as.enum_value.enum_name);
+    return name ? (int)strlen(name) : 0;
 }
 
 // Extract additional type bindings from matching a method's receiver pattern against concrete args
@@ -519,6 +544,17 @@ const char* assign_op_str(TokenType op) {
     }
 }
 
+void emit_value_match_cond(CodeGen* gen, int match_id, Node* pattern, Type* expr_type) {
+    if (expr_type->kind == TYPE_STRING) {
+        emit(gen, "strcmp(__match%d, ", match_id);
+        emit_expr(gen, pattern);
+        emit(gen, ") == 0");
+    } else {
+        emit(gen, "__match%d == ", match_id);
+        emit_expr(gen, pattern);
+    }
+}
+
 // Emit an extern module: #include directive and register function aliases/names
 static void emit_extern_module(CodeGen* gen, Node* node) {
     emit(gen, "\n#include <%s.h>\n", node->as.extern_module.module_name);
@@ -542,18 +578,6 @@ static void emit_extern_module(CodeGen* gen, Node* node) {
             }
         }
     }
-}
-
-static int return_type_is_void(Node* return_type) {
-    return !return_type ||
-           (return_type->type == NODE_IDENT && strcmp(return_type->as.ident.name, "void") == 0);
-}
-
-static void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
-    if (fdn->return_is_const && !return_type_is_void(fdn->return_type)) {
-        emit(gen, "const ");
-    }
-    emit_type(gen, fdn->return_type);
 }
 
 static int should_skip_func_decl(CodeGen* gen, func_decl_node* fdn, int is_method) {
@@ -676,7 +700,7 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
         return;
     }
 
-    int is_void = return_type_is_void(fdn->return_type);
+    int is_void = codegen_return_type_is_void(fdn->return_type);
 
     if (gen->line_directives && node->line > 0) {
         emit(gen, "#line %d \"%s\"\n", node->line, gen->source_file);

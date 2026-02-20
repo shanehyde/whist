@@ -3,7 +3,6 @@
 
 #include "alloc.h"
 #include "codegen_internal.h"
-#include "sem_info.h"
 #include "types.h"
 #include "vec.h"
 
@@ -12,7 +11,6 @@ static void emit_expr_stmt(CodeGen* gen, Node* node);
 static void emit_var_decl_stmt(CodeGen* gen, Node* node);
 static void emit_return_stmt(CodeGen* gen, Node* node);
 static void emit_match_stmt(CodeGen* gen, Node* node);
-static int  find_enum_variant_index(Type* enum_type, const char* variant);
 
 // Walk a destructuring pattern and RC-track any identifiers with RC-managed types
 static void rc_track_destruct_pattern(CodeGen* gen, DestructPattern* pattern) {
@@ -33,18 +31,6 @@ static void rc_track_destruct_pattern(CodeGen* gen, DestructPattern* pattern) {
         // Struct destructuring is handled separately
         break;
     }
-}
-
-static const char* enum_value_resolved_name(CodeGen* gen, Node* enum_value) {
-    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
-                                                             enum_value->as.enum_value.enum_name);
-    return name ? name : "";
-}
-
-static int enum_value_resolved_name_length(CodeGen* gen, Node* enum_value) {
-    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
-                                                             enum_value->as.enum_value.enum_name);
-    return name ? (int)strlen(name) : 0;
 }
 
 // Emit statements within a block without emitting braces, but with RC scope handling
@@ -842,8 +828,8 @@ static void emit_var_decl_inferred_enum_value(CodeGen* gen, Node* node, const ch
         return;
     }
 
-    emit(gen, "%.*s %s", enum_value_resolved_name_length(gen, init),
-         enum_value_resolved_name(gen, init), name);
+    emit(gen, "%.*s %s", codegen_enum_value_resolved_name_length(gen, init),
+         codegen_enum_value_resolved_name(gen, init), name);
 }
 
 // Emit a type-and-name declaration inferred from the initializer expression.
@@ -1276,17 +1262,6 @@ static void emit_return_stmt(CodeGen* gen, Node* node) {
 }
 
 // Emit a comparison for a value match arm pattern
-static void emit_value_match_cond(CodeGen* gen, int match_id, Node* pattern, Type* expr_type) {
-    if (expr_type->kind == TYPE_STRING) {
-        emit(gen, "strcmp(__match%d, ", match_id);
-        emit_expr(gen, pattern);
-        emit(gen, ") == 0");
-    } else {
-        emit(gen, "__match%d == ", match_id);
-        emit_expr(gen, pattern);
-    }
-}
-
 // Emit a value match statement (non-enum) as an if/else-if chain
 static void emit_value_match_stmt(CodeGen* gen, Node* node) {
     Type* expr_type = node->as.match_stmt.resolved_type;
@@ -1410,7 +1385,7 @@ static void emit_match_arm_bindings(CodeGen* gen, Node* arm, Type* enum_type, in
     }
 
     const char* variant     = arm->as.match_arm.variant_name;
-    int         variant_idx = find_enum_variant_index(enum_type, variant);
+    int         variant_idx = type_enum_variant_index(enum_type, variant);
     for (int j = 0; j < arm->as.match_arm.binding_count; j++) {
         emit_indent(gen);
         emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);
@@ -1787,21 +1762,12 @@ static void emit_continue_stmt(CodeGen* gen, Node* node) {
     emit(gen, "continue;\n");
 }
 
-static int find_enum_variant_index(Type* enum_type, const char* variant) {
-    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
-        if (strcmp(enum_type->as.enm.value_names[i], variant) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 static void emit_if_let_bindings(CodeGen* gen, Node* node, Type* enum_type, const char* variant,
                                  int let_id) {
     if (!enum_type->as.enm.has_data || node->as.if_let_stmt.binding_count <= 0)
         return;
 
-    int variant_idx = find_enum_variant_index(enum_type, variant);
+    int variant_idx = type_enum_variant_index(enum_type, variant);
     for (int j = 0; j < node->as.if_let_stmt.binding_count; j++) {
         emit_indent(gen);
         emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);

@@ -176,9 +176,10 @@ int         type_is_integer(Type* type);                // Is this any integer t
 int         type_is_rc_managed(Type* type);             // Is this an RC-managed type as a field?
 int         type_is_signed_integer(Type* type);         // Is this a signed integer type?
 int         type_is_unsigned_integer(Type* type);       // Is this an unsigned integer type?
-int         type_supports_vec_contains(Type* type);     // Can Vec<T>.contains compare this type?
-int         type_supports_vec_sort(Type* type);         // Is this type sortable by Vec<T>.sort?
-int         type_supports_equality(Type* type);         // Can this type be compared with ==?
+int         type_enum_variant_index(Type* enum_type, const char* variant_name);
+int         type_supports_vec_contains(Type* type); // Can Vec<T>.contains compare this type?
+int         type_supports_vec_sort(Type* type);     // Is this type sortable by Vec<T>.sort?
+int         type_supports_equality(Type* type);     // Can this type be compared with ==?
 const char* type_name(Type* type);
 
 // Builtin type lookup utilities

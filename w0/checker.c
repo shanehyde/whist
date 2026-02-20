@@ -1337,19 +1337,10 @@ static void check_defer_stmt(Checker* checker, Node* node) {
     check_statement(checker, node->as.defer_stmt.stmt);
 }
 
-static int find_enum_variant_index(Type* enum_type, const char* variant_name) {
-    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
-        if (strcmp(enum_type->as.enm.value_names[i], variant_name) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 static int check_if_let_variant(Checker* checker, Node* node, Type* expr_type,
                                 int* variant_idx_out) {
     const char* variant_name = node->as.if_let_stmt.variant_name;
-    int         variant_idx  = find_enum_variant_index(expr_type, variant_name);
+    int         variant_idx  = type_enum_variant_index(expr_type, variant_name);
     if (variant_idx < 0) {
         check_error(checker, node->line, node->column, "'%s' is not a variant of enum '%s'",
                     variant_name, expr_type->as.enm.name);

@@ -304,6 +304,18 @@ int type_is_unsigned_integer(Type* type) {
            type->kind == TYPE_UINT32;
 }
 
+int type_enum_variant_index(Type* enum_type, const char* variant_name) {
+    if (!enum_type || enum_type->kind != TYPE_ENUM || !variant_name) {
+        return -1;
+    }
+    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
+        if (strcmp(enum_type->as.enm.value_names[i], variant_name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 int type_supports_vec_contains(Type* type) {
     if (!type)
         return 0;

@@ -38,18 +38,6 @@ static int member_is_ref(CodeGen* gen, Node* member) {
     return sem_info_get_member_is_ref(gen->checker.sem, member, member->as.member.is_ref);
 }
 
-static const char* enum_value_resolved_name(CodeGen* gen, Node* enum_value) {
-    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
-                                                             enum_value->as.enum_value.enum_name);
-    return name ? name : "";
-}
-
-static int enum_value_resolved_name_length(CodeGen* gen, Node* enum_value) {
-    const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
-                                                             enum_value->as.enum_value.enum_name);
-    return name ? (int)strlen(name) : 0;
-}
-
 // In a generic method body, look up the field type node from the struct template.
 // For `self.fieldname`, returns the AST type node of the field, or NULL.
 Node* lookup_generic_template_field_type(CodeGen* gen, const char* field_name) {
@@ -201,8 +189,8 @@ static void emit_enum_value(CodeGen* gen, Node* node) {
         return;
     }
 
-    const char* enum_name    = enum_value_resolved_name(gen, node);
-    int         enum_len     = enum_value_resolved_name_length(gen, node);
+    const char* enum_name    = codegen_enum_value_resolved_name(gen, node);
+    int         enum_len     = codegen_enum_value_resolved_name_length(gen, node);
     int         is_data_enum = sem_info_get_enum_value_is_data_enum(gen->checker.sem, node,
                                                                     node->as.enum_value.is_data_enum);
 
@@ -1170,18 +1158,6 @@ static void emit_try_expr(CodeGen* gen, Node* node) {
     }
 }
 
-// Emit a comparison for a value match arm pattern (inline, for expression context)
-static void emit_value_match_cond_expr(CodeGen* gen, int match_id, Node* pattern, Type* expr_type) {
-    if (expr_type->kind == TYPE_STRING) {
-        emit(gen, "strcmp(__match%d, ", match_id);
-        emit_expr(gen, pattern);
-        emit(gen, ") == 0");
-    } else {
-        emit(gen, "__match%d == ", match_id);
-        emit_expr(gen, pattern);
-    }
-}
-
 // Emit value match as expression via GCC statement expression
 static void emit_value_match_expr(CodeGen* gen, Node* node) {
     Type* expr_type  = node->as.match_stmt.resolved_type;
@@ -1217,7 +1193,7 @@ static void emit_value_match_expr(CodeGen* gen, Node* node) {
             } else {
                 emit(gen, "else if (");
             }
-            emit_value_match_cond_expr(gen, match_id, arm->as.match_arm.pattern_expr, expr_type);
+            emit_value_match_cond(gen, match_id, arm->as.match_arm.pattern_expr, expr_type);
             emit(gen, ") { ");
         }
         first = 0;
