@@ -799,16 +799,6 @@ static Type* tuple_literal_elem_type(Node* elem) {
     }
 }
 
-// Find a matching tuple type index in the generated tuple-type table.
-static int find_tuple_type_index(CodeGen* gen, Type* tuple) {
-    for (int i = 0; i < gen->tuple_type_count; i++) {
-        if (tuple_types_equal(gen->tuple_types[i], tuple)) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 // Emit an inferred declaration type for tuple literal initializers.
 static void emit_var_decl_inferred_tuple_lit(CodeGen* gen, Node* node, const char* name) {
     int    count = node->as.var_decl.init->as.tuple_lit.elements.count;
@@ -819,7 +809,7 @@ static void emit_var_decl_inferred_tuple_lit(CodeGen* gen, Node* node, const cha
     }
 
     Type* tuple = type_tuple(elems, count);
-    int   idx   = find_tuple_type_index(gen, tuple);
+    int   idx   = codegen_find_tuple_type_index(gen, tuple);
     if (idx >= 0) {
         emit(gen, "__tuple_t%d %s", idx, name);
         return;
@@ -1400,16 +1390,6 @@ static void emit_value_match_stmt(CodeGen* gen, Node* node) {
     }
 }
 
-// Return whether a match statement contains a wildcard arm.
-static int match_stmt_has_wildcard(Node* node) {
-    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
-        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 // Emit the `if`/`else if`/`else` header for a single match arm.
 static void emit_match_arm_header(CodeGen* gen, Node* arm, int first, int has_wildcard, int arm_idx,
                                   int last_arm, int is_data, int match_id, const char* enum_name) {
@@ -1523,7 +1503,7 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
     emit_expr(gen, node->as.match_stmt.expr);
     emit(gen, ";\n");
 
-    int has_wildcard = match_stmt_has_wildcard(node);
+    int has_wildcard = match_stmt_has_wildcard_arm(node);
     int last_arm     = node->as.match_stmt.arms.count - 1;
 
     int first = 1;

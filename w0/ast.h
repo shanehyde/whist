@@ -620,4 +620,7 @@ void nodelist_init(NodeList* list);
 void nodelist_push(NodeList* list, Node* node);
 void nodelist_free(NodeList* list);
 
+// Match helpers
+int match_stmt_has_wildcard_arm(Node* node);
+
 #endif

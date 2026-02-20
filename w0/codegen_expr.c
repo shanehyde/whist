@@ -1225,26 +1225,6 @@ static void emit_value_match_expr(CodeGen* gen, Node* node) {
     emit(gen, "__matchv%d; })", match_id);
 }
 
-// Return whether a match expression contains a wildcard arm.
-static int match_expr_has_wildcard(Node* node) {
-    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
-        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-// Return the variant index for a variant name in an enum type, or -1 if missing.
-static int find_enum_variant_index(Type* enum_type, const char* variant) {
-    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
-        if (strcmp(enum_type->as.enm.value_names[i], variant) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 // Emit the opening branch header for one match arm.
 static void emit_match_expr_arm_head(CodeGen* gen, Node* arm, int is_first, int has_wildcard,
                                      int arm_index, int last_arm, int is_data,
@@ -1285,7 +1265,7 @@ static void emit_match_expr_arm_bindings(CodeGen* gen, Node* arm, Type* enum_typ
     }
 
     const char* variant     = arm->as.match_arm.variant_name;
-    int         variant_idx = find_enum_variant_index(enum_type, variant);
+    int         variant_idx = type_enum_variant_index(enum_type, variant);
     if (variant_idx < 0) {
         return;
     }
@@ -1322,7 +1302,7 @@ static void emit_match_expr(CodeGen* gen, Node* node) {
     emit_resolved_type(gen, value_type);
     emit(gen, " __matchv%d; ", match_id);
 
-    int has_wildcard = match_expr_has_wildcard(node);
+    int has_wildcard = match_stmt_has_wildcard_arm(node);
     int last_arm     = node->as.match_stmt.arms.count - 1;
 
     int first = 1;

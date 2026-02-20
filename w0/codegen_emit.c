@@ -46,6 +46,18 @@ void emit_func_return_type(CodeGen* gen, func_decl_node* fdn) {
     emit_type(gen, fdn->return_type);
 }
 
+int codegen_find_tuple_type_index(CodeGen* gen, Type* tuple_type) {
+    if (!tuple_type) {
+        return -1;
+    }
+    for (int i = 0; i < gen->tuple_type_count; i++) {
+        if (tuple_types_equal(gen->tuple_types[i], tuple_type)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 const char* codegen_enum_value_resolved_name(CodeGen* gen, Node* enum_value) {
     const char* name = sem_info_get_enum_value_resolved_name(gen->checker.sem, enum_value,
                                                              enum_value->as.enum_value.enum_name);
@@ -240,12 +252,7 @@ static void emit_array_type(CodeGen* gen, Node* type_node) {
 // Return the registered tuple typedef index for a tuple type node, or -1 if missing.
 static int find_tuple_type_index(CodeGen* gen, Node* tuple_type_node) {
     Type* tuple = type_from_node(tuple_type_node);
-    for (int i = 0; i < gen->tuple_type_count; i++) {
-        if (tuple_types_equal(gen->tuple_types[i], tuple)) {
-            return i;
-        }
-    }
-    return -1;
+    return codegen_find_tuple_type_index(gen, tuple);
 }
 
 // Emit an inline struct form for a tuple type node.
@@ -376,13 +383,7 @@ static const char* resolved_builtin_c_type(TypeKind kind) {
 }
 
 static void emit_resolved_tuple_type(CodeGen* gen, Type* type) {
-    int idx = -1;
-    for (int i = 0; i < gen->tuple_type_count; i++) {
-        if (tuple_types_equal(gen->tuple_types[i], type)) {
-            idx = i;
-            break;
-        }
-    }
+    int idx = codegen_find_tuple_type_index(gen, type);
     if (idx >= 0) {
         emit(gen, "__tuple_t%d", idx);
         return;

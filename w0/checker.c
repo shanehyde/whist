@@ -1054,26 +1054,6 @@ static int check_match_arm_body(Checker* checker, Node* arm, int is_expr_context
     return 1;
 }
 
-// Return the enum variant index for a variant name, or -1 if not found.
-static int find_enum_variant_index(Type* enum_type, const char* variant_name) {
-    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
-        if (strcmp(enum_type->as.enm.value_names[i], variant_name) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-// Return 1 if any match arm is a wildcard arm.
-static int match_has_wildcard_arm(Node* node) {
-    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
-        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 // Return 1 if any non-wildcard arm references the given enum variant name.
 static int match_has_variant_arm(Node* node, const char* variant_name) {
     for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
@@ -1107,7 +1087,7 @@ static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int
         }
 
         const char* variant_name = arm->as.match_arm.variant_name;
-        int         variant_idx  = find_enum_variant_index(expr_type, variant_name);
+        int         variant_idx  = type_enum_variant_index(expr_type, variant_name);
         if (variant_idx < 0) {
             check_error(checker, arm->line, arm->column, "'%s' is not a variant of enum '%s'",
                         variant_name, expr_type->as.enm.name);
@@ -1145,7 +1125,7 @@ static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int
     }
 
     // Exhaustiveness check: if no wildcard arm, every variant must be covered
-    if (!match_has_wildcard_arm(node)) {
+    if (!match_stmt_has_wildcard_arm(node)) {
         for (int i = 0; i < expr_type->as.enm.value_count; i++) {
             if (!match_has_variant_arm(node, expr_type->as.enm.value_names[i])) {
                 check_error(checker, node->line, node->column,

@@ -19,6 +19,7 @@ void  register_thunk(CodeGen* gen, const char* c_name, Type* func_type);
 void        defer_push(CodeGen* gen, Node* node);
 int         codegen_return_type_is_void(Node* return_type);
 void        emit_func_return_type(CodeGen* gen, func_decl_node* fdn);
+int         codegen_find_tuple_type_index(CodeGen* gen, Type* tuple_type);
 const char* codegen_enum_value_resolved_name(CodeGen* gen, Node* enum_value);
 int         codegen_enum_value_resolved_name_length(CodeGen* gen, Node* enum_value);
 void        emit_value_match_cond(CodeGen* gen, int match_id, Node* pattern, Type* expr_type);
