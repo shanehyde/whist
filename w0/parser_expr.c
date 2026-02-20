@@ -361,35 +361,124 @@ static Node* parse_float_lit(Token token) {
     return node;
 }
 
-static Node* parse_string_lit(Token token) {
-    Node* node = node_new(NODE_STRING_LIT, token.line, token.column);
+// Returns whether a string token uses triple-quote delimiters.
+static int is_triple_string_token(const Token* token) {
+    return token->length >= 6 && token->start[0] == '"' && token->start[1] == '"' &&
+           token->start[2] == '"';
+}
 
-    int is_triple = token.length >= 6 && token.start[0] == '"' && token.start[1] == '"' &&
-                    token.start[2] == '"';
-
-    const char* src;
-    const char* end;
+// Computes source bounds for the body of a normal or triple-quoted string token.
+static void get_string_token_bounds(const Token* token, int is_triple, const char** src,
+                                    const char** end) {
     if (is_triple) {
-        src = token.start + 3;
-        end = token.start + token.length - 3;
+        *src = token->start + 3;
+        *end = token->start + token->length - 3;
     } else {
-        src = token.start + 1;
-        end = token.start + token.length - 1;
+        *src = token->start + 1;
+        *end = token->start + token->length - 1;
     }
+}
 
-    // Phase 1: Decode escape sequences into a raw buffer
+// Decodes escape sequences from raw token text into a newly allocated UTF-8 byte buffer.
+static char* decode_string_raw(const char* src, const char* end, size_t* raw_len) {
     size_t max_len = end - src;
     char*  raw     = xmalloc(max_len + 1);
-    size_t raw_len = 0;
+    *raw_len       = 0;
+
     while (src < end) {
         if (*src == '\\' && src + 1 < end) {
             src++;
-            raw[raw_len++] = decode_escape(&src, end);
+            raw[(*raw_len)++] = decode_escape(&src, end);
         } else {
-            raw[raw_len++] = *src++;
+            raw[(*raw_len)++] = *src++;
         }
     }
-    raw[raw_len] = '\0';
+    raw[*raw_len] = '\0';
+    return raw;
+}
+
+// Drops the optional first newline that immediately follows a triple-quote opener.
+static void trim_triple_leading_newline(const char** content, size_t* content_len) {
+    if (*content_len > 0 && (*content)[0] == '\n') {
+        (*content)++;
+        (*content_len)--;
+    }
+}
+
+// Returns whether a line contains only spaces and tabs.
+static int is_all_ws_line(const char* line, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (line[i] != ' ' && line[i] != '\t') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// Detects indentation prefix from the trailing whitespace-only line in a triple-quoted string.
+static void detect_triple_indent_prefix(const char* content, size_t* content_len,
+                                        const char** prefix, size_t* prefix_len) {
+    const char* last_newline = NULL;
+    for (size_t i = *content_len; i > 0; i--) {
+        if (content[i - 1] == '\n') {
+            last_newline = &content[i - 1];
+            break;
+        }
+    }
+
+    *prefix     = NULL;
+    *prefix_len = 0;
+    if (!last_newline) {
+        return;
+    }
+
+    const char* last_line     = last_newline + 1;
+    size_t      last_line_len = *content_len - (size_t)(last_line - content);
+    if (!is_all_ws_line(last_line, last_line_len)) {
+        return;
+    }
+
+    *prefix      = last_line;
+    *prefix_len  = last_line_len;
+    *content_len = (size_t)(last_newline - content);
+}
+
+// Builds triple-quoted string output by stripping the computed indent prefix per line.
+static char* strip_triple_indent_prefix(const char* content, size_t content_len, const char* prefix,
+                                        size_t prefix_len, size_t* result_len) {
+    char* result = xmalloc(content_len + 1);
+    *result_len  = 0;
+    size_t i     = 0;
+
+    while (i < content_len) {
+        if (prefix_len > 0 && i + prefix_len <= content_len &&
+            memcmp(&content[i], prefix, prefix_len) == 0) {
+            i += prefix_len;
+        }
+
+        while (i < content_len && content[i] != '\n') {
+            result[(*result_len)++] = content[i++];
+        }
+
+        if (i < content_len && content[i] == '\n') {
+            result[(*result_len)++] = content[i++];
+        }
+    }
+
+    result[*result_len] = '\0';
+    return result;
+}
+
+static Node* parse_string_lit(Token token) {
+    Node* node = node_new(NODE_STRING_LIT, token.line, token.column);
+
+    int         is_triple = is_triple_string_token(&token);
+    const char* src       = NULL;
+    const char* end       = NULL;
+    get_string_token_bounds(&token, is_triple, &src, &end);
+
+    size_t raw_len = 0;
+    char*  raw     = decode_string_raw(src, end, &raw_len);
 
     if (!is_triple) {
         node->as.string_lit.value  = raw;
@@ -397,66 +486,17 @@ static Node* parse_string_lit(Token token) {
         return node;
     }
 
-    // Phase 2: Triple-quoted indentation stripping
-    // Skip leading newline after opening """
     const char* content     = raw;
     size_t      content_len = raw_len;
-    if (content_len > 0 && content[0] == '\n') {
-        content++;
-        content_len--;
-    }
+    trim_triple_leading_newline(&content, &content_len);
 
-    // Find the last line (after final newline) to determine indent prefix
-    const char* last_newline = NULL;
-    for (size_t i = content_len; i > 0; i--) {
-        if (content[i - 1] == '\n') {
-            last_newline = &content[i - 1];
-            break;
-        }
-    }
-
-    size_t      prefix_len = 0;
     const char* prefix     = NULL;
-    if (last_newline) {
-        // Last line is everything after the final newline
-        const char* last_line     = last_newline + 1;
-        size_t      last_line_len = content_len - (last_line - content);
-        // Check if last line is all whitespace
-        int all_ws = 1;
-        for (size_t i = 0; i < last_line_len; i++) {
-            if (last_line[i] != ' ' && last_line[i] != '\t') {
-                all_ws = 0;
-                break;
-            }
-        }
-        if (all_ws) {
-            prefix     = last_line;
-            prefix_len = last_line_len;
-            // Remove the trailing whitespace-only line (and its preceding newline)
-            content_len = last_newline - content;
-        }
-    }
+    size_t      prefix_len = 0;
+    detect_triple_indent_prefix(content, &content_len, &prefix, &prefix_len);
 
-    // Build result by stripping prefix from start of each line
-    char*  result     = xmalloc(content_len + 1);
     size_t result_len = 0;
-    size_t i          = 0;
-    while (i < content_len) {
-        // Strip prefix at start of line
-        if (prefix_len > 0 && i + prefix_len <= content_len &&
-            memcmp(&content[i], prefix, prefix_len) == 0) {
-            i += prefix_len;
-        }
-        // Copy until end of line
-        while (i < content_len && content[i] != '\n') {
-            result[result_len++] = content[i++];
-        }
-        // Copy the newline
-        if (i < content_len && content[i] == '\n') {
-            result[result_len++] = content[i++];
-        }
-    }
-    result[result_len] = '\0';
+    char*  result =
+        strip_triple_indent_prefix(content, content_len, prefix, prefix_len, &result_len);
 
     free(raw);
     node->as.string_lit.value  = result;
