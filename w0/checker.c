@@ -1283,6 +1283,164 @@ static void check_match_stmt(Checker* checker, Node* node) {
 // Statement checking
 // =============================================================================
 
+static void check_block_stmt(Checker* checker, Node* node) {
+    checker_push_scope(checker);
+    for (int i = 0; i < node->as.block.stmts.count; i++) {
+        check_statement(checker, node->as.block.stmts.nodes[i]);
+    }
+    checker_pop_scope(checker);
+}
+
+static void check_if_stmt(Checker* checker, Node* node) {
+    Type* cond = check_expression(checker, node->as.if_stmt.cond);
+    if (cond->kind != TYPE_BOOL && cond->kind != TYPE_ERROR) {
+        check_error(checker, node->as.if_stmt.cond->line, node->as.if_stmt.cond->column,
+                    "If condition must be bool, got '%s'", type_name(cond));
+    }
+
+    check_statement(checker, node->as.if_stmt.then_block);
+    if (node->as.if_stmt.else_block) {
+        check_statement(checker, node->as.if_stmt.else_block);
+    }
+}
+
+static void check_while_stmt(Checker* checker, Node* node) {
+    Type* cond = check_expression(checker, node->as.while_stmt.cond);
+    if (cond->kind != TYPE_BOOL && cond->kind != TYPE_ERROR) {
+        check_error(checker, node->as.while_stmt.cond->line, node->as.while_stmt.cond->column,
+                    "While condition must be bool, got '%s'", type_name(cond));
+    }
+
+    int was_in_loop  = checker->in_loop;
+    checker->in_loop = 1;
+    check_statement(checker, node->as.while_stmt.body);
+    checker->in_loop = was_in_loop;
+}
+
+static void check_break_stmt(Checker* checker, Node* node) {
+    if (!checker->in_loop) {
+        check_error(checker, node->line, node->column, "Break outside of loop");
+    }
+}
+
+static void check_continue_stmt(Checker* checker, Node* node) {
+    if (!checker->in_loop) {
+        check_error(checker, node->line, node->column, "Continue outside of loop");
+    }
+}
+
+static void check_defer_stmt(Checker* checker, Node* node) {
+    if (!checker->current_func_return) {
+        check_error(checker, node->line, node->column, "Defer outside of function");
+        return;
+    }
+    check_statement(checker, node->as.defer_stmt.stmt);
+}
+
+static int find_enum_variant_index(Type* enum_type, const char* variant_name) {
+    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
+        if (strcmp(enum_type->as.enm.value_names[i], variant_name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int check_if_let_variant(Checker* checker, Node* node, Type* expr_type,
+                                int* variant_idx_out) {
+    const char* variant_name = node->as.if_let_stmt.variant_name;
+    int         variant_idx  = find_enum_variant_index(expr_type, variant_name);
+    if (variant_idx < 0) {
+        check_error(checker, node->line, node->column, "'%s' is not a variant of enum '%s'",
+                    variant_name, expr_type->as.enm.name);
+        return 0;
+    }
+
+    // If qualified name given, verify it matches
+    if (node->as.if_let_stmt.enum_name &&
+        strcmp(node->as.if_let_stmt.enum_name, expr_type->as.enm.name) != 0) {
+        check_error(checker, node->line, node->column,
+                    "Enum name '%s' does not match expression type '%s'",
+                    node->as.if_let_stmt.enum_name, expr_type->as.enm.name);
+        return 0;
+    }
+
+    *variant_idx_out = variant_idx;
+    return 1;
+}
+
+static int check_if_let_binding_count(Checker* checker, Node* node, Type* expr_type,
+                                      int variant_idx) {
+    // Check binding count: allow bare check (0 bindings) or exact match
+    int         expected_bindings = expr_type->as.enm.variant_type_counts[variant_idx];
+    const char* variant_name      = node->as.if_let_stmt.variant_name;
+    if (node->as.if_let_stmt.binding_count != 0 &&
+        node->as.if_let_stmt.binding_count != expected_bindings) {
+        check_error(checker, node->line, node->column, "Variant '%s' expects %d binding(s), got %d",
+                    variant_name, expected_bindings, node->as.if_let_stmt.binding_count);
+        return 0;
+    }
+    return 1;
+}
+
+static void check_if_let_extra_cond(Checker* checker, Node* node) {
+    // Type-check optional && condition (bindings are in scope)
+    if (node->as.if_let_stmt.extra_cond) {
+        Type* cond_type = check_expression(checker, node->as.if_let_stmt.extra_cond);
+        if (cond_type->kind != TYPE_ERROR && cond_type->kind != TYPE_BOOL) {
+            check_error(checker, node->as.if_let_stmt.extra_cond->line,
+                        node->as.if_let_stmt.extra_cond->column,
+                        "'is' pattern '&&' condition must be bool, got '%s'", type_name(cond_type));
+        }
+    }
+}
+
+static void check_if_let_then_scope(Checker* checker, Node* node, Type* expr_type,
+                                    int variant_idx) {
+    checker_push_scope(checker);
+    for (int j = 0; j < node->as.if_let_stmt.binding_count; j++) {
+        Type* binding_type = expr_type->as.enm.variant_types[variant_idx][j];
+        checker_define(checker, node->as.if_let_stmt.bindings[j], SYM_VAR, binding_type, 0, 0,
+                       NULL);
+    }
+
+    check_if_let_extra_cond(checker, node);
+    check_statement(checker, node->as.if_let_stmt.then_block);
+    checker_pop_scope(checker);
+}
+
+static void check_if_let_stmt(Checker* checker, Node* node) {
+    // Type-check expression
+    Type* expr_type = check_expression(checker, node->as.if_let_stmt.expr);
+    if (expr_type->kind == TYPE_ERROR) {
+        return;
+    }
+
+    // Must be an enum type
+    if (expr_type->kind != TYPE_ENUM) {
+        check_error(checker, node->line, node->column,
+                    "'is' pattern requires an enum type, got '%s'", type_name(expr_type));
+        return;
+    }
+
+    node->as.if_let_stmt.resolved_type = expr_type;
+
+    int variant_idx = -1;
+    if (!check_if_let_variant(checker, node, expr_type, &variant_idx)) {
+        return;
+    }
+    if (!check_if_let_binding_count(checker, node, expr_type, variant_idx)) {
+        return;
+    }
+
+    check_if_let_then_scope(checker, node, expr_type, variant_idx);
+
+    // Check else_block (no bindings in scope)
+    if (node->as.if_let_stmt.else_block) {
+        check_statement(checker, node->as.if_let_stmt.else_block);
+    }
+}
+
 // Dispatch statement type-checking based on node type
 void check_statement(Checker* checker, Node* node) {
     if (!node)
@@ -1298,38 +1456,16 @@ void check_statement(Checker* checker, Node* node) {
         break;
 
     case NODE_BLOCK:
-        checker_push_scope(checker);
-        for (int i = 0; i < node->as.block.stmts.count; i++) {
-            check_statement(checker, node->as.block.stmts.nodes[i]);
-        }
-        checker_pop_scope(checker);
+        check_block_stmt(checker, node);
         break;
 
-    case NODE_IF: {
-        Type* cond = check_expression(checker, node->as.if_stmt.cond);
-        if (cond->kind != TYPE_BOOL && cond->kind != TYPE_ERROR) {
-            check_error(checker, node->as.if_stmt.cond->line, node->as.if_stmt.cond->column,
-                        "If condition must be bool, got '%s'", type_name(cond));
-        }
-        check_statement(checker, node->as.if_stmt.then_block);
-        if (node->as.if_stmt.else_block) {
-            check_statement(checker, node->as.if_stmt.else_block);
-        }
+    case NODE_IF:
+        check_if_stmt(checker, node);
         break;
-    }
 
-    case NODE_WHILE: {
-        Type* cond = check_expression(checker, node->as.while_stmt.cond);
-        if (cond->kind != TYPE_BOOL && cond->kind != TYPE_ERROR) {
-            check_error(checker, node->as.while_stmt.cond->line, node->as.while_stmt.cond->column,
-                        "While condition must be bool, got '%s'", type_name(cond));
-        }
-        int was_in_loop  = checker->in_loop;
-        checker->in_loop = 1;
-        check_statement(checker, node->as.while_stmt.body);
-        checker->in_loop = was_in_loop;
+    case NODE_WHILE:
+        check_while_stmt(checker, node);
         break;
-    }
 
     case NODE_FOR:
         check_for_stmt(checker, node);
@@ -1344,105 +1480,24 @@ void check_statement(Checker* checker, Node* node) {
         break;
 
     case NODE_BREAK:
-        if (!checker->in_loop) {
-            check_error(checker, node->line, node->column, "Break outside of loop");
-        }
+        check_break_stmt(checker, node);
         break;
 
     case NODE_CONTINUE:
-        if (!checker->in_loop) {
-            check_error(checker, node->line, node->column, "Continue outside of loop");
-        }
+        check_continue_stmt(checker, node);
         break;
 
     case NODE_DEFER:
-        if (!checker->current_func_return) {
-            check_error(checker, node->line, node->column, "Defer outside of function");
-            return;
-        }
-        check_statement(checker, node->as.defer_stmt.stmt);
+        check_defer_stmt(checker, node);
         break;
 
     case NODE_MATCH:
         check_match_stmt(checker, node);
         break;
 
-    case NODE_IF_LET: {
-        // Type-check expression
-        Type* expr_type = check_expression(checker, node->as.if_let_stmt.expr);
-        if (expr_type->kind == TYPE_ERROR)
-            break;
-
-        // Must be an enum type
-        if (expr_type->kind != TYPE_ENUM) {
-            check_error(checker, node->line, node->column,
-                        "'is' pattern requires an enum type, got '%s'", type_name(expr_type));
-            break;
-        }
-
-        node->as.if_let_stmt.resolved_type = expr_type;
-
-        // Look up variant in enum type
-        const char* variant_name = node->as.if_let_stmt.variant_name;
-        int         variant_idx  = -1;
-        for (int i = 0; i < expr_type->as.enm.value_count; i++) {
-            if (strcmp(expr_type->as.enm.value_names[i], variant_name) == 0) {
-                variant_idx = i;
-                break;
-            }
-        }
-        if (variant_idx < 0) {
-            check_error(checker, node->line, node->column, "'%s' is not a variant of enum '%s'",
-                        variant_name, expr_type->as.enm.name);
-            break;
-        }
-
-        // If qualified name given, verify it matches
-        if (node->as.if_let_stmt.enum_name) {
-            if (strcmp(node->as.if_let_stmt.enum_name, expr_type->as.enm.name) != 0) {
-                check_error(checker, node->line, node->column,
-                            "Enum name '%s' does not match expression type '%s'",
-                            node->as.if_let_stmt.enum_name, expr_type->as.enm.name);
-                break;
-            }
-        }
-
-        // Check binding count: allow bare check (0 bindings) or exact match
-        int expected_bindings = expr_type->as.enm.variant_type_counts[variant_idx];
-        if (node->as.if_let_stmt.binding_count != 0 &&
-            node->as.if_let_stmt.binding_count != expected_bindings) {
-            check_error(checker, node->line, node->column,
-                        "Variant '%s' expects %d binding(s), got %d", variant_name,
-                        expected_bindings, node->as.if_let_stmt.binding_count);
-            break;
-        }
-
-        // Push scope, define bindings, check extra_cond and then_block, pop scope
-        checker_push_scope(checker);
-        for (int j = 0; j < node->as.if_let_stmt.binding_count; j++) {
-            Type* binding_type = expr_type->as.enm.variant_types[variant_idx][j];
-            checker_define(checker, node->as.if_let_stmt.bindings[j], SYM_VAR, binding_type, 0, 0,
-                           NULL);
-        }
-        // Type-check optional && condition (bindings are in scope)
-        if (node->as.if_let_stmt.extra_cond) {
-            Type* cond_type = check_expression(checker, node->as.if_let_stmt.extra_cond);
-            if (cond_type->kind != TYPE_ERROR && cond_type->kind != TYPE_BOOL) {
-                check_error(checker, node->as.if_let_stmt.extra_cond->line,
-                            node->as.if_let_stmt.extra_cond->column,
-                            "'is' pattern '&&' condition must be bool, got '%s'",
-                            type_name(cond_type));
-            }
-        }
-        check_statement(checker, node->as.if_let_stmt.then_block);
-        checker_pop_scope(checker);
-
-        // Check else_block (no bindings in scope)
-        if (node->as.if_let_stmt.else_block) {
-            check_statement(checker, node->as.if_let_stmt.else_block);
-        }
+    case NODE_IF_LET:
+        check_if_let_stmt(checker, node);
         break;
-    }
 
     default:
         check_error(checker, node->line, node->column, "Unknown statement type %d", node->type);
