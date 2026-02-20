@@ -795,6 +795,95 @@ void emit_vec_cleanup(CodeGen* gen) {
     }
 }
 
+// Emit the common cleanup function prologue for a struct type.
+static void emit_struct_cleanup_prologue(CodeGen* gen, const char* type_name) {
+    emit(gen, "static inline void __%s_cleanup(void* raw) {\n", type_name);
+    emit(gen, "    %s* ptr = (%s*)raw;\n", type_name, type_name);
+}
+
+// Emit one RC decrement statement for a non-generic struct field.
+static void emit_non_generic_field_cleanup(CodeGen* gen, const RcFieldInfo* field) {
+    if (field->is_enum) {
+        emit(gen, "    __rc_dec_%s(ptr->%s);\n", field->type_name, field->field_name);
+    } else if (field->type_name && strcmp(field->type_name, "string") == 0) {
+        emit(gen, "    __rc_dec((void*)ptr->%s);\n", field->field_name);
+    } else {
+        emit(gen, "    __rc_dec(ptr->%s);\n", field->field_name);
+    }
+}
+
+// Emit one RC decrement statement for a generic struct instance field.
+static void emit_generic_field_cleanup(CodeGen* gen, const char* field_name, Type* field_type) {
+    if (!field_type)
+        return;
+
+    if (field_type->kind == TYPE_STRUCT || field_type->kind == TYPE_VEC ||
+        field_type->kind == TYPE_STRINGBUILDER) {
+        emit(gen, "    __rc_dec(ptr->%s);\n", field_name);
+    } else if (field_type->kind == TYPE_STRING) {
+        emit(gen, "    __rc_dec((void*)ptr->%s);\n", field_name);
+    } else if (field_type->kind == TYPE_ENUM && field_type->as.enm.has_rc_fields) {
+        emit(gen, "    __rc_dec_%s(ptr->%s);\n", field_type->as.enm.name, field_name);
+    }
+}
+
+// Free field/type name allocations created by collect_rc_field_info.
+static void free_rc_field_info_list(RcFieldInfo* fields, int count) {
+    for (int i = 0; i < count; i++) {
+        free(fields[i].field_name);
+        free(fields[i].type_name);
+    }
+    free(fields);
+}
+
+// Emit cleanup helper for one non-generic struct declaration when needed.
+static void emit_non_generic_struct_cleanup(CodeGen* gen, Node* decl) {
+    const char* sname    = decl->as.struct_decl.name;
+    int         has_drop = struct_implements_drop(gen, sname);
+
+    RcFieldInfo* rc_fields      = NULL;
+    int          rc_field_count = collect_rc_field_info(gen, decl, &rc_fields);
+
+    if (!has_drop && rc_field_count == 0) {
+        free_rc_field_info_list(rc_fields, rc_field_count);
+        return;
+    }
+
+    emit_struct_cleanup_prologue(gen, sname);
+    if (has_drop) {
+        emit(gen, "    %s_drop(ptr);\n", sname);
+    }
+    for (int f = 0; f < rc_field_count; f++) {
+        emit_non_generic_field_cleanup(gen, &rc_fields[f]);
+    }
+    emit(gen, "}\n\n");
+
+    free_rc_field_info_list(rc_fields, rc_field_count);
+}
+
+// Emit cleanup helper for one instantiated generic struct type when needed.
+static void emit_generic_struct_cleanup(CodeGen* gen, GenericInstance* info) {
+    Type* t = info->type;
+    if (!t || t->kind != TYPE_STRUCT)
+        return;
+
+    int has_drop      = struct_implements_drop(gen, info->base_name);
+    int has_rc_fields = t->as.struc.has_rc_fields;
+
+    if (!has_drop && !has_rc_fields)
+        return;
+
+    const char* mname = info->mangled_name;
+    emit_struct_cleanup_prologue(gen, mname);
+    if (has_drop) {
+        emit(gen, "    %s_drop(ptr);\n", mname);
+    }
+    for (int f = 0; f < t->as.struc.field_count; f++) {
+        emit_generic_field_cleanup(gen, t->as.struc.field_names[f], t->as.struc.field_types[f]);
+    }
+    emit(gen, "}\n\n");
+}
+
 // Emit __TypeName_cleanup definitions for structs with Drop or RC-managed fields
 void emit_struct_cleanup(CodeGen* gen, Node* ast) {
     // Non-generic structs
@@ -809,72 +898,12 @@ void emit_struct_cleanup(CodeGen* gen, Node* ast) {
             if (decl->as.struct_decl.type_param_count > 0)
                 continue; // Skip generic templates
 
-            const char* sname    = decl->as.struct_decl.name;
-            int         has_drop = struct_implements_drop(gen, sname);
-
-            RcFieldInfo* rc_fields      = NULL;
-            int          rc_field_count = collect_rc_field_info(gen, decl, &rc_fields);
-
-            if (!has_drop && rc_field_count == 0)
-                continue;
-
-            emit(gen, "static inline void __%s_cleanup(void* raw) {\n", sname);
-            emit(gen, "    %s* ptr = (%s*)raw;\n", sname, sname);
-            if (has_drop) {
-                emit(gen, "    %s_drop(ptr);\n", sname);
-            }
-            for (int f = 0; f < rc_field_count; f++) {
-                if (rc_fields[f].is_enum) {
-                    emit(gen, "    __rc_dec_%s(ptr->%s);\n", rc_fields[f].type_name,
-                         rc_fields[f].field_name);
-                } else if (rc_fields[f].type_name &&
-                           strcmp(rc_fields[f].type_name, "string") == 0) {
-                    emit(gen, "    __rc_dec((void*)ptr->%s);\n", rc_fields[f].field_name);
-                } else {
-                    emit(gen, "    __rc_dec(ptr->%s);\n", rc_fields[f].field_name);
-                }
-            }
-            emit(gen, "}\n\n");
-
-            for (int f = 0; f < rc_field_count; f++) {
-                free(rc_fields[f].field_name);
-                free(rc_fields[f].type_name);
-            }
-            free(rc_fields);
+            emit_non_generic_struct_cleanup(gen, decl);
         }
     }
 
     // Generic instances
     for (int i = 0; i < gen->checker.instance_count; i++) {
-        GenericInstance* info = &gen->checker.instances[i];
-        Type*            t    = info->type;
-        if (!t || t->kind != TYPE_STRUCT)
-            continue;
-
-        int has_drop      = struct_implements_drop(gen, info->base_name);
-        int has_rc_fields = t->as.struc.has_rc_fields;
-
-        if (!has_drop && !has_rc_fields)
-            continue;
-
-        const char* mname = info->mangled_name;
-        emit(gen, "static inline void __%s_cleanup(void* raw) {\n", mname);
-        emit(gen, "    %s* ptr = (%s*)raw;\n", mname, mname);
-        if (has_drop) {
-            emit(gen, "    %s_drop(ptr);\n", mname);
-        }
-        for (int f = 0; f < t->as.struc.field_count; f++) {
-            Type* ft = t->as.struc.field_types[f];
-            if (ft && (ft->kind == TYPE_STRUCT || ft->kind == TYPE_VEC ||
-                       ft->kind == TYPE_STRINGBUILDER)) {
-                emit(gen, "    __rc_dec(ptr->%s);\n", t->as.struc.field_names[f]);
-            } else if (ft && ft->kind == TYPE_STRING) {
-                emit(gen, "    __rc_dec((void*)ptr->%s);\n", t->as.struc.field_names[f]);
-            } else if (ft && ft->kind == TYPE_ENUM && ft->as.enm.has_rc_fields) {
-                emit(gen, "    __rc_dec_%s(ptr->%s);\n", ft->as.enm.name,
-                     t->as.struc.field_names[f]);
-            }
-        }
-        emit(gen, "}\n\n");
+        emit_generic_struct_cleanup(gen, &gen->checker.instances[i]);
     }
 }
