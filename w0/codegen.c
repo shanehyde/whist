@@ -369,6 +369,15 @@ char* build_mangled_name_from_generic_node(CodeGen* gen, Node* type_node) {
 //     ... preserved for potential future use
 // }
 
+// Return whether a function decl is a direct generic-receiver method for `struct_name`.
+static int is_collectible_generic_method(Node* decl, const char* struct_name) {
+    return decl && decl->type == NODE_FUNC_DECL && decl->as.func_decl.body != NULL &&
+           decl->as.func_decl.receiver_type != NULL &&
+           decl->as.func_decl.receiver_type_args.count > 0 &&
+           decl->as.func_decl.type_param_count == 0 &&
+           strcmp(decl->as.func_decl.receiver_type, struct_name) == 0;
+}
+
 // Collect all generic methods for a given struct name
 void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods_out,
                              int* count_out) {
@@ -388,29 +397,23 @@ void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods
             continue;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            // Direct generic methods: func (Box<T>) get() -> T
-            // Exclude method-level generics (type_param_count > 0) — those go through
-            // GenericFuncInstance
-            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.body != NULL &&
-                decl->as.func_decl.receiver_type != NULL &&
-                decl->as.func_decl.receiver_type_args.count > 0 &&
-                decl->as.func_decl.type_param_count == 0 &&
-                strcmp(decl->as.func_decl.receiver_type, struct_name) == 0) {
+            // Direct generic methods: func (Box<T>) get() -> T.
+            // Excludes method-level generics (type_param_count > 0), which are handled
+            // via GenericFuncInstance.
+            if (is_collectible_generic_method(decl, struct_name)) {
                 VEC_GROW(methods, count, capacity);
                 methods[count++] = decl;
             }
+
             // Methods inside impl blocks: impl Drop for Box { func (Box<T>) drop() -> void }
-            if (decl->type == NODE_IMPL_DECL) {
-                for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
-                    Node* method = decl->as.impl_decl.methods.nodes[j];
-                    if (method->type == NODE_FUNC_DECL && method->as.func_decl.body != NULL &&
-                        method->as.func_decl.receiver_type != NULL &&
-                        method->as.func_decl.receiver_type_args.count > 0 &&
-                        method->as.func_decl.type_param_count == 0 &&
-                        strcmp(method->as.func_decl.receiver_type, struct_name) == 0) {
-                        VEC_GROW(methods, count, capacity);
-                        methods[count++] = method;
-                    }
+            if (decl->type != NODE_IMPL_DECL) {
+                continue;
+            }
+            for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
+                Node* method = decl->as.impl_decl.methods.nodes[j];
+                if (is_collectible_generic_method(method, struct_name)) {
+                    VEC_GROW(methods, count, capacity);
+                    methods[count++] = method;
                 }
             }
         }
