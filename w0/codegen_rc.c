@@ -187,51 +187,56 @@ static void emit_enum_rc_func(CodeGen* gen, const char* ename, Node* enum_decl, 
     emit(gen, "}\n\n");
 }
 
-// Emit __rc_inc_EnumName/__rc_dec_EnumName helpers for enums with RC-managed fields
-void emit_enum_rc_helpers(CodeGen* gen, Node* ast) {
-    // Forward declarations for non-generic enums
+// Return whether a declaration is a non-generic enum declaration.
+static int is_non_generic_enum_decl(Node* decl) {
+    return decl && decl->type == NODE_ENUM_DECL && decl->as.enum_decl.type_param_count == 0;
+}
+
+// Emit forward declarations for __rc_inc_Name and __rc_dec_Name.
+static void emit_enum_rc_forward_decls_for_name(CodeGen* gen, const char* name) {
+    emit(gen, "static inline void __rc_inc_%s(%s v);\n", name, name);
+    emit(gen, "static inline void __rc_dec_%s(%s v);\n", name, name);
+}
+
+// Emit enum RC forward declarations for non-generic enum declarations.
+static void emit_non_generic_enum_rc_forward_decls(CodeGen* gen, Node* ast) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
             continue;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type != NODE_ENUM_DECL)
+            if (!is_non_generic_enum_decl(decl))
                 continue;
-            if (decl->as.enum_decl.type_param_count > 0)
-                continue; // Skip generic templates
             const char* ename = decl->as.enum_decl.name;
             if (!enum_has_rc_fields(gen, ename))
                 continue;
-            emit(gen, "static inline void __rc_inc_%s(%s v);\n", ename, ename);
-            emit(gen, "static inline void __rc_dec_%s(%s v);\n", ename, ename);
+            emit_enum_rc_forward_decls_for_name(gen, ename);
         }
     }
-    // Forward declarations for generic enum RC helpers
+}
+
+// Emit enum RC forward declarations for generic enum instances.
+static void emit_generic_enum_rc_forward_decls(CodeGen* gen) {
     for (int gi = 0; gi < gen->checker.instance_count; gi++) {
         GenericInstance* info = &gen->checker.instances[gi];
         if (info->type->kind != TYPE_ENUM)
             continue;
         if (!enum_has_rc_fields(gen, info->mangled_name))
             continue;
-        emit(gen, "static inline void __rc_inc_%s(%s v);\n", info->mangled_name,
-             info->mangled_name);
-        emit(gen, "static inline void __rc_dec_%s(%s v);\n", info->mangled_name,
-             info->mangled_name);
+        emit_enum_rc_forward_decls_for_name(gen, info->mangled_name);
     }
-    if (gen->enums.count > 0)
-        emit(gen, "\n");
+}
 
-    // Definitions for non-generic enums
+// Emit enum RC function definitions for non-generic enum declarations.
+static void emit_non_generic_enum_rc_defs(CodeGen* gen, Node* ast) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
             continue;
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type != NODE_ENUM_DECL)
-                continue;
-            if (decl->as.enum_decl.type_param_count > 0)
+            if (!is_non_generic_enum_decl(decl))
                 continue;
             const char* ename = decl->as.enum_decl.name;
             if (!enum_has_rc_fields(gen, ename))
@@ -240,8 +245,27 @@ void emit_enum_rc_helpers(CodeGen* gen, Node* ast) {
             emit_enum_rc_func(gen, ename, decl, 0); // __rc_dec
         }
     }
+}
 
-    // Definitions for generic enum instances
+// Emit enum RC function definitions for one generic enum instance with substitution bound.
+static void emit_generic_enum_rc_defs_for_instance(CodeGen* gen, GenericInstance* info,
+                                                   Node* tmpl) {
+    TypeSubstContext subst;
+    subst.type_params = tmpl->as.enum_decl.type_params;
+    subst.type_args   = info->type_args;
+    subst.count       = tmpl->as.enum_decl.type_param_count;
+
+    TypeSubstContext* old_subst = gen->generics.subst;
+    gen->generics.subst         = &subst;
+
+    emit_enum_rc_func(gen, info->mangled_name, tmpl, 1); // __rc_inc
+    emit_enum_rc_func(gen, info->mangled_name, tmpl, 0); // __rc_dec
+
+    gen->generics.subst = old_subst;
+}
+
+// Emit enum RC function definitions for generic enum instances.
+static void emit_generic_enum_rc_defs(CodeGen* gen, Node* ast) {
     for (int gi = 0; gi < gen->checker.instance_count; gi++) {
         GenericInstance* info = &gen->checker.instances[gi];
         if (info->type->kind != TYPE_ENUM)
@@ -252,20 +276,19 @@ void emit_enum_rc_helpers(CodeGen* gen, Node* ast) {
         if (!tmpl)
             continue;
 
-        // Set up substitution context for generic type resolution
-        TypeSubstContext subst;
-        subst.type_params = tmpl->as.enum_decl.type_params;
-        subst.type_args   = info->type_args;
-        subst.count       = tmpl->as.enum_decl.type_param_count;
-
-        TypeSubstContext* old_subst = gen->generics.subst;
-        gen->generics.subst         = &subst;
-
-        emit_enum_rc_func(gen, info->mangled_name, tmpl, 1); // __rc_inc
-        emit_enum_rc_func(gen, info->mangled_name, tmpl, 0); // __rc_dec
-
-        gen->generics.subst = old_subst;
+        emit_generic_enum_rc_defs_for_instance(gen, info, tmpl);
     }
+}
+
+// Emit __rc_inc_EnumName/__rc_dec_EnumName helpers for enums with RC-managed fields
+void emit_enum_rc_helpers(CodeGen* gen, Node* ast) {
+    emit_non_generic_enum_rc_forward_decls(gen, ast);
+    emit_generic_enum_rc_forward_decls(gen);
+    if (gen->enums.count > 0)
+        emit(gen, "\n");
+
+    emit_non_generic_enum_rc_defs(gen, ast);
+    emit_generic_enum_rc_defs(gen, ast);
 }
 
 // Check if a struct type has a Drop trait implementation
