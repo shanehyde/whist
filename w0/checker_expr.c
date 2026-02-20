@@ -149,94 +149,137 @@ static const char* get_const_binding_name(Checker* checker, Node* node) {
 // Expression checking helpers
 // =============================================================================
 
-// Check comparison operators: == != < > <= >=
-static Type* check_comparison_op(Checker* checker, Node* node, Type* left, Type* right) {
-    TokenType op = node->as.binary.op;
+static int is_equality_op(TokenType op) {
+    return op == TOK_EQ_EQ || op == TOK_BANG_EQ;
+}
 
-    // String comparison
-    if (left->kind == TYPE_STRING && right->kind == TYPE_STRING) {
-        node->as.binary.is_string_op = 1;
-        return type_bool;
+static int is_numeric_comparable_type(Type* type) {
+    return type_is_integer(type) || type->kind == TYPE_F32 || type->kind == TYPE_F64;
+}
+
+static int is_nullable_comparison_pair(Type* left, Type* right) {
+    return (left->kind == TYPE_VOIDPTR && right->kind == TYPE_NULL) ||
+           (left->kind == TYPE_NULL && right->kind == TYPE_VOIDPTR) ||
+           (left->kind == TYPE_STRUCT && right->kind == TYPE_NULL) ||
+           (left->kind == TYPE_NULL && right->kind == TYPE_STRUCT);
+}
+
+static int try_check_string_comparison(Node* node, Type* left, Type* right, Type** out_type) {
+    if (left->kind != TYPE_STRING || right->kind != TYPE_STRING) {
+        return 0;
     }
-    // Vec comparison: only == and != allowed, element type must support equality
-    if (left->kind == TYPE_VEC && right->kind == TYPE_VEC) {
-        if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
-            if (!type_equals(left->as.vec.elem, right->as.vec.elem)) {
-                check_error(checker, node->line, node->column,
-                            "Cannot compare Vec with different element types");
-                return type_error;
-            }
-            Type* elem = left->as.vec.elem;
-            if (!type_supports_equality(elem)) {
-                check_error(checker, node->line, node->column,
-                            "Vec element type '%s' does not support ==", type_name(elem));
-                return type_error;
-            }
-            char buf[256];
-            snprintf(buf, sizeof(buf), "__Vec_%s", type_mangle_name(elem));
-            node->as.binary.is_eq_op     = 1;
-            node->as.binary.eq_type_name = xstrdup(buf);
-            return type_bool;
-        }
+    node->as.binary.is_string_op = 1;
+    *out_type                    = type_bool;
+    return 1;
+}
+
+static int try_check_vec_comparison(Checker* checker, Node* node, Type* left, Type* right,
+                                    TokenType op, Type** out_type) {
+    if (left->kind != TYPE_VEC || right->kind != TYPE_VEC) {
+        return 0;
+    }
+
+    if (!is_equality_op(op)) {
         check_error(checker, node->line, node->column,
                     "Vec types only support == and != comparison");
+        *out_type = type_error;
+        return 1;
+    }
+
+    if (!type_equals(left->as.vec.elem, right->as.vec.elem)) {
+        check_error(checker, node->line, node->column,
+                    "Cannot compare Vec with different element types");
+        *out_type = type_error;
+        return 1;
+    }
+
+    Type* elem = left->as.vec.elem;
+    if (!type_supports_equality(elem)) {
+        check_error(checker, node->line, node->column,
+                    "Vec element type '%s' does not support ==", type_name(elem));
+        *out_type = type_error;
+        return 1;
+    }
+
+    char buf[256];
+    snprintf(buf, sizeof(buf), "__Vec_%s", type_mangle_name(elem));
+    node->as.binary.is_eq_op     = 1;
+    node->as.binary.eq_type_name = xstrdup(buf);
+    *out_type                    = type_bool;
+    return 1;
+}
+
+static int validate_data_enum_equality(Checker* checker, Node* node, Type* enum_type) {
+    for (int v = 0; v < enum_type->as.enm.value_count; v++) {
+        for (int f = 0; f < enum_type->as.enm.variant_type_counts[v]; f++) {
+            Type* field_type = enum_type->as.enm.variant_types[v][f];
+            if (field_type->kind == TYPE_STRUCT && !field_type->as.struc.has_eq) {
+                check_error(
+                    checker, node->line, node->column,
+                    "Cannot compare enum '%s': variant '%s' contains struct '%s' without Eq impl",
+                    enum_type->as.enm.name, enum_type->as.enm.value_names[v],
+                    field_type->as.struc.name);
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static Type* check_equal_types_comparison(Checker* checker, Node* node, Type* left, TokenType op) {
+    if (left->kind == TYPE_STRUCT && is_equality_op(op)) {
+        if (!left->as.struc.has_eq) {
+            check_error(checker, node->line, node->column,
+                        "Cannot compare struct '%s' with == (no Eq impl)", left->as.struc.name);
+            return type_error;
+        }
+        node->as.binary.is_eq_op     = 1;
+        node->as.binary.eq_type_name = left->as.struc.name;
+        return type_bool;
+    }
+
+    if (left->kind == TYPE_STRUCT) {
+        check_error(checker, node->line, node->column, "Cannot compare struct '%s' with '%s'",
+                    left->as.struc.name, token_type_symbol(op));
         return type_error;
     }
 
-    if (type_equals(left, right)) {
-        // Struct == requires Eq trait impl
-        if (left->kind == TYPE_STRUCT && (op == TOK_EQ_EQ || op == TOK_BANG_EQ)) {
-            if (!left->as.struc.has_eq) {
-                check_error(checker, node->line, node->column,
-                            "Cannot compare struct '%s' with == (no Eq impl)", left->as.struc.name);
-                return type_error;
-            }
-            node->as.binary.is_eq_op     = 1;
-            node->as.binary.eq_type_name = left->as.struc.name;
-            return type_bool;
-        }
-        // Struct < > <= >= still disallowed
-        if (left->kind == TYPE_STRUCT) {
-            check_error(checker, node->line, node->column, "Cannot compare struct '%s' with '%s'",
-                        left->as.struc.name, token_type_symbol(op));
+    if (left->kind == TYPE_ENUM && left->as.enm.has_data && is_equality_op(op)) {
+        if (!validate_data_enum_equality(checker, node, left)) {
             return type_error;
         }
-        // Data enum == requires struct variants to have Eq
-        if (left->kind == TYPE_ENUM && left->as.enm.has_data &&
-            (op == TOK_EQ_EQ || op == TOK_BANG_EQ)) {
-            for (int v = 0; v < left->as.enm.value_count; v++) {
-                for (int f = 0; f < left->as.enm.variant_type_counts[v]; f++) {
-                    Type* ft = left->as.enm.variant_types[v][f];
-                    if (ft->kind == TYPE_STRUCT && !ft->as.struc.has_eq) {
-                        check_error(checker, node->line, node->column,
-                                    "Cannot compare enum '%s': variant '%s' contains struct '%s' "
-                                    "without Eq impl",
-                                    left->as.enm.name, left->as.enm.value_names[v],
-                                    ft->as.struc.name);
-                        return type_error;
-                    }
-                }
-            }
-            node->as.binary.is_eq_op     = 1;
-            node->as.binary.is_enum_eq   = 1;
-            node->as.binary.eq_type_name = left->as.enm.name;
-            return type_bool;
-        }
+        node->as.binary.is_eq_op     = 1;
+        node->as.binary.is_enum_eq   = 1;
+        node->as.binary.eq_type_name = left->as.enm.name;
         return type_bool;
     }
-    // voidptr/struct == null and null == voidptr/struct (only for == and !=)
-    if (op == TOK_EQ_EQ || op == TOK_BANG_EQ) {
-        if ((left->kind == TYPE_VOIDPTR && right->kind == TYPE_NULL) ||
-            (left->kind == TYPE_NULL && right->kind == TYPE_VOIDPTR) ||
-            (left->kind == TYPE_STRUCT && right->kind == TYPE_NULL) ||
-            (left->kind == TYPE_NULL && right->kind == TYPE_STRUCT)) {
-            return type_bool;
-        }
+
+    return type_bool;
+}
+
+// Check comparison operators: == != < > <= >=
+static Type* check_comparison_op(Checker* checker, Node* node, Type* left, Type* right) {
+    TokenType op = node->as.binary.op;
+    Type*     result;
+
+    if (try_check_string_comparison(node, left, right, &result)) {
+        return result;
     }
-    if ((type_is_integer(left) || left->kind == TYPE_F32 || left->kind == TYPE_F64) &&
-        (type_is_integer(right) || right->kind == TYPE_F32 || right->kind == TYPE_F64)) {
+    if (try_check_vec_comparison(checker, node, left, right, op, &result)) {
+        return result;
+    }
+
+    if (type_equals(left, right)) {
+        return check_equal_types_comparison(checker, node, left, op);
+    }
+
+    if (is_equality_op(op) && is_nullable_comparison_pair(left, right)) {
         return type_bool;
     }
+    if (is_numeric_comparable_type(left) && is_numeric_comparable_type(right)) {
+        return type_bool;
+    }
+
     check_error(checker, node->line, node->column, "Cannot compare '%s' and '%s'", type_name(left),
                 type_name(right));
     return type_error;
