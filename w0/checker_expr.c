@@ -1031,6 +1031,100 @@ static int is_lvalue(Node* node) {
     }
 }
 
+// Check that assigning to an identifier target does not mutate a const binding.
+static int check_ident_assignment_mutability(Checker* checker, Node* target, int line, int column) {
+    Symbol* sym = checker_lookup(checker, target->as.ident.name);
+    if (sym && sym->is_const) {
+        check_error(checker, line, column, "Cannot assign to const '%s'", target->as.ident.name);
+        return 0;
+    }
+    return 1;
+}
+
+// Check that assigning through a member target does not mutate const state.
+static int check_member_assignment_mutability(Checker* checker, Node* target, int line,
+                                              int column) {
+    Node* obj = target->as.member.object;
+    if (obj->type == NODE_IDENT) {
+        Symbol* sym = checker_lookup(checker, obj->as.ident.name);
+        if (sym && sym->is_const) {
+            check_error(checker, line, column, "Cannot modify field '%s' through const '%s'",
+                        target->as.member.name, obj->as.ident.name);
+            return 0;
+        }
+    }
+    if (sem_info_get_member_is_const_access(checker->sem, target,
+                                            target->as.member.is_const_access)) {
+        check_error(checker, line, column, "Cannot assign to const field '%s'",
+                    target->as.member.name);
+        return 0;
+    }
+    return 1;
+}
+
+// Check that assigning through an index target does not write to a const binding.
+static int check_index_assignment_mutability(Checker* checker, Node* target, int line, int column) {
+    const char* const_name = get_const_binding_name(checker, target->as.index.object);
+    if (const_name) {
+        check_error(checker, line, column, "Cannot write to index of const '%s'", const_name);
+        return 0;
+    }
+    return 1;
+}
+
+// Validate assignment target shape and mutability rules for lvalue writes.
+static int check_assignment_target_writable(Checker* checker, Node* assign_node) {
+    Node* target = assign_node->as.assign.target;
+    if (!is_lvalue(target)) {
+        check_error(checker, assign_node->line, assign_node->column, "Invalid assignment target");
+        return 0;
+    }
+
+    switch (target->type) {
+    case NODE_IDENT:
+        return check_ident_assignment_mutability(checker, target, assign_node->line,
+                                                 assign_node->column);
+    case NODE_MEMBER:
+        return check_member_assignment_mutability(checker, target, assign_node->line,
+                                                  assign_node->column);
+    case NODE_INDEX:
+        return check_index_assignment_mutability(checker, target, assign_node->line,
+                                                 assign_node->column);
+    default:
+        return 1;
+    }
+}
+
+// Disallow writes to .tag on data enums, which is a read-only synthesized field.
+static int check_assignment_enum_tag_writable(Checker* checker, Node* assign_node) {
+    Node* target = assign_node->as.assign.target;
+    if (target->type != NODE_MEMBER || strcmp(target->as.member.name, "tag") != 0) {
+        return 1;
+    }
+
+    Type* obj_type = check_expression(checker, target->as.member.object);
+    if (obj_type && obj_type->kind == TYPE_ENUM && obj_type->as.enm.has_data) {
+        check_error(checker, assign_node->line, assign_node->column,
+                    "Enum tag is read-only; cannot assign to '%s.tag'", obj_type->as.enm.name);
+        return 0;
+    }
+    return 1;
+}
+
+// Validate that compound assignment uses numeric operands on both sides.
+static int check_compound_assignment_operands(Checker* checker, Node* assign_node, Type* target,
+                                              Type* value) {
+    if (assign_node->as.assign.op == TOK_EQ) {
+        return 1;
+    }
+    if (!is_numeric_comparable_type(target) || !is_numeric_comparable_type(value)) {
+        check_error(checker, assign_node->line, assign_node->column,
+                    "Invalid operands for compound assignment");
+        return 0;
+    }
+    return 1;
+}
+
 // Type-check an assignment: validate lvalue, const, enum tag, and type compatibility
 static Type* check_assign_expr(Checker* checker, Node* node) {
     Type* target = check_expression(checker, node->as.assign.target);
@@ -1046,63 +1140,16 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
     if (target->kind == TYPE_ERROR || value->kind == TYPE_ERROR)
         return type_error;
 
-    // Check if target is assignable (lvalue check)
-    Node* t = node->as.assign.target;
-    if (!is_lvalue(t)) {
-        check_error(checker, node->line, node->column, "Invalid assignment target");
+    if (!check_assignment_target_writable(checker, node)) {
         return type_error;
     }
-    if (t->type == NODE_IDENT) {
-        Symbol* sym = checker_lookup(checker, t->as.ident.name);
-        if (sym && sym->is_const) {
-            check_error(checker, node->line, node->column, "Cannot assign to const '%s'",
-                        t->as.ident.name);
-            return type_error;
-        }
-    } else if (t->type == NODE_MEMBER) {
-        Node* obj = t->as.member.object;
-        if (obj->type == NODE_IDENT) {
-            Symbol* sym = checker_lookup(checker, obj->as.ident.name);
-            if (sym && sym->is_const) {
-                check_error(checker, node->line, node->column,
-                            "Cannot modify field '%s' through const '%s'", t->as.member.name,
-                            obj->as.ident.name);
-                return type_error;
-            }
-        }
-        if (sem_info_get_member_is_const_access(checker->sem, t, t->as.member.is_const_access)) {
-            check_error(checker, node->line, node->column, "Cannot assign to const field '%s'",
-                        t->as.member.name);
-            return type_error;
-        }
-    } else if (t->type == NODE_INDEX) {
-        const char* const_name = get_const_binding_name(checker, t->as.index.object);
-        if (const_name) {
-            check_error(checker, node->line, node->column, "Cannot write to index of const '%s'",
-                        const_name);
-            return type_error;
-        }
+
+    if (!check_assignment_enum_tag_writable(checker, node)) {
+        return type_error;
     }
 
-    // Disallow assignments to data enum tags
-    if (t->type == NODE_MEMBER && strcmp(t->as.member.name, "tag") == 0) {
-        Type* obj_type = check_expression(checker, t->as.member.object);
-        if (obj_type && obj_type->kind == TYPE_ENUM && obj_type->as.enm.has_data) {
-            check_error(checker, node->line, node->column,
-                        "Enum tag is read-only; cannot assign to '%s.tag'", obj_type->as.enm.name);
-            return type_error;
-        }
-    }
-
-    // For compound assignment, check operation is valid
-    TokenType op = node->as.assign.op;
-    if (op != TOK_EQ) {
-        if ((!type_is_integer(target) && target->kind != TYPE_F32 && target->kind != TYPE_F64) ||
-            (!type_is_integer(value) && value->kind != TYPE_F32 && value->kind != TYPE_F64)) {
-            check_error(checker, node->line, node->column,
-                        "Invalid operands for compound assignment");
-            return type_error;
-        }
+    if (!check_compound_assignment_operands(checker, node, target, value)) {
+        return type_error;
     }
 
     if (!type_assignable(target, value)) {
