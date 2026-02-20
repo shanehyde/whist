@@ -2696,16 +2696,15 @@ static Type* check_ident_expr(Checker* checker, Node* node) {
     return sym->type;
 }
 
-// Dispatch expression type-checking based on node type, returning the resolved type
-Type* check_expression(Checker* checker, Node* node) {
-    if (!node)
-        return type_error;
+// Report use of a struct initializer where a contextual struct type is required.
+static Type* check_contextless_struct_init_expr(Checker* checker, Node* node) {
+    check_error(checker, node->line, node->column,
+                "Struct initializer requires a contextual struct type");
+    return type_error;
+}
 
-    Type* literal_type = get_literal_expr_type(node->type);
-    if (literal_type) {
-        return literal_type;
-    }
-
+// Dispatch non-literal expression nodes to their dedicated type-checking routines.
+static Type* check_non_literal_expression(Checker* checker, Node* node) {
     switch (node->type) {
     case NODE_IDENT:
         return check_ident_expr(checker, node);
@@ -2747,9 +2746,7 @@ Type* check_expression(Checker* checker, Node* node) {
         return check_match_expr(checker, node);
 
     case NODE_STRUCT_INIT:
-        check_error(checker, node->line, node->column,
-                    "Struct initializer requires a contextual struct type");
-        return type_error;
+        return check_contextless_struct_init_expr(checker, node);
 
     case NODE_TUPLE_LIT:
         return check_tuple_lit_expr(checker, node);
@@ -2767,6 +2764,19 @@ Type* check_expression(Checker* checker, Node* node) {
         check_error(checker, node->line, node->column, "Unknown expression type %d", node->type);
         return type_error;
     }
+}
+
+// Dispatch expression type-checking based on node type, returning the resolved type
+Type* check_expression(Checker* checker, Node* node) {
+    if (!node)
+        return type_error;
+
+    Type* literal_type = get_literal_expr_type(node->type);
+    if (literal_type) {
+        return literal_type;
+    }
+
+    return check_non_literal_expression(checker, node);
 }
 
 // =============================================================================
