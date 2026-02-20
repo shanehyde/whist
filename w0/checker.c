@@ -657,55 +657,157 @@ static void define_destruct_pattern_vars(Checker* checker, DestructPattern* patt
 
 // --- Statement case helpers ---
 
-// Type-check a variable declaration: handles destructuring, type inference, and RC tracking
-static void check_var_decl_stmt(Checker* checker, Node* node) {
-    // Check if this is a destructuring declaration
-    DestructPattern* pattern = node->as.var_decl.destruct_pattern;
-    if (pattern) {
-        // Destructuring: var (a, b) = tuple; or var (a, (b, c)) = nested;
+static int is_module_call_enum_value(Node* init) {
+    return init->type == NODE_ENUM_VALUE && init->as.enum_value.is_module_call;
+}
 
-        // Check for redefinitions
-        if (check_destruct_pattern_redefinitions(checker, pattern, node->line, node->column)) {
-            return;
+static void mark_var_decl_rc(Node* node, Symbol* sym, Type* resolved_type) {
+    node->as.var_decl.is_rc         = 1;
+    node->as.var_decl.resolved_type = resolved_type;
+    if (sym) {
+        sym->is_rc = 1;
+    }
+}
+
+static Type* check_var_decl_initializer(Checker* checker, Type* decl_type, Node* init) {
+    if (!init) {
+        return NULL;
+    }
+
+    // Set enum_target_hint for generic enum inference (e.g., var x: Option<i64> = Option::None)
+    Type* old_hint = checker->enum_target_hint;
+    if (decl_type && decl_type->kind == TYPE_ENUM) {
+        checker->enum_target_hint = decl_type;
+    }
+    Type* init_type           = check_expression(checker, init);
+    checker->enum_target_hint = old_hint;
+    return init_type;
+}
+
+static Type* resolve_var_decl_type(Checker* checker, Node* node, const char* name, Type* decl_type,
+                                   Type* init_type) {
+    if (decl_type && init_type) {
+        // Both specified - check compatibility
+        if (!type_assignable(decl_type, init_type)) {
+            check_error_type(checker, node->line, node->column, name, decl_type, init_type);
         }
+        return decl_type;
+    }
+    if (decl_type) {
+        return decl_type;
+    }
+    if (init_type) {
+        return init_type;
+    }
 
-        // Initializer is required (parser enforces this)
-        Type* init_type = check_expression(checker, node->as.var_decl.init);
+    check_error(checker, node->line, node->column,
+                "Variable '%s' needs type annotation or initializer", name);
+    return type_error;
+}
 
-        // Check pattern against initializer type
-        if (check_destruct_pattern_against_type(checker, pattern, init_type, node->line,
-                                                node->column)) {
-            return;
-        }
-
-        // Define all variables in the pattern
-        define_destruct_pattern_vars(checker, pattern, init_type, node->as.var_decl.is_const,
-                                     node->as.var_decl.is_public);
-
-        // RC tracking for struct destructuring (the temp struct must stay alive)
-        if (pattern->kind == PATTERN_STRUCT && init_type->kind == TYPE_STRUCT) {
-            Node* init = node->as.var_decl.init;
-            if (init->type == NODE_NEW_EXPR) {
-                node->as.var_decl.is_rc         = 1;
-                node->as.var_decl.resolved_type = init->as.new_expr.resolved_type;
-            } else if (init->type == NODE_IDENT) {
-                Symbol* src = checker_lookup(checker, init->as.ident.name);
-                if (src && src->is_rc) {
-                    node->as.var_decl.is_rc         = 1;
-                    node->as.var_decl.resolved_type = src->type;
-                }
-            } else if (init->type == NODE_CALL) {
-                node->as.var_decl.is_rc         = 1;
-                node->as.var_decl.resolved_type = init_type;
-            } else if (init->type == NODE_ENUM_VALUE && init->as.enum_value.is_module_call) {
-                node->as.var_decl.is_rc         = 1;
-                node->as.var_decl.resolved_type = init_type;
-            }
-        }
+static void record_inferred_var_decl_type(Node* node, Type* init_type) {
+    if (node->as.var_decl.type || !init_type) {
         return;
     }
 
-    // Normal variable declaration
+    // Store resolved type for codegen when type is inferred from non-literal expressions
+    if (init_type->kind == TYPE_STRING && node->as.var_decl.init->type != NODE_STRING_LIT) {
+        node->as.var_decl.resolved_type = init_type;
+    }
+
+    // Store resolved type for function pointer inference (var fp = some_func)
+    if (init_type->kind == TYPE_FUNC) {
+        node->as.var_decl.resolved_type = init_type;
+    }
+}
+
+static void maybe_mark_struct_destructuring_rc(Checker* checker, Node* node, Type* init_type) {
+    DestructPattern* pattern = node->as.var_decl.destruct_pattern;
+    if (pattern->kind != PATTERN_STRUCT || init_type->kind != TYPE_STRUCT) {
+        return;
+    }
+
+    // RC tracking for struct destructuring (the temp struct must stay alive)
+    Node* init = node->as.var_decl.init;
+    if (init->type == NODE_NEW_EXPR) {
+        mark_var_decl_rc(node, NULL, init->as.new_expr.resolved_type);
+    } else if (init->type == NODE_IDENT) {
+        Symbol* src = checker_lookup(checker, init->as.ident.name);
+        if (src && src->is_rc) {
+            mark_var_decl_rc(node, NULL, src->type);
+        }
+    } else if (init->type == NODE_CALL || is_module_call_enum_value(init)) {
+        mark_var_decl_rc(node, NULL, init_type);
+    }
+}
+
+static void maybe_mark_var_decl_rc_from_init(Checker* checker, Node* node, Symbol* sym,
+                                             Type* var_type) {
+    Node* init = node->as.var_decl.init;
+    if (!sym || !init) {
+        return;
+    }
+
+    if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
+        mark_var_decl_rc(node, sym, var_type);
+    }
+
+    if (init->type == NODE_NEW_EXPR) {
+        mark_var_decl_rc(node, sym, init->as.new_expr.resolved_type);
+    } else if (init->type == NODE_IDENT) {
+        Symbol* src = checker_lookup(checker, init->as.ident.name);
+        if (src && src->is_rc) {
+            mark_var_decl_rc(node, sym, src->type);
+        }
+    } else if (init->type == NODE_CALL && var_type) {
+        // Store resolved type for codegen type inference
+        node->as.var_decl.resolved_type = var_type;
+        if (type_is_rc_managed(var_type)) {
+            // Function call returning an RC-managed type transfers ownership
+            node->as.var_decl.is_rc = 1;
+            sym->is_rc              = 1;
+        }
+    } else if (is_module_call_enum_value(init) && var_type) {
+        // Module call (parsed as enum value): store resolved type for codegen
+        node->as.var_decl.resolved_type = var_type;
+        if (type_is_rc_managed(var_type)) {
+            node->as.var_decl.is_rc = 1;
+            sym->is_rc              = 1;
+        }
+    }
+}
+
+static void maybe_mark_string_var_decl_rc(Node* node, Symbol* sym, Type* var_type) {
+    // All string variables are RC-managed (immortal literals are no-ops for inc/dec)
+    if (sym && var_type && var_type->kind == TYPE_STRING && !node->as.var_decl.is_rc) {
+        mark_var_decl_rc(node, sym, type_string);
+    }
+}
+
+static void check_destructuring_var_decl_stmt(Checker* checker, Node* node) {
+    DestructPattern* pattern = node->as.var_decl.destruct_pattern;
+
+    // Check for redefinitions
+    if (check_destruct_pattern_redefinitions(checker, pattern, node->line, node->column)) {
+        return;
+    }
+
+    // Initializer is required (parser enforces this)
+    Type* init_type = check_expression(checker, node->as.var_decl.init);
+
+    // Check pattern against initializer type
+    if (check_destruct_pattern_against_type(checker, pattern, init_type, node->line,
+                                            node->column)) {
+        return;
+    }
+
+    // Define all variables in the pattern
+    define_destruct_pattern_vars(checker, pattern, init_type, node->as.var_decl.is_const,
+                                 node->as.var_decl.is_public);
+    maybe_mark_struct_destructuring_rc(checker, node, init_type);
+}
+
+static void check_normal_var_decl_stmt(Checker* checker, Node* node) {
     const char* name = node->as.var_decl.name;
 
     // Check for redefinition
@@ -715,97 +817,29 @@ static void check_var_decl_stmt(Checker* checker, Node* node) {
     }
 
     Type* decl_type = NULL;
-    Type* init_type = NULL;
-
     if (node->as.var_decl.type) {
         decl_type = resolve_type(checker, node->as.var_decl.type);
     }
 
-    if (node->as.var_decl.init) {
-        // Set enum_target_hint for generic enum inference (e.g., var x: Option<i64> =
-        // Option::None)
-        Type* old_hint = checker->enum_target_hint;
-        if (decl_type && decl_type->kind == TYPE_ENUM) {
-            checker->enum_target_hint = decl_type;
-        }
-        init_type                 = check_expression(checker, node->as.var_decl.init);
-        checker->enum_target_hint = old_hint;
-    }
-
-    Type* var_type;
-    if (decl_type && init_type) {
-        // Both specified - check compatibility
-        if (!type_assignable(decl_type, init_type)) {
-            check_error_type(checker, node->line, node->column, name, decl_type, init_type);
-        }
-        var_type = decl_type;
-    } else if (decl_type) {
-        var_type = decl_type;
-    } else if (init_type) {
-        var_type = init_type;
-    } else {
-        check_error(checker, node->line, node->column,
-                    "Variable '%s' needs type annotation or initializer", name);
-        var_type = type_error;
-    }
+    Type* init_type = check_var_decl_initializer(checker, decl_type, node->as.var_decl.init);
+    Type* var_type  = resolve_var_decl_type(checker, node, name, decl_type, init_type);
 
     Symbol* sym = checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const,
                                  node->as.var_decl.is_public, checker->modules.current_module);
 
-    // Store resolved type for codegen when type is inferred from non-literal expressions
-    if (!node->as.var_decl.type && init_type && init_type->kind == TYPE_STRING &&
-        node->as.var_decl.init->type != NODE_STRING_LIT) {
-        node->as.var_decl.resolved_type = init_type;
+    record_inferred_var_decl_type(node, init_type);
+    maybe_mark_var_decl_rc_from_init(checker, node, sym, var_type);
+    maybe_mark_string_var_decl_rc(node, sym, var_type);
+}
+
+// Type-check a variable declaration: handles destructuring, type inference, and RC tracking
+static void check_var_decl_stmt(Checker* checker, Node* node) {
+    if (node->as.var_decl.destruct_pattern) {
+        check_destructuring_var_decl_stmt(checker, node);
+        return;
     }
 
-    // Store resolved type for function pointer inference (var fp = some_func)
-    if (!node->as.var_decl.type && init_type && init_type->kind == TYPE_FUNC) {
-        node->as.var_decl.resolved_type = init_type;
-    }
-
-    // Propagate RC tracking
-    if (sym && node->as.var_decl.init) {
-        if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
-            node->as.var_decl.is_rc         = 1;
-            node->as.var_decl.resolved_type = var_type;
-            sym->is_rc                      = 1;
-        }
-        if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
-            node->as.var_decl.is_rc         = 1;
-            node->as.var_decl.resolved_type = node->as.var_decl.init->as.new_expr.resolved_type;
-            sym->is_rc                      = 1;
-        } else if (node->as.var_decl.init->type == NODE_IDENT) {
-            Symbol* src = checker_lookup(checker, node->as.var_decl.init->as.ident.name);
-            if (src && src->is_rc) {
-                node->as.var_decl.is_rc         = 1;
-                node->as.var_decl.resolved_type = src->type;
-                sym->is_rc                      = 1;
-            }
-        } else if (node->as.var_decl.init->type == NODE_CALL && var_type) {
-            // Store resolved type for codegen type inference
-            node->as.var_decl.resolved_type = var_type;
-            if (type_is_rc_managed(var_type)) {
-                // Function call returning an RC-managed type transfers ownership
-                node->as.var_decl.is_rc = 1;
-                sym->is_rc              = 1;
-            }
-        } else if (node->as.var_decl.init->type == NODE_ENUM_VALUE &&
-                   node->as.var_decl.init->as.enum_value.is_module_call && var_type) {
-            // Module call (parsed as enum value): store resolved type for codegen
-            node->as.var_decl.resolved_type = var_type;
-            if (type_is_rc_managed(var_type)) {
-                node->as.var_decl.is_rc = 1;
-                sym->is_rc              = 1;
-            }
-        }
-    }
-
-    // All string variables are RC-managed (immortal literals are no-ops for inc/dec)
-    if (sym && var_type && var_type->kind == TYPE_STRING && !node->as.var_decl.is_rc) {
-        node->as.var_decl.is_rc         = 1;
-        node->as.var_decl.resolved_type = type_string;
-        sym->is_rc                      = 1;
-    }
+    check_normal_var_decl_stmt(checker, node);
 }
 
 // Type-check a for loop: init, condition, post-expression, and body
