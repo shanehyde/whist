@@ -726,6 +726,7 @@ Node* node_clone(Node* node) {
         c->as.var_decl.type             = node_clone(node->as.var_decl.type);
         c->as.var_decl.init             = node_clone(node->as.var_decl.init);
         c->as.var_decl.is_const         = node->as.var_decl.is_const;
+        c->as.var_decl.is_boxed         = node->as.var_decl.is_boxed;
         c->as.var_decl.destruct_pattern = pattern_clone(node->as.var_decl.destruct_pattern);
         break;
     case NODE_BLOCK:

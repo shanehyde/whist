@@ -666,6 +666,8 @@ Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
     }
 
     // Normal variable declaration
+    int is_boxed = match_token(parser, TOK_CARET);
+
     Token name = parser->current;
     consume_token(parser, TOK_IDENT, "Expected variable name");
 
@@ -676,6 +678,7 @@ Node* parse_var_decl(Parser* parser, int is_const, int is_public) {
     vdn->is_public        = is_public;
     vdn->name_length      = name.length;
     vdn->is_const         = is_const;
+    vdn->is_boxed         = is_boxed;
     vdn->type             = NULL;
     vdn->init             = NULL;
     vdn->destruct_pattern = NULL;

@@ -171,6 +171,7 @@ typedef struct {
     Node* type;
     Node* init;
     int   is_const;
+    int   is_boxed;      // Parser flag: var ^name = expr (autoboxing)
     char* source_module; // NULL = same module, else external module name
 
     // Destructuring support: var (a, b) = tuple; or var (a, (b, c)) = nested;

@@ -845,7 +845,32 @@ static void check_normal_var_decl_stmt(Checker* checker, Node* node) {
     }
 
     Type* init_type = check_var_decl_initializer(checker, decl_type, node->as.var_decl.init);
-    Type* var_type  = resolve_var_decl_type(checker, node, name, decl_type, init_type);
+
+    // Autoboxing: var ^x = expr desugars to Box<T> allocation
+    if (node->as.var_decl.is_boxed) {
+        if (!node->as.var_decl.init) {
+            check_error(checker, node->line, node->column,
+                        "Boxed variable declaration requires an initializer");
+            return;
+        }
+        Type* inner = decl_type ? decl_type : init_type;
+        if (!inner || inner->kind == TYPE_ERROR) {
+            check_error(checker, node->line, node->column,
+                        "Cannot determine type for boxed variable '%s'", name);
+            return;
+        }
+        if (decl_type && init_type && !type_assignable(decl_type, init_type)) {
+            check_error_type(checker, node->line, node->column, name, decl_type, init_type);
+            return;
+        }
+        Type*   box_type = ensure_box_type(checker, inner);
+        Symbol* sym = checker_define(checker, name, SYM_VAR, box_type, node->as.var_decl.is_const,
+                                     node->as.var_decl.is_public, checker->modules.current_module);
+        mark_var_decl_rc(node, sym, box_type);
+        return;
+    }
+
+    Type* var_type = resolve_var_decl_type(checker, node, name, decl_type, init_type);
 
     Symbol* sym = checker_define(checker, name, SYM_VAR, var_type, node->as.var_decl.is_const,
                                  node->as.var_decl.is_public, checker->modules.current_module);
