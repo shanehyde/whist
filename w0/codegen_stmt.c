@@ -46,6 +46,7 @@ void emit_block_contents(CodeGen* gen, Node* block) {
     gen->rc.depth--;
 }
 
+// Look up a struct field type by field name.
 static Type* find_struct_field_type(Type* struct_type, const char* field_name) {
     if (!struct_type || struct_type->kind != TYPE_STRUCT) {
         return NULL;
@@ -58,6 +59,7 @@ static Type* find_struct_field_type(Type* struct_type, const char* field_name) {
     return NULL;
 }
 
+// Record a hoisted expression node and its temporary name.
 static void hoist_push_new_arg(CodeGen* gen, Node* arg, const char* temp_name) {
     if (gen->hoist.count >= gen->hoist.capacity) {
         int new_cap         = gen->hoist.capacity == 0 ? 8 : gen->hoist.capacity * 2;
@@ -201,6 +203,7 @@ static int closure_ident_needs_env_inc(Node* expr) {
     return expr && expr->type == NODE_IDENT && !expr->as.ident.resolved_func_type;
 }
 
+// Emit RC-safe assignment for tracked identifier targets; returns whether it handled the statement.
 static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
     if (expr->type != NODE_ASSIGN || expr->as.assign.op != TOK_EQ ||
         expr->as.assign.target->type != NODE_IDENT ||
@@ -259,11 +262,13 @@ static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
     return 1;
 }
 
+// Return whether a value expression is a borrowed RC reference requiring retain.
 static int rc_value_needs_borrow_inc(CodeGen* gen, Node* value) {
     return (value->type == NODE_IDENT && rc_is_tracked(gen, value->as.ident.name)) ||
            (value->type == NODE_INDEX && value->as.index.is_rc_elem);
 }
 
+// Return whether member-assignment value handling should use RC management.
 static int rc_member_value_is_managed(CodeGen* gen, Node* value, Type* field_ty) {
     int value_is_rc = rc_value_needs_borrow_inc(gen, value) || value->type == NODE_NEW_EXPR;
     // For string fields, any assignment needs RC handling.
@@ -273,17 +278,20 @@ static int rc_member_value_is_managed(CodeGen* gen, Node* value, Type* field_ty)
     return value_is_rc;
 }
 
+// Return whether a field type should be handled with pointer-style RC ops.
 static int rc_member_field_uses_pointer_rc(Type* field_ty) {
     return field_ty && (field_ty->kind == TYPE_STRUCT || field_ty->kind == TYPE_STRING ||
                         field_ty->kind == TYPE_VEC || field_ty->kind == TYPE_STRINGBUILDER);
 }
 
+// Emit assignment to a member expression from a precomputed temp.
 static void emit_member_assign_from_tmp(CodeGen* gen, Node* member, int tmp) {
     emit_indent(gen);
     emit_expr(gen, member);
     emit(gen, " = __rc_tmp%d;\n", tmp);
 }
 
+// Emit RC-safe assignment for enum fields with RC payload cleanup/retain.
 static int emit_rc_member_assign_enum_field(CodeGen* gen, Node* expr, Node* member,
                                             Type* field_ty) {
     if (!(field_ty && field_ty->kind == TYPE_ENUM && field_ty->as.enm.has_rc_fields)) {
@@ -312,6 +320,7 @@ static int emit_rc_member_assign_enum_field(CodeGen* gen, Node* expr, Node* memb
     return 1;
 }
 
+// Emit RC-safe assignment for pointer-like member fields.
 static int emit_rc_member_assign_pointer_field(CodeGen* gen, Node* expr, Node* member,
                                                Type* field_ty) {
     Node* value = expr->as.assign.value;
@@ -343,6 +352,7 @@ static int emit_rc_member_assign_pointer_field(CodeGen* gen, Node* expr, Node* m
     return 1;
 }
 
+// Handle `self.field = new ...` by releasing the old field value before assignment.
 static int emit_rc_self_new_member_assign(CodeGen* gen, Node* expr, Node* member, int obj_is_rc) {
     if (obj_is_rc || member->as.member.object->type != NODE_IDENT ||
         strcmp(member->as.member.object->as.ident.name, "self") != 0 ||
@@ -363,6 +373,7 @@ static int emit_rc_self_new_member_assign(CodeGen* gen, Node* expr, Node* member
     return 1;
 }
 
+// Emit RC-safe member assignment logic; returns whether it handled the statement.
 static int emit_rc_member_assign_stmt(CodeGen* gen, Node* expr) {
     if (expr->type != NODE_ASSIGN || expr->as.assign.op != TOK_EQ ||
         expr->as.assign.target->type != NODE_MEMBER) {
@@ -393,6 +404,7 @@ static int emit_rc_member_assign_stmt(CodeGen* gen, Node* expr) {
     return 0;
 }
 
+// Emit Vec index assignment with bounds checking and RC element handling.
 static int emit_vec_index_assign_stmt(CodeGen* gen, Node* expr) {
     if (expr->type != NODE_ASSIGN || expr->as.assign.target->type != NODE_INDEX ||
         !expr->as.assign.target->as.index.is_vec_index) {
@@ -739,10 +751,12 @@ static void emit_var_decl_rc_copy(CodeGen* gen, Node* node) {
     rc_push_var(gen, node->as.var_decl.name, rc_type);
 }
 
+// Emit a default inferred integer declaration type.
 static void emit_var_decl_default_int(CodeGen* gen, const char* name) {
     emit(gen, "int64_t %s", name);
 }
 
+// Infer a tuple literal element type for fallback tuple declaration emission.
 static Type* tuple_literal_elem_type(Node* elem) {
     switch (elem->type) {
     case NODE_INT_LIT:
@@ -762,6 +776,7 @@ static Type* tuple_literal_elem_type(Node* elem) {
     }
 }
 
+// Find a matching tuple type index in the generated tuple-type table.
 static int find_tuple_type_index(CodeGen* gen, Type* tuple) {
     for (int i = 0; i < gen->tuple_type_count; i++) {
         if (tuple_types_equal(gen->tuple_types[i], tuple)) {
@@ -771,6 +786,7 @@ static int find_tuple_type_index(CodeGen* gen, Type* tuple) {
     return -1;
 }
 
+// Emit an inferred declaration type for tuple literal initializers.
 static void emit_var_decl_inferred_tuple_lit(CodeGen* gen, Node* node, const char* name) {
     int    count = node->as.var_decl.init->as.tuple_lit.elements.count;
     Type** elems = xmalloc(count * sizeof(Type*));
@@ -794,6 +810,7 @@ static void emit_var_decl_inferred_tuple_lit(CodeGen* gen, Node* node, const cha
     emit(gen, "} %s", name);
 }
 
+// Emit an inferred declaration type for array literal initializers.
 static void emit_var_decl_inferred_array_lit(CodeGen* gen, Node* init, const char* name) {
     Type* elem_type = init->as.array_lit.resolved_type;
     int   count     = init->as.array_lit.elements.count;
@@ -801,6 +818,7 @@ static void emit_var_decl_inferred_array_lit(CodeGen* gen, Node* init, const cha
     emit(gen, " %s[%d]", name, count);
 }
 
+// Emit declaration type from resolved type, or fallback default type.
 static void emit_var_decl_resolved_or_default(CodeGen* gen, Node* node, const char* name) {
     if (!node->as.var_decl.resolved_type) {
         emit_var_decl_default_int(gen, name);
@@ -816,6 +834,7 @@ static void emit_var_decl_resolved_or_default(CodeGen* gen, Node* node, const ch
     }
 }
 
+// Emit an inferred declaration type for enum value initializers.
 static void emit_var_decl_inferred_enum_value(CodeGen* gen, Node* node, const char* name) {
     Node* init = node->as.var_decl.init;
     if (init->as.enum_value.is_module_call) {
@@ -899,6 +918,7 @@ static void emit_var_decl_struct_destructuring(CodeGen* gen, Node* node, Destruc
     }
 }
 
+// Emit tuple destructuring declaration through a temporary tuple binding.
 static void emit_var_decl_tuple_destructuring(CodeGen* gen, Node* node, DestructPattern* pattern) {
     // Tuple destructuring
     Type* tuple_type = pattern->resolved_type;
@@ -916,6 +936,7 @@ static void emit_var_decl_tuple_destructuring(CodeGen* gen, Node* node, Destruct
     rc_track_destruct_pattern(gen, pattern);
 }
 
+// Emit destructuring declaration logic when a destructuring pattern is present.
 static int emit_var_decl_destructuring(CodeGen* gen, Node* node) {
     // Handle destructuring: var (a, b) = tuple; or var {x, y} = struct_expr;
     DestructPattern* pattern = node->as.var_decl.destruct_pattern;
@@ -930,6 +951,7 @@ static int emit_var_decl_destructuring(CodeGen* gen, Node* node) {
     return 1;
 }
 
+// Dispatch RC-managed `new` declaration emission by allocated type.
 static void emit_var_decl_rc_new(CodeGen* gen, Node* node) {
     Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
     if (rtype && rtype->kind == TYPE_VEC) {
@@ -943,6 +965,7 @@ static void emit_var_decl_rc_new(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit RC-managed copy declaration with owned-temp hoist cleanup around the init expression.
 static void emit_var_decl_rc_copy_with_temps(CodeGen* gen, Node* node) {
     // Hoist nested owned temps (e.g., intermediate in nums.map(...).filter(...))
     int has_temps = has_owned_temps(node->as.var_decl.init);
@@ -958,6 +981,7 @@ static void emit_var_decl_rc_copy_with_temps(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit RC-managed variable declaration fast path; returns whether it handled the declaration.
 static int emit_var_decl_rc_managed(CodeGen* gen, Node* node) {
     if (!node->as.var_decl.is_rc || !node->as.var_decl.init) {
         return 0;
@@ -973,6 +997,7 @@ static int emit_var_decl_rc_managed(CodeGen* gen, Node* node) {
     return 1;
 }
 
+// Disable lambda owned-temp hoisting when ownership transfers directly to the declared variable.
 static int begin_lambda_owned_transfer(Node* node) {
     // Direct lambda assignment: ownership transfers to variable's .env tracking, don't hoist
     if (!node->as.var_decl.init || node->as.var_decl.init->type != NODE_LAMBDA ||
@@ -983,18 +1008,21 @@ static int begin_lambda_owned_transfer(Node* node) {
     return 1;
 }
 
+// Restore lambda owned-temp state after declaration emission.
 static void restore_lambda_owned_transfer(Node* node, int lambda_owned) {
     if (lambda_owned) {
         node->as.var_decl.init->is_owned_temp = 1;
     }
 }
 
+// Return whether a variable declaration is for a function/closure value.
 static int var_decl_is_func_var(Node* node) {
     return (node->as.var_decl.resolved_type &&
             node->as.var_decl.resolved_type->kind == TYPE_FUNC) ||
            (node->as.var_decl.type && node->as.var_decl.type->type == NODE_FUNC_TYPE);
 }
 
+// Hoist owned temporaries in a variable initializer and return whether any were hoisted.
 static int hoist_var_decl_init_temps(CodeGen* gen, Node* node, int* saved) {
     int has_temps = node->as.var_decl.init && has_owned_temps(node->as.var_decl.init);
     if (has_temps) {
@@ -1003,6 +1031,7 @@ static int hoist_var_decl_init_temps(CodeGen* gen, Node* node, int* saved) {
     return has_temps;
 }
 
+// Emit the type-and-name portion of a variable declaration.
 static void emit_var_decl_signature(CodeGen* gen, Node* node) {
     emit_indent(gen);
     if (node->as.var_decl.is_const) {
@@ -1016,6 +1045,7 @@ static void emit_var_decl_signature(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit the initializer portion of a variable declaration with null special-cases.
 static void emit_var_decl_initializer(CodeGen* gen, Node* node, int struct_type, int is_func_var) {
     if (node->as.var_decl.init) {
         if (struct_type && node->as.var_decl.init->type == NODE_NULL_LIT) {
@@ -1032,6 +1062,7 @@ static void emit_var_decl_initializer(CodeGen* gen, Node* node, int struct_type,
     }
 }
 
+// Emit closure env retain when initializing a function variable from another closure variable.
 static void emit_var_decl_func_var_env_inc(CodeGen* gen, Node* node, int is_func_var) {
     // Closure copy from another closure variable needs an env retain.
     if (is_func_var && closure_ident_needs_env_inc(node->as.var_decl.init)) {
@@ -1040,6 +1071,7 @@ static void emit_var_decl_func_var_env_inc(CodeGen* gen, Node* node, int is_func
     }
 }
 
+// Track function variable env pointers for RC cleanup at scope exit.
 static void track_var_decl_func_env(CodeGen* gen, Node* node, int is_func_var) {
     // Track closure env for scope cleanup: __rc_dec(f.env) at scope exit.
     // __rc_dec(NULL) is a no-op, so this is safe even for non-capturing closures.
@@ -1050,6 +1082,7 @@ static void track_var_decl_func_env(CodeGen* gen, Node* node, int is_func_var) {
     }
 }
 
+// Emit a complete variable declaration statement.
 static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
     if (emit_var_decl_destructuring(gen, node)) {
         return;
@@ -1096,6 +1129,7 @@ static void emit_rc_inc_for_return(CodeGen* gen, const char* value_name) {
     }
 }
 
+// Find the RC variable name to skip during return cleanup for ownership transfer.
 static const char* find_return_skip_name(CodeGen* gen, Node* return_value, char* env_buf,
                                          size_t env_buf_size) {
     if (!return_value || return_value->type != NODE_IDENT) {
@@ -1118,6 +1152,7 @@ static const char* find_return_skip_name(CodeGen* gen, Node* return_value, char*
     return NULL;
 }
 
+// Return whether returning this value requires converting borrowed ownership to owned.
 static int return_needs_borrow_inc(CodeGen* gen, Node* return_value, const char* skip_name) {
     // When returning an identifier that's not RC-tracked (e.g., a function parameter)
     // and the return type is RC-managed, we must __rc_inc to give caller ownership.
@@ -1126,6 +1161,7 @@ static int return_needs_borrow_inc(CodeGen* gen, Node* return_value, const char*
            gen->defer.return_type && type_node_has_rc(gen, gen->defer.return_type);
 }
 
+// Hoist owned temporaries used by a return expression.
 static void hoist_return_value_temps(CodeGen* gen, Node* return_value, int* has_temps, int* saved) {
     *has_temps = 0;
     *saved     = 0;
@@ -1148,12 +1184,14 @@ static void hoist_return_value_temps(CodeGen* gen, Node* return_value, int* has_
     }
 }
 
+// Emit decref cleanup for hoisted temporaries owned by enclosing expression contexts.
 static void emit_enclosing_hoists_cleanup(CodeGen* gen, int enclosing_hoists) {
     for (int i = 0; i < enclosing_hoists; i++) {
         emit_owned_temp_dec(gen, gen->hoist.nodes[i], gen->hoist.names[i]);
     }
 }
 
+// Emit a plain return statement with optional return expression.
 static void emit_return_expr_stmt(CodeGen* gen, Node* return_value) {
     emit_indent(gen);
     emit(gen, "return");
@@ -1164,6 +1202,7 @@ static void emit_return_expr_stmt(CodeGen* gen, Node* return_value) {
     emit(gen, ";\n");
 }
 
+// Emit return flow when defers are active, including cleanup and jump to cleanup label.
 static void emit_return_with_defer(CodeGen* gen, Node* return_value, const char* skip_name,
                                    int needs_borrow_inc, int has_temps, int saved,
                                    int enclosing_hoists) {
@@ -1188,6 +1227,7 @@ static void emit_return_with_defer(CodeGen* gen, Node* return_value, const char*
     emit(gen, "goto __cleanup;\n");
 }
 
+// Emit return flow that stores the return expression in a temp before cleanup.
 static void emit_return_with_cleanup_temp(CodeGen* gen, Node* return_value, int needs_borrow_inc,
                                           int has_temps, int saved, int enclosing_hoists) {
     // Complex expression: evaluate to temp first
@@ -1211,6 +1251,7 @@ static void emit_return_with_cleanup_temp(CodeGen* gen, Node* return_value, int 
     emit(gen, "return __rc_ret;\n");
 }
 
+// Emit return flow that performs cleanup and then emits the direct return expression.
 static void emit_return_with_cleanup_expr(CodeGen* gen, Node* return_value, const char* skip_name,
                                           int has_temps, int saved, int enclosing_hoists) {
     if (gen->rc.count > 0) {
@@ -1336,6 +1377,7 @@ static void emit_value_match_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+// Return whether a match statement contains a wildcard arm.
 static int match_stmt_has_wildcard(Node* node) {
     for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
         if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
@@ -1345,6 +1387,7 @@ static int match_stmt_has_wildcard(Node* node) {
     return 0;
 }
 
+// Emit the `if`/`else if`/`else` header for a single match arm.
 static void emit_match_arm_header(CodeGen* gen, Node* arm, int first, int has_wildcard, int arm_idx,
                                   int last_arm, int is_data, int match_id, const char* enum_name) {
     emit_indent(gen);
@@ -1378,6 +1421,7 @@ static void emit_match_arm_header(CodeGen* gen, Node* arm, int first, int has_wi
     emit(gen, ") {\n");
 }
 
+// Emit local bindings for data-carrying match arms.
 static void emit_match_arm_bindings(CodeGen* gen, Node* arm, Type* enum_type, int is_data,
                                     int match_id) {
     if (arm->as.match_arm.is_wildcard || !is_data || arm->as.match_arm.binding_count <= 0) {
@@ -1393,6 +1437,7 @@ static void emit_match_arm_bindings(CodeGen* gen, Node* arm, Type* enum_type, in
     }
 }
 
+// Emit the body for a match arm.
 static void emit_match_arm_body(CodeGen* gen, Node* arm) {
     if (!arm->as.match_arm.body) {
         return;
@@ -1405,6 +1450,7 @@ static void emit_match_arm_body(CodeGen* gen, Node* arm) {
     }
 }
 
+// Cleanup owned temporaries used by a match subject expression.
 static void cleanup_match_owned_temps(CodeGen* gen, Node* subject, int has_temps, int saved,
                                       int subject_is_owned, int match_id) {
     if (has_temps) {
@@ -1477,10 +1523,12 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
     cleanup_match_owned_temps(gen, subject, has_temps, saved, subject_is_owned, match_id);
 }
 
+// Return whether a condition expression already emits outer parentheses.
 static int stmt_cond_has_outer_parens(Node* cond) {
     return cond && (cond->type == NODE_BINARY || cond->type == NODE_UNARY);
 }
 
+// Emit a statement body, handling block and single-statement forms.
 static void emit_stmt_body(CodeGen* gen, Node* body) {
     if (!body)
         return;
@@ -1491,6 +1539,7 @@ static void emit_stmt_body(CodeGen* gen, Node* body) {
     }
 }
 
+// Emit a block statement with scoped RC cleanup.
 static void emit_block_stmt(CodeGen* gen, Node* node) {
     emit_indent(gen);
     emit(gen, "{\n");
@@ -1506,6 +1555,7 @@ static void emit_block_stmt(CodeGen* gen, Node* node) {
     emit(gen, "}\n");
 }
 
+// Emit an if/else statement with owned-temp condition handling.
 static void emit_if_stmt(CodeGen* gen, Node* node) {
     // Hoist owned temps in condition before the if statement
     int has_temps = has_owned_temps(node->as.if_stmt.cond);
@@ -1577,6 +1627,7 @@ static void emit_if_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a while loop, including owned-temp-safe condition evaluation when needed.
 static void emit_while_stmt(CodeGen* gen, Node* node) {
     // If condition has owned temps, transform to for(;;) with hoist/cleanup each iteration
     if (has_owned_temps(node->as.while_stmt.cond)) {
@@ -1633,6 +1684,7 @@ static void emit_while_stmt(CodeGen* gen, Node* node) {
     emit(gen, "}\n");
 }
 
+// Emit a classic C-style for loop statement.
 static void emit_for_stmt(CodeGen* gen, Node* node) {
     emit_indent(gen);
     emit(gen, "for (");
@@ -1671,6 +1723,7 @@ static void emit_for_stmt(CodeGen* gen, Node* node) {
     emit(gen, "}\n");
 }
 
+// Emit a foreach loop over string/Vec/Span collections.
 static void emit_foreach_collection_stmt(CodeGen* gen, Node* node) {
     // Hoist owned temps in collection expression (evaluated once before the loop)
     int saved = gen->hoist.count;
@@ -1716,6 +1769,7 @@ static void emit_foreach_collection_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a foreach range loop using start/end/step expressions.
 static void emit_foreach_range_stmt(CodeGen* gen, Node* node) {
     emit_indent(gen);
     emit(gen, "for (");
@@ -1736,6 +1790,7 @@ static void emit_foreach_range_stmt(CodeGen* gen, Node* node) {
     emit(gen, "}\n");
 }
 
+// Dispatch foreach emission for collection and range forms.
 static void emit_foreach_stmt(CodeGen* gen, Node* node) {
     if (node->as.foreach_stmt.collection) {
         emit_foreach_collection_stmt(gen, node);
@@ -1744,10 +1799,12 @@ static void emit_foreach_stmt(CodeGen* gen, Node* node) {
     }
 }
 
+// Register a deferred statement for execution at scope cleanup.
 static void emit_defer_stmt(CodeGen* gen, Node* node) {
     defer_push(gen, node->as.defer_stmt.stmt);
 }
 
+// Emit a break statement with RC cleanup for the current scope depth.
 static void emit_break_stmt(CodeGen* gen, Node* node) {
     (void)node;
     rc_cleanup_scope(gen, gen->rc.depth);
@@ -1755,6 +1812,7 @@ static void emit_break_stmt(CodeGen* gen, Node* node) {
     emit(gen, "break;\n");
 }
 
+// Emit a continue statement with RC cleanup for the current scope depth.
 static void emit_continue_stmt(CodeGen* gen, Node* node) {
     (void)node;
     rc_cleanup_scope(gen, gen->rc.depth);
@@ -1762,6 +1820,7 @@ static void emit_continue_stmt(CodeGen* gen, Node* node) {
     emit(gen, "continue;\n");
 }
 
+// Emit variable bindings extracted from a successful if-let pattern match.
 static void emit_if_let_bindings(CodeGen* gen, Node* node, Type* enum_type, const char* variant,
                                  int let_id) {
     if (!enum_type->as.enm.has_data || node->as.if_let_stmt.binding_count <= 0)
@@ -1776,6 +1835,7 @@ static void emit_if_let_bindings(CodeGen* gen, Node* node, Type* enum_type, cons
     }
 }
 
+// Emit the then-branch body for if-let, including optional extra condition and matched flag.
 static void emit_if_let_then_block(CodeGen* gen, Node* node, Node* extra_cond, int has_flag,
                                    int flag_id) {
     if (!extra_cond) {
@@ -1798,6 +1858,7 @@ static void emit_if_let_then_block(CodeGen* gen, Node* node, Node* extra_cond, i
     emit(gen, "}\n");
 }
 
+// Emit else behavior for if-let using the matched flag path.
 static void emit_if_let_else_from_flag(CodeGen* gen, Node* else_block, int flag_id) {
     emit(gen, "\n");
     emit_indent(gen);
@@ -1813,6 +1874,7 @@ static void emit_if_let_else_from_flag(CodeGen* gen, Node* else_block, int flag_
     emit(gen, "}\n");
 }
 
+// Emit else behavior for if-let without a matched flag.
 static void emit_if_let_else_block(CodeGen* gen, Node* else_block) {
     if (!else_block) {
         emit(gen, "\n");
@@ -1849,6 +1911,7 @@ static void emit_if_let_else_block(CodeGen* gen, Node* else_block) {
     emit(gen, "}\n");
 }
 
+// Cleanup owned temporaries used by the if-let subject expression.
 static void cleanup_if_let_owned_temps(CodeGen* gen, Node* subject, int has_temps, int saved,
                                        int subject_is_owned, int let_id) {
     if (has_temps) {
@@ -1864,6 +1927,7 @@ static void cleanup_if_let_owned_temps(CodeGen* gen, Node* subject, int has_temp
     emit_owned_temp_dec(gen, subject, name);
 }
 
+// Emit an if-let statement with optional bindings, extra condition, and else branch.
 static void emit_if_let_stmt(CodeGen* gen, Node* node) {
     Type* enum_type = node->as.if_let_stmt.resolved_type;
     if (!enum_type)
@@ -1928,6 +1992,7 @@ static void emit_if_let_stmt(CodeGen* gen, Node* node) {
     cleanup_if_let_owned_temps(gen, subject, has_temps, saved, subject_is_owned, let_id);
 }
 
+// Emit a placeholder for unsupported or unknown statement node kinds.
 static void emit_unknown_stmt(CodeGen* gen, Node* node) {
     emit_indent(gen);
     emit(gen, "/* unknown stmt %d */;\n", node ? node->type : -1);

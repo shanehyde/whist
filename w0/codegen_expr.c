@@ -26,14 +26,17 @@ static void emit_tuple_lit_expr(CodeGen* gen, Node* node);
 static void emit_array_lit_expr(CodeGen* gen, Node* node);
 static void emit_lambda_expr(CodeGen* gen, Node* node);
 
+// Return the resolved struct name for a member expression.
 static const char* member_struct_name(CodeGen* gen, Node* member) {
     return sem_info_get_member_struct_name(gen->checker.sem, member, member->as.member.struct_name);
 }
 
+// Return the resolved module name for a member expression.
 static const char* member_module_name(CodeGen* gen, Node* member) {
     return sem_info_get_member_module_name(gen->checker.sem, member, member->as.member.module_name);
 }
 
+// Return whether the member expression receiver is treated as a reference.
 static int member_is_ref(CodeGen* gen, Node* member) {
     return sem_info_get_member_is_ref(gen->checker.sem, member, member->as.member.is_ref);
 }
@@ -243,12 +246,14 @@ static void emit_enum_value(CodeGen* gen, Node* node) {
     }
 }
 
+// Return whether an identifier node exactly matches a function name.
 static int call_ident_matches(Node* ident, const char* name) {
     int len = (int)strlen(name);
     return ident && ident->type == NODE_IDENT && ident->as.ident.length == len &&
            strncmp(ident->as.ident.name, name, ident->as.ident.length) == 0;
 }
 
+// Emit call arguments, optionally prefixing the first arg with a comma.
 static void emit_call_args(CodeGen* gen, Node* call, int leading_comma) {
     for (int i = 0; i < call->as.call.args.count; i++) {
         if (leading_comma || i > 0) {
@@ -258,18 +263,21 @@ static void emit_call_args(CodeGen* gen, Node* call, int leading_comma) {
     }
 }
 
+// Detect `std.format(...)` member calls that map to `__std_format`.
 static int is_std_format_member_call(const char* module_name, Node* func) {
     return module_name && strcmp(module_name, "std") == 0 && func->type == NODE_MEMBER &&
            func->as.member.length == 6 &&
            strncmp(func->as.member.name, "format", func->as.member.length) == 0;
 }
 
+// Emit a module-qualified member call as `module_member(args...)`.
 static void emit_module_member_call(CodeGen* gen, Node* call, Node* func, const char* module_name) {
     emit(gen, "%s_%.*s(", module_name, func->as.member.length, func->as.member.name);
     emit_call_args(gen, call, 0);
     emit(gen, ")");
 }
 
+// Emit the receiver argument for a resolved struct or enum method call.
 static void emit_method_receiver(CodeGen* gen, Node* func, const char* callee_struct_name) {
     if (!is_enum_type_name(gen, callee_struct_name)) {
         emit_expr(gen, func->as.member.object);
@@ -289,6 +297,7 @@ static void emit_method_receiver(CodeGen* gen, Node* func, const char* callee_st
     }
 }
 
+// Emit a resolved struct method call with receiver and regular arguments.
 static void emit_struct_method_call(CodeGen* gen, Node* call, Node* func,
                                     const char* callee_struct_name) {
     emit(gen, "%s_%.*s(", callee_struct_name, func->as.member.length, func->as.member.name);
@@ -297,6 +306,7 @@ static void emit_struct_method_call(CodeGen* gen, Node* call, Node* func,
     emit(gen, ")");
 }
 
+// Return whether a generic member call targets a known generic module alias.
 static int is_generic_module_call(CodeGen* gen, Node* func) {
     if (func->as.member.object->type != NODE_IDENT) {
         return 0;
@@ -311,6 +321,7 @@ static int is_generic_module_call(CodeGen* gen, Node* func) {
     return 0;
 }
 
+// Emit a member call in generic context using module or type resolution when possible.
 static void emit_generic_member_call(CodeGen* gen, Node* call, Node* func) {
     if (is_generic_module_call(gen, func)) {
         emit(gen, "%s_%.*s(", func->as.member.object->as.ident.name, func->as.member.length,
@@ -336,6 +347,7 @@ static void emit_generic_member_call(CodeGen* gen, Node* call, Node* func) {
     emit(gen, ")");
 }
 
+// Look up an alias mapping for an identifier function name.
 static const char* find_name_alias(NameAlias* aliases, int count, Node* func) {
     if (func->type != NODE_IDENT) {
         return NULL;
@@ -350,6 +362,7 @@ static const char* find_name_alias(NameAlias* aliases, int count, Node* func) {
     return NULL;
 }
 
+// Resolve a call alias by checking extern aliases first, then use aliases.
 static const char* find_call_alias(CodeGen* gen, Node* func) {
     const char* alias = find_name_alias(gen->aliases.externs, gen->aliases.extern_count, func);
     if (alias) {
@@ -358,6 +371,7 @@ static const char* find_call_alias(CodeGen* gen, Node* func) {
     return find_name_alias(gen->aliases.uses, gen->aliases.use_count, func);
 }
 
+// Return whether an identifier call target is declared as extern.
 static int is_extern_call(CodeGen* gen, Node* func) {
     if (func->type != NODE_IDENT) {
         return 0;
@@ -400,6 +414,7 @@ static void emit_closure_call(CodeGen* gen, Node* call) {
     emit(gen, "); })");
 }
 
+// Emit a non-member call with alias, generic, and closure-call handling.
 static void emit_regular_call(CodeGen* gen, Node* call, Node* func) {
     // Generic free function calls use the checker-set mangled name
     if (call->as.call.resolved_name) {
@@ -939,6 +954,7 @@ void emit_hoisted_owned_temp(CodeGen* gen, Node* node, const char* temp_name) {
     emit(gen, ";\n");
 }
 
+// Return whether an interpolated string contains expression segments.
 static int string_interp_has_expr(Node* node) {
     int count = node->as.string_interp.part_count;
     for (int i = 0; i < count; i++) {
@@ -949,6 +965,7 @@ static int string_interp_has_expr(Node* node) {
     return 0;
 }
 
+// Emit escaped text for C strings, optionally escaping `%` for format strings.
 static void emit_interp_escaped_text(CodeGen* gen, const char* s, int n, int escape_percent) {
     for (int i = 0; i < n; i++) {
         switch (s[i]) {
@@ -983,6 +1000,7 @@ static void emit_interp_escaped_text(CodeGen* gen, const char* s, int n, int esc
     }
 }
 
+// Emit interpolation with no expressions as a single string literal.
 static void emit_string_interp_plain(CodeGen* gen, Node* node) {
     int count = node->as.string_interp.part_count;
     int total = 0;
@@ -1016,6 +1034,7 @@ static void emit_string_interp_plain(CodeGen* gen, Node* node) {
     emit(gen, "\"");
 }
 
+// Map a type to the `__std_format` specifier used for interpolation.
 static const char* string_interp_format_spec(Type* t) {
     if (!t)
         return NULL;
@@ -1295,6 +1314,7 @@ static void emit_match_expr(CodeGen* gen, Node* node) {
     emit(gen, "__matchv%d; })", match_id);
 }
 
+// Return whether a name is present in the active lambda capture context.
 static int capture_ctx_contains(CodeGen* gen, const char* name, int length) {
     for (int i = 0; i < gen->capture_ctx.count; i++) {
         if (length == (int)strlen(gen->capture_ctx.names[i]) &&
@@ -1316,6 +1336,7 @@ static void emit_capture_source_name(CodeGen* gen, const char* name) {
     }
 }
 
+// Emit an identifier expression, handling method `self` and captured names.
 static void emit_ident_expr(CodeGen* gen, Node* node) {
     // In enum methods, self is a pointer but represents a value — dereference it.
     if (gen->in_enum_method && node->as.ident.length == 4 &&
@@ -1335,6 +1356,7 @@ static void emit_ident_expr(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit an equality/inequality expression using generated type equality helpers.
 static void emit_eq_binary_expr(CodeGen* gen, Node* node) {
     const char* tname = node->as.binary.eq_type_name;
     emit(gen, "(");
@@ -1352,6 +1374,7 @@ static void emit_eq_binary_expr(CodeGen* gen, Node* node) {
     emit(gen, "))");
 }
 
+// Return the `strcmp` suffix comparison for a given string comparison operator.
 static const char* string_compare_suffix(TokenType op) {
     switch (op) {
     case TOK_EQ_EQ:
@@ -1371,6 +1394,7 @@ static const char* string_compare_suffix(TokenType op) {
     }
 }
 
+// Emit string binary operations for concatenation and comparisons.
 static void emit_string_binary_expr(CodeGen* gen, Node* node) {
     TokenType op = node->as.binary.op;
     if (op == TOK_PLUS) {
@@ -1394,6 +1418,7 @@ static void emit_string_binary_expr(CodeGen* gen, Node* node) {
     emit(gen, ")%s)", suffix);
 }
 
+// Emit a binary expression, dispatching to specialized string/equality handlers.
 static void emit_binary_expr(CodeGen* gen, Node* node) {
     if (node->as.binary.is_eq_op) {
         emit_eq_binary_expr(gen, node);
@@ -1412,6 +1437,7 @@ static void emit_binary_expr(CodeGen* gen, Node* node) {
     emit(gen, ")");
 }
 
+// Emit an assignment expression with its resolved assignment operator.
 static void emit_assign_expr(CodeGen* gen, Node* node) {
     emit(gen, "(");
     emit_expr(gen, node->as.assign.target);
@@ -1420,6 +1446,7 @@ static void emit_assign_expr(CodeGen* gen, Node* node) {
     emit(gen, ")");
 }
 
+// Emit a comma-separated compound literal list enclosed in braces.
 static void emit_compound_literal_from_list(CodeGen* gen, NodeList* elements) {
     emit(gen, "{");
     for (int i = 0; i < elements->count; i++) {
@@ -1431,6 +1458,7 @@ static void emit_compound_literal_from_list(CodeGen* gen, NodeList* elements) {
     emit(gen, "}");
 }
 
+// Return the hoisted temporary name for a node, or NULL when not hoisted.
 static const char* find_hoisted_temp_name(CodeGen* gen, Node* node) {
     for (int i = 0; i < gen->hoist.count; i++) {
         if (gen->hoist.nodes[i] == node) {
@@ -1440,12 +1468,14 @@ static const char* find_hoisted_temp_name(CodeGen* gen, Node* node) {
     return NULL;
 }
 
+// Emit a unary expression with the resolved unary operator.
 static void emit_unary_expr(CodeGen* gen, Node* node) {
     emit(gen, "(%s", unary_op_str(node->as.unary.op));
     emit_expr(gen, node->as.unary.operand);
     emit(gen, ")");
 }
 
+// Emit a cast expression to the node's resolved target type.
 static void emit_cast_expr(CodeGen* gen, Node* node) {
     emit(gen, "((");
     emit_resolved_type(gen, node->as.cast_expr.resolved_type);
@@ -1454,6 +1484,7 @@ static void emit_cast_expr(CodeGen* gen, Node* node) {
     emit(gen, "))");
 }
 
+// Emit a tuple literal, including an explicit tuple type when resolved.
 static void emit_tuple_lit_expr(CodeGen* gen, Node* node) {
     // Tuple literal: (e1, e2, ...) -> (__tuple_tN){e1, e2, ...}
     if (node->as.tuple_lit.resolved_type) {
@@ -1464,11 +1495,13 @@ static void emit_tuple_lit_expr(CodeGen* gen, Node* node) {
     emit_compound_literal_from_list(gen, &node->as.tuple_lit.elements);
 }
 
+// Emit an array literal as a C compound literal list.
 static void emit_array_lit_expr(CodeGen* gen, Node* node) {
     // Array literal: [e1, e2, ...] -> {e1, e2, ...}.
     emit_compound_literal_from_list(gen, &node->as.array_lit.elements);
 }
 
+// Return whether a lambda captures any reference-counted values.
 static int lambda_has_rc_capture(Node* node) {
     for (int c = 0; c < node->as.lambda.captures.count; c++) {
         if (node->as.lambda.captures.is_rc[c]) {
@@ -1478,6 +1511,7 @@ static int lambda_has_rc_capture(Node* node) {
     return 0;
 }
 
+// Emit allocation of a lambda capture environment, with optional cleanup hook.
 static void emit_lambda_env_alloc(CodeGen* gen, int id, int has_rc) {
     emit(gen,
          "({ __lambda_%d_env* __cenv_%d = (__lambda_%d_env*)__rc_alloc("
@@ -1491,6 +1525,7 @@ static void emit_lambda_env_alloc(CodeGen* gen, int id, int has_rc) {
     emit(gen, ");\n");
 }
 
+// Emit `__rc_inc` for a captured value stored in a lambda environment.
 static void emit_lambda_capture_inc(CodeGen* gen, int id, const char* name, Type* capture_type) {
     if (capture_type && capture_type->kind == TYPE_STRING) {
         emit(gen, "    __rc_inc((void*)__cenv_%d->%s);\n", id, name);
@@ -1501,6 +1536,7 @@ static void emit_lambda_capture_inc(CodeGen* gen, int id, const char* name, Type
     }
 }
 
+// Emit assignments of captured variables into the lambda environment struct.
 static void emit_lambda_capture_assignments(CodeGen* gen, Node* node, int id) {
     for (int c = 0; c < node->as.lambda.captures.count; c++) {
         const char* capture_name = node->as.lambda.captures.names[c];
@@ -1513,6 +1549,7 @@ static void emit_lambda_capture_assignments(CodeGen* gen, Node* node, int id) {
     }
 }
 
+// Emit a lambda literal as a closure, including capture environment setup.
 static void emit_lambda_expr(CodeGen* gen, Node* node) {
     if (node->as.lambda.captures.count > 0) {
         int id     = node->as.lambda.lambda_id;
