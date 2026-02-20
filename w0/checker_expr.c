@@ -7,8 +7,9 @@
 #include "sem_info.h"
 #include "vec.h"
 
-// Forward declaration for check_struct_init (called by check_new_expr)
+// Forward declarations
 static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type);
+static int   count_captured_boundaries(Checker* checker, const char* name);
 
 // Auto-deref Box<T> to T: if type is TYPE_BOX, set is_box_deref flag and return elem type.
 static Type* auto_deref_box(Node* node, Type* type) {
@@ -1154,6 +1155,32 @@ static int check_assignment_enum_tag_writable(Checker* checker, Node* assign_nod
     return 1;
 }
 
+// Disallow assignment to captured value types inside lambdas.
+// Value types are copied into the closure environment, so assignment modifies the copy, not the
+// original. Returns 0 (and emits an error) if this is a forbidden captured value-type assignment.
+static int check_captured_value_assignment(Checker* checker, Node* assign_node, Type* target) {
+    if (checker->lambda_depth <= 0)
+        return 1;
+
+    Node* lhs = assign_node->as.assign.target;
+    if (lhs->type != NODE_IDENT)
+        return 1;
+
+    int boundaries = count_captured_boundaries(checker, lhs->as.ident.name);
+    if (boundaries <= 0)
+        return 1;
+
+    // RC-managed types and func types are heap-allocated pointers — assignment is fine
+    if (type_is_rc_managed(target) || (target && target->kind == TYPE_FUNC))
+        return 1;
+
+    check_error(checker, assign_node->line, assign_node->column,
+                "Cannot assign to captured value type '%s' in lambda; value types are copied into "
+                "the closure — use 'var ^%s' to create a shared mutable Box",
+                lhs->as.ident.name, lhs->as.ident.name);
+    return 0;
+}
+
 // Validate that compound assignment uses numeric operands on both sides.
 static int check_compound_assignment_operands(Checker* checker, Node* assign_node, Type* target,
                                               Type* value) {
@@ -1188,6 +1215,10 @@ static Type* check_assign_expr(Checker* checker, Node* node) {
     }
 
     if (!check_assignment_enum_tag_writable(checker, node)) {
+        return type_error;
+    }
+
+    if (!check_captured_value_assignment(checker, node, target)) {
         return type_error;
     }
 
