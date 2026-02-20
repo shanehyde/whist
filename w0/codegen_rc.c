@@ -319,333 +319,360 @@ static int collect_rc_field_info(CodeGen* gen, Node* struct_decl, RcFieldInfo** 
     return count;
 }
 
+typedef struct {
+    Type*       elem_type;
+    const char* elem_tname;
+    int         elem_is_ptr;
+    int         elem_is_rc_enum;
+} VecMethodEmitCtx;
+
+static void emit_vec_elem_inc_stmt(CodeGen* gen, const VecMethodEmitCtx* ctx, const char* value) {
+    if (ctx->elem_is_ptr) {
+        if (ctx->elem_type->kind == TYPE_STRING) {
+            emit(gen, "    __rc_inc((void*)%s);\n", value);
+        } else {
+            emit(gen, "    __rc_inc(%s);\n", value);
+        }
+    } else if (ctx->elem_is_rc_enum) {
+        emit(gen, "    __rc_inc_%s(%s);\n", ctx->elem_type->as.enm.name, value);
+    }
+}
+
+static void emit_vec_push_method(CodeGen* gen, const VecMethodEmitCtx* ctx) {
+    // Vec<string> push is provided by whist_runtime.h.
+    if (ctx->elem_type->kind == TYPE_STRING) {
+        return;
+    }
+
+    emit(gen, "static inline void __Vec_%s_push(__Vec_%s* self, ", ctx->elem_tname,
+         ctx->elem_tname);
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, " value) {\n");
+    emit(gen, "    if (self->count == self->capacity) {\n");
+    emit(gen, "        int64_t new_cap = self->capacity == 0 ? 4 : self->capacity * 2;\n");
+    emit(gen, "        self->data = realloc(self->data, new_cap * sizeof(");
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, "));\n");
+    emit(gen, "        self->capacity = new_cap;\n");
+    emit(gen, "    }\n");
+    emit_vec_elem_inc_stmt(gen, ctx, "value");
+    emit(gen, "    self->data[self->count] = value;\n");
+    emit(gen, "    self->count++;\n");
+    emit(gen, "}\n\n");
+}
+
+static void emit_vec_insert_method(CodeGen* gen, const VecMethodEmitCtx* ctx) {
+    emit(gen, "static inline void __Vec_%s_insert(__Vec_%s* self, int64_t index, ", ctx->elem_tname,
+         ctx->elem_tname);
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, " value) {\n");
+    emit(gen, "    if (index < 0 || index > self->count) {\n");
+    emit(gen, "        fprintf(stderr, \"Panic: Vec insert index %%lld out of bounds "
+              "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
+    emit(gen, "        exit(1);\n");
+    emit(gen, "    }\n");
+    emit(gen, "    if (self->count == self->capacity) {\n");
+    emit(gen, "        int64_t new_cap = self->capacity == 0 ? 4 : self->capacity * 2;\n");
+    emit(gen, "        self->data = realloc(self->data, new_cap * sizeof(");
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, "));\n");
+    emit(gen, "        self->capacity = new_cap;\n");
+    emit(gen, "    }\n");
+    emit(gen, "    if (index < self->count) {\n");
+    emit(gen, "        memmove(&self->data[index + 1], &self->data[index], "
+              "(size_t)(self->count - index) * sizeof(");
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, "));\n");
+    emit(gen, "    }\n");
+    emit_vec_elem_inc_stmt(gen, ctx, "value");
+    emit(gen, "    self->data[index] = value;\n");
+    emit(gen, "    self->count++;\n");
+    emit(gen, "}\n\n");
+}
+
+static void emit_vec_reserve_method(CodeGen* gen, const VecMethodEmitCtx* ctx) {
+    emit(gen, "static inline void __Vec_%s_reserve(__Vec_%s* self, int64_t additional) {\n",
+         ctx->elem_tname, ctx->elem_tname);
+    emit(gen, "    if (additional <= 0) {\n");
+    emit(gen, "        return;\n");
+    emit(gen, "    }\n");
+    emit(gen, "    int64_t required = self->count + additional;\n");
+    emit(gen, "    if (required > self->capacity) {\n");
+    emit(gen, "        self->data = realloc(self->data, required * sizeof(");
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, "));\n");
+    emit(gen, "        self->capacity = required;\n");
+    emit(gen, "    }\n");
+    emit(gen, "}\n\n");
+}
+
+static void emit_vec_contains_method(CodeGen* gen, const VecMethodEmitCtx* ctx) {
+    if (!type_supports_vec_contains(ctx->elem_type)) {
+        return;
+    }
+
+    emit(gen, "static inline bool __Vec_%s_contains(__Vec_%s* self, ", ctx->elem_tname,
+         ctx->elem_tname);
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, " value) {\n");
+    emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
+    if (ctx->elem_type->kind == TYPE_STRING) {
+        emit(gen, "        const char* item = self->data[i];\n");
+        emit(gen, "        if ((item == NULL && value == NULL) ||\n");
+        emit(gen, "            (item != NULL && value != NULL && strcmp(item, value) == 0)) {\n");
+        emit(gen, "            return true;\n");
+        emit(gen, "        }\n");
+    } else {
+        emit(gen, "        if (self->data[i] == value) {\n");
+        emit(gen, "            return true;\n");
+        emit(gen, "        }\n");
+    }
+    emit(gen, "    }\n");
+    emit(gen, "    return false;\n");
+    emit(gen, "}\n\n");
+}
+
+static void emit_vec_sort_method(CodeGen* gen, const VecMethodEmitCtx* ctx) {
+    if (!type_supports_vec_sort(ctx->elem_type)) {
+        return;
+    }
+
+    emit(gen, "static int __Vec_%s_sort_cmp(const void* a, const void* b) {\n", ctx->elem_tname);
+    const char* const_prefix = (ctx->elem_type->kind == TYPE_STRING) ? "" : "const ";
+    emit(gen, "    %s", const_prefix);
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, "* lhs = (%s", const_prefix);
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, "*)a;\n");
+    emit(gen, "    %s", const_prefix);
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, "* rhs = (%s", const_prefix);
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, "*)b;\n");
+    if (ctx->elem_type->kind == TYPE_STRING) {
+        emit(gen, "    if (*lhs == NULL && *rhs == NULL) {\n");
+        emit(gen, "        return 0;\n");
+        emit(gen, "    }\n");
+        emit(gen, "    if (*lhs == NULL) {\n");
+        emit(gen, "        return -1;\n");
+        emit(gen, "    }\n");
+        emit(gen, "    if (*rhs == NULL) {\n");
+        emit(gen, "        return 1;\n");
+        emit(gen, "    }\n");
+        emit(gen, "    return strcmp(*lhs, *rhs);\n");
+    } else {
+        emit(gen, "    if (*lhs < *rhs) {\n");
+        emit(gen, "        return -1;\n");
+        emit(gen, "    }\n");
+        emit(gen, "    if (*lhs > *rhs) {\n");
+        emit(gen, "        return 1;\n");
+        emit(gen, "    }\n");
+        emit(gen, "    return 0;\n");
+    }
+    emit(gen, "}\n\n");
+
+    emit(gen, "static inline void __Vec_%s_sort(__Vec_%s* self) {\n", ctx->elem_tname,
+         ctx->elem_tname);
+    emit(gen, "    if (self->count <= 1) {\n");
+    emit(gen, "        return;\n");
+    emit(gen, "    }\n");
+    emit(gen, "    qsort(self->data, (size_t)self->count, sizeof(");
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, "), __Vec_%s_sort_cmp);\n", ctx->elem_tname);
+    emit(gen, "}\n\n");
+}
+
+static void emit_vec_remove_method(CodeGen* gen, const VecMethodEmitCtx* ctx) {
+    emit(gen, "static inline ");
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, " __Vec_%s_remove(__Vec_%s* self, int64_t index) {\n", ctx->elem_tname,
+         ctx->elem_tname);
+    emit(gen, "    if (index < 0 || index >= self->count) {\n");
+    emit(gen, "        fprintf(stderr, \"Panic: Vec remove index %%lld out of bounds "
+              "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
+    emit(gen, "        exit(1);\n");
+    emit(gen, "    }\n");
+    emit(gen, "    ");
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, " removed = self->data[index];\n");
+    emit(gen, "    if (index < self->count - 1) {\n");
+    emit(gen, "        memmove(&self->data[index], &self->data[index + 1], "
+              "(size_t)(self->count - index - 1) * sizeof(");
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, "));\n");
+    emit(gen, "    }\n");
+    emit(gen, "    self->count--;\n");
+    emit(gen, "    return removed;\n");
+    emit(gen, "}\n\n");
+}
+
+static void emit_vec_swap_remove_method(CodeGen* gen, const VecMethodEmitCtx* ctx) {
+    emit(gen, "static inline ");
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, " __Vec_%s_swap_remove(__Vec_%s* self, int64_t index) {\n", ctx->elem_tname,
+         ctx->elem_tname);
+    emit(gen, "    if (index < 0 || index >= self->count) {\n");
+    emit(gen, "        fprintf(stderr, \"Panic: Vec swap_remove index %%lld out of bounds "
+              "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
+    emit(gen, "        exit(1);\n");
+    emit(gen, "    }\n");
+    emit(gen, "    ");
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, " removed = self->data[index];\n");
+    emit(gen, "    self->count--;\n");
+    emit(gen, "    if (index < self->count) {\n");
+    emit(gen, "        self->data[index] = self->data[self->count];\n");
+    emit(gen, "    }\n");
+    emit(gen, "    return removed;\n");
+    emit(gen, "}\n\n");
+}
+
+static void emit_vec_clear_method(CodeGen* gen, const VecMethodEmitCtx* ctx) {
+    emit(gen, "static inline void __Vec_%s_clear(__Vec_%s* self) {\n", ctx->elem_tname,
+         ctx->elem_tname);
+    if (ctx->elem_is_ptr) {
+        emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
+        if (ctx->elem_type->kind == TYPE_STRING) {
+            emit(gen, "        __rc_dec((void*)self->data[i]);\n");
+        } else {
+            emit(gen, "        __rc_dec(self->data[i]);\n");
+        }
+        emit(gen, "    }\n");
+    } else if (ctx->elem_is_rc_enum) {
+        emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
+        emit(gen, "        __rc_dec_%s(self->data[i]);\n", ctx->elem_type->as.enm.name);
+        emit(gen, "    }\n");
+    }
+    emit(gen, "    self->count = 0;\n");
+    emit(gen, "}\n\n");
+}
+
+static void emit_vec_shrink_to_fit_method(CodeGen* gen, const VecMethodEmitCtx* ctx) {
+    emit(gen, "static inline void __Vec_%s_shrink_to_fit(__Vec_%s* self) {\n", ctx->elem_tname,
+         ctx->elem_tname);
+    emit(gen, "    if (self->capacity > self->count) {\n");
+    emit(gen, "        if (self->count == 0) {\n");
+    emit(gen, "            free(self->data);\n");
+    emit(gen, "            self->data = NULL;\n");
+    emit(gen, "            self->capacity = 0;\n");
+    emit(gen, "            return;\n");
+    emit(gen, "        }\n");
+    emit(gen, "        self->data = realloc(self->data, self->count * sizeof(");
+    emit_resolved_type(gen, ctx->elem_type);
+    emit(gen, "));\n");
+    emit(gen, "        self->capacity = self->count;\n");
+    emit(gen, "    }\n");
+    emit(gen, "}\n\n");
+}
+
+static int vec_has_option_instance(CodeGen* gen, const char* option_mangled) {
+    for (int gi = 0; gi < gen->checker.instance_count; gi++) {
+        if (strcmp(gen->checker.instances[gi].mangled_name, option_mangled) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void emit_vec_option_methods(CodeGen* gen, const VecMethodEmitCtx* ctx) {
+    const char* option_tname = type_mangle_name(ctx->elem_type);
+    char        option_mangled[256];
+    snprintf(option_mangled, sizeof(option_mangled), "Option_%s", option_tname);
+    if (!vec_has_option_instance(gen, option_mangled)) {
+        return;
+    }
+
+    // First — returns Option<T>, Some(v[0]) if non-empty, None if empty.
+    emit(gen, "static inline Option_%s __Vec_%s_first(__Vec_%s* self) {\n", option_tname,
+         ctx->elem_tname, ctx->elem_tname);
+    emit(gen, "    if (self->count == 0) {\n");
+    emit(gen, "        return (Option_%s){.tag = Option_%s_None};\n", option_tname, option_tname);
+    emit(gen, "    }\n");
+    emit_vec_elem_inc_stmt(gen, ctx, "self->data[0]");
+    emit(gen,
+         "    return (Option_%s){.tag = Option_%s_Some, .Some = {.f0 = "
+         "self->data[0]}};\n",
+         option_tname, option_tname);
+    emit(gen, "}\n\n");
+
+    // Last — returns Option<T>, Some(v[count-1]) if non-empty, None if empty.
+    emit(gen, "static inline Option_%s __Vec_%s_last(__Vec_%s* self) {\n", option_tname,
+         ctx->elem_tname, ctx->elem_tname);
+    emit(gen, "    if (self->count == 0) {\n");
+    emit(gen, "        return (Option_%s){.tag = Option_%s_None};\n", option_tname, option_tname);
+    emit(gen, "    }\n");
+    emit_vec_elem_inc_stmt(gen, ctx, "self->data[self->count - 1]");
+    emit(gen,
+         "    return (Option_%s){.tag = Option_%s_Some, "
+         ".Some = {.f0 = self->data[self->count - 1]}};\n",
+         option_tname, option_tname);
+    emit(gen, "}\n\n");
+
+    // Pop — returns Option<T>, transfers ownership (no __rc_inc).
+    emit(gen, "static inline Option_%s __Vec_%s_pop(__Vec_%s* self) {\n", option_tname,
+         ctx->elem_tname, ctx->elem_tname);
+    emit(gen, "    if (self->count == 0) {\n");
+    emit(gen, "        return (Option_%s){.tag = Option_%s_None};\n", option_tname, option_tname);
+    emit(gen, "    }\n");
+    emit(gen, "    self->count--;\n");
+    emit(gen,
+         "    return (Option_%s){.tag = Option_%s_Some, "
+         ".Some = {.f0 = self->data[self->count]}};\n",
+         option_tname, option_tname);
+    emit(gen, "}\n\n");
+}
+
+static void emit_vec_eq_method(CodeGen* gen, const VecMethodEmitCtx* ctx) {
+    if (!type_supports_equality(ctx->elem_type)) {
+        return;
+    }
+
+    emit(gen, "static inline bool __Vec_%s_eq(__Vec_%s* a, __Vec_%s* b) {\n", ctx->elem_tname,
+         ctx->elem_tname, ctx->elem_tname);
+    emit(gen, "    if (a == b) return true;\n");
+    emit(gen, "    if (a->count != b->count) return false;\n");
+    emit(gen, "    for (int64_t i = 0; i < a->count; i++) {\n");
+    if (ctx->elem_type->kind == TYPE_STRING) {
+        emit(gen, "        if (strcmp(a->data[i], b->data[i]) != 0) return false;\n");
+    } else if (ctx->elem_type->kind == TYPE_STRUCT) {
+        emit(gen, "        if (!%s_eq(a->data[i], b->data[i])) return false;\n",
+             ctx->elem_type->as.struc.name);
+    } else if (ctx->elem_type->kind == TYPE_VEC) {
+        const char* sub_tname = type_mangle_name(ctx->elem_type->as.vec.elem);
+        emit(gen, "        if (!__Vec_%s_eq(a->data[i], b->data[i])) return false;\n", sub_tname);
+    } else {
+        emit(gen, "        if (a->data[i] != b->data[i]) return false;\n");
+    }
+    emit(gen, "    }\n");
+    emit(gen, "    return true;\n");
+    emit(gen, "}\n\n");
+}
+
 // Emit push, pop, insert, remove, swap_remove, clear, reserve, shrink_to_fit, contains, sort,
-// first, and last method implementations for each Vec type instance
+// first, and last method implementations for each Vec type instance.
 void emit_vec_methods(CodeGen* gen) {
     for (int i = 0; i < gen->checker.vec_count; i++) {
-        VecInstance* inst        = &gen->checker.vecs[i];
-        Type*        elem_type   = inst->elem_type;
-        const char*  elem_tname  = type_mangle_name(elem_type);
-        int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC ||
-                           elem_type->kind == TYPE_STRING || elem_type->kind == TYPE_STRINGBUILDER);
-        int elem_is_rc_enum = (elem_type->kind == TYPE_ENUM && elem_type->as.enm.has_rc_fields);
+        VecInstance*     inst = &gen->checker.vecs[i];
+        VecMethodEmitCtx ctx;
+        ctx.elem_type  = inst->elem_type;
+        ctx.elem_tname = type_mangle_name(ctx.elem_type);
+        ctx.elem_is_ptr =
+            (ctx.elem_type->kind == TYPE_STRUCT || ctx.elem_type->kind == TYPE_VEC ||
+             ctx.elem_type->kind == TYPE_STRING || ctx.elem_type->kind == TYPE_STRINGBUILDER);
+        ctx.elem_is_rc_enum =
+            (ctx.elem_type->kind == TYPE_ENUM && ctx.elem_type->as.enm.has_rc_fields);
 
-        // Push (Vec<string> push is provided by whist_runtime.h)
-        if (elem_type->kind != TYPE_STRING) {
-            emit(gen, "static inline void __Vec_%s_push(__Vec_%s* self, ", elem_tname, elem_tname);
-            emit_resolved_type(gen, elem_type);
-            emit(gen, " value) {\n");
-            emit(gen, "    if (self->count == self->capacity) {\n");
-            emit(gen, "        int64_t new_cap = self->capacity == 0 ? 4 : self->capacity * 2;\n");
-            emit(gen, "        self->data = realloc(self->data, new_cap * sizeof(");
-            emit_resolved_type(gen, elem_type);
-            emit(gen, "));\n");
-            emit(gen, "        self->capacity = new_cap;\n");
-            emit(gen, "    }\n");
-            if (elem_is_ptr) {
-                emit(gen, "    __rc_inc(value);\n");
-            } else if (elem_is_rc_enum) {
-                emit(gen, "    __rc_inc_%s(value);\n", elem_type->as.enm.name);
-            }
-            emit(gen, "    self->data[self->count] = value;\n");
-            emit(gen, "    self->count++;\n");
-            emit(gen, "}\n\n");
-        }
-
-        // Insert
-        emit(gen, "static inline void __Vec_%s_insert(__Vec_%s* self, int64_t index, ", elem_tname,
-             elem_tname);
-        emit_resolved_type(gen, elem_type);
-        emit(gen, " value) {\n");
-        emit(gen, "    if (index < 0 || index > self->count) {\n");
-        emit(gen, "        fprintf(stderr, \"Panic: Vec insert index %%lld out of bounds "
-                  "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
-        emit(gen, "        exit(1);\n");
-        emit(gen, "    }\n");
-        emit(gen, "    if (self->count == self->capacity) {\n");
-        emit(gen, "        int64_t new_cap = self->capacity == 0 ? 4 : self->capacity * 2;\n");
-        emit(gen, "        self->data = realloc(self->data, new_cap * sizeof(");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, "));\n");
-        emit(gen, "        self->capacity = new_cap;\n");
-        emit(gen, "    }\n");
-        emit(gen, "    if (index < self->count) {\n");
-        emit(gen, "        memmove(&self->data[index + 1], &self->data[index], "
-                  "(size_t)(self->count - index) * sizeof(");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, "));\n");
-        emit(gen, "    }\n");
-        if (elem_is_ptr) {
-            if (elem_type->kind == TYPE_STRING) {
-                emit(gen, "    __rc_inc((void*)value);\n");
-            } else {
-                emit(gen, "    __rc_inc(value);\n");
-            }
-        } else if (elem_is_rc_enum) {
-            emit(gen, "    __rc_inc_%s(value);\n", elem_type->as.enm.name);
-        }
-        emit(gen, "    self->data[index] = value;\n");
-        emit(gen, "    self->count++;\n");
-        emit(gen, "}\n\n");
-
-        // Reserve
-        emit(gen, "static inline void __Vec_%s_reserve(__Vec_%s* self, int64_t additional) {\n",
-             elem_tname, elem_tname);
-        emit(gen, "    if (additional <= 0) {\n");
-        emit(gen, "        return;\n");
-        emit(gen, "    }\n");
-        emit(gen, "    int64_t required = self->count + additional;\n");
-        emit(gen, "    if (required > self->capacity) {\n");
-        emit(gen, "        self->data = realloc(self->data, required * sizeof(");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, "));\n");
-        emit(gen, "        self->capacity = required;\n");
-        emit(gen, "    }\n");
-        emit(gen, "}\n\n");
-
-        // Contains
-        if (type_supports_vec_contains(elem_type)) {
-            emit(gen, "static inline bool __Vec_%s_contains(__Vec_%s* self, ", elem_tname,
-                 elem_tname);
-            emit_resolved_type(gen, elem_type);
-            emit(gen, " value) {\n");
-            emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
-            if (elem_type->kind == TYPE_STRING) {
-                emit(gen, "        const char* item = self->data[i];\n");
-                emit(gen, "        if ((item == NULL && value == NULL) ||\n");
-                emit(gen, "            (item != NULL && value != NULL && strcmp(item, value) == "
-                          "0)) {\n");
-                emit(gen, "            return true;\n");
-                emit(gen, "        }\n");
-            } else {
-                emit(gen, "        if (self->data[i] == value) {\n");
-                emit(gen, "            return true;\n");
-                emit(gen, "        }\n");
-            }
-            emit(gen, "    }\n");
-            emit(gen, "    return false;\n");
-            emit(gen, "}\n\n");
-        }
-
-        // Sort (ascending)
-        if (type_supports_vec_sort(elem_type)) {
-            emit(gen, "static int __Vec_%s_sort_cmp(const void* a, const void* b) {\n", elem_tname);
-            const char* const_prefix = (elem_type->kind == TYPE_STRING) ? "" : "const ";
-            emit(gen, "    %s", const_prefix);
-            emit_resolved_type(gen, elem_type);
-            emit(gen, "* lhs = (%s", const_prefix);
-            emit_resolved_type(gen, elem_type);
-            emit(gen, "*)a;\n");
-            emit(gen, "    %s", const_prefix);
-            emit_resolved_type(gen, elem_type);
-            emit(gen, "* rhs = (%s", const_prefix);
-            emit_resolved_type(gen, elem_type);
-            emit(gen, "*)b;\n");
-            if (elem_type->kind == TYPE_STRING) {
-                emit(gen, "    if (*lhs == NULL && *rhs == NULL) {\n");
-                emit(gen, "        return 0;\n");
-                emit(gen, "    }\n");
-                emit(gen, "    if (*lhs == NULL) {\n");
-                emit(gen, "        return -1;\n");
-                emit(gen, "    }\n");
-                emit(gen, "    if (*rhs == NULL) {\n");
-                emit(gen, "        return 1;\n");
-                emit(gen, "    }\n");
-                emit(gen, "    return strcmp(*lhs, *rhs);\n");
-            } else {
-                emit(gen, "    if (*lhs < *rhs) {\n");
-                emit(gen, "        return -1;\n");
-                emit(gen, "    }\n");
-                emit(gen, "    if (*lhs > *rhs) {\n");
-                emit(gen, "        return 1;\n");
-                emit(gen, "    }\n");
-                emit(gen, "    return 0;\n");
-            }
-            emit(gen, "}\n\n");
-
-            emit(gen, "static inline void __Vec_%s_sort(__Vec_%s* self) {\n", elem_tname,
-                 elem_tname);
-            emit(gen, "    if (self->count <= 1) {\n");
-            emit(gen, "        return;\n");
-            emit(gen, "    }\n");
-            emit(gen, "    qsort(self->data, (size_t)self->count, sizeof(");
-            emit_resolved_type(gen, elem_type);
-            emit(gen, "), __Vec_%s_sort_cmp);\n", elem_tname);
-            emit(gen, "}\n\n");
-        }
-
-        // Remove
-        emit(gen, "static inline ");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, " __Vec_%s_remove(__Vec_%s* self, int64_t index) {\n", elem_tname, elem_tname);
-        emit(gen, "    if (index < 0 || index >= self->count) {\n");
-        emit(gen, "        fprintf(stderr, \"Panic: Vec remove index %%lld out of bounds "
-                  "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
-        emit(gen, "        exit(1);\n");
-        emit(gen, "    }\n");
-        emit(gen, "    ");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, " removed = self->data[index];\n");
-        emit(gen, "    if (index < self->count - 1) {\n");
-        emit(gen, "        memmove(&self->data[index], &self->data[index + 1], "
-                  "(size_t)(self->count - index - 1) * sizeof(");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, "));\n");
-        emit(gen, "    }\n");
-        emit(gen, "    self->count--;\n");
-        emit(gen, "    return removed;\n");
-        emit(gen, "}\n\n");
-
-        // Swap remove
-        emit(gen, "static inline ");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, " __Vec_%s_swap_remove(__Vec_%s* self, int64_t index) {\n", elem_tname,
-             elem_tname);
-        emit(gen, "    if (index < 0 || index >= self->count) {\n");
-        emit(gen, "        fprintf(stderr, \"Panic: Vec swap_remove index %%lld out of bounds "
-                  "(count=%%lld)\\n\", (long long)index, (long long)self->count);\n");
-        emit(gen, "        exit(1);\n");
-        emit(gen, "    }\n");
-        emit(gen, "    ");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, " removed = self->data[index];\n");
-        emit(gen, "    self->count--;\n");
-        emit(gen, "    if (index < self->count) {\n");
-        emit(gen, "        self->data[index] = self->data[self->count];\n");
-        emit(gen, "    }\n");
-        emit(gen, "    return removed;\n");
-        emit(gen, "}\n\n");
-
-        // Clear
-        emit(gen, "static inline void __Vec_%s_clear(__Vec_%s* self) {\n", elem_tname, elem_tname);
-        if (elem_is_ptr) {
-            emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
-            if (elem_type->kind == TYPE_STRING) {
-                emit(gen, "        __rc_dec((void*)self->data[i]);\n");
-            } else {
-                emit(gen, "        __rc_dec(self->data[i]);\n");
-            }
-            emit(gen, "    }\n");
-        } else if (elem_is_rc_enum) {
-            emit(gen, "    for (int64_t i = 0; i < self->count; i++) {\n");
-            emit(gen, "        __rc_dec_%s(self->data[i]);\n", elem_type->as.enm.name);
-            emit(gen, "    }\n");
-        }
-        emit(gen, "    self->count = 0;\n");
-        emit(gen, "}\n\n");
-
-        // Shrink to fit
-        emit(gen, "static inline void __Vec_%s_shrink_to_fit(__Vec_%s* self) {\n", elem_tname,
-             elem_tname);
-        emit(gen, "    if (self->capacity > self->count) {\n");
-        emit(gen, "        if (self->count == 0) {\n");
-        emit(gen, "            free(self->data);\n");
-        emit(gen, "            self->data = NULL;\n");
-        emit(gen, "            self->capacity = 0;\n");
-        emit(gen, "            return;\n");
-        emit(gen, "        }\n");
-        emit(gen, "        self->data = realloc(self->data, self->count * sizeof(");
-        emit_resolved_type(gen, elem_type);
-        emit(gen, "));\n");
-        emit(gen, "        self->capacity = self->count;\n");
-        emit(gen, "    }\n");
-        emit(gen, "}\n\n");
-
-        // First/Last — only emit if Option<elem_type> was instantiated (i.e. first/last used)
-        const char* option_tname = type_mangle_name(elem_type);
-        char        option_mangled[256];
-        snprintf(option_mangled, sizeof(option_mangled), "Option_%s", option_tname);
-        int has_option = 0;
-        for (int gi = 0; gi < gen->checker.instance_count; gi++) {
-            if (strcmp(gen->checker.instances[gi].mangled_name, option_mangled) == 0) {
-                has_option = 1;
-                break;
-            }
-        }
-        if (has_option) {
-            // First — returns Option<T>, Some(v[0]) if non-empty, None if empty
-            emit(gen, "static inline Option_%s __Vec_%s_first(__Vec_%s* self) {\n", option_tname,
-                 elem_tname, elem_tname);
-            emit(gen, "    if (self->count == 0) {\n");
-            emit(gen, "        return (Option_%s){.tag = Option_%s_None};\n", option_tname,
-                 option_tname);
-            emit(gen, "    }\n");
-            if (elem_is_ptr) {
-                if (elem_type->kind == TYPE_STRING) {
-                    emit(gen, "    __rc_inc((void*)self->data[0]);\n");
-                } else {
-                    emit(gen, "    __rc_inc(self->data[0]);\n");
-                }
-            } else if (elem_is_rc_enum) {
-                emit(gen, "    __rc_inc_%s(self->data[0]);\n", elem_type->as.enm.name);
-            }
-            emit(gen,
-                 "    return (Option_%s){.tag = Option_%s_Some, .Some = {.f0 = "
-                 "self->data[0]}};\n",
-                 option_tname, option_tname);
-            emit(gen, "}\n\n");
-
-            // Last — returns Option<T>, Some(v[count-1]) if non-empty, None if empty
-            emit(gen, "static inline Option_%s __Vec_%s_last(__Vec_%s* self) {\n", option_tname,
-                 elem_tname, elem_tname);
-            emit(gen, "    if (self->count == 0) {\n");
-            emit(gen, "        return (Option_%s){.tag = Option_%s_None};\n", option_tname,
-                 option_tname);
-            emit(gen, "    }\n");
-            if (elem_is_ptr) {
-                if (elem_type->kind == TYPE_STRING) {
-                    emit(gen, "    __rc_inc((void*)self->data[self->count - 1]);\n");
-                } else {
-                    emit(gen, "    __rc_inc(self->data[self->count - 1]);\n");
-                }
-            } else if (elem_is_rc_enum) {
-                emit(gen, "    __rc_inc_%s(self->data[self->count - 1]);\n",
-                     elem_type->as.enm.name);
-            }
-            emit(gen,
-                 "    return (Option_%s){.tag = Option_%s_Some, "
-                 ".Some = {.f0 = self->data[self->count - 1]}};\n",
-                 option_tname, option_tname);
-            emit(gen, "}\n\n");
-
-            // Pop — returns Option<T>, transfers ownership (no __rc_inc)
-            emit(gen, "static inline Option_%s __Vec_%s_pop(__Vec_%s* self) {\n", option_tname,
-                 elem_tname, elem_tname);
-            emit(gen, "    if (self->count == 0) {\n");
-            emit(gen, "        return (Option_%s){.tag = Option_%s_None};\n", option_tname,
-                 option_tname);
-            emit(gen, "    }\n");
-            emit(gen, "    self->count--;\n");
-            emit(gen,
-                 "    return (Option_%s){.tag = Option_%s_Some, "
-                 ".Some = {.f0 = self->data[self->count]}};\n",
-                 option_tname, option_tname);
-            emit(gen, "}\n\n");
-        }
-
-        // Eq
-        if (type_supports_equality(elem_type)) {
-            emit(gen, "static inline bool __Vec_%s_eq(__Vec_%s* a, __Vec_%s* b) {\n", elem_tname,
-                 elem_tname, elem_tname);
-            emit(gen, "    if (a == b) return true;\n");
-            emit(gen, "    if (a->count != b->count) return false;\n");
-            emit(gen, "    for (int64_t i = 0; i < a->count; i++) {\n");
-            if (elem_type->kind == TYPE_STRING) {
-                emit(gen, "        if (strcmp(a->data[i], b->data[i]) != 0) return false;\n");
-            } else if (elem_type->kind == TYPE_STRUCT) {
-                emit(gen, "        if (!%s_eq(a->data[i], b->data[i])) return false;\n",
-                     elem_type->as.struc.name);
-            } else if (elem_type->kind == TYPE_VEC) {
-                const char* sub_tname = type_mangle_name(elem_type->as.vec.elem);
-                emit(gen, "        if (!__Vec_%s_eq(a->data[i], b->data[i])) return false;\n",
-                     sub_tname);
-            } else {
-                emit(gen, "        if (a->data[i] != b->data[i]) return false;\n");
-            }
-            emit(gen, "    }\n");
-            emit(gen, "    return true;\n");
-            emit(gen, "}\n\n");
-        }
+        emit_vec_push_method(gen, &ctx);
+        emit_vec_insert_method(gen, &ctx);
+        emit_vec_reserve_method(gen, &ctx);
+        emit_vec_contains_method(gen, &ctx);
+        emit_vec_sort_method(gen, &ctx);
+        emit_vec_remove_method(gen, &ctx);
+        emit_vec_swap_remove_method(gen, &ctx);
+        emit_vec_clear_method(gen, &ctx);
+        emit_vec_shrink_to_fit_method(gen, &ctx);
+        emit_vec_option_methods(gen, &ctx);
+        emit_vec_eq_method(gen, &ctx);
     }
 }
 
