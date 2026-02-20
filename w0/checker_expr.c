@@ -51,6 +51,70 @@ static int infer_from_generic_instance(Checker* checker, GenericFuncDef* def,
     return 0;
 }
 
+// Infer type params from generic type syntax like Vec<T>, Span<T>, or generic struct/enum
+// instances.
+static void infer_from_generic_param_type(Checker* checker, GenericFuncDef* def, Node* param_type,
+                                          Type* arg_type, Type** inferred) {
+    const char* base      = param_type->as.generic_type.base_name;
+    NodeList*   type_args = &param_type->as.generic_type.type_args;
+
+    if (strcmp(base, "Vec") == 0 && arg_type->kind == TYPE_VEC && type_args->count == 1) {
+        infer_type_param(checker, def, type_args->nodes[0], arg_type->as.vec.elem, inferred);
+        return;
+    }
+
+    if (strcmp(base, "Span") == 0 && arg_type->kind == TYPE_SPAN && type_args->count == 1) {
+        infer_type_param(checker, def, type_args->nodes[0], arg_type->as.span.elem, inferred);
+        return;
+    }
+
+    if (arg_type->kind == TYPE_STRUCT) {
+        infer_from_generic_instance(checker, def, type_args, arg_type->as.struc.name, inferred);
+        return;
+    }
+    if (arg_type->kind == TYPE_ENUM) {
+        infer_from_generic_instance(checker, def, type_args, arg_type->as.enm.name, inferred);
+    }
+}
+
+// Infer type params from function type syntax by matching parameter and return types.
+static void infer_from_func_param_type(Checker* checker, GenericFuncDef* def, Node* param_type,
+                                       Type* arg_type, Type** inferred) {
+    if (arg_type->kind != TYPE_FUNC) {
+        return;
+    }
+
+    infer_type_arg_list(checker, def, &param_type->as.func_type.param_types,
+                        arg_type->as.func.param_types, arg_type->as.func.param_count, inferred);
+    if (param_type->as.func_type.return_type) {
+        infer_type_param(checker, def, param_type->as.func_type.return_type,
+                         arg_type->as.func.return_type, inferred);
+    }
+}
+
+// Infer type params from tuple type syntax by inferring each tuple element pair.
+static void infer_from_tuple_param_type(Checker* checker, GenericFuncDef* def, Node* param_type,
+                                        Type* arg_type, Type** inferred) {
+    if (arg_type->kind != TYPE_TUPLE) {
+        return;
+    }
+
+    infer_type_arg_list(checker, def, &param_type->as.tuple_type.elem_types,
+                        arg_type->as.tuple.elem_types, arg_type->as.tuple.elem_count, inferred);
+}
+
+// Infer type params from array-like syntax by accepting both arrays and spans as argument types.
+static void infer_from_array_param_type(Checker* checker, GenericFuncDef* def, Node* param_type,
+                                        Type* arg_type, Type** inferred) {
+    if (arg_type->kind == TYPE_ARRAY) {
+        infer_type_param(checker, def, param_type->as.array_type.elem_type, arg_type->as.array.elem,
+                         inferred);
+    } else if (arg_type->kind == TYPE_SPAN) {
+        infer_type_param(checker, def, param_type->as.array_type.elem_type, arg_type->as.span.elem,
+                         inferred);
+    }
+}
+
 // Infer type parameters from a parameter type node and the actual argument type.
 // Recursively walks the parameter type AST and binds type parameter names to
 // concrete types from the argument. `inferred` array is parallel to def->type_params.
@@ -63,59 +127,17 @@ static void infer_type_param(Checker* checker, GenericFuncDef* def, Node* param_
     case NODE_IDENT:
         infer_direct_type_param(def, param_type->as.ident.name, arg_type, inferred);
         return;
-    case NODE_GENERIC_TYPE: {
-        const char* base      = param_type->as.generic_type.base_name;
-        NodeList*   type_args = &param_type->as.generic_type.type_args;
-
-        // Vec<T> → recurse on element type
-        if (strcmp(base, "Vec") == 0 && arg_type->kind == TYPE_VEC && type_args->count == 1) {
-            infer_type_param(checker, def, type_args->nodes[0], arg_type->as.vec.elem, inferred);
-            return;
-        }
-
-        // Span<T> → recurse on element type
-        if (strcmp(base, "Span") == 0 && arg_type->kind == TYPE_SPAN && type_args->count == 1) {
-            infer_type_param(checker, def, type_args->nodes[0], arg_type->as.span.elem, inferred);
-            return;
-        }
-
-        if (arg_type->kind == TYPE_STRUCT &&
-            infer_from_generic_instance(checker, def, type_args, arg_type->as.struc.name,
-                                        inferred)) {
-            return;
-        }
-        if (arg_type->kind == TYPE_ENUM &&
-            infer_from_generic_instance(checker, def, type_args, arg_type->as.enm.name, inferred)) {
-            return;
-        }
+    case NODE_GENERIC_TYPE:
+        infer_from_generic_param_type(checker, def, param_type, arg_type, inferred);
         return;
-    }
     case NODE_FUNC_TYPE:
-        if (arg_type->kind == TYPE_FUNC) {
-            infer_type_arg_list(checker, def, &param_type->as.func_type.param_types,
-                                arg_type->as.func.param_types, arg_type->as.func.param_count,
-                                inferred);
-            if (param_type->as.func_type.return_type) {
-                infer_type_param(checker, def, param_type->as.func_type.return_type,
-                                 arg_type->as.func.return_type, inferred);
-            }
-        }
+        infer_from_func_param_type(checker, def, param_type, arg_type, inferred);
         return;
     case NODE_TUPLE_TYPE:
-        if (arg_type->kind == TYPE_TUPLE) {
-            infer_type_arg_list(checker, def, &param_type->as.tuple_type.elem_types,
-                                arg_type->as.tuple.elem_types, arg_type->as.tuple.elem_count,
-                                inferred);
-        }
+        infer_from_tuple_param_type(checker, def, param_type, arg_type, inferred);
         return;
     case NODE_ARRAY_TYPE:
-        if (arg_type->kind == TYPE_ARRAY) {
-            infer_type_param(checker, def, param_type->as.array_type.elem_type,
-                             arg_type->as.array.elem, inferred);
-        } else if (arg_type->kind == TYPE_SPAN) {
-            infer_type_param(checker, def, param_type->as.array_type.elem_type,
-                             arg_type->as.span.elem, inferred);
-        }
+        infer_from_array_param_type(checker, def, param_type, arg_type, inferred);
         return;
     default:
         return;
