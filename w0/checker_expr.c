@@ -1199,15 +1199,6 @@ static int find_template_enum_variant(Node* enum_decl, const char* value_name) {
     return -1;
 }
 
-static int find_resolved_enum_variant(Type* enum_type, const char* value_name) {
-    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
-        if (strcmp(enum_type->as.enm.value_names[i], value_name) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 static int all_type_args_inferred(Type** inferred, int type_param_count) {
     for (int i = 0; i < type_param_count; i++) {
         if (!inferred[i]) {
@@ -1435,7 +1426,7 @@ static Type* check_enum_value_expr(Checker* checker, Node* node) {
     sem_info_set_enum_value_resolved_name(checker->sem, node, enum_type->as.enm.name);
 
     // Check that the value exists in the (possibly instantiated) enum.
-    int variant_idx = find_resolved_enum_variant(enum_type, value_name);
+    int variant_idx = type_enum_variant_index(enum_type, value_name);
     if (variant_idx < 0) {
         check_error(checker, node->line, node->column, "'%s' is not a value of enum '%s'",
                     value_name, enum_type->as.enm.name);
@@ -2319,10 +2310,10 @@ static Type* check_string_interp_expr(Checker* checker, Node* node) {
 // =============================================================================
 
 static int classify_try_enum(Type* enum_type, int* is_option, int* success_idx, int* err_idx) {
-    int ok_idx   = find_resolved_enum_variant(enum_type, "Ok");
-    int err      = find_resolved_enum_variant(enum_type, "Err");
-    int some_idx = find_resolved_enum_variant(enum_type, "Some");
-    int none_idx = find_resolved_enum_variant(enum_type, "None");
+    int ok_idx   = type_enum_variant_index(enum_type, "Ok");
+    int err      = type_enum_variant_index(enum_type, "Err");
+    int some_idx = type_enum_variant_index(enum_type, "Some");
+    int none_idx = type_enum_variant_index(enum_type, "None");
 
     int is_result = (ok_idx >= 0 && err >= 0);
     int option    = (some_idx >= 0 && none_idx >= 0);
@@ -2350,7 +2341,7 @@ static int check_try_return_type_compatibility(Checker* checker, Node* node, Typ
     }
 
     if (is_option) {
-        if (find_resolved_enum_variant(ret_type, "None") < 0) {
+        if (type_enum_variant_index(ret_type, "None") < 0) {
             check_error(checker, node->line, node->column,
                         "'?' on Option requires function return type to have 'None' variant, "
                         "got '%s'",
@@ -2360,7 +2351,7 @@ static int check_try_return_type_compatibility(Checker* checker, Node* node, Typ
         return 1;
     }
 
-    int ret_err_idx = find_resolved_enum_variant(ret_type, "Err");
+    int ret_err_idx = type_enum_variant_index(ret_type, "Err");
     if (ret_err_idx < 0) {
         check_error(checker, node->line, node->column,
                     "'?' on Result requires function return type to have 'Err' variant, got '%s'",

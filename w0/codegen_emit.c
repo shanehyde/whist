@@ -51,7 +51,7 @@ int codegen_find_tuple_type_index(CodeGen* gen, Type* tuple_type) {
         return -1;
     }
     for (int i = 0; i < gen->tuple_type_count; i++) {
-        if (tuple_types_equal(gen->tuple_types[i], tuple_type)) {
+        if (type_equals(gen->tuple_types[i], tuple_type)) {
             return i;
         }
     }

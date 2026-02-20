@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "alloc.h"
+#include "ast.h"
 #include "vec.h"
 
 // Built-in type singletons
@@ -411,6 +413,18 @@ int type_is_rc_managed(Type* type) {
     return 0;
 }
 
+int type_find_field_index(Type* type, const char* field_name) {
+    if (!type || type->kind != TYPE_STRUCT) {
+        return -1;
+    }
+    for (int i = 0; i < type->as.struc.field_count; i++) {
+        if (strcmp(type->as.struc.field_names[i], field_name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 int type_assignable(Type* target, Type* value) {
     if (type_equals(target, value))
         return 1;
@@ -766,4 +780,64 @@ void typelist_free(TypeList* list) {
     list->types    = NULL;
     list->count    = 0;
     list->capacity = 0;
+}
+
+// Build a Type* from a type node (simplified, for codegen/tuple collection)
+Type* type_from_node(Node* type_node) {
+    if (!type_node)
+        return type_void;
+
+    switch (type_node->type) {
+    case NODE_IDENT: {
+        const char* name    = type_node->as.ident.name;
+        Type*       builtin = type_builtin_from_name(name);
+        if (builtin)
+            return builtin;
+        // User-defined type - return a struct type
+        return type_struct(name);
+    }
+    case NODE_ARRAY_TYPE: {
+        Type* elem = type_from_node(type_node->as.array_type.elem_type);
+        int   size = -1;
+        if (type_node->as.array_type.size && type_node->as.array_type.size->type == NODE_INT_LIT) {
+            size = (int)type_node->as.array_type.size->as.int_lit.value;
+        }
+        return type_array(elem, size);
+    }
+    case NODE_TUPLE_TYPE: {
+        int    count = type_node->as.tuple_type.elem_types.count;
+        Type** elems = xmalloc(count * sizeof(Type*));
+        for (int i = 0; i < count; i++) {
+            elems[i] = type_from_node(type_node->as.tuple_type.elem_types.nodes[i]);
+        }
+        return type_tuple(elems, count);
+    }
+    case NODE_GENERIC_TYPE: {
+        const char* base      = type_node->as.generic_type.base_name;
+        int         arg_count = type_node->as.generic_type.type_args.count;
+        Type**      args      = xmalloc(arg_count * sizeof(Type*));
+        for (int i = 0; i < arg_count; i++) {
+            args[i] = type_from_node(type_node->as.generic_type.type_args.nodes[i]);
+        }
+        // Vec and Span are special built-in generic types
+        if (strcmp(base, "Vec") == 0 && arg_count == 1) {
+            Type* result = type_vec(args[0]);
+            free(args);
+            return result;
+        }
+        if (strcmp(base, "Span") == 0 && arg_count == 1) {
+            Type* result = type_span(args[0]);
+            free(args);
+            return result;
+        }
+        // For other generics, build a struct type with the mangled name
+        char* mangled = type_mangle_generic(base, args, arg_count);
+        Type* result  = type_struct(mangled);
+        free(mangled);
+        free(args);
+        return result;
+    }
+    default:
+        return type_error;
+    }
 }

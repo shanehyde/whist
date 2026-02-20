@@ -12,22 +12,11 @@
 #include "types.h"
 #include "vec.h"
 
-// Check if two tuple types are structurally equal
-int tuple_types_equal(Type* a, Type* b) {
-    if (a->as.tuple.elem_count != b->as.tuple.elem_count)
-        return 0;
-    for (int i = 0; i < a->as.tuple.elem_count; i++) {
-        if (!type_equals(a->as.tuple.elem_types[i], b->as.tuple.elem_types[i]))
-            return 0;
-    }
-    return 1;
-}
-
 // Register a tuple type and return its index (for typedef name)
 static int register_tuple_type(CodeGen* gen, Type* type) {
     // Check if already registered
     for (int i = 0; i < gen->tuple_type_count; i++) {
-        if (tuple_types_equal(gen->tuple_types[i], type))
+        if (type_equals(gen->tuple_types[i], type))
             return i;
     }
     // Add new
@@ -189,66 +178,6 @@ static void collect_tuple_types_from_stmt(CodeGen* gen, Node* node) {
     }
 }
 
-// Build a Type* from a type node (for codegen purposes, simplified)
-Type* type_from_node(Node* type_node) {
-    if (!type_node)
-        return type_void;
-
-    switch (type_node->type) {
-    case NODE_IDENT: {
-        const char* name    = type_node->as.ident.name;
-        Type*       builtin = type_builtin_from_name(name);
-        if (builtin)
-            return builtin;
-        // User-defined type - return a struct type
-        return type_struct(name);
-    }
-    case NODE_ARRAY_TYPE: {
-        Type* elem = type_from_node(type_node->as.array_type.elem_type);
-        int   size = -1;
-        if (type_node->as.array_type.size && type_node->as.array_type.size->type == NODE_INT_LIT) {
-            size = (int)type_node->as.array_type.size->as.int_lit.value;
-        }
-        return type_array(elem, size);
-    }
-    case NODE_TUPLE_TYPE: {
-        int    count = type_node->as.tuple_type.elem_types.count;
-        Type** elems = xmalloc(count * sizeof(Type*));
-        for (int i = 0; i < count; i++) {
-            elems[i] = type_from_node(type_node->as.tuple_type.elem_types.nodes[i]);
-        }
-        return type_tuple(elems, count);
-    }
-    case NODE_GENERIC_TYPE: {
-        const char* base      = type_node->as.generic_type.base_name;
-        int         arg_count = type_node->as.generic_type.type_args.count;
-        Type**      args      = xmalloc(arg_count * sizeof(Type*));
-        for (int i = 0; i < arg_count; i++) {
-            args[i] = type_from_node(type_node->as.generic_type.type_args.nodes[i]);
-        }
-        // Vec and Span are special built-in generic types
-        if (strcmp(base, "Vec") == 0 && arg_count == 1) {
-            Type* result = type_vec(args[0]);
-            free(args);
-            return result;
-        }
-        if (strcmp(base, "Span") == 0 && arg_count == 1) {
-            Type* result = type_span(args[0]);
-            free(args);
-            return result;
-        }
-        // For other generics, build a struct type with the mangled name
-        char* mangled = type_mangle_generic(base, args, arg_count);
-        Type* result  = type_struct(mangled);
-        free(mangled);
-        free(args);
-        return result;
-    }
-    default:
-        return type_error;
-    }
-}
-
 // Collect tuple types from a type node
 static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node) {
     if (!type_node)
@@ -271,44 +200,6 @@ static void collect_tuple_types_from_node(CodeGen* gen, Node* type_node) {
         }
         // Note: generic instances are passed from checker, no need to collect here
     }
-}
-
-// Find a generic struct declaration by name in the AST
-Node* find_generic_struct_decl(Node* ast, const char* name) {
-    if (!ast || ast->type != NODE_PROGRAM)
-        return NULL;
-    for (int m = 0; m < ast->as.program.modules.count; m++) {
-        Node* mod = ast->as.program.modules.nodes[m];
-        if (!mod || mod->type != NODE_MODULE)
-            continue;
-        for (int i = 0; i < mod->as.module.decls.count; i++) {
-            Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type == NODE_STRUCT_DECL && decl->as.struct_decl.type_param_count > 0 &&
-                strcmp(decl->as.struct_decl.name, name) == 0) {
-                return decl;
-            }
-        }
-    }
-    return NULL;
-}
-
-// Find a generic enum declaration by name in the AST
-Node* find_generic_enum_decl(Node* ast, const char* name) {
-    if (!ast || ast->type != NODE_PROGRAM)
-        return NULL;
-    for (int m = 0; m < ast->as.program.modules.count; m++) {
-        Node* mod = ast->as.program.modules.nodes[m];
-        if (!mod || mod->type != NODE_MODULE)
-            continue;
-        for (int i = 0; i < mod->as.module.decls.count; i++) {
-            Node* decl = mod->as.module.decls.nodes[i];
-            if (decl->type == NODE_ENUM_DECL && decl->as.enum_decl.type_param_count > 0 &&
-                strcmp(decl->as.enum_decl.name, name) == 0) {
-                return decl;
-            }
-        }
-    }
-    return NULL;
 }
 
 // Look up a type parameter name in the current generic substitution context.
@@ -368,60 +259,6 @@ char* build_mangled_name_from_generic_node(CodeGen* gen, Node* type_node) {
 // static const char* type_arg_mangle_name(Type* type) {
 //     ... preserved for potential future use
 // }
-
-// Return whether a function decl is a direct generic-receiver method for `struct_name`.
-static int is_collectible_generic_method(Node* decl, const char* struct_name) {
-    return decl && decl->type == NODE_FUNC_DECL && decl->as.func_decl.body != NULL &&
-           decl->as.func_decl.receiver_type != NULL &&
-           decl->as.func_decl.receiver_type_args.count > 0 &&
-           decl->as.func_decl.type_param_count == 0 &&
-           strcmp(decl->as.func_decl.receiver_type, struct_name) == 0;
-}
-
-// Collect all generic methods for a given struct name
-void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods_out,
-                             int* count_out) {
-    *methods_out = NULL;
-    *count_out   = 0;
-
-    if (!ast || ast->type != NODE_PROGRAM)
-        return;
-
-    int    capacity = 0;
-    Node** methods  = NULL;
-    int    count    = 0;
-
-    for (int m = 0; m < ast->as.program.modules.count; m++) {
-        Node* mod = ast->as.program.modules.nodes[m];
-        if (!mod || mod->type != NODE_MODULE)
-            continue;
-        for (int i = 0; i < mod->as.module.decls.count; i++) {
-            Node* decl = mod->as.module.decls.nodes[i];
-            // Direct generic methods: func (Box<T>) get() -> T.
-            // Excludes method-level generics (type_param_count > 0), which are handled
-            // via GenericFuncInstance.
-            if (is_collectible_generic_method(decl, struct_name)) {
-                VEC_GROW(methods, count, capacity);
-                methods[count++] = decl;
-            }
-
-            // Methods inside impl blocks: impl Drop for Box { func (Box<T>) drop() -> void }
-            if (decl->type != NODE_IMPL_DECL) {
-                continue;
-            }
-            for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
-                Node* method = decl->as.impl_decl.methods.nodes[j];
-                if (is_collectible_generic_method(method, struct_name)) {
-                    VEC_GROW(methods, count, capacity);
-                    methods[count++] = method;
-                }
-            }
-        }
-    }
-
-    *methods_out = methods;
-    *count_out   = count;
-}
 
 // Collect all tuple types from a declaration
 static void collect_tuple_types_from_decl(CodeGen* gen, Node* decl) {
@@ -1342,130 +1179,6 @@ static void emit_main_wrapper(CodeGen* gen) {
     emit(gen, "}\n\n");
 }
 
-// Append a C string into a bounded stringify buffer.
-static void stringify_append_cstr(char* buf, int buf_size, int* pos, const char* s) {
-    while (*s && *pos < buf_size - 1) {
-        buf[(*pos)++] = *s++;
-    }
-}
-
-// Append a fixed-length byte slice into a bounded stringify buffer.
-static void stringify_append_n(char* buf, int buf_size, int* pos, const char* s, int n) {
-    for (int i = 0; i < n && *pos < buf_size - 1; i++) {
-        buf[(*pos)++] = s[i];
-    }
-}
-
-// Append a single character into a bounded stringify buffer.
-static void stringify_append_char(char* buf, int buf_size, int* pos, char c) {
-    if (*pos < buf_size - 1) {
-        buf[(*pos)++] = c;
-    }
-}
-
-// Append a string literal with escaping and surrounding quotes.
-static void stringify_append_string_lit(char* buf, int buf_size, int* pos, const char* s) {
-    stringify_append_cstr(buf, buf_size, pos, "\\\"");
-    while (*s && *pos < buf_size - 1) {
-        if (*s == '"') {
-            stringify_append_cstr(buf, buf_size, pos, "\\\"");
-        } else if (*s == '\\') {
-            stringify_append_cstr(buf, buf_size, pos, "\\\\");
-        } else if (*s == '\n') {
-            stringify_append_cstr(buf, buf_size, pos, "\\n");
-        } else if (*s == '\t') {
-            stringify_append_cstr(buf, buf_size, pos, "\\t");
-        } else if (*s == '\r') {
-            stringify_append_cstr(buf, buf_size, pos, "\\r");
-        } else {
-            stringify_append_char(buf, buf_size, pos, *s);
-        }
-        s++;
-    }
-    stringify_append_cstr(buf, buf_size, pos, "\\\"");
-}
-
-// Stringify an expression AST node into a human-readable string for assert messages
-static void stringify_expr_to(Node* node, char* buf, int buf_size, int* pos) {
-    if (!node || *pos >= buf_size - 1)
-        return;
-
-    switch (node->type) {
-    case NODE_INT_LIT: {
-        char tmp[32];
-        snprintf(tmp, sizeof(tmp), "%ld", node->as.int_lit.value);
-        stringify_append_cstr(buf, buf_size, pos, tmp);
-        break;
-    }
-    case NODE_FLOAT_LIT: {
-        char tmp[32];
-        snprintf(tmp, sizeof(tmp), "%g", node->as.float_lit.value);
-        stringify_append_cstr(buf, buf_size, pos, tmp);
-        break;
-    }
-    case NODE_BOOL_LIT:
-        stringify_append_cstr(buf, buf_size, pos, node->as.bool_lit.value ? "true" : "false");
-        break;
-    case NODE_STRING_LIT:
-        stringify_append_string_lit(buf, buf_size, pos, node->as.string_lit.value);
-        break;
-    case NODE_NULL_LIT:
-        stringify_append_cstr(buf, buf_size, pos, "null");
-        break;
-    case NODE_IDENT:
-        stringify_append_n(buf, buf_size, pos, node->as.ident.name, node->as.ident.length);
-        break;
-    case NODE_BINARY: {
-        stringify_append_cstr(buf, buf_size, pos, "(");
-        stringify_expr_to(node->as.binary.left, buf, buf_size, pos);
-        stringify_append_cstr(buf, buf_size, pos, " ");
-        stringify_append_cstr(buf, buf_size, pos, token_type_symbol(node->as.binary.op));
-        stringify_append_cstr(buf, buf_size, pos, " ");
-        stringify_expr_to(node->as.binary.right, buf, buf_size, pos);
-        stringify_append_cstr(buf, buf_size, pos, ")");
-        break;
-    }
-    case NODE_UNARY:
-        stringify_append_cstr(buf, buf_size, pos, token_type_symbol(node->as.unary.op));
-        stringify_expr_to(node->as.unary.operand, buf, buf_size, pos);
-        break;
-    case NODE_CALL: {
-        stringify_expr_to(node->as.call.func, buf, buf_size, pos);
-        stringify_append_cstr(buf, buf_size, pos, "(");
-        for (int i = 0; i < node->as.call.args.count; i++) {
-            if (i > 0) {
-                stringify_append_cstr(buf, buf_size, pos, ", ");
-            }
-            stringify_expr_to(node->as.call.args.nodes[i], buf, buf_size, pos);
-        }
-        stringify_append_cstr(buf, buf_size, pos, ")");
-        break;
-    }
-    case NODE_MEMBER:
-        stringify_expr_to(node->as.member.object, buf, buf_size, pos);
-        stringify_append_cstr(buf, buf_size, pos, ".");
-        stringify_append_n(buf, buf_size, pos, node->as.member.name, node->as.member.length);
-        break;
-    case NODE_INDEX:
-        stringify_expr_to(node->as.index.object, buf, buf_size, pos);
-        stringify_append_cstr(buf, buf_size, pos, "[");
-        stringify_expr_to(node->as.index.index, buf, buf_size, pos);
-        stringify_append_cstr(buf, buf_size, pos, "]");
-        break;
-    default:
-        stringify_append_cstr(buf, buf_size, pos, "...");
-        break;
-    }
-}
-
-char* stringify_expr(Node* node) {
-    static char buf[512];
-    int         pos = 0;
-    stringify_expr_to(node, buf, sizeof(buf), &pos);
-    buf[pos] = '\0';
-    return buf;
-}
-
 // Collect all NODE_TEST_DECL nodes from the program AST
 typedef struct {
     Node** tests;
@@ -1943,57 +1656,6 @@ static void emit_generic_method_impls(CodeGen* gen, Node* ast) {
 
         free(methods);
     }
-}
-
-// Find a method-level generic function declaration in the AST.
-// Matches func (ReceiverType<...>) MethodName<...>(...): ...
-Node* find_generic_method_func_decl(Node* ast, const char* receiver_type, const char* method_name) {
-    for (int m = 0; m < ast->as.program.modules.count; m++) {
-        Node* mod = ast->as.program.modules.nodes[m];
-        if (!mod || mod->type != NODE_MODULE)
-            continue;
-        for (int d = 0; d < mod->as.module.decls.count; d++) {
-            Node* decl = mod->as.module.decls.nodes[d];
-            // Direct method: func (Vec<T>) map<K>(...) -> Vec<K>
-            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type != NULL &&
-                decl->as.func_decl.type_param_count > 0 &&
-                strcmp(decl->as.func_decl.receiver_type, receiver_type) == 0 &&
-                strcmp(decl->as.func_decl.name, method_name) == 0) {
-                return decl;
-            }
-            // Inside impl blocks
-            if (decl->type == NODE_IMPL_DECL) {
-                for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
-                    Node* method = decl->as.impl_decl.methods.nodes[j];
-                    if (method->type == NODE_FUNC_DECL &&
-                        method->as.func_decl.receiver_type != NULL &&
-                        method->as.func_decl.type_param_count > 0 &&
-                        strcmp(method->as.func_decl.receiver_type, receiver_type) == 0 &&
-                        strcmp(method->as.func_decl.name, method_name) == 0) {
-                        return method;
-                    }
-                }
-            }
-        }
-    }
-    return NULL;
-}
-
-// Find a generic free function declaration in the AST by name
-Node* find_generic_func_decl(Node* ast, const char* name) {
-    for (int m = 0; m < ast->as.program.modules.count; m++) {
-        Node* mod = ast->as.program.modules.nodes[m];
-        if (!mod || mod->type != NODE_MODULE)
-            continue;
-        for (int d = 0; d < mod->as.module.decls.count; d++) {
-            Node* decl = mod->as.module.decls.nodes[d];
-            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.type_param_count > 0 &&
-                strcmp(decl->as.func_decl.name, name) == 0) {
-                return decl;
-            }
-        }
-    }
-    return NULL;
 }
 
 GenericFuncDef* lookup_generic_func_def_for_instance(CodeGen* gen, const char* base_name) {

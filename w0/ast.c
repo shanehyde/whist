@@ -830,3 +830,230 @@ Node* node_clone(Node* node) {
     node_reset_checker_flags(c);
     return c;
 }
+
+// ============================================================================
+// AST query functions (pure Node* traversals, no codegen state)
+// ============================================================================
+
+// Find a generic struct declaration by name in the AST
+Node* find_generic_struct_decl(Node* ast, const char* name) {
+    if (!ast || ast->type != NODE_PROGRAM)
+        return NULL;
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type == NODE_STRUCT_DECL && decl->as.struct_decl.type_param_count > 0 &&
+                strcmp(decl->as.struct_decl.name, name) == 0) {
+                return decl;
+            }
+        }
+    }
+    return NULL;
+}
+
+// Find a generic enum declaration by name in the AST
+Node* find_generic_enum_decl(Node* ast, const char* name) {
+    if (!ast || ast->type != NODE_PROGRAM)
+        return NULL;
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type == NODE_ENUM_DECL && decl->as.enum_decl.type_param_count > 0 &&
+                strcmp(decl->as.enum_decl.name, name) == 0) {
+                return decl;
+            }
+        }
+    }
+    return NULL;
+}
+
+// Find a generic free function declaration in the AST by name
+Node* find_generic_func_decl(Node* ast, const char* name) {
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int d = 0; d < mod->as.module.decls.count; d++) {
+            Node* decl = mod->as.module.decls.nodes[d];
+            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.type_param_count > 0 &&
+                strcmp(decl->as.func_decl.name, name) == 0) {
+                return decl;
+            }
+        }
+    }
+    return NULL;
+}
+
+// Find a method-level generic function declaration in the AST.
+// Matches func (ReceiverType<...>) MethodName<...>(...): ...
+Node* find_generic_method_func_decl(Node* ast, const char* receiver_type, const char* method_name) {
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int d = 0; d < mod->as.module.decls.count; d++) {
+            Node* decl = mod->as.module.decls.nodes[d];
+            // Direct method: func (Vec<T>) map<K>(...) -> Vec<K>
+            if (decl->type == NODE_FUNC_DECL && decl->as.func_decl.receiver_type != NULL &&
+                decl->as.func_decl.type_param_count > 0 &&
+                strcmp(decl->as.func_decl.receiver_type, receiver_type) == 0 &&
+                strcmp(decl->as.func_decl.name, method_name) == 0) {
+                return decl;
+            }
+            // Inside impl blocks
+            if (decl->type == NODE_IMPL_DECL) {
+                for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
+                    Node* method = decl->as.impl_decl.methods.nodes[j];
+                    if (method->type == NODE_FUNC_DECL &&
+                        method->as.func_decl.receiver_type != NULL &&
+                        method->as.func_decl.type_param_count > 0 &&
+                        strcmp(method->as.func_decl.receiver_type, receiver_type) == 0 &&
+                        strcmp(method->as.func_decl.name, method_name) == 0) {
+                        return method;
+                    }
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+// Return whether a function decl is a direct generic-receiver method for `struct_name`.
+static int is_collectible_generic_method(Node* decl, const char* struct_name) {
+    return decl && decl->type == NODE_FUNC_DECL && decl->as.func_decl.body != NULL &&
+           decl->as.func_decl.receiver_type != NULL &&
+           decl->as.func_decl.receiver_type_args.count > 0 &&
+           decl->as.func_decl.type_param_count == 0 &&
+           strcmp(decl->as.func_decl.receiver_type, struct_name) == 0;
+}
+
+// Collect all generic methods for a given struct name
+void collect_generic_methods(Node* ast, const char* struct_name, Node*** methods_out,
+                             int* count_out) {
+    *methods_out = NULL;
+    *count_out   = 0;
+
+    if (!ast || ast->type != NODE_PROGRAM)
+        return;
+
+    int    capacity = 0;
+    Node** methods  = NULL;
+    int    count    = 0;
+
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            // Direct generic methods: func (Box<T>) get() -> T.
+            // Excludes method-level generics (type_param_count > 0), which are handled
+            // via GenericFuncInstance.
+            if (is_collectible_generic_method(decl, struct_name)) {
+                VEC_GROW(methods, count, capacity);
+                methods[count++] = decl;
+            }
+
+            // Methods inside impl blocks: impl Drop for Box { func (Box<T>) drop() -> void }
+            if (decl->type != NODE_IMPL_DECL) {
+                continue;
+            }
+            for (int j = 0; j < decl->as.impl_decl.methods.count; j++) {
+                Node* method = decl->as.impl_decl.methods.nodes[j];
+                if (is_collectible_generic_method(method, struct_name)) {
+                    VEC_GROW(methods, count, capacity);
+                    methods[count++] = method;
+                }
+            }
+        }
+    }
+
+    *methods_out = methods;
+    *count_out   = count;
+}
+
+// ============================================================================
+// Owned temp predicates (pure Node* checks)
+// ============================================================================
+
+// Forward declaration for mutual recursion
+static int has_owned_temps_children(Node* node);
+
+// Return whether a new-expression subtree contains any owned temps.
+static int has_owned_temps_new_expr(Node* node) {
+    if (node->as.new_expr.init) {
+        for (int i = 0; i < node->as.new_expr.init->as.struct_init.fields.count; i++) {
+            Node* field = node->as.new_expr.init->as.struct_init.fields.nodes[i];
+            if (field && field->type == NODE_FIELD_INIT &&
+                has_owned_temps(field->as.field_init.value)) {
+                return 1;
+            }
+        }
+    }
+    for (int i = 0; i < node->as.new_expr.args.count; i++) {
+        if (has_owned_temps(node->as.new_expr.args.nodes[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Return whether any child expression for this node contains owned temps.
+static int has_owned_temps_children(Node* node) {
+    switch (node->type) {
+    case NODE_CALL:
+        if (has_owned_temps(node->as.call.func))
+            return 1;
+        for (int i = 0; i < node->as.call.args.count; i++) {
+            if (has_owned_temps(node->as.call.args.nodes[i]))
+                return 1;
+        }
+        return 0;
+    case NODE_BINARY:
+        return has_owned_temps(node->as.binary.left) || has_owned_temps(node->as.binary.right);
+    case NODE_UNARY:
+        return has_owned_temps(node->as.unary.operand);
+    case NODE_MEMBER:
+        return has_owned_temps(node->as.member.object);
+    case NODE_INDEX:
+        return has_owned_temps(node->as.index.object) || has_owned_temps(node->as.index.index);
+    case NODE_SLICE:
+        return has_owned_temps(node->as.slice.object) || has_owned_temps(node->as.slice.start) ||
+               has_owned_temps(node->as.slice.end);
+    case NODE_NEW_EXPR:
+        return has_owned_temps_new_expr(node);
+    case NODE_CAST:
+        return has_owned_temps(node->as.cast_expr.expr);
+    case NODE_STRING_INTERP:
+        for (int i = 0; i < node->as.string_interp.part_count; i++) {
+            if (has_owned_temps(node->as.string_interp.parts.nodes[i]))
+                return 1;
+        }
+        return 0;
+    case NODE_ASSIGN:
+        return has_owned_temps(node->as.assign.target) || has_owned_temps(node->as.assign.value);
+    case NODE_ENUM_VALUE:
+        for (int i = 0; i < node->as.enum_value.args.count; i++) {
+            if (has_owned_temps(node->as.enum_value.args.nodes[i]))
+                return 1;
+        }
+        return 0;
+    default:
+        return 0;
+    }
+}
+
+// Check if an expression tree contains any owned temps.
+int has_owned_temps(Node* node) {
+    if (!node)
+        return 0;
+    if (node->is_owned_temp)
+        return 1;
+    return has_owned_temps_children(node);
+}

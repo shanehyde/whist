@@ -576,16 +576,6 @@ static int check_tuple_destruct_pattern_against_type(Checker* checker, DestructP
     return 0;
 }
 
-// Return the index of a struct field by name, or -1 if not found.
-static int find_struct_field_index(Type* type, const char* field_name) {
-    for (int j = 0; j < type->as.struc.field_count; j++) {
-        if (strcmp(field_name, type->as.struc.field_names[j]) == 0) {
-            return j;
-        }
-    }
-    return -1;
-}
-
 // Validate struct destructuring fields and record resolved field types.
 static int check_struct_destruct_pattern_against_type(Checker* checker, DestructPattern* pattern,
                                                       Type* type, int line, int col) {
@@ -603,7 +593,7 @@ static int check_struct_destruct_pattern_against_type(Checker* checker, Destruct
     }
 
     for (int i = 0; i < pattern->as.struc.count; i++) {
-        int field_idx = find_struct_field_index(type, pattern->as.struc.field_names[i]);
+        int field_idx = type_find_field_index(type, pattern->as.struc.field_names[i]);
         if (field_idx < 0) {
             check_error(checker, line, col, "Struct '%s' has no field '%s'", type->as.struc.name,
                         pattern->as.struc.field_names[i]);
