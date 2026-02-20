@@ -1684,24 +1684,122 @@ static const char* get_receiver_info(Checker* checker, Type* recv_type, Type*** 
 
 // Try to resolve a method-level generic call: items.map(|x| x * 2)
 // Returns the return type if this is a method-level generic call, or NULL if not.
+static int should_skip_generic_method_call(Checker* checker, Node* callee) {
+    // Skip module-qualified calls (e.g., std.print) and type references (e.g., Point.move).
+    // These are not method calls on a receiver object.
+    if (callee->as.member.object->type != NODE_IDENT) {
+        return 0;
+    }
+
+    const char* name = callee->as.member.object->as.ident.name;
+    if (is_imported_module(checker, name)) {
+        return 1;
+    }
+
+    Symbol* sym = checker_lookup(checker, name);
+    return sym && sym->kind == SYM_TYPE;
+}
+
+static int check_generic_method_arg_count(Checker* checker, Node* node, func_decl_node* fdn,
+                                          const char* method_name) {
+    if (node->as.call.args.count == fdn->params.count) {
+        return 1;
+    }
+
+    check_error(checker, node->line, node->column, "Method '%s' expects %d arguments, got %d",
+                method_name, fdn->params.count, node->as.call.args.count);
+    return 0;
+}
+
+static void infer_method_type_params_from_receiver(Checker* checker, GenericFuncDef* gdef,
+                                                   func_decl_node* fdn, Type** recv_args,
+                                                   int recv_arg_count, Type** inferred) {
+    int recv_pattern_count = fdn->receiver_type_args.count;
+    for (int i = 0; i < recv_arg_count && i < recv_pattern_count; i++) {
+        infer_type_param(checker, gdef, fdn->receiver_type_args.nodes[i], recv_args[i], inferred);
+    }
+}
+
+static Type** check_generic_method_args(Checker* checker, Node* node, GenericFuncDef* gdef,
+                                        func_decl_node* fdn, Type** inferred) {
+    int    arg_count = node->as.call.args.count;
+    Type** arg_types = xmalloc(arg_count * sizeof(Type*));
+    int    has_error = 0;
+
+    for (int i = 0; i < arg_count; i++) {
+        // Build expected type for lambda args from partially-inferred params.
+        Type* old_expected    = checker->expected_func_type;
+        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
+        Type* expected        = build_expected_func_type(checker, param_type_node, gdef, inferred);
+        if (expected) {
+            checker->expected_func_type = expected;
+        }
+
+        arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
+
+        checker->expected_func_type = old_expected;
+
+        if (arg_types[i]->kind == TYPE_ERROR) {
+            has_error = 1;
+        }
+    }
+
+    if (has_error) {
+        free(arg_types);
+        return NULL;
+    }
+    return arg_types;
+}
+
+static void infer_method_type_params_from_args(Checker* checker, GenericFuncDef* gdef,
+                                               func_decl_node* fdn, Type** arg_types, int arg_count,
+                                               Type** inferred) {
+    for (int i = 0; i < arg_count; i++) {
+        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
+        infer_type_param(checker, gdef, param_type_node, arg_types[i], inferred);
+    }
+}
+
+static int ensure_generic_method_inference_complete(Checker* checker, Node* node,
+                                                    GenericFuncDef* gdef, const char* base_name,
+                                                    const char* method_name, Type** inferred) {
+    for (int i = 0; i < gdef->type_param_count; i++) {
+        if (!inferred[i]) {
+            check_error(checker, node->line, node->column,
+                        "Cannot infer type parameter '%s' for generic method '%s.%s'",
+                        gdef->type_params[i], base_name, method_name);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int check_generic_method_trait_bounds(Checker* checker, Node* node, GenericFuncDef* gdef,
+                                             const char* base_name, const char* method_name,
+                                             Type** inferred) {
+    for (int i = 0; i < gdef->type_param_count; i++) {
+        const char* bound = gdef->type_param_bounds[i];
+        if (!bound) {
+            continue;
+        }
+        if (!type_satisfies_trait_bound(checker, inferred[i], bound)) {
+            check_error(checker, node->line, node->column,
+                        "Type '%s' does not implement trait '%s' required by '%s.%s'",
+                        type_name(inferred[i]), bound, base_name, method_name);
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static Type* try_check_generic_method_call(Checker* checker, Node* node) {
     Node* callee = node->as.call.func;
     if (callee->type != NODE_MEMBER) {
         return NULL;
     }
 
-    // Skip module-qualified calls (e.g., std.print) and type references (e.g., Point.move)
-    // These are not method calls on a receiver object. We must check this BEFORE calling
-    // check_expression on the object, because module names are not variables in scope.
-    if (callee->as.member.object->type == NODE_IDENT) {
-        const char* name = callee->as.member.object->as.ident.name;
-        if (is_imported_module(checker, name)) {
-            return NULL;
-        }
-        Symbol* sym = checker_lookup(checker, name);
-        if (sym && sym->kind == SYM_TYPE) {
-            return NULL;
-        }
+    if (should_skip_generic_method_call(checker, callee)) {
+        return NULL;
     }
 
     // Type-check the receiver object
@@ -1728,79 +1826,39 @@ static Type* try_check_generic_method_call(Checker* checker, Node* node) {
     func_decl_node* fdn = &gdef->decl->as.func_decl;
 
     // Validate argument count (method params, not counting self)
-    if (node->as.call.args.count != fdn->params.count) {
-        check_error(checker, node->line, node->column, "Method '%s' expects %d arguments, got %d",
-                    method_name, fdn->params.count, node->as.call.args.count);
+    if (!check_generic_method_arg_count(checker, node, fdn, method_name)) {
         free(recv_args);
         return type_error;
     }
 
     // Pre-fill inference array from receiver pattern BEFORE checking args
-    Type** inferred           = xcalloc(gdef->type_param_count, sizeof(Type*));
-    int    recv_pattern_count = fdn->receiver_type_args.count;
-    for (int i = 0; i < recv_arg_count && i < recv_pattern_count; i++) {
-        infer_type_param(checker, gdef, fdn->receiver_type_args.nodes[i], recv_args[i], inferred);
-    }
+    Type** inferred = xcalloc(gdef->type_param_count, sizeof(Type*));
+    infer_method_type_params_from_receiver(checker, gdef, fdn, recv_args, recv_arg_count, inferred);
     free(recv_args);
 
-    // Type-check all arguments (with expected types for lambda inference)
-    int    arg_count = node->as.call.args.count;
-    Type** arg_types = xmalloc(arg_count * sizeof(Type*));
-    int    has_error = 0;
-    for (int i = 0; i < arg_count; i++) {
-        // Build expected type for lambda args from partially-inferred params
-        Type* old_expected    = checker->expected_func_type;
-        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
-        Type* expected        = build_expected_func_type(checker, param_type_node, gdef, inferred);
-        if (expected)
-            checker->expected_func_type = expected;
-
-        arg_types[i] = check_expression(checker, node->as.call.args.nodes[i]);
-
-        checker->expected_func_type = old_expected;
-
-        if (arg_types[i]->kind == TYPE_ERROR) {
-            has_error = 1;
-        }
-    }
-    if (has_error) {
-        free(arg_types);
+    Type** arg_types = check_generic_method_args(checker, node, gdef, fdn, inferred);
+    if (!arg_types) {
         free(inferred);
         return type_error;
     }
 
     // Infer remaining type params from arguments
-    for (int i = 0; i < arg_count; i++) {
-        Node* param_type_node = fdn->params.nodes[i]->as.param.type;
-        infer_type_param(checker, gdef, param_type_node, arg_types[i], inferred);
-    }
+    int arg_count = node->as.call.args.count;
+    infer_method_type_params_from_args(checker, gdef, fdn, arg_types, arg_count, inferred);
 
     // Check all type params were inferred
-    for (int i = 0; i < gdef->type_param_count; i++) {
-        if (!inferred[i]) {
-            check_error(checker, node->line, node->column,
-                        "Cannot infer type parameter '%s' for generic method '%s.%s'",
-                        gdef->type_params[i], base_name, method_name);
-            free(arg_types);
-            free(inferred);
-            return type_error;
-        }
+    if (!ensure_generic_method_inference_complete(checker, node, gdef, base_name, method_name,
+                                                  inferred)) {
+        free(arg_types);
+        free(inferred);
+        return type_error;
     }
 
     // Check trait bounds
-    for (int i = 0; i < gdef->type_param_count; i++) {
-        const char* bound = gdef->type_param_bounds[i];
-        if (!bound) {
-            continue;
-        }
-        if (!type_satisfies_trait_bound(checker, inferred[i], bound)) {
-            check_error(checker, node->line, node->column,
-                        "Type '%s' does not implement trait '%s' required by '%s.%s'",
-                        type_name(inferred[i]), bound, base_name, method_name);
-            free(arg_types);
-            free(inferred);
-            return type_error;
-        }
+    if (!check_generic_method_trait_bounds(checker, node, gdef, base_name, method_name, inferred)) {
+        free(arg_types);
+        free(inferred);
+        return type_error;
     }
 
     // Instantiate
