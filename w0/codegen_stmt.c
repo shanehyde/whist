@@ -1711,6 +1711,117 @@ static void emit_continue_stmt(CodeGen* gen, Node* node) {
     emit(gen, "continue;\n");
 }
 
+static int find_enum_variant_index(Type* enum_type, const char* variant) {
+    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
+        if (strcmp(enum_type->as.enm.value_names[i], variant) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void emit_if_let_bindings(CodeGen* gen, Node* node, Type* enum_type, const char* variant,
+                                 int let_id) {
+    if (!enum_type->as.enm.has_data || node->as.if_let_stmt.binding_count <= 0)
+        return;
+
+    int variant_idx = find_enum_variant_index(enum_type, variant);
+    for (int j = 0; j < node->as.if_let_stmt.binding_count; j++) {
+        emit_indent(gen);
+        emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);
+        emit(gen, " %s = __if_let%d.%s.f%d;\n", node->as.if_let_stmt.bindings[j], let_id, variant,
+             j);
+    }
+}
+
+static void emit_if_let_then_block(CodeGen* gen, Node* node, Node* extra_cond, int has_flag,
+                                   int flag_id) {
+    if (!extra_cond) {
+        emit_stmt_body(gen, node->as.if_let_stmt.then_block);
+        return;
+    }
+
+    emit_indent(gen);
+    emit(gen, "if (");
+    emit_expr(gen, extra_cond);
+    emit(gen, ") {\n");
+    gen->out.indent++;
+    if (has_flag) {
+        emit_indent(gen);
+        emit(gen, "__matched%d = 1;\n", flag_id);
+    }
+    emit_stmt_body(gen, node->as.if_let_stmt.then_block);
+    gen->out.indent--;
+    emit_indent(gen);
+    emit(gen, "}\n");
+}
+
+static void emit_if_let_else_from_flag(CodeGen* gen, Node* else_block, int flag_id) {
+    emit(gen, "\n");
+    emit_indent(gen);
+    emit(gen, "if (!__matched%d) {\n", flag_id);
+    gen->out.indent++;
+    if (else_block->type == NODE_BLOCK) {
+        emit_stmt_body(gen, else_block);
+    } else {
+        emit_stmt(gen, else_block);
+    }
+    gen->out.indent--;
+    emit_indent(gen);
+    emit(gen, "}\n");
+}
+
+static void emit_if_let_else_block(CodeGen* gen, Node* else_block) {
+    if (!else_block) {
+        emit(gen, "\n");
+        return;
+    }
+
+    if (else_block->type == NODE_IF) {
+        int else_if_has_temps = has_owned_temps(else_block->as.if_stmt.cond);
+        if (else_if_has_temps) {
+            emit(gen, " else {\n");
+            gen->out.indent++;
+            emit_stmt(gen, else_block);
+            gen->out.indent--;
+            emit_indent(gen);
+            emit(gen, "}\n");
+        } else {
+            emit(gen, " else ");
+            gen->out.indent--;
+            emit_stmt(gen, else_block);
+            gen->out.indent++;
+        }
+        return;
+    }
+
+    emit(gen, " else {\n");
+    gen->out.indent++;
+    if (else_block->type == NODE_IF_LET) {
+        emit_stmt(gen, else_block);
+    } else {
+        emit_stmt_body(gen, else_block);
+    }
+    gen->out.indent--;
+    emit_indent(gen);
+    emit(gen, "}\n");
+}
+
+static void cleanup_if_let_owned_temps(CodeGen* gen, Node* subject, int has_temps, int saved,
+                                       int subject_is_owned, int let_id) {
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+    if (!subject_is_owned) {
+        return;
+    }
+
+    subject->is_owned_temp = 1;
+    char name[32];
+    snprintf(name, sizeof(name), "__if_let%d", let_id);
+    emit_owned_temp_dec(gen, subject, name);
+}
+
 static void emit_if_let_stmt(CodeGen* gen, Node* node) {
     Type* enum_type = node->as.if_let_stmt.resolved_type;
     if (!enum_type)
@@ -1759,109 +1870,20 @@ static void emit_if_let_stmt(CodeGen* gen, Node* node) {
 
     gen->out.indent++;
 
-    // Emit binding declarations
-    if (is_data && node->as.if_let_stmt.binding_count > 0) {
-        int variant_idx = -1;
-        for (int i = 0; i < enum_type->as.enm.value_count; i++) {
-            if (strcmp(enum_type->as.enm.value_names[i], variant) == 0) {
-                variant_idx = i;
-                break;
-            }
-        }
-        for (int j = 0; j < node->as.if_let_stmt.binding_count; j++) {
-            emit_indent(gen);
-            emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);
-            emit(gen, " %s = __if_let%d.%s.f%d;\n", node->as.if_let_stmt.bindings[j], let_id,
-                 variant, j);
-        }
-    }
-
-    if (extra_cond) {
-        // Nested if for the && condition
-        emit_indent(gen);
-        emit(gen, "if (");
-        emit_expr(gen, extra_cond);
-        emit(gen, ") {\n");
-        gen->out.indent++;
-        if (has_flag) {
-            emit_indent(gen);
-            emit(gen, "__matched%d = 1;\n", flag_id);
-        }
-        emit_stmt_body(gen, node->as.if_let_stmt.then_block);
-        gen->out.indent--;
-        emit_indent(gen);
-        emit(gen, "}\n");
-    } else {
-        // Emit then block directly
-        emit_stmt_body(gen, node->as.if_let_stmt.then_block);
-    }
+    emit_if_let_bindings(gen, node, enum_type, variant, let_id);
+    emit_if_let_then_block(gen, node, extra_cond, has_flag, flag_id);
 
     gen->out.indent--;
     emit_indent(gen);
     emit(gen, "}");
 
-    // Emit else block
-    if (node->as.if_let_stmt.else_block) {
-        if (has_flag) {
-            // With extra_cond + else: use flag-based approach
-            emit(gen, "\n");
-            emit_indent(gen);
-            emit(gen, "if (!__matched%d) {\n", flag_id);
-            gen->out.indent++;
-            if (node->as.if_let_stmt.else_block->type == NODE_BLOCK) {
-                emit_stmt_body(gen, node->as.if_let_stmt.else_block);
-            } else {
-                emit_stmt(gen, node->as.if_let_stmt.else_block);
-            }
-            gen->out.indent--;
-            emit_indent(gen);
-            emit(gen, "}\n");
-        } else if (node->as.if_let_stmt.else_block->type == NODE_IF) {
-            int else_if_has_temps =
-                has_owned_temps(node->as.if_let_stmt.else_block->as.if_stmt.cond);
-            if (else_if_has_temps) {
-                emit(gen, " else {\n");
-                gen->out.indent++;
-                emit_stmt(gen, node->as.if_let_stmt.else_block);
-                gen->out.indent--;
-                emit_indent(gen);
-                emit(gen, "}\n");
-            } else {
-                emit(gen, " else ");
-                gen->out.indent--;
-                emit_stmt(gen, node->as.if_let_stmt.else_block);
-                gen->out.indent++;
-            }
-        } else if (node->as.if_let_stmt.else_block->type == NODE_IF_LET) {
-            emit(gen, " else {\n");
-            gen->out.indent++;
-            emit_stmt(gen, node->as.if_let_stmt.else_block);
-            gen->out.indent--;
-            emit_indent(gen);
-            emit(gen, "}\n");
-        } else {
-            emit(gen, " else {\n");
-            gen->out.indent++;
-            emit_stmt_body(gen, node->as.if_let_stmt.else_block);
-            gen->out.indent--;
-            emit_indent(gen);
-            emit(gen, "}\n");
-        }
+    if (has_flag) {
+        emit_if_let_else_from_flag(gen, node->as.if_let_stmt.else_block, flag_id);
     } else {
-        emit(gen, "\n");
+        emit_if_let_else_block(gen, node->as.if_let_stmt.else_block);
     }
 
-    // Cleanup sub-expression owned temps
-    if (has_temps) {
-        cleanup_owned_temps(gen, saved);
-    }
-    // Cleanup subject if it was an owned temp
-    if (subject_is_owned) {
-        subject->is_owned_temp = 1;
-        char name[32];
-        snprintf(name, sizeof(name), "__if_let%d", let_id);
-        emit_owned_temp_dec(gen, subject, name);
-    }
+    cleanup_if_let_owned_temps(gen, subject, has_temps, saved, subject_is_owned, let_id);
 }
 
 static void emit_unknown_stmt(CodeGen* gen, Node* node) {
