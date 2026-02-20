@@ -170,6 +170,100 @@ static void flush_text_part(NodeList* parts, char* buf, int* buf_len, int line, 
     *buf_len = 0;
 }
 
+// Reports an empty `{}` interpolation segment and marks the parser as failed.
+static void report_empty_interp_expr(Parser* parser, Token* token) {
+    if (!parser->panic_mode) {
+        parser->panic_mode = 1;
+        parser->had_error  = 1;
+        fprintf(stderr, "[line %d:%d] Error: Empty expression in string interpolation\n",
+                token->line, token->column);
+    }
+}
+
+// Skips a quoted string literal while scanning inside an interpolation expression.
+static void skip_interp_expr_string(const char** src, const char* end) {
+    (*src)++;
+    while (*src < end && **src != '"') {
+        if (**src == '\\' && *src + 1 < end) {
+            (*src)++;
+        }
+        (*src)++;
+    }
+    if (*src < end) {
+        (*src)++; // skip closing "
+    }
+}
+
+// Scans interpolation source after `{` and returns the enclosed expression bounds.
+static void scan_interp_expr_bounds(const char** src, const char* end, const char** expr_start,
+                                    int* expr_len) {
+    *expr_start = *src;
+    int depth   = 1;
+    while (*src < end && depth > 0) {
+        if (**src == '{') {
+            depth++;
+        } else if (**src == '}') {
+            depth--;
+            if (depth == 0) {
+                break;
+            }
+        } else if (**src == '"') {
+            skip_interp_expr_string(src, end);
+            continue;
+        }
+        (*src)++;
+    }
+
+    *expr_len = (int)(*src - *expr_start);
+    if (*src < end) {
+        (*src)++; // skip '}'
+    }
+}
+
+// Parses one interpolation expression fragment with a sub-parser and returns its AST node.
+static Node* parse_interp_expr_node(Parser* parser, Token* token, const char* expr_start,
+                                    int expr_len) {
+    if (expr_len == 0) {
+        report_empty_interp_expr(parser, token);
+        return NULL;
+    }
+
+    char* expr_source = xmalloc(expr_len + 2); // +1 for ';', +1 for '\0'
+    memcpy(expr_source, expr_start, expr_len);
+    expr_source[expr_len]     = ';';
+    expr_source[expr_len + 1] = '\0';
+
+    Parser sub_parser;
+    parser_init(&sub_parser, expr_source);
+    Node* expr_node = parse_expression(&sub_parser);
+    free(expr_source);
+
+    if (sub_parser.had_error || !expr_node) {
+        parse_error_at(parser, token, "Invalid expression in string interpolation");
+        node_free(expr_node);
+        return NULL;
+    }
+
+    // Sub-parser coordinates are local; normalize to interpolation token location.
+    expr_node->line   = token->line;
+    expr_node->column = token->column;
+    return expr_node;
+}
+
+// Flushes pending text, parses an interpolation expression, and appends it to parts.
+static int append_interp_expr_part(Parser* parser, Node* node, char* buf, int* buf_len,
+                                   Token* token, const char* expr_start, int expr_len) {
+    flush_text_part(&node->as.string_interp.parts, buf, buf_len, token->line, token->column);
+
+    Node* expr_node = parse_interp_expr_node(parser, token, expr_start, expr_len);
+    if (!expr_node) {
+        return 0;
+    }
+
+    nodelist_push(&node->as.string_interp.parts, expr_node);
+    return 1;
+}
+
 static Node* parse_interp_string(Parser* parser) {
     Token token = parser->previous; // TOK_INTERP_STRING already consumed
 
@@ -198,85 +292,18 @@ static Node* parse_interp_string(Parser* parser) {
                 buf[buf_len++] = '{';
                 src += 2;
             } else {
-                // Expression: {expr}
                 src++; // skip '{'
 
-                // Find matching '}' tracking brace depth
-                const char* expr_start = src;
-                int         depth      = 1;
-                while (src < end && depth > 0) {
-                    if (*src == '{') {
-                        depth++;
-                    } else if (*src == '}') {
-                        depth--;
-                        if (depth == 0)
-                            break;
-                    } else if (*src == '"') {
-                        // Skip string literals inside expressions
-                        src++;
-                        while (src < end && *src != '"') {
-                            if (*src == '\\' && src + 1 < end)
-                                src++;
-                            src++;
-                        }
-                        if (src < end)
-                            src++; // skip closing "
-                        continue;
-                    }
-                    src++;
-                }
+                const char* expr_start = NULL;
+                int         expr_len   = 0;
+                scan_interp_expr_bounds(&src, end, &expr_start, &expr_len);
 
-                int expr_len = (int)(src - expr_start);
-                if (src < end)
-                    src++; // skip '}'
-
-                // Check for empty expression
-                if (expr_len == 0) {
-                    if (!parser->panic_mode) {
-                        parser->panic_mode = 1;
-                        parser->had_error  = 1;
-                        fprintf(stderr,
-                                "[line %d:%d] Error: Empty expression in string interpolation\n",
-                                token.line, token.column);
-                    }
+                if (!append_interp_expr_part(parser, node, buf, &buf_len, &token, expr_start,
+                                             expr_len)) {
                     free(buf);
                     node_free(node);
                     return NULL;
                 }
-
-                // Flush any accumulated text
-                flush_text_part(&node->as.string_interp.parts, buf, &buf_len, token.line,
-                                token.column);
-
-                // Create a null-terminated copy of the expression source
-                char* expr_source = xmalloc(expr_len + 2); // +1 for ';', +1 for '\0'
-                memcpy(expr_source, expr_start, expr_len);
-                expr_source[expr_len]     = ';';
-                expr_source[expr_len + 1] = '\0';
-
-                // Parse the expression with a sub-parser
-                Parser sub_parser;
-                parser_init(&sub_parser, expr_source);
-                Node* expr_node = parse_expression(&sub_parser);
-
-                if (sub_parser.had_error || !expr_node) {
-                    char error_msg[256];
-                    snprintf(error_msg, sizeof(error_msg),
-                             "Invalid expression in string interpolation");
-                    parse_error_at(parser, &token, error_msg);
-                    free(expr_source);
-                    free(buf);
-                    node_free(expr_node);
-                    node_free(node);
-                    return NULL;
-                }
-
-                // Fix line/column info (sub-parser uses line 1, col 1)
-                expr_node->line   = token.line;
-                expr_node->column = token.column;
-
-                nodelist_push(&node->as.string_interp.parts, expr_node);
-                free(expr_source);
             }
         } else if (*src == '}' && src + 1 < end && src[1] == '}') {
             // Escaped brace: }} -> literal }
