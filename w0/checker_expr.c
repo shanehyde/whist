@@ -2578,52 +2578,68 @@ static Type* check_lambda_expr(Checker* checker, Node* node) {
 // Expression checking
 // =============================================================================
 
+// Return the built-in type for literal expression nodes, or NULL otherwise.
+static Type* get_literal_expr_type(int node_type) {
+    switch (node_type) {
+    case NODE_INT_LIT:
+        return type_int64;
+    case NODE_FLOAT_LIT:
+        return type_f32;
+    case NODE_STRING_LIT:
+        return type_string;
+    case NODE_CHAR_LIT:
+        return type_char;
+    case NODE_BOOL_LIT:
+        return type_bool;
+    case NODE_NULL_LIT:
+        return type_null; // null reference
+    default:
+        return NULL;
+    }
+}
+
+// Collect lambda captures when an identifier resolves to a variable across boundaries.
+static void maybe_collect_ident_capture(Checker* checker, Node* node, Symbol* sym) {
+    if (checker->lambda_depth <= 0 || !sym || sym->kind != SYM_VAR) {
+        return;
+    }
+
+    int boundaries = count_captured_boundaries(checker, node->as.ident.name);
+    if (boundaries > 0) {
+        collect_captures(checker, node->as.ident.name, sym->type, boundaries);
+    }
+}
+
+// Type-check an identifier expression and record resolved function type metadata.
+static Type* check_ident_expr(Checker* checker, Node* node) {
+    Symbol* sym = checker_lookup(checker, node->as.ident.name);
+    if (!sym) {
+        check_error(checker, node->line, node->column, "Undefined identifier '%s'",
+                    node->as.ident.name);
+        return type_error;
+    }
+
+    maybe_collect_ident_capture(checker, node, sym);
+
+    if (sym->kind == SYM_FUNC && sym->type->kind == TYPE_FUNC) {
+        node->as.ident.resolved_func_type = sym->type;
+    }
+    return sym->type;
+}
+
 // Dispatch expression type-checking based on node type, returning the resolved type
 Type* check_expression(Checker* checker, Node* node) {
     if (!node)
         return type_error;
 
-    switch (node->type) {
-    case NODE_INT_LIT:
-        return type_int64;
-
-    case NODE_FLOAT_LIT:
-        return type_f32;
-
-    case NODE_STRING_LIT:
-        return type_string;
-
-    case NODE_CHAR_LIT:
-        return type_char;
-
-    case NODE_BOOL_LIT:
-        return type_bool;
-
-    case NODE_NULL_LIT:
-        return type_null; // null reference
-
-    case NODE_IDENT: {
-        if (checker->lambda_depth > 0) {
-            int boundaries = count_captured_boundaries(checker, node->as.ident.name);
-            if (boundaries > 0) {
-                // Variable crosses lambda boundaries — collect captures
-                Symbol* sym = checker_lookup(checker, node->as.ident.name);
-                if (sym && sym->kind == SYM_VAR) {
-                    collect_captures(checker, node->as.ident.name, sym->type, boundaries);
-                }
-            }
-        }
-        Symbol* sym = checker_lookup(checker, node->as.ident.name);
-        if (!sym) {
-            check_error(checker, node->line, node->column, "Undefined identifier '%s'",
-                        node->as.ident.name);
-            return type_error;
-        }
-        if (sym->kind == SYM_FUNC && sym->type->kind == TYPE_FUNC) {
-            node->as.ident.resolved_func_type = sym->type;
-        }
-        return sym->type;
+    Type* literal_type = get_literal_expr_type(node->type);
+    if (literal_type) {
+        return literal_type;
     }
+
+    switch (node->type) {
+    case NODE_IDENT:
+        return check_ident_expr(checker, node);
 
     case NODE_ENUM_VALUE:
         return check_enum_value_expr(checker, node);
