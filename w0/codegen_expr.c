@@ -20,6 +20,11 @@ static void emit_match_expr(CodeGen* gen, Node* node);
 static void emit_binary_expr(CodeGen* gen, Node* node);
 static void emit_assign_expr(CodeGen* gen, Node* node);
 static void emit_compound_literal_from_list(CodeGen* gen, NodeList* elements);
+static void emit_unary_expr(CodeGen* gen, Node* node);
+static void emit_cast_expr(CodeGen* gen, Node* node);
+static void emit_tuple_lit_expr(CodeGen* gen, Node* node);
+static void emit_array_lit_expr(CodeGen* gen, Node* node);
+static void emit_lambda_expr(CodeGen* gen, Node* node);
 
 static const char* member_struct_name(CodeGen* gen, Node* member) {
     return sem_info_get_member_struct_name(gen->checker.sem, member, member->as.member.struct_name);
@@ -1450,17 +1455,111 @@ static void emit_compound_literal_from_list(CodeGen* gen, NodeList* elements) {
     emit(gen, "}");
 }
 
+static const char* find_hoisted_temp_name(CodeGen* gen, Node* node) {
+    for (int i = 0; i < gen->hoist.count; i++) {
+        if (gen->hoist.nodes[i] == node) {
+            return gen->hoist.names[i];
+        }
+    }
+    return NULL;
+}
+
+static void emit_unary_expr(CodeGen* gen, Node* node) {
+    emit(gen, "(%s", unary_op_str(node->as.unary.op));
+    emit_expr(gen, node->as.unary.operand);
+    emit(gen, ")");
+}
+
+static void emit_cast_expr(CodeGen* gen, Node* node) {
+    emit(gen, "((");
+    emit_resolved_type(gen, node->as.cast_expr.resolved_type);
+    emit(gen, ")(");
+    emit_expr(gen, node->as.cast_expr.expr);
+    emit(gen, "))");
+}
+
+static void emit_tuple_lit_expr(CodeGen* gen, Node* node) {
+    // Tuple literal: (e1, e2, ...) -> (__tuple_tN){e1, e2, ...}
+    if (node->as.tuple_lit.resolved_type) {
+        emit(gen, "(");
+        emit_resolved_type(gen, node->as.tuple_lit.resolved_type);
+        emit(gen, ")");
+    }
+    emit_compound_literal_from_list(gen, &node->as.tuple_lit.elements);
+}
+
+static void emit_array_lit_expr(CodeGen* gen, Node* node) {
+    // Array literal: [e1, e2, ...] -> {e1, e2, ...}.
+    emit_compound_literal_from_list(gen, &node->as.array_lit.elements);
+}
+
+static int lambda_has_rc_capture(Node* node) {
+    for (int c = 0; c < node->as.lambda.captures.count; c++) {
+        if (node->as.lambda.captures.is_rc[c]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void emit_lambda_env_alloc(CodeGen* gen, int id, int has_rc) {
+    emit(gen,
+         "({ __lambda_%d_env* __cenv_%d = (__lambda_%d_env*)__rc_alloc("
+         "sizeof(__lambda_%d_env), ",
+         id, id, id, id);
+    if (has_rc) {
+        emit(gen, "__lambda_%d_env_cleanup", id);
+    } else {
+        emit(gen, "NULL");
+    }
+    emit(gen, ");\n");
+}
+
+static void emit_lambda_capture_inc(CodeGen* gen, int id, const char* name, Type* capture_type) {
+    if (capture_type && capture_type->kind == TYPE_STRING) {
+        emit(gen, "    __rc_inc((void*)__cenv_%d->%s);\n", id, name);
+    } else if (capture_type && capture_type->kind == TYPE_FUNC) {
+        emit(gen, "    __rc_inc(__cenv_%d->%s.env);\n", id, name);
+    } else {
+        emit(gen, "    __rc_inc(__cenv_%d->%s);\n", id, name);
+    }
+}
+
+static void emit_lambda_capture_assignments(CodeGen* gen, Node* node, int id) {
+    for (int c = 0; c < node->as.lambda.captures.count; c++) {
+        const char* capture_name = node->as.lambda.captures.names[c];
+        emit(gen, "    __cenv_%d->%s = ", id, capture_name);
+        emit_capture_source_name(gen, capture_name);
+        emit(gen, ";\n");
+        if (node->as.lambda.captures.is_rc[c]) {
+            emit_lambda_capture_inc(gen, id, capture_name, node->as.lambda.captures.types[c]);
+        }
+    }
+}
+
+static void emit_lambda_expr(CodeGen* gen, Node* node) {
+    if (node->as.lambda.captures.count > 0) {
+        int id     = node->as.lambda.lambda_id;
+        int has_rc = lambda_has_rc_capture(node);
+        emit_lambda_env_alloc(gen, id, has_rc);
+        emit_lambda_capture_assignments(gen, node, id);
+        emit(gen, "    (__Closure){(void*)__lambda_%d, (void*)__cenv_%d}; })", id, id);
+        return;
+    }
+
+    emit(gen, "(__Closure){(void*)__lambda_%d, NULL}", node->as.lambda.lambda_id);
+}
+
 // Dispatch expression code generation based on node type
 void emit_expr(CodeGen* gen, Node* node) {
     if (!node)
         return;
 
     // Check if this node was hoisted — if so, emit just the temp name
-    for (int i = 0; i < gen->hoist.count; i++) {
-        if (gen->hoist.nodes[i] == node) {
-            emit(gen, "%s", gen->hoist.names[i]);
-            return;
-        }
+    const char* hoisted_name = find_hoisted_temp_name(gen, node);
+    if (hoisted_name) {
+        emit(gen, "%s", hoisted_name);
+        return;
     }
 
     switch (node->type) {
@@ -1501,9 +1600,7 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_UNARY:
-        emit(gen, "(%s", unary_op_str(node->as.unary.op));
-        emit_expr(gen, node->as.unary.operand);
-        emit(gen, ")");
+        emit_unary_expr(gen, node);
         break;
 
     case NODE_CALL:
@@ -1531,18 +1628,11 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_TUPLE_LIT:
-        // Tuple literal: (e1, e2, ...) -> (__tuple_tN){e1, e2, ...}
-        if (node->as.tuple_lit.resolved_type) {
-            emit(gen, "(");
-            emit_resolved_type(gen, node->as.tuple_lit.resolved_type);
-            emit(gen, ")");
-        }
-        emit_compound_literal_from_list(gen, &node->as.tuple_lit.elements);
+        emit_tuple_lit_expr(gen, node);
         break;
 
     case NODE_ARRAY_LIT:
-        // Array literal: [e1, e2, ...] -> {e1, e2, ...}.
-        emit_compound_literal_from_list(gen, &node->as.array_lit.elements);
+        emit_array_lit_expr(gen, node);
         break;
 
     case NODE_NEW_EXPR:
@@ -1554,11 +1644,7 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_CAST:
-        emit(gen, "((");
-        emit_resolved_type(gen, node->as.cast_expr.resolved_type);
-        emit(gen, ")(");
-        emit_expr(gen, node->as.cast_expr.expr);
-        emit(gen, "))");
+        emit_cast_expr(gen, node);
         break;
 
     case NODE_TRY_EXPR:
@@ -1570,49 +1656,7 @@ void emit_expr(CodeGen* gen, Node* node) {
         break;
 
     case NODE_LAMBDA:
-        if (node->as.lambda.captures.count > 0) {
-            int id     = node->as.lambda.lambda_id;
-            int has_rc = 0;
-            for (int c = 0; c < node->as.lambda.captures.count; c++) {
-                if (node->as.lambda.captures.is_rc[c]) {
-                    has_rc = 1;
-                    break;
-                }
-            }
-            const char* cleanup = has_rc ? "__lambda_%d_env_cleanup" : "NULL";
-            emit(gen,
-                 "({ __lambda_%d_env* __cenv_%d = (__lambda_%d_env*)__rc_alloc("
-                 "sizeof(__lambda_%d_env), ",
-                 id, id, id, id);
-            if (has_rc) {
-                emit(gen, "__lambda_%d_env_cleanup", id);
-            } else {
-                emit(gen, "NULL");
-            }
-            (void)cleanup;
-            emit(gen, ");\n");
-            for (int c = 0; c < node->as.lambda.captures.count; c++) {
-                emit(gen, "    __cenv_%d->%s = ", id, node->as.lambda.captures.names[c]);
-                emit_capture_source_name(gen, node->as.lambda.captures.names[c]);
-                emit(gen, ";\n");
-                if (node->as.lambda.captures.is_rc[c]) {
-                    Type* ct = node->as.lambda.captures.types[c];
-                    if (ct && ct->kind == TYPE_STRING) {
-                        emit(gen, "    __rc_inc((void*)__cenv_%d->%s);\n", id,
-                             node->as.lambda.captures.names[c]);
-                    } else if (ct && ct->kind == TYPE_FUNC) {
-                        emit(gen, "    __rc_inc(__cenv_%d->%s.env);\n", id,
-                             node->as.lambda.captures.names[c]);
-                    } else {
-                        emit(gen, "    __rc_inc(__cenv_%d->%s);\n", id,
-                             node->as.lambda.captures.names[c]);
-                    }
-                }
-            }
-            emit(gen, "    (__Closure){(void*)__lambda_%d, (void*)__cenv_%d}; })", id, id);
-        } else {
-            emit(gen, "(__Closure){(void*)__lambda_%d, NULL}", node->as.lambda.lambda_id);
-        }
+        emit_lambda_expr(gen, node);
         break;
 
     default:
