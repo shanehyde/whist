@@ -12,7 +12,6 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node);
 static void emit_return_stmt(CodeGen* gen, Node* node);
 static void emit_match_stmt(CodeGen* gen, Node* node);
 static void collect_owned_temps(Node* node, Node*** temps, int* count, int* cap);
-int         has_owned_temps(Node* node);
 
 // Walk a destructuring pattern and RC-track any identifiers with RC-managed types
 static void rc_track_destruct_pattern(CodeGen* gen, DestructPattern* pattern) {
@@ -46,19 +45,6 @@ void emit_block_contents(CodeGen* gen, Node* block) {
     }
     rc_cleanup_scope(gen, gen->rc.depth);
     gen->rc.depth--;
-}
-
-// Look up a struct field type by field name.
-static Type* find_struct_field_type(Type* struct_type, const char* field_name) {
-    if (!struct_type || struct_type->kind != TYPE_STRUCT) {
-        return NULL;
-    }
-    for (int i = 0; i < struct_type->as.struc.field_count; i++) {
-        if (strcmp(struct_type->as.struc.field_names[i], field_name) == 0) {
-            return struct_type->as.struc.field_types[i];
-        }
-    }
-    return NULL;
 }
 
 // Record a hoisted expression node and its temporary name.
@@ -396,9 +382,10 @@ static int emit_rc_member_assign_stmt(CodeGen* gen, Node* expr) {
                     rc_is_tracked(gen, member->as.member.object->as.ident.name);
 
     if (obj_is_rc) {
-        const char* obj_name = member->as.member.object->as.ident.name;
-        Type*       obj_type = rc_get_var_type(gen, obj_name);
-        Type*       field_ty = find_struct_field_type(obj_type, member->as.member.name);
+        const char* obj_name  = member->as.member.object->as.ident.name;
+        Type*       obj_type  = rc_get_var_type(gen, obj_name);
+        int         field_idx = type_find_field_index(obj_type, member->as.member.name);
+        Type*       field_ty  = field_idx >= 0 ? obj_type->as.struc.field_types[field_idx] : NULL;
 
         if (emit_rc_member_assign_enum_field(gen, expr, member, field_ty)) {
             return 1;
@@ -459,80 +446,6 @@ static int emit_vec_index_assign_stmt(CodeGen* gen, Node* expr) {
     emit_expr(gen, expr->as.assign.value);
     emit(gen, ";\n");
     return 1;
-}
-
-// Check if an expression tree contains any owned temps.
-// Return whether a new-expression subtree contains any owned temps.
-static int has_owned_temps_new_expr(Node* node) {
-    if (node->as.new_expr.init) {
-        for (int i = 0; i < node->as.new_expr.init->as.struct_init.fields.count; i++) {
-            Node* field = node->as.new_expr.init->as.struct_init.fields.nodes[i];
-            if (field && field->type == NODE_FIELD_INIT &&
-                has_owned_temps(field->as.field_init.value)) {
-                return 1;
-            }
-        }
-    }
-    for (int i = 0; i < node->as.new_expr.args.count; i++) {
-        if (has_owned_temps(node->as.new_expr.args.nodes[i])) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-// Return whether any child expression for this node contains owned temps.
-static int has_owned_temps_children(Node* node) {
-    switch (node->type) {
-    case NODE_CALL:
-        if (has_owned_temps(node->as.call.func))
-            return 1;
-        for (int i = 0; i < node->as.call.args.count; i++) {
-            if (has_owned_temps(node->as.call.args.nodes[i]))
-                return 1;
-        }
-        return 0;
-    case NODE_BINARY:
-        return has_owned_temps(node->as.binary.left) || has_owned_temps(node->as.binary.right);
-    case NODE_UNARY:
-        return has_owned_temps(node->as.unary.operand);
-    case NODE_MEMBER:
-        return has_owned_temps(node->as.member.object);
-    case NODE_INDEX:
-        return has_owned_temps(node->as.index.object) || has_owned_temps(node->as.index.index);
-    case NODE_SLICE:
-        return has_owned_temps(node->as.slice.object) || has_owned_temps(node->as.slice.start) ||
-               has_owned_temps(node->as.slice.end);
-    case NODE_NEW_EXPR:
-        return has_owned_temps_new_expr(node);
-    case NODE_CAST:
-        return has_owned_temps(node->as.cast_expr.expr);
-    case NODE_STRING_INTERP:
-        for (int i = 0; i < node->as.string_interp.part_count; i++) {
-            if (has_owned_temps(node->as.string_interp.parts.nodes[i]))
-                return 1;
-        }
-        return 0;
-    case NODE_ASSIGN:
-        return has_owned_temps(node->as.assign.target) || has_owned_temps(node->as.assign.value);
-    case NODE_ENUM_VALUE:
-        for (int i = 0; i < node->as.enum_value.args.count; i++) {
-            if (has_owned_temps(node->as.enum_value.args.nodes[i]))
-                return 1;
-        }
-        return 0;
-    default:
-        return 0;
-    }
-}
-
-// Check if an expression tree contains any owned temps.
-int has_owned_temps(Node* node) {
-    if (!node)
-        return 0;
-    if (node->is_owned_temp)
-        return 1;
-    return has_owned_temps_children(node);
 }
 
 // Emit an expression statement (NODE_EXPR_STMT).

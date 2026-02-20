@@ -623,4 +623,15 @@ void nodelist_free(NodeList* list);
 // Match helpers
 int match_stmt_has_wildcard_arm(Node* node);
 
+// Owned temp predicates
+int has_owned_temps(Node* node);
+
+// AST query functions
+Node* find_generic_struct_decl(Node* ast, const char* name);
+Node* find_generic_enum_decl(Node* ast, const char* name);
+Node* find_generic_func_decl(Node* ast, const char* name);
+Node* find_generic_method_func_decl(Node* ast, const char* receiver_type, const char* method_name);
+void  collect_generic_methods(Node* ast, const char* struct_name, Node*** methods_out,
+                              int* count_out);
+
 #endif

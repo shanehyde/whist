@@ -3,6 +3,9 @@
 
 #include <stddef.h>
 
+// Forward declaration for type_from_node
+typedef struct Node Node;
+
 typedef enum {
     TYPE_VOID,
     TYPE_BOOL,
@@ -177,6 +180,7 @@ int         type_is_rc_managed(Type* type);             // Is this an RC-managed
 int         type_is_signed_integer(Type* type);         // Is this a signed integer type?
 int         type_is_unsigned_integer(Type* type);       // Is this an unsigned integer type?
 int         type_enum_variant_index(Type* enum_type, const char* variant_name);
+int         type_find_field_index(Type* type, const char* field_name);
 int         type_supports_vec_contains(Type* type); // Can Vec<T>.contains compare this type?
 int         type_supports_vec_sort(Type* type);     // Is this type sortable by Vec<T>.sort?
 int         type_supports_equality(Type* type);     // Can this type be compared with ==?
@@ -186,6 +190,9 @@ const char* type_name(Type* type);
 Type*       type_builtin_from_name(const char* name); // Returns builtin Type* or NULL
 const char* type_c_name(const char* name);            // Returns C type string or NULL
 int         type_is_builtin_name(const char* name);   // Is this a builtin type name?
+
+// AST-to-Type conversion
+Type* type_from_node(Node* type_node);
 
 // TypeList operations
 void typelist_init(TypeList* list);
