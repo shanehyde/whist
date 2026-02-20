@@ -1563,119 +1563,118 @@ static void emit_lambda_expr(CodeGen* gen, Node* node) {
     emit(gen, "(__Closure){(void*)__lambda_%d, NULL}", node->as.lambda.lambda_id);
 }
 
-// Dispatch expression code generation based on node type
-void emit_expr(CodeGen* gen, Node* node) {
-    if (!node)
-        return;
-
-    // Check if this node was hoisted — if so, emit just the temp name
+// Emit a hoisted temp name for an expression and return whether one was emitted.
+static int emit_hoisted_expr(CodeGen* gen, Node* node) {
     const char* hoisted_name = find_hoisted_temp_name(gen, node);
-    if (hoisted_name) {
-        emit(gen, "%s", hoisted_name);
-        return;
+    if (!hoisted_name) {
+        return 0;
     }
 
+    emit(gen, "%s", hoisted_name);
+    return 1;
+}
+
+// Emit literal and symbol-like expressions and return whether the node was handled.
+static int emit_simple_expr(CodeGen* gen, Node* node) {
     switch (node->type) {
     case NODE_INT_LIT:
         emit(gen, "%ldLL", node->as.int_lit.value);
-        break;
-
+        return 1;
     case NODE_FLOAT_LIT:
         emit(gen, "%g", node->as.float_lit.value);
-        break;
-
+        return 1;
     case NODE_STRING_LIT:
         emit_string_lit(gen, node);
-        break;
-
+        return 1;
     case NODE_CHAR_LIT:
         emit_char_lit(gen, node);
-        break;
-
+        return 1;
     case NODE_BOOL_LIT:
         emit(gen, "%s", node->as.bool_lit.value ? "true" : "false");
-        break;
-
+        return 1;
     case NODE_NULL_LIT:
         emit(gen, "NULL");
-        break;
-
+        return 1;
     case NODE_IDENT:
         emit_ident_expr(gen, node);
-        break;
-
+        return 1;
     case NODE_ENUM_VALUE:
         emit_enum_value(gen, node);
-        break;
+        return 1;
+    default:
+        return 0;
+    }
+}
 
+// Emit complex expressions that recurse into child expressions.
+static void emit_complex_expr(CodeGen* gen, Node* node) {
+    switch (node->type) {
     case NODE_BINARY:
         emit_binary_expr(gen, node);
         break;
-
     case NODE_UNARY:
         emit_unary_expr(gen, node);
         break;
-
     case NODE_CALL:
         emit_call_expr(gen, node);
         break;
-
     case NODE_INDEX:
         emit_index_expr(gen, node);
         break;
-
     case NODE_SLICE:
         emit_slice_expr(gen, node);
         break;
-
     case NODE_MEMBER:
         emit_member_expr(gen, node);
         break;
-
     case NODE_ASSIGN:
         emit_assign_expr(gen, node);
         break;
-
     case NODE_STRUCT_INIT:
         emit_struct_init(gen, node);
         break;
-
     case NODE_TUPLE_LIT:
         emit_tuple_lit_expr(gen, node);
         break;
-
     case NODE_ARRAY_LIT:
         emit_array_lit_expr(gen, node);
         break;
-
     case NODE_NEW_EXPR:
         emit_new_expr(gen, node);
         break;
-
     case NODE_STRING_INTERP:
         emit_string_interp(gen, node);
         break;
-
     case NODE_CAST:
         emit_cast_expr(gen, node);
         break;
-
     case NODE_TRY_EXPR:
         emit_try_expr(gen, node);
         break;
-
     case NODE_MATCH:
         emit_match_expr(gen, node);
         break;
-
     case NODE_LAMBDA:
         emit_lambda_expr(gen, node);
         break;
-
     default:
         emit(gen, "/* unknown expr %d */", node->type);
         break;
     }
+}
+
+// Dispatch expression code generation based on node type.
+void emit_expr(CodeGen* gen, Node* node) {
+    if (!node) {
+        return;
+    }
+    if (emit_hoisted_expr(gen, node)) {
+        return;
+    }
+    if (emit_simple_expr(gen, node)) {
+        return;
+    }
+    emit_complex_expr(gen, node);
 }
 
 // Emit a struct initializer as a C designated initializer: {.field = value, ...}
