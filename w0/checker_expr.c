@@ -2139,6 +2139,83 @@ static Type* check_string_interp_expr(Checker* checker, Node* node) {
 // Try expression checking (? operator)
 // =============================================================================
 
+static int classify_try_enum(Type* enum_type, int* is_option, int* success_idx, int* err_idx) {
+    int ok_idx   = find_resolved_enum_variant(enum_type, "Ok");
+    int err      = find_resolved_enum_variant(enum_type, "Err");
+    int some_idx = find_resolved_enum_variant(enum_type, "Some");
+    int none_idx = find_resolved_enum_variant(enum_type, "None");
+
+    int is_result = (ok_idx >= 0 && err >= 0);
+    int option    = (some_idx >= 0 && none_idx >= 0);
+    if (is_result) {
+        option = 0;
+    }
+
+    if (!is_result && !option) {
+        return 0;
+    }
+
+    *is_option   = option;
+    *success_idx = is_result ? ok_idx : some_idx;
+    *err_idx     = is_result ? err : -1;
+    return 1;
+}
+
+static int check_try_return_type_compatibility(Checker* checker, Node* node, Type* expr_type,
+                                               Type* ret_type, int is_option, int expr_err_idx) {
+    if (ret_type->kind != TYPE_ENUM || !ret_type->as.enm.has_data) {
+        check_error(checker, node->line, node->column,
+                    "'?' used in function returning '%s', but must return a Result or Option type",
+                    type_name(ret_type));
+        return 0;
+    }
+
+    if (is_option) {
+        if (find_resolved_enum_variant(ret_type, "None") < 0) {
+            check_error(checker, node->line, node->column,
+                        "'?' on Option requires function return type to have 'None' variant, "
+                        "got '%s'",
+                        type_name(ret_type));
+            return 0;
+        }
+        return 1;
+    }
+
+    int ret_err_idx = find_resolved_enum_variant(ret_type, "Err");
+    if (ret_err_idx < 0) {
+        check_error(checker, node->line, node->column,
+                    "'?' on Result requires function return type to have 'Err' variant, got '%s'",
+                    type_name(ret_type));
+        return 0;
+    }
+
+    if (expr_type->as.enm.variant_type_counts[expr_err_idx] != 1 ||
+        ret_type->as.enm.variant_type_counts[ret_err_idx] != 1) {
+        check_error(checker, node->line, node->column,
+                    "'?' requires 'Err' variant to have exactly one payload field");
+        return 0;
+    }
+
+    Type* expr_err_type = expr_type->as.enm.variant_types[expr_err_idx][0];
+    Type* ret_err_type  = ret_type->as.enm.variant_types[ret_err_idx][0];
+    if (!type_assignable(ret_err_type, expr_err_type)) {
+        check_error(checker, node->line, node->column,
+                    "'?' error type mismatch: expression has Err(%s) but function returns Err(%s)",
+                    type_name(expr_err_type), type_name(ret_err_type));
+        return 0;
+    }
+    return 1;
+}
+
+static void set_try_expr_info(Node* node, Type* expr_type, Type* ret_type, Type* unwrapped_type,
+                              int is_option) {
+    node->as.try_expr.resolved_type  = expr_type;
+    node->as.try_expr.unwrapped_type = unwrapped_type;
+    node->as.try_expr.is_option      = is_option ? 1 : 0;
+    node->as.try_expr.enum_name      = xstrdup(expr_type->as.enm.name);
+    node->as.try_expr.ret_enum_name  = xstrdup(ret_type->as.enm.name);
+}
+
 // Type-check a try expression (expr?): validates Result/Option pattern,
 // extracts unwrapped type, and checks return type compatibility
 static Type* check_try_expr(Checker* checker, Node* node) {
@@ -2161,29 +2238,10 @@ static Type* check_try_expr(Checker* checker, Node* node) {
         return type_error;
     }
 
-    // Detect Option pattern: has Some(T) + None variants
-    // Detect Result pattern: has Ok(T) + Err(E) variants
-    int ok_idx = -1, err_idx = -1, some_idx = -1, none_idx = -1;
-    for (int i = 0; i < expr_type->as.enm.value_count; i++) {
-        const char* vname = expr_type->as.enm.value_names[i];
-        if (strcmp(vname, "Ok") == 0)
-            ok_idx = i;
-        else if (strcmp(vname, "Err") == 0)
-            err_idx = i;
-        else if (strcmp(vname, "Some") == 0)
-            some_idx = i;
-        else if (strcmp(vname, "None") == 0)
-            none_idx = i;
-    }
-
-    int is_result = (ok_idx >= 0 && err_idx >= 0);
-    int is_option = (some_idx >= 0 && none_idx >= 0);
-
-    // Result takes priority if enum has both Ok/Err and Some/None
-    if (is_result)
-        is_option = 0;
-
-    if (!is_result && !is_option) {
+    int is_option   = 0;
+    int success_idx = -1;
+    int err_idx     = -1;
+    if (!classify_try_enum(expr_type, &is_option, &success_idx, &err_idx)) {
         check_error(checker, node->line, node->column,
                     "'?' operator requires a Result (Ok/Err) or Option (Some/None) enum, got '%s'",
                     type_name(expr_type));
@@ -2191,81 +2249,22 @@ static Type* check_try_expr(Checker* checker, Node* node) {
     }
 
     // Extract unwrapped type T from Ok(T) or Some(T)
-    int success_idx = is_result ? ok_idx : some_idx;
     if (expr_type->as.enm.variant_type_counts[success_idx] != 1) {
         check_error(checker, node->line, node->column,
                     "'?' requires '%s' variant to have exactly one payload field",
-                    is_result ? "Ok" : "Some");
+                    is_option ? "Some" : "Ok");
         return type_error;
     }
     Type* unwrapped_type = expr_type->as.enm.variant_types[success_idx][0];
 
     // Validate function return type compatibility
     Type* ret_type = checker->current_func_return;
-    if (ret_type->kind != TYPE_ENUM || !ret_type->as.enm.has_data) {
-        check_error(checker, node->line, node->column,
-                    "'?' used in function returning '%s', but must return a Result or Option type",
-                    type_name(ret_type));
+    if (!check_try_return_type_compatibility(checker, node, expr_type, ret_type, is_option,
+                                             err_idx)) {
         return type_error;
     }
 
-    if (is_option) {
-        // Option: return type must have a None variant
-        int ret_has_none = 0;
-        for (int i = 0; i < ret_type->as.enm.value_count; i++) {
-            if (strcmp(ret_type->as.enm.value_names[i], "None") == 0) {
-                ret_has_none = 1;
-                break;
-            }
-        }
-        if (!ret_has_none) {
-            check_error(checker, node->line, node->column,
-                        "'?' on Option requires function return type to have 'None' variant, "
-                        "got '%s'",
-                        type_name(ret_type));
-            return type_error;
-        }
-    } else {
-        // Result: return type must have an Err variant with matching error type
-        int ret_err_idx = -1;
-        for (int i = 0; i < ret_type->as.enm.value_count; i++) {
-            if (strcmp(ret_type->as.enm.value_names[i], "Err") == 0) {
-                ret_err_idx = i;
-                break;
-            }
-        }
-        if (ret_err_idx < 0) {
-            check_error(checker, node->line, node->column,
-                        "'?' on Result requires function return type to have 'Err' variant, "
-                        "got '%s'",
-                        type_name(ret_type));
-            return type_error;
-        }
-        // Check error type compatibility
-        if (expr_type->as.enm.variant_type_counts[err_idx] != 1 ||
-            ret_type->as.enm.variant_type_counts[ret_err_idx] != 1) {
-            check_error(checker, node->line, node->column,
-                        "'?' requires 'Err' variant to have exactly one payload field");
-            return type_error;
-        }
-        Type* expr_err_type = expr_type->as.enm.variant_types[err_idx][0];
-        Type* ret_err_type  = ret_type->as.enm.variant_types[ret_err_idx][0];
-        if (!type_assignable(ret_err_type, expr_err_type)) {
-            check_error(checker, node->line, node->column,
-                        "'?' error type mismatch: expression has Err(%s) but function returns "
-                        "Err(%s)",
-                        type_name(expr_err_type), type_name(ret_err_type));
-            return type_error;
-        }
-    }
-
-    // Set checker fields on the node
-    node->as.try_expr.resolved_type  = expr_type;
-    node->as.try_expr.unwrapped_type = unwrapped_type;
-    node->as.try_expr.is_option      = is_option ? 1 : 0;
-    node->as.try_expr.enum_name      = xstrdup(expr_type->as.enm.name);
-    node->as.try_expr.ret_enum_name  = xstrdup(ret_type->as.enm.name);
-
+    set_try_expr_info(node, expr_type, ret_type, unwrapped_type, is_option);
     return unwrapped_type;
 }
 
