@@ -1916,8 +1916,7 @@ static void emit_generic_method_impls(CodeGen* gen, Node* ast) {
 
 // Find a method-level generic function declaration in the AST.
 // Matches func (ReceiverType<...>) MethodName<...>(...): ...
-Node* find_generic_method_func_decl(Node* ast, const char* receiver_type,
-                                    const char* method_name) {
+Node* find_generic_method_func_decl(Node* ast, const char* receiver_type, const char* method_name) {
     for (int m = 0; m < ast->as.program.modules.count; m++) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
