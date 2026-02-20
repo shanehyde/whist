@@ -538,6 +538,82 @@ static int check_destruct_pattern_redefinitions_internal(Checker* checker, Destr
     return 0;
 }
 
+// Propagate tuple-pattern child types as type_error when parent type checking already failed.
+static void propagate_tuple_pattern_error(Checker* checker, DestructPattern* pattern, int line,
+                                          int col) {
+    for (int i = 0; i < pattern->as.tuple.count; i++) {
+        check_destruct_pattern_against_type(checker, pattern->as.tuple.elements[i], type_error,
+                                            line, col);
+    }
+}
+
+// Validate tuple destructuring arity and recursively validate each element type.
+static int check_tuple_destruct_pattern_against_type(Checker* checker, DestructPattern* pattern,
+                                                     Type* type, int line, int col) {
+    if (type->kind != TYPE_TUPLE && type->kind != TYPE_ERROR) {
+        check_error(checker, line, col, "Nested pattern requires a tuple, got '%s'",
+                    type_name(type));
+        return 1;
+    }
+
+    if (type->kind == TYPE_ERROR) {
+        propagate_tuple_pattern_error(checker, pattern, line, col);
+        return 0;
+    }
+
+    if (type->as.tuple.elem_count != pattern->as.tuple.count) {
+        check_error(checker, line, col, "Nested pattern has %d elements, but tuple has %d elements",
+                    pattern->as.tuple.count, type->as.tuple.elem_count);
+        return 1;
+    }
+
+    for (int i = 0; i < pattern->as.tuple.count; i++) {
+        if (check_destruct_pattern_against_type(checker, pattern->as.tuple.elements[i],
+                                                type->as.tuple.elem_types[i], line, col)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Return the index of a struct field by name, or -1 if not found.
+static int find_struct_field_index(Type* type, const char* field_name) {
+    for (int j = 0; j < type->as.struc.field_count; j++) {
+        if (strcmp(field_name, type->as.struc.field_names[j]) == 0) {
+            return j;
+        }
+    }
+    return -1;
+}
+
+// Validate struct destructuring fields and record resolved field types.
+static int check_struct_destruct_pattern_against_type(Checker* checker, DestructPattern* pattern,
+                                                      Type* type, int line, int col) {
+    if (type->kind != TYPE_STRUCT && type->kind != TYPE_ERROR) {
+        check_error(checker, line, col, "Struct destructuring requires a struct type, got '%s'",
+                    type_name(type));
+        return 1;
+    }
+
+    if (type->kind == TYPE_ERROR) {
+        for (int i = 0; i < pattern->as.struc.count; i++) {
+            pattern->as.struc.field_types[i] = type_error;
+        }
+        return 0;
+    }
+
+    for (int i = 0; i < pattern->as.struc.count; i++) {
+        int field_idx = find_struct_field_index(type, pattern->as.struc.field_names[i]);
+        if (field_idx < 0) {
+            check_error(checker, line, col, "Struct '%s' has no field '%s'", type->as.struc.name,
+                        pattern->as.struc.field_names[i]);
+            return 1;
+        }
+        pattern->as.struc.field_types[i] = type->as.struc.field_types[field_idx];
+    }
+    return 0;
+}
+
 // Check that a destructuring pattern matches a type (recursive)
 // Also sets resolved_type on each pattern node
 // Returns 1 if error found, 0 otherwise
@@ -550,70 +626,11 @@ static int check_destruct_pattern_against_type(Checker* checker, DestructPattern
 
     switch (pattern->kind) {
     case PATTERN_IDENT:
-        // Any type is valid for an identifier pattern
         return 0;
-
     case PATTERN_TUPLE:
-        // Pattern must match a tuple type
-        if (type->kind != TYPE_TUPLE && type->kind != TYPE_ERROR) {
-            check_error(checker, line, col, "Nested pattern requires a tuple, got '%s'",
-                        type_name(type));
-            return 1;
-        }
-
-        if (type->kind == TYPE_ERROR) {
-            // Propagate error type to all children
-            for (int i = 0; i < pattern->as.tuple.count; i++) {
-                check_destruct_pattern_against_type(checker, pattern->as.tuple.elements[i],
-                                                    type_error, line, col);
-            }
-            return 0;
-        }
-
-        // Check arity
-        if (type->as.tuple.elem_count != pattern->as.tuple.count) {
-            check_error(checker, line, col,
-                        "Nested pattern has %d elements, but tuple has %d elements",
-                        pattern->as.tuple.count, type->as.tuple.elem_count);
-            return 1;
-        }
-
-        // Recursively check each element
-        for (int i = 0; i < pattern->as.tuple.count; i++) {
-            if (check_destruct_pattern_against_type(checker, pattern->as.tuple.elements[i],
-                                                    type->as.tuple.elem_types[i], line, col)) {
-                return 1;
-            }
-        }
-        return 0;
-
+        return check_tuple_destruct_pattern_against_type(checker, pattern, type, line, col);
     case PATTERN_STRUCT:
-        if (type->kind != TYPE_STRUCT && type->kind != TYPE_ERROR) {
-            check_error(checker, line, col, "Struct destructuring requires a struct type, got '%s'",
-                        type_name(type));
-            return 1;
-        }
-        if (type->kind == TYPE_ERROR) {
-            for (int i = 0; i < pattern->as.struc.count; i++)
-                pattern->as.struc.field_types[i] = type_error;
-            return 0;
-        }
-        for (int i = 0; i < pattern->as.struc.count; i++) {
-            int found = 0;
-            for (int j = 0; j < type->as.struc.field_count; j++) {
-                if (strcmp(pattern->as.struc.field_names[i], type->as.struc.field_names[j]) == 0) {
-                    pattern->as.struc.field_types[i] = type->as.struc.field_types[j];
-                    found                            = 1;
-                    break;
-                }
-            }
-            if (!found) {
-                check_error(checker, line, col, "Struct '%s' has no field '%s'",
-                            type->as.struc.name, pattern->as.struc.field_names[i]);
-                return 1;
-            }
-        }
-        return 0;
+        return check_struct_destruct_pattern_against_type(checker, pattern, type, line, col);
     }
     return 0;
 }
