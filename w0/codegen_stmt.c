@@ -830,121 +830,152 @@ static void emit_var_decl_inferred_type(CodeGen* gen, Node* node) {
 
 // Emit a variable declaration statement (NODE_VAR_DECL).
 // Handles destructuring, RC-managed declarations, type inference, and struct init.
-static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
+static void emit_var_decl_struct_destructuring(CodeGen* gen, Node* node, DestructPattern* pattern) {
+    // Struct destructuring: var {a, b} = expr;
+    Type* struct_type = pattern->resolved_type;
+    int   temp_id     = gen->out.temp_count++;
+
+    // Emit temp: StructName* __destruct0 = expr;
+    // emit_resolved_type already adds * for struct types
+    emit_indent(gen);
+    emit_resolved_type(gen, struct_type);
+    emit(gen, " __destruct%d = ", temp_id);
+    emit_expr(gen, node->as.var_decl.init);
+    emit(gen, ";\n");
+
+    // Emit field extractions
+    char temp_name[64];
+    snprintf(temp_name, sizeof(temp_name), "__destruct%d", temp_id);
+    emit_destruct_pattern(gen, pattern, temp_name, node->as.var_decl.is_const);
+
+    // RC-track the temp (struct stays alive for scope)
+    if (node->as.var_decl.is_rc) {
+        rc_push_var(gen, temp_name, struct_type);
+    }
+}
+
+static void emit_var_decl_tuple_destructuring(CodeGen* gen, Node* node, DestructPattern* pattern) {
+    // Tuple destructuring
+    Type* tuple_type = pattern->resolved_type;
+    emit_indent(gen);
+    emit_resolved_type(gen, tuple_type);
+    int temp_id = gen->out.temp_count++;
+    emit(gen, " __tuple%d = ", temp_id);
+    emit_expr(gen, node->as.var_decl.init);
+    emit(gen, ";\n");
+    char temp_prefix[64];
+    snprintf(temp_prefix, sizeof(temp_prefix), "__tuple%d", temp_id);
+    emit_destruct_pattern(gen, pattern, temp_prefix, node->as.var_decl.is_const);
+
+    // RC-track any destructured variables with RC-managed types
+    rc_track_destruct_pattern(gen, pattern);
+}
+
+static int emit_var_decl_destructuring(CodeGen* gen, Node* node) {
     // Handle destructuring: var (a, b) = tuple; or var {x, y} = struct_expr;
     DestructPattern* pattern = node->as.var_decl.destruct_pattern;
-    if (pattern) {
-        if (pattern->kind == PATTERN_STRUCT) {
-            // Struct destructuring: var {a, b} = expr;
-            Type* struct_type = pattern->resolved_type;
-            int   temp_id     = gen->out.temp_count++;
-
-            // Emit temp: StructName* __destruct0 = expr;
-            // emit_resolved_type already adds * for struct types
-            emit_indent(gen);
-            emit_resolved_type(gen, struct_type);
-            emit(gen, " __destruct%d = ", temp_id);
-            emit_expr(gen, node->as.var_decl.init);
-            emit(gen, ";\n");
-
-            // Emit field extractions
-            char temp_name[64];
-            snprintf(temp_name, sizeof(temp_name), "__destruct%d", temp_id);
-            emit_destruct_pattern(gen, pattern, temp_name, node->as.var_decl.is_const);
-
-            // RC-track the temp (struct stays alive for scope)
-            if (node->as.var_decl.is_rc) {
-                rc_push_var(gen, temp_name, struct_type);
-            }
-            return;
-        }
-        // Tuple destructuring
-        Type* tuple_type = pattern->resolved_type;
-        emit_indent(gen);
-        emit_resolved_type(gen, tuple_type);
-        int temp_id = gen->out.temp_count++;
-        emit(gen, " __tuple%d = ", temp_id);
-        emit_expr(gen, node->as.var_decl.init);
-        emit(gen, ";\n");
-        char temp_prefix[64];
-        snprintf(temp_prefix, sizeof(temp_prefix), "__tuple%d", temp_id);
-        emit_destruct_pattern(gen, pattern, temp_prefix, node->as.var_decl.is_const);
-
-        // RC-track any destructured variables with RC-managed types
-        rc_track_destruct_pattern(gen, pattern);
-        return;
+    if (!pattern) {
+        return 0;
     }
-
-    // Handle RC-managed variable declarations
-    if (node->as.var_decl.is_rc && node->as.var_decl.init) {
-        // Direct RC assignment: ownership transfers to the variable, don't hoist the init itself
-        node->as.var_decl.init->is_owned_temp = 0;
-        if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
-            Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
-            if (rtype && rtype->kind == TYPE_VEC) {
-                emit_var_decl_rc_new_vec(gen, node);
-            } else if (rtype && rtype->kind == TYPE_STRINGBUILDER) {
-                emit_var_decl_rc_new_stringbuilder(gen, node);
-            } else if (node->as.var_decl.init->as.new_expr.init == NULL) {
-                emit_var_decl_rc_new_init(gen, node);
-            } else {
-                emit_var_decl_rc_new_struct(gen, node);
-            }
-        } else {
-            // Hoist nested owned temps (e.g., intermediate in nums.map(...).filter(...))
-            int has_temps = has_owned_temps(node->as.var_decl.init);
-            int saved     = 0;
-            if (has_temps) {
-                saved = hoist_owned_temps(gen, node->as.var_decl.init);
-            }
-
-            emit_var_decl_rc_copy(gen, node);
-
-            if (has_temps) {
-                cleanup_owned_temps(gen, saved);
-            }
-        }
-        return;
+    if (pattern->kind == PATTERN_STRUCT) {
+        emit_var_decl_struct_destructuring(gen, node, pattern);
+    } else {
+        emit_var_decl_tuple_destructuring(gen, node, pattern);
     }
+    return 1;
+}
 
-    // Direct lambda assignment: ownership transfers to variable's .env tracking, don't hoist
-    int lambda_owned = 0;
-    if (node->as.var_decl.init && node->as.var_decl.init->type == NODE_LAMBDA &&
-        node->as.var_decl.init->is_owned_temp) {
-        lambda_owned                          = 1;
-        node->as.var_decl.init->is_owned_temp = 0;
+static void emit_var_decl_rc_new(CodeGen* gen, Node* node) {
+    Type* rtype = node->as.var_decl.init->as.new_expr.resolved_type;
+    if (rtype && rtype->kind == TYPE_VEC) {
+        emit_var_decl_rc_new_vec(gen, node);
+    } else if (rtype && rtype->kind == TYPE_STRINGBUILDER) {
+        emit_var_decl_rc_new_stringbuilder(gen, node);
+    } else if (node->as.var_decl.init->as.new_expr.init == NULL) {
+        emit_var_decl_rc_new_init(gen, node);
+    } else {
+        emit_var_decl_rc_new_struct(gen, node);
     }
+}
 
-    // Hoist owned temps in init expression (e.g., var count = std.args().length)
+static void emit_var_decl_rc_copy_with_temps(CodeGen* gen, Node* node) {
+    // Hoist nested owned temps (e.g., intermediate in nums.map(...).filter(...))
+    int has_temps = has_owned_temps(node->as.var_decl.init);
     int saved     = 0;
-    int has_temps = node->as.var_decl.init && has_owned_temps(node->as.var_decl.init);
     if (has_temps) {
         saved = hoist_owned_temps(gen, node->as.var_decl.init);
     }
 
+    emit_var_decl_rc_copy(gen, node);
+
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+}
+
+static int emit_var_decl_rc_managed(CodeGen* gen, Node* node) {
+    if (!node->as.var_decl.is_rc || !node->as.var_decl.init) {
+        return 0;
+    }
+
+    // Direct RC assignment: ownership transfers to the variable, don't hoist the init itself
+    node->as.var_decl.init->is_owned_temp = 0;
+    if (node->as.var_decl.init->type == NODE_NEW_EXPR) {
+        emit_var_decl_rc_new(gen, node);
+    } else {
+        emit_var_decl_rc_copy_with_temps(gen, node);
+    }
+    return 1;
+}
+
+static int begin_lambda_owned_transfer(Node* node) {
+    // Direct lambda assignment: ownership transfers to variable's .env tracking, don't hoist
+    if (!node->as.var_decl.init || node->as.var_decl.init->type != NODE_LAMBDA ||
+        !node->as.var_decl.init->is_owned_temp) {
+        return 0;
+    }
+    node->as.var_decl.init->is_owned_temp = 0;
+    return 1;
+}
+
+static void restore_lambda_owned_transfer(Node* node, int lambda_owned) {
+    if (lambda_owned) {
+        node->as.var_decl.init->is_owned_temp = 1;
+    }
+}
+
+static int var_decl_is_func_var(Node* node) {
+    return (node->as.var_decl.resolved_type &&
+            node->as.var_decl.resolved_type->kind == TYPE_FUNC) ||
+           (node->as.var_decl.type && node->as.var_decl.type->type == NODE_FUNC_TYPE);
+}
+
+static int hoist_var_decl_init_temps(CodeGen* gen, Node* node, int* saved) {
+    int has_temps = node->as.var_decl.init && has_owned_temps(node->as.var_decl.init);
+    if (has_temps) {
+        *saved = hoist_owned_temps(gen, node->as.var_decl.init);
+    }
+    return has_temps;
+}
+
+static void emit_var_decl_signature(CodeGen* gen, Node* node) {
     emit_indent(gen);
     if (node->as.var_decl.is_const) {
         emit(gen, "const ");
     }
-
-    int struct_type = node->as.var_decl.type && is_struct_type(gen, node->as.var_decl.type);
-    int is_func_var =
-        (node->as.var_decl.resolved_type && node->as.var_decl.resolved_type->kind == TYPE_FUNC) ||
-        (node->as.var_decl.type && node->as.var_decl.type->type == NODE_FUNC_TYPE);
 
     if (node->as.var_decl.type) {
         emit_type_with_name(gen, node->as.var_decl.type, node->as.var_decl.name);
     } else {
         emit_var_decl_inferred_type(gen, node);
     }
+}
 
+static void emit_var_decl_initializer(CodeGen* gen, Node* node, int struct_type, int is_func_var) {
     if (node->as.var_decl.init) {
         if (struct_type && node->as.var_decl.init->type == NODE_NULL_LIT) {
             emit(gen, " = NULL");
-        } else if (node->as.var_decl.init->type == NODE_NULL_LIT &&
-                   ((node->as.var_decl.resolved_type &&
-                     node->as.var_decl.resolved_type->kind == TYPE_FUNC) ||
-                    (node->as.var_decl.type && node->as.var_decl.type->type == NODE_FUNC_TYPE))) {
+        } else if (node->as.var_decl.init->type == NODE_NULL_LIT && is_func_var) {
             emit(gen, " = (__Closure){NULL, NULL}");
         } else {
             emit(gen, " = ");
@@ -954,24 +985,17 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
         // Ensure env cleanup sees a deterministic pointer value.
         emit(gen, " = (__Closure){NULL, NULL}");
     }
-    emit(gen, ";\n");
+}
 
+static void emit_var_decl_func_var_env_inc(CodeGen* gen, Node* node, int is_func_var) {
     // Closure copy from another closure variable needs an env retain.
     if (is_func_var && closure_ident_needs_env_inc(node->as.var_decl.init)) {
         emit_indent(gen);
         emit(gen, "__rc_inc(%s.env);\n", node->as.var_decl.name);
     }
+}
 
-    // Cleanup owned temps after the var decl
-    if (has_temps) {
-        cleanup_owned_temps(gen, saved);
-    }
-
-    // Restore lambda is_owned_temp flag
-    if (lambda_owned) {
-        node->as.var_decl.init->is_owned_temp = 1;
-    }
-
+static void track_var_decl_func_env(CodeGen* gen, Node* node, int is_func_var) {
     // Track closure env for scope cleanup: __rc_dec(f.env) at scope exit.
     // __rc_dec(NULL) is a no-op, so this is safe even for non-capturing closures.
     if (is_func_var) {
@@ -979,6 +1003,35 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
         snprintf(env_name, sizeof(env_name), "%s.env", node->as.var_decl.name);
         rc_push_var(gen, env_name, NULL);
     }
+}
+
+static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
+    if (emit_var_decl_destructuring(gen, node)) {
+        return;
+    }
+
+    if (emit_var_decl_rc_managed(gen, node)) {
+        return;
+    }
+
+    int lambda_owned = begin_lambda_owned_transfer(node);
+    int saved        = 0;
+    int has_temps    = hoist_var_decl_init_temps(gen, node, &saved);
+    int struct_type  = node->as.var_decl.type && is_struct_type(gen, node->as.var_decl.type);
+    int is_func_var  = var_decl_is_func_var(node);
+    emit_var_decl_signature(gen, node);
+    emit_var_decl_initializer(gen, node, struct_type, is_func_var);
+    emit(gen, ";\n");
+
+    emit_var_decl_func_var_env_inc(gen, node, is_func_var);
+
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+
+    restore_lambda_owned_transfer(node, lambda_owned);
+
+    track_var_decl_func_env(gen, node, is_func_var);
 }
 
 // Emit __rc_inc for a borrowed reference being returned (e.g., function parameter).
