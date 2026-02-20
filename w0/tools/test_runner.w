@@ -447,29 +447,22 @@ func main() -> i32 {
             var has_main = file_contains(file, "func main(");
 
             if (has_test_blocks) {
-                std::print($"{disp}:".pad_right(45, ' '));
                 var result = run_test_block_file(file, w0, lib_path, verbose);
                 if (result.is_ok()) {
-                    std::println($" {green("PASS")}");
                     run_passed += 1;
                 } else {
-                    std::println($" {red("FAIL")} ({result.error()})");
+                    std::println($"{disp}:".pad_right(45, ' ') + $" {red("FAIL")} ({result.error()})");
                     run_failed += 1;
                 }
             } else if (has_main) {
-                std::print($"{disp}:".pad_right(45, ' '));
                 var result = run_program_test(file, w0, lib_path, verbose);
                 if (result.is_ok()) {
-                    std::println($" {green("PASS")}");
                     run_passed += 1;
                 } else {
-                    std::println($" {red("FAIL")} ({result.error()})");
+                    std::println($"{disp}:".pad_right(45, ' ') + $" {red("FAIL")} ({result.error()})");
                     run_failed += 1;
                 }
             } else {
-                if (verbose) {
-                    std::println($"{gray($"{disp}: SKIP (helper module)")}");
-                }
                 run_skipped += 1;
             }
         }
@@ -485,17 +478,11 @@ func main() -> i32 {
         foreach (const file in files) {
             var disp = display_path(file);
 
-            std::print($"{disp}:".pad_right(45, ' '));
-
             var result = run_error_test(file, w0, lib_path, verbose);
-            if (result is Ok(actual)) {
-                std::println($" {green("PASS")} (correct error)");
-                if (actual != "") {
-                    std::println($"  {gray(actual)}");
-                }
+            if (result.is_ok()) {
                 error_passed += 1;
             } else {
-                std::println($" {red("FAIL")} ({result.error()})");
+                std::println($"{disp}:".pad_right(45, ' ') + $" {red("FAIL")} ({result.error()})");
                 error_failed += 1;
             }
         }

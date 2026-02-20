@@ -1130,7 +1130,17 @@ static void emit_var_decl_stmt(CodeGen* gen, Node* node) {
 static void emit_rc_inc_for_return(CodeGen* gen, const char* value_name) {
     Node* rtype = resolve_alias(gen, gen->defer.return_type);
     emit_indent(gen);
-    if (rtype && rtype->type == NODE_IDENT && strcmp(rtype->as.ident.name, "string") == 0) {
+    // Check if return type is string (directly or via generic substitution)
+    int is_str = 0;
+    if (rtype && rtype->type == NODE_IDENT) {
+        if (strcmp(rtype->as.ident.name, "string") == 0) {
+            is_str = 1;
+        } else {
+            Type* resolved = subst_lookup(gen, rtype->as.ident.name);
+            is_str         = (resolved && resolved->kind == TYPE_STRING);
+        }
+    }
+    if (is_str) {
         emit(gen, "__rc_inc((void*)%s);\n", value_name);
     } else {
         const char* enum_name = resolve_enum_name(gen, rtype);
