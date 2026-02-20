@@ -1037,6 +1037,38 @@ static int check_match_arm_body(Checker* checker, Node* arm, int is_expr_context
     return 1;
 }
 
+// Return the enum variant index for a variant name, or -1 if not found.
+static int find_enum_variant_index(Type* enum_type, const char* variant_name) {
+    for (int i = 0; i < enum_type->as.enm.value_count; i++) {
+        if (strcmp(enum_type->as.enm.value_names[i], variant_name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Return 1 if any match arm is a wildcard arm.
+static int match_has_wildcard_arm(Node* node) {
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Return 1 if any non-wildcard arm references the given enum variant name.
+static int match_has_variant_arm(Node* node, const char* variant_name) {
+    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
+        Node* arm = node->as.match_stmt.arms.nodes[a];
+        if (!arm->as.match_arm.is_wildcard && arm->as.match_arm.variant_name &&
+            strcmp(arm->as.match_arm.variant_name, variant_name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int is_expr_context) {
     Type* match_value_type = NULL;
     int   had_expr_error   = 0;
@@ -1057,17 +1089,8 @@ static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int
             continue;
         }
 
-        // Look up variant in enum type
         const char* variant_name = arm->as.match_arm.variant_name;
-        int         variant_idx  = -1;
-
-        for (int i = 0; i < expr_type->as.enm.value_count; i++) {
-            if (strcmp(expr_type->as.enm.value_names[i], variant_name) == 0) {
-                variant_idx = i;
-                break;
-            }
-        }
-
+        int         variant_idx  = find_enum_variant_index(expr_type, variant_name);
         if (variant_idx < 0) {
             check_error(checker, arm->line, arm->column, "'%s' is not a variant of enum '%s'",
                         variant_name, expr_type->as.enm.name);
@@ -1105,26 +1128,9 @@ static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int
     }
 
     // Exhaustiveness check: if no wildcard arm, every variant must be covered
-    int has_wildcard = 0;
-    for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
-        if (node->as.match_stmt.arms.nodes[a]->as.match_arm.is_wildcard) {
-            has_wildcard = 1;
-            break;
-        }
-    }
-
-    if (!has_wildcard) {
+    if (!match_has_wildcard_arm(node)) {
         for (int i = 0; i < expr_type->as.enm.value_count; i++) {
-            int found = 0;
-            for (int a = 0; a < node->as.match_stmt.arms.count; a++) {
-                Node* arm = node->as.match_stmt.arms.nodes[a];
-                if (!arm->as.match_arm.is_wildcard && arm->as.match_arm.variant_name &&
-                    strcmp(arm->as.match_arm.variant_name, expr_type->as.enm.value_names[i]) == 0) {
-                    found = 1;
-                    break;
-                }
-            }
-            if (!found) {
+            if (!match_has_variant_arm(node, expr_type->as.enm.value_names[i])) {
                 check_error(checker, node->line, node->column,
                             "Match is not exhaustive: missing variant '%s'",
                             expr_type->as.enm.value_names[i]);
@@ -1132,16 +1138,16 @@ static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int
         }
     }
 
-    if (is_expr_context) {
-        if (!match_value_type || had_expr_error) {
-            node->as.match_stmt.resolved_value_type = type_error;
-            return type_error;
-        }
-        node->as.match_stmt.resolved_value_type = match_value_type;
-        return match_value_type;
+    if (!is_expr_context) {
+        return type_void;
     }
 
-    return type_void;
+    if (!match_value_type || had_expr_error) {
+        node->as.match_stmt.resolved_value_type = type_error;
+        return type_error;
+    }
+    node->as.match_stmt.resolved_value_type = match_value_type;
+    return match_value_type;
 }
 
 // Compare two literal pattern nodes for duplicate detection
