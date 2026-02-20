@@ -2437,18 +2437,16 @@ static void collect_captures(Checker* checker, const char* name, Type* type, int
     }
 }
 
-static Type* check_lambda_expr(Checker* checker, Node* node) {
-    // Assign unique ID
-    node->as.lambda.lambda_id = checker->lambda_next_id++;
-
-    NodeList* params      = &node->as.lambda.params;
+// Resolve lambda parameter types from annotations or the expected function type.
+static int resolve_lambda_param_types(Checker* checker, Node* lambda, Type*** out_param_types,
+                                      int* out_param_count) {
+    NodeList* params      = &lambda->as.lambda.params;
     int       param_count = params->count;
-
-    // Resolve parameter types
-    Type** param_types = NULL;
+    Type**    param_types = NULL;
     if (param_count > 0) {
         param_types = xmalloc(param_count * sizeof(Type*));
     }
+
     for (int i = 0; i < param_count; i++) {
         Node* p = params->nodes[i];
         if (p->as.param.type) {
@@ -2461,22 +2459,84 @@ static Type* check_lambda_expr(Checker* checker, Node* node) {
             check_error(checker, p->line, p->column, "Cannot infer type for lambda parameter '%s'",
                         p->as.param.name);
             free(param_types);
-            return type_error;
+            return 0;
         }
+
         if (param_types[i]->kind == TYPE_ERROR) {
             free(param_types);
-            return type_error;
+            return 0;
         }
     }
 
-    // Resolve explicit return type
-    Type* return_type = NULL;
-    if (node->as.lambda.return_type) {
-        return_type = resolve_type(checker, node->as.lambda.return_type);
-        if (return_type->kind == TYPE_ERROR) {
-            free(param_types);
-            return type_error;
+    *out_param_types = param_types;
+    *out_param_count = param_count;
+    return 1;
+}
+
+// Resolve an explicitly declared lambda return type, if present.
+static Type* resolve_lambda_return_type(Checker* checker, Node* lambda) {
+    if (!lambda->as.lambda.return_type) {
+        return NULL;
+    }
+    return resolve_type(checker, lambda->as.lambda.return_type);
+}
+
+// Define lambda parameters in the current scope.
+static void define_lambda_params_in_scope(Checker* checker, Node* lambda, Type** param_types,
+                                          int param_count) {
+    NodeList* params = &lambda->as.lambda.params;
+    for (int i = 0; i < param_count; i++) {
+        Node* p = params->nodes[i];
+        checker_define(checker, p->as.param.name, SYM_VAR, param_types[i], p->as.param.is_const, 0,
+                       NULL);
+    }
+}
+
+// Type-check a lambda body and return the effective lambda return type.
+static Type* check_lambda_body(Checker* checker, Node* lambda, Type* declared_return_type) {
+    Type* return_type = declared_return_type;
+
+    if (lambda->as.lambda.is_expr_body) {
+        checker->current_func_return = return_type ? return_type : type_void;
+        Type* body_type              = check_expression(checker, lambda->as.lambda.body);
+        if (!return_type) {
+            return_type = body_type;
+        } else if (!type_assignable(return_type, body_type)) {
+            check_error(checker, lambda->as.lambda.body->line, lambda->as.lambda.body->column,
+                        "Lambda body type '%s' doesn't match return type '%s'",
+                        type_name(body_type), type_name(return_type));
         }
+        return return_type;
+    }
+
+    if (!return_type) {
+        return_type = type_void;
+    }
+    checker->current_func_return = return_type;
+    Node* body                   = lambda->as.lambda.body;
+    if (body && body->type == NODE_BLOCK) {
+        for (int i = 0; i < body->as.block.stmts.count; i++) {
+            check_statement(checker, body->as.block.stmts.nodes[i]);
+        }
+    }
+    return return_type;
+}
+
+static Type* check_lambda_expr(Checker* checker, Node* node) {
+    // Assign unique ID
+    node->as.lambda.lambda_id = checker->lambda_next_id++;
+
+    Type** param_types = NULL;
+    int    param_count = 0;
+    if (!resolve_lambda_param_types(checker, node, &param_types, &param_count)) {
+        return type_error;
+    }
+
+    // Resolve explicit return type
+    Type* return_type = resolve_lambda_return_type(checker, node);
+    if (return_type && return_type->kind == TYPE_ERROR) {
+        free(param_types);
+        return type_error;
     }
 
     // Push lambda scope
@@ -2491,43 +2551,8 @@ static Type* check_lambda_expr(Checker* checker, Node* node) {
     VEC_GROW(checker->lambda_stack, checker->lambda_stack_count, checker->lambda_stack_capacity);
     checker->lambda_stack[checker->lambda_stack_count++] = node;
 
-    // Define params in lambda scope
-    for (int i = 0; i < param_count; i++) {
-        Node* p = params->nodes[i];
-        checker_define(checker, p->as.param.name, SYM_VAR, param_types[i], p->as.param.is_const, 0,
-                       NULL);
-    }
-
-    if (node->as.lambda.is_expr_body) {
-        // Expression body: infer return type
-        if (!return_type) {
-            // Set return type temporarily to NULL to allow checking
-            checker->current_func_return = type_void;
-        } else {
-            checker->current_func_return = return_type;
-        }
-        Type* body_type = check_expression(checker, node->as.lambda.body);
-        if (!return_type) {
-            return_type = body_type;
-        } else if (!type_assignable(return_type, body_type)) {
-            check_error(checker, node->as.lambda.body->line, node->as.lambda.body->column,
-                        "Lambda body type '%s' doesn't match return type '%s'",
-                        type_name(body_type), type_name(return_type));
-        }
-    } else {
-        // Block body
-        if (!return_type) {
-            return_type = type_void;
-        }
-        checker->current_func_return = return_type;
-        // Check block statements (like check_function_body)
-        Node* body = node->as.lambda.body;
-        if (body && body->type == NODE_BLOCK) {
-            for (int i = 0; i < body->as.block.stmts.count; i++) {
-                check_statement(checker, body->as.block.stmts.nodes[i]);
-            }
-        }
-    }
+    define_lambda_params_in_scope(checker, node, param_types, param_count);
+    return_type = check_lambda_body(checker, node, return_type);
 
     // Restore state
     checker->lambda_stack_count--;
