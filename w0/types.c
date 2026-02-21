@@ -497,10 +497,8 @@ static char* next_type_name_buf(void) {
     return buf;
 }
 
-const char* type_name(Type* type) {
-    if (!type)
-        return "(null)";
-
+// Return the display name for non-composite type kinds, or NULL if formatting is needed.
+static const char* type_name_leaf(Type* type) {
     switch (type->kind) {
     case TYPE_VOID:
         return "void";
@@ -538,76 +536,102 @@ const char* type_name(Type* type) {
         return "<error>";
     case TYPE_NULL:
         return "null";
-    case TYPE_ARRAY: {
-        char* buf = next_type_name_buf();
-        if (type->as.array.size >= 0) {
-            snprintf(buf, 256, "[%d]%s", type->as.array.size, type_name(type->as.array.elem));
-        } else {
-            snprintf(buf, 256, "[]%s", type_name(type->as.array.elem));
-        }
-        return buf;
-    }
-    case TYPE_SPAN: {
-        char* buf = next_type_name_buf();
-        snprintf(buf, 256, "Span<%s>", type_name(type->as.span.elem));
-        return buf;
-    }
-    case TYPE_VEC: {
-        char* buf = next_type_name_buf();
-        snprintf(buf, 256, "Vec<%s>", type_name(type->as.vec.elem));
-        return buf;
-    }
-    case TYPE_BOX: {
-        char* buf = next_type_name_buf();
-        snprintf(buf, 256, "Box<%s>", type_name(type->as.box.elem));
-        return buf;
-    }
     case TYPE_STRUCT:
         return type->as.struc.name;
     case TYPE_ENUM:
         return type->as.enm.name;
     case TYPE_TRAIT:
         return type->as.trait.name;
-    case TYPE_FUNC: {
-        char* buf = next_type_name_buf();
-        int   n   = snprintf(buf, 256, "func(");
-        for (int i = 0; i < type->as.func.param_count && n < 255; i++) {
-            if (i > 0)
-                n += snprintf(buf + n, 256 - n, ", ");
-            n += snprintf(buf + n, 256 - n, "%s", type_name(type->as.func.param_types[i]));
-        }
-        n += snprintf(buf + n, 256 - n, ")");
-        if (type->as.func.return_type && type->as.func.return_type->kind != TYPE_VOID) {
-            snprintf(buf + n, 256 - n, " -> %s", type_name(type->as.func.return_type));
-        }
-        return buf;
-    }
-    case TYPE_TUPLE: {
-        char* buf = next_type_name_buf();
-        char* p   = buf;
-        char* end = buf + 256 - 1;
-        *p++      = '(';
-        for (int i = 0; i < type->as.tuple.elem_count && p < end; i++) {
-            if (i > 0) {
-                if (p + 2 < end) {
-                    *p++ = ',';
-                    *p++ = ' ';
-                }
-            }
-            const char* elem_name = type_name(type->as.tuple.elem_types[i]);
-            while (*elem_name && p < end) {
-                *p++ = *elem_name++;
-            }
-        }
-        if (p < end)
-            *p++ = ')';
-        *p = '\0';
-        return buf;
-    }
     case TYPE_GENERIC_PARAM:
         return type->as.generic_param.name;
+    default:
+        return NULL;
     }
-    return "<unknown>";
+}
+
+// Format an array type name into the rotating type_name buffer.
+static const char* type_name_array(Type* type) {
+    char* buf = next_type_name_buf();
+    if (type->as.array.size >= 0) {
+        snprintf(buf, 256, "[%d]%s", type->as.array.size, type_name(type->as.array.elem));
+    } else {
+        snprintf(buf, 256, "[]%s", type_name(type->as.array.elem));
+    }
+    return buf;
+}
+
+// Format a single-parameter generic wrapper like Span<T>, Vec<T>, or Box<T>.
+static const char* type_name_wrapped_elem(const char* wrapper, Type* elem_type) {
+    char* buf = next_type_name_buf();
+    snprintf(buf, 256, "%s<%s>", wrapper, type_name(elem_type));
+    return buf;
+}
+
+// Format a function signature type like func(A, B) -> C.
+static const char* type_name_func(Type* type) {
+    char* buf = next_type_name_buf();
+    int   n   = snprintf(buf, 256, "func(");
+    for (int i = 0; i < type->as.func.param_count && n < 255; i++) {
+        if (i > 0)
+            n += snprintf(buf + n, 256 - n, ", ");
+        n += snprintf(buf + n, 256 - n, "%s", type_name(type->as.func.param_types[i]));
+    }
+    n += snprintf(buf + n, 256 - n, ")");
+    if (type->as.func.return_type && type->as.func.return_type->kind != TYPE_VOID) {
+        snprintf(buf + n, 256 - n, " -> %s", type_name(type->as.func.return_type));
+    }
+    return buf;
+}
+
+// Format a tuple type name like (A, B, C).
+static const char* type_name_tuple(Type* type) {
+    char* buf = next_type_name_buf();
+    char* p   = buf;
+    char* end = buf + 256 - 1;
+    *p++      = '(';
+    for (int i = 0; i < type->as.tuple.elem_count && p < end; i++) {
+        if (i > 0) {
+            if (p + 2 < end) {
+                *p++ = ',';
+                *p++ = ' ';
+            }
+        }
+        const char* elem_name = type_name(type->as.tuple.elem_types[i]);
+        while (*elem_name && p < end) {
+            *p++ = *elem_name++;
+        }
+    }
+    if (p < end)
+        *p++ = ')';
+    *p = '\0';
+    return buf;
+}
+
+const char* type_name(Type* type) {
+    if (!type)
+        return "(null)";
+
+    const char* leaf_name = type_name_leaf(type);
+    if (leaf_name) {
+        return leaf_name;
+    }
+
+    switch (type->kind) {
+    case TYPE_ARRAY:
+        return type_name_array(type);
+    case TYPE_SPAN:
+        return type_name_wrapped_elem("Span", type->as.span.elem);
+    case TYPE_VEC:
+        return type_name_wrapped_elem("Vec", type->as.vec.elem);
+    case TYPE_BOX:
+        return type_name_wrapped_elem("Box", type->as.box.elem);
+    case TYPE_FUNC:
+        return type_name_func(type);
+    case TYPE_TUPLE:
+        return type_name_tuple(type);
+    default:
+        return "<unknown>";
+    }
 }
 
 // Builtin type lookup table
