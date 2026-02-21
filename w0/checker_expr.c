@@ -2968,6 +2968,10 @@ static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type) 
 
     for (int i = 0; i < field_count; i++) {
         if (!seen[i]) {
+            // Allow Option<T> fields to be omitted (default to None)
+            if (type_is_option(struct_type->as.struc.field_types[i])) {
+                continue;
+            }
             check_error(checker, init->line, init->column, "Missing initializer for field '%s'",
                         struct_type->as.struc.field_names[i]);
             had_error = 1;

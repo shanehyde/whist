@@ -600,7 +600,7 @@ static void emit_var_decl_rc_new_struct(CodeGen* gen, Node* node) {
     free(cleanup);
     emit_indent(gen);
     emit(gen, "*%s = (%s)", node->as.var_decl.name, tname);
-    emit_struct_init(gen, node->as.var_decl.init->as.new_expr.init);
+    emit_struct_init(gen, node->as.var_decl.init->as.new_expr.init, rtype);
     emit(gen, ";\n");
     // Increment refcount for any RC values stored in struct fields
     Node* rc_init = node->as.var_decl.init->as.new_expr.init;
@@ -960,7 +960,21 @@ static void emit_var_decl_rc_copy_with_temps(CodeGen* gen, Node* node) {
 
 // Emit RC-managed variable declaration fast path; returns whether it handled the declaration.
 static int emit_var_decl_rc_managed(CodeGen* gen, Node* node) {
-    if (!node->as.var_decl.is_rc || !node->as.var_decl.init) {
+    if (!node->as.var_decl.is_rc) {
+        return 0;
+    }
+
+    // Option<T> with RC fields but no initializer: default to None and track for cleanup
+    if (!node->as.var_decl.init) {
+        Type* rt = node->as.var_decl.resolved_type;
+        if (rt && type_is_option(rt)) {
+            int none_idx = type_enum_variant_index(rt, "None");
+            emit_indent(gen);
+            emit(gen, "%s %s = (%s){.tag = %s_%s};\n", rt->as.enm.name, node->as.var_decl.name,
+                 rt->as.enm.name, rt->as.enm.name, rt->as.enm.value_names[none_idx]);
+            rc_push_var(gen, node->as.var_decl.name, rt);
+            return 1;
+        }
         return 0;
     }
 
@@ -1042,6 +1056,14 @@ static void emit_var_decl_initializer(CodeGen* gen, Node* node, int struct_type,
     } else if (is_func_var) {
         // Ensure env cleanup sees a deterministic pointer value.
         emit(gen, " = (__Closure){NULL, NULL}");
+    } else if (!node->as.var_decl.init) {
+        // Option<T> without initializer defaults to None
+        Type* rt = node->as.var_decl.resolved_type;
+        if (rt && type_is_option(rt)) {
+            int none_idx = type_enum_variant_index(rt, "None");
+            emit(gen, " = (%s){.tag = %s_%s}", rt->as.enm.name, rt->as.enm.name,
+                 rt->as.enm.value_names[none_idx]);
+        }
     }
 }
 
