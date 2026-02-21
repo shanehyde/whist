@@ -52,15 +52,18 @@ static Type** allocated_types    = NULL;
 static int    allocated_count    = 0;
 static int    allocated_capacity = 0;
 
+// Register a heap-allocated type so it can be freed by types_cleanup.
 static void track_type(Type* type) {
     VEC_GROW_N(allocated_types, allocated_count, allocated_capacity, 64);
     allocated_types[allocated_count++] = type;
 }
 
+// Initialize the type system (currently a no-op since builtins are static).
 void types_init(void) {
     // Nothing to do - builtins are static
 }
 
+// Free all heap-allocated types and reset the tracking list.
 void types_cleanup(void) {
     for (int i = 0; i < allocated_count; i++) {
         type_free(allocated_types[i]);
@@ -71,6 +74,7 @@ void types_cleanup(void) {
     allocated_capacity = 0;
 }
 
+// Allocate a new Type with the given kind and register it for cleanup.
 Type* type_new(TypeKind kind) {
     Type* type = xcalloc(1, sizeof(Type));
     type->kind = kind;
@@ -78,6 +82,7 @@ Type* type_new(TypeKind kind) {
     return type;
 }
 
+// Create a fixed-size array type: [size]elem.
 Type* type_array(Type* elem, int size) {
     Type* type          = type_new(TYPE_ARRAY);
     type->as.array.elem = elem;
@@ -85,6 +90,7 @@ Type* type_array(Type* elem, int size) {
     return type;
 }
 
+// Create a named struct type with empty fields and methods.
 Type* type_struct(const char* name) {
     Type* type                      = type_new(TYPE_STRUCT);
     type->as.struc.name             = xstrdup(name);
@@ -101,6 +107,7 @@ Type* type_struct(const char* name) {
     return type;
 }
 
+// Create a named enum type with empty variants and methods.
 Type* type_enum(const char* name) {
     Type* type                       = type_new(TYPE_ENUM);
     type->as.enm.name                = xstrdup(name);
@@ -117,6 +124,7 @@ Type* type_enum(const char* name) {
     return type;
 }
 
+// Create a named trait type with empty method signatures.
 Type* type_trait(const char* name) {
     Type* type                     = type_new(TYPE_TRAIT);
     type->as.trait.name            = xstrdup(name);
@@ -127,6 +135,7 @@ Type* type_trait(const char* name) {
     return type;
 }
 
+// Create a function type with parameter types, return type, and varargs flag.
 Type* type_func(Type** params, int param_count, Type* return_type, int is_varargs) {
     Type* type                = type_new(TYPE_FUNC);
     type->as.func.param_types = params;
@@ -136,6 +145,7 @@ Type* type_func(Type** params, int param_count, Type* return_type, int is_vararg
     return type;
 }
 
+// Create a tuple type with the given element types.
 Type* type_tuple(Type** elems, int count) {
     Type* type                = type_new(TYPE_TUPLE);
     type->as.tuple.elem_types = elems;
@@ -143,24 +153,28 @@ Type* type_tuple(Type** elems, int count) {
     return type;
 }
 
+// Create a generic type parameter placeholder (e.g. T, K).
 Type* type_generic_param(const char* name) {
     Type* type                  = type_new(TYPE_GENERIC_PARAM);
     type->as.generic_param.name = xstrdup(name);
     return type;
 }
 
+// Create a Span<elem> type (borrowed slice).
 Type* type_span(Type* elem) {
     Type* type         = type_new(TYPE_SPAN);
     type->as.span.elem = elem;
     return type;
 }
 
+// Create a Vec<elem> type (heap-allocated dynamic array).
 Type* type_vec(Type* elem) {
     Type* type        = type_new(TYPE_VEC);
     type->as.vec.elem = elem;
     return type;
 }
 
+// Create a Box<elem> type (heap-allocated single value).
 Type* type_box(Type* elem) {
     Type* type        = type_new(TYPE_BOX);
     type->as.box.elem = elem;
@@ -252,6 +266,7 @@ static void type_free_members(Type* type) {
     }
 }
 
+// Free a type and its owned members. No-op for builtin singletons.
 void type_free(Type* type) {
     if (!type || type_is_builtin(type))
         return;
@@ -296,6 +311,7 @@ static int type_equals_tuple(Type* a, Type* b) {
     return 1;
 }
 
+// Return whether two types are structurally equal.
 int type_equals(Type* a, Type* b) {
     if (a == b)
         return 1;
@@ -331,6 +347,7 @@ int type_equals(Type* a, Type* b) {
     }
 }
 
+// Return whether the type is any integer kind (signed, unsigned, or char).
 int type_is_integer(Type* type) {
     if (!type)
         return 0;
@@ -339,6 +356,7 @@ int type_is_integer(Type* type) {
            type->kind == TYPE_UINT16 || type->kind == TYPE_UINT32 || type->kind == TYPE_CHAR;
 }
 
+// Return whether the type is a signed integer (i8, i16, i32, i64).
 int type_is_signed_integer(Type* type) {
     if (!type)
         return 0;
@@ -346,6 +364,7 @@ int type_is_signed_integer(Type* type) {
            type->kind == TYPE_INT32;
 }
 
+// Return whether the type is an unsigned integer (u8, u16, u32, u64).
 int type_is_unsigned_integer(Type* type) {
     if (!type)
         return 0;
@@ -353,6 +372,7 @@ int type_is_unsigned_integer(Type* type) {
            type->kind == TYPE_UINT32;
 }
 
+// Return the index of a variant within an enum type, or -1 if not found.
 int type_enum_variant_index(Type* enum_type, const char* variant_name) {
     if (!enum_type || enum_type->kind != TYPE_ENUM || !variant_name) {
         return -1;
@@ -365,6 +385,7 @@ int type_enum_variant_index(Type* enum_type, const char* variant_name) {
     return -1;
 }
 
+// Return whether this element type supports Vec.contains (requires ==).
 int type_supports_vec_contains(Type* type) {
     if (!type)
         return 0;
@@ -392,6 +413,7 @@ int type_supports_vec_contains(Type* type) {
     }
 }
 
+// Return whether this element type supports Vec.sort (requires <).
 int type_supports_vec_sort(Type* type) {
     if (!type)
         return 0;
@@ -416,6 +438,7 @@ int type_supports_vec_sort(Type* type) {
     }
 }
 
+// Return whether this type supports the == operator.
 int type_supports_equality(Type* type) {
     if (!type)
         return 0;
@@ -460,6 +483,7 @@ int type_is_rc_managed(Type* type) {
     return 0;
 }
 
+// Return the index of a field within a struct type, or -1 if not found.
 int type_find_field_index(Type* type, const char* field_name) {
     if (!type || type->kind != TYPE_STRUCT) {
         return -1;
@@ -472,6 +496,8 @@ int type_find_field_index(Type* type, const char* field_name) {
     return -1;
 }
 
+// Return whether a value of type 'value' can be assigned to a target of type 'target',
+// including implicit promotions (int->float, f32->f64, i64->smaller int, null->ref types).
 int type_assignable(Type* target, Type* value) {
     if (type_equals(target, value))
         return 1;
@@ -530,6 +556,7 @@ int type_assignable(Type* target, Type* value) {
 static char type_name_bufs[TYPE_NAME_BUFS][256];
 static int  type_name_idx = 0;
 
+// Return the next slot from the rotating buffer for type_name formatting.
 static char* next_type_name_buf(void) {
     char* buf     = type_name_bufs[type_name_idx];
     type_name_idx = (type_name_idx + 1) % TYPE_NAME_BUFS;
@@ -646,6 +673,7 @@ static const char* type_name_tuple(Type* type) {
     return buf;
 }
 
+// Return a human-readable display name for a type (e.g. "Vec<i32>", "func(i32) -> bool").
 const char* type_name(Type* type) {
     if (!type)
         return "(null)";
@@ -698,6 +726,7 @@ static struct {
     {NULL, NULL, NULL},
 };
 
+// Look up a builtin type by its Whist name (e.g. "i32" -> type_int32), or NULL.
 Type* type_builtin_from_name(const char* name) {
     for (int i = 0; builtin_types[i].whist_name; i++) {
         if (strcmp(name, builtin_types[i].whist_name) == 0) {
@@ -707,6 +736,7 @@ Type* type_builtin_from_name(const char* name) {
     return NULL;
 }
 
+// Return the C type name for a Whist builtin name (e.g. "i32" -> "int32_t"), or NULL.
 const char* type_c_name(const char* name) {
     for (int i = 0; builtin_types[i].whist_name; i++) {
         if (strcmp(name, builtin_types[i].whist_name) == 0) {
@@ -716,6 +746,7 @@ const char* type_c_name(const char* name) {
     return NULL;
 }
 
+// Return whether a name refers to a builtin type.
 int type_is_builtin_name(const char* name) {
     return type_builtin_from_name(name) != NULL;
 }
@@ -725,6 +756,7 @@ int type_is_builtin_name(const char* name) {
 static char type_mangle_bufs[TYPE_MANGLE_BUFS][256];
 static int  type_mangle_idx = 0;
 
+// Return the next slot from the rotating buffer for type_mangle formatting.
 static char* next_type_mangle_buf(void) {
     char* buf       = type_mangle_bufs[type_mangle_idx];
     type_mangle_idx = (type_mangle_idx + 1) % TYPE_MANGLE_BUFS;
@@ -846,6 +878,8 @@ const char* type_mangle_name(Type* type) {
     }
 }
 
+// Build a mangled name for a generic instantiation (e.g. "HashMap_string_i64").
+// Caller owns the returned string.
 char* type_mangle_generic(const char* base, Type** args, int count) {
     // Calculate required buffer size
     size_t len = strlen(base);
@@ -872,17 +906,20 @@ char* type_mangle_generic(const char* base, Type** args, int count) {
     return result;
 }
 
+// Initialize a TypeList to empty.
 void typelist_init(TypeList* list) {
     list->types    = NULL;
     list->count    = 0;
     list->capacity = 0;
 }
 
+// Append a type to a TypeList, growing the backing array if needed.
 void typelist_push(TypeList* list, Type* type) {
     VEC_GROW(list->types, list->count, list->capacity);
     list->types[list->count++] = type;
 }
 
+// Free the backing array of a TypeList and reset it to empty.
 void typelist_free(TypeList* list) {
     free(list->types);
     list->types    = NULL;
