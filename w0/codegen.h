@@ -160,6 +160,10 @@ typedef struct {
     const char* source_file;
     // 1 = emit #line directives in generated C
     int line_directives;
+    // Non-NULL in -c mode: only emit code for this module (skip imported modules)
+    const char* target_module;
+    // 1 when emitting non-target module declarations (forces static linkage)
+    int force_static;
 } CodeGen;
 
 // Codegen lifecycle:

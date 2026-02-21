@@ -23,6 +23,7 @@ typedef struct {
     int         rc_debug;
     int         emit_c;
     int         line_directives;
+    int         compile_only; // -c flag: compile to .o without linking
     const char* output_file;
     const char* lib_path;
 } MainOptions;
@@ -85,8 +86,9 @@ static CodeGenChecker make_codegen_checker(Checker* checker) {
     };
 }
 
-static int compile_to_c(const char* source, const char* source_path, const char* lib_path,
-                        int rc_debug, int test_mode, int line_directives, FILE* out) {
+static int compile_to_c_targeted(const char* source, const char* source_path, const char* lib_path,
+                                 int rc_debug, int test_mode, int line_directives, FILE* out,
+                                 const char* target_module) {
     ModuleLoader loader;
     module_loader_init(&loader, lib_path);
 
@@ -119,6 +121,7 @@ static int compile_to_c(const char* source, const char* source_path, const char*
     CodeGen gen;
     codegen_init(&gen, out, make_codegen_checker(&checker), rc_debug, test_mode, source_path,
                  line_directives);
+    gen.target_module = target_module;
     codegen_emit(&gen, ast);
     codegen_free(&gen);
 
@@ -127,6 +130,12 @@ static int compile_to_c(const char* source, const char* source_path, const char*
     parser_free(&parser);
     module_loader_free(&loader);
     return 0;
+}
+
+static int compile_to_c(const char* source, const char* source_path, const char* lib_path,
+                        int rc_debug, int test_mode, int line_directives, FILE* out) {
+    return compile_to_c_targeted(source, source_path, lib_path, rc_debug, test_mode,
+                                 line_directives, out, NULL);
 }
 
 static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path,
@@ -337,11 +346,123 @@ static int compile_and_test(const char* source_path, const char* lib_path, int r
     return 1;
 }
 
+static int ends_with(const char* str, const char* suffix) {
+    size_t str_len    = strlen(str);
+    size_t suffix_len = strlen(suffix);
+    if (suffix_len > str_len)
+        return 0;
+    return strcmp(str + str_len - suffix_len, suffix) == 0;
+}
+
+// Compile a .w file to a .o object file (separate compilation mode).
+// Emits C for the target file only, then invokes cc -c.
+static int compile_to_object(const char* source_path, const char* output_path, const char* lib_path,
+                             int rc_debug, int emit_c, int line_directives) {
+    char* source = read_file(source_path);
+    if (!source) {
+        fprintf(stderr, "Could not open file: %s\n", source_path);
+        return 1;
+    }
+
+    // --emit-c: dump filtered C to stdout and exit
+    if (emit_c) {
+        int result = compile_to_c_targeted(source, source_path, lib_path, rc_debug, 0,
+                                           line_directives, stdout, "main");
+        free(source);
+        return result;
+    }
+
+    // Create temp .c file
+    char c_base[] = "/tmp/w0_XXXXXX";
+    int  c_fd     = mkstemp(c_base);
+    if (c_fd < 0) {
+        fprintf(stderr, "Could not create temp file\n");
+        free(source);
+        return 1;
+    }
+
+    char c_path[256];
+    snprintf(c_path, sizeof(c_path), "%s.c", c_base);
+    close(c_fd);
+    if (rename(c_base, c_path) != 0) {
+        fprintf(stderr, "Could not rename temp file\n");
+        unlink(c_base);
+        free(source);
+        return 1;
+    }
+
+    FILE* c_file = fopen(c_path, "w");
+    if (!c_file) {
+        fprintf(stderr, "Could not open temp file for writing\n");
+        unlink(c_path);
+        free(source);
+        return 1;
+    }
+
+    int result = compile_to_c_targeted(source, source_path, lib_path, rc_debug, 0, line_directives,
+                                       c_file, "main");
+    fclose(c_file);
+    free(source);
+
+    if (result != 0) {
+        unlink(c_path);
+        return 1;
+    }
+
+    // Invoke cc -c to produce .o
+    char cmd[1024];
+    if (lib_path) {
+        snprintf(cmd, sizeof(cmd), "cc -c -o %s %s -I%s/include", output_path, c_path, lib_path);
+    } else {
+        snprintf(cmd, sizeof(cmd), "cc -c -o %s %s", output_path, c_path);
+    }
+
+    int cc_result = system(cmd);
+    unlink(c_path);
+
+    if (cc_result != 0) {
+        fprintf(stderr, "C compilation failed\n");
+        return 1;
+    }
+
+    return 0;
+}
+
+// Link .o files together with the runtime library into an executable.
+static int link_objects(const char** obj_files, int obj_count, const char* output_path,
+                        const char* lib_path) {
+    // Build command: cc -o <output> <obj1> <obj2> ... [-I<lib>/include <lib>/whist_runtime.c]
+    char cmd[4096];
+    int  pos = 0;
+
+    pos += snprintf(cmd + pos, sizeof(cmd) - pos, "cc -o %s", output_path);
+
+    for (int i = 0; i < obj_count; i++) {
+        pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", obj_files[i]);
+    }
+
+    if (lib_path) {
+        pos += snprintf(cmd + pos, sizeof(cmd) - pos, " -I%s/include %s/whist_runtime.c", lib_path,
+                        lib_path);
+    }
+
+    int cc_result = system(cmd);
+    if (cc_result != 0) {
+        fprintf(stderr, "Linking failed\n");
+        return 1;
+    }
+
+    return 0;
+}
+
 static void print_usage(const char* program) {
-    fprintf(stderr, "Usage: %s [options] <source-file>\n", program);
+    fprintf(stderr, "Usage: %s [options] <source.w>\n", program);
+    fprintf(stderr, "       %s -c <source.w> -o <output.o> [options]\n", program);
+    fprintf(stderr, "       %s <inputs...> -o <output> [options]\n", program);
     fprintf(stderr, "       %s run [options] <source-file> [args...]\n", program);
     fprintf(stderr, "       %s test [options] <source-file>\n", program);
     fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  -c        Compile to object file (requires -o)\n");
     fprintf(stderr, "  --lex     Lex only (print tokens)\n");
     fprintf(stderr, "  --parse   Parse only (no type checking)\n");
     fprintf(stderr, "  --check   Type check only (no code generation)\n");
@@ -352,13 +473,16 @@ static void print_usage(const char* program) {
     fprintf(stderr, "            Library search path for module imports\n");
     fprintf(stderr, "  --rc-debug\n");
     fprintf(stderr, "            Emit RC tracking debug output to stderr\n");
-    fprintf(stderr, "  --emit-c  Dump generated C to stdout (works with run/test)\n");
+    fprintf(stderr, "  --emit-c  Dump generated C to stdout (works with run/test/-c)\n");
     fprintf(stderr, "  --line-directives\n");
     fprintf(stderr, "            Emit #line directives in generated C\n");
     fprintf(stderr, "  -o <file> Output file\n");
     fprintf(stderr, "Commands:\n");
     fprintf(stderr, "  run       Compile and run the program\n");
     fprintf(stderr, "  test      Compile and run tests\n");
+    fprintf(stderr, "Inputs can be .w source files and/or .o object files.\n");
+    fprintf(stderr, "With -c: compile one .w to .o (separate compilation).\n");
+    fprintf(stderr, "Without -c: compile .w files and link all .o files into executable.\n");
 }
 
 static int is_option_with_value(const char* arg) {
@@ -368,13 +492,17 @@ static int is_option_with_value(const char* arg) {
 static void prescan_global_options(int argc, char** argv, MainOptions* opts) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--lib-path") == 0 && i + 1 < argc) {
-            opts->lib_path = argv[i + 1];
+            opts->lib_path = argv[++i];
+        } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+            opts->output_file = argv[++i];
         } else if (strcmp(argv[i], "--rc-debug") == 0) {
             opts->rc_debug = 1;
         } else if (strcmp(argv[i], "--emit-c") == 0) {
             opts->emit_c = 1;
         } else if (strcmp(argv[i], "--line-directives") == 0) {
             opts->line_directives = 1;
+        } else if (strcmp(argv[i], "-c") == 0) {
+            opts->compile_only = 1;
         }
     }
 }
@@ -458,6 +586,8 @@ static void parse_main_options(int argc, char** argv, MainOptions* opts, int* ar
             opts->line_directives = 1;
         } else if (strcmp(argv[*arg_idx], "--ast-checked") == 0) {
             opts->print_ast_checked = 1;
+        } else if (strcmp(argv[*arg_idx], "-c") == 0) {
+            opts->compile_only = 1;
         } else if (strcmp(argv[*arg_idx], "-o") == 0 && *arg_idx + 1 < argc) {
             (*arg_idx)++;
             opts->output_file = argv[*arg_idx];
@@ -621,8 +751,115 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const char* source_file = argv[arg_idx];
-    char*       source      = read_file(source_file);
+    // Collect all positional arguments (input files), skipping any remaining options.
+    // Options like -o and --lib-path may appear after the first input file.
+    const char** input_files = xmalloc(argc * sizeof(const char*));
+    int          input_count = 0;
+    for (int i = arg_idx; i < argc; i++) {
+        if (is_option_with_value(argv[i]) && i + 1 < argc) {
+            i++; // skip option and its value
+        } else if (argv[i][0] == '-') {
+            // skip standalone flags (--rc-debug, --emit-c, --line-directives, -c)
+        } else {
+            input_files[input_count++] = argv[i];
+        }
+    }
+
+    // -c mode: compile single .w to .o
+    if (opts.compile_only) {
+        if (input_count != 1 || !ends_with(input_files[0], ".w")) {
+            fprintf(stderr, "Error: -c requires exactly one .w source file\n");
+            free(input_files);
+            return 1;
+        }
+        if (!opts.output_file && !opts.emit_c) {
+            fprintf(stderr, "Error: -c requires -o <output.o> (or --emit-c)\n");
+            free(input_files);
+            return 1;
+        }
+        int result = compile_to_object(input_files[0], opts.output_file, opts.lib_path,
+                                       opts.rc_debug, opts.emit_c, opts.line_directives);
+        free(input_files);
+        return result;
+    }
+
+    // Check if we have multiple inputs or any .o files (multi-file / link mode)
+    int has_obj_input = 0;
+    for (int i = 0; i < input_count; i++) {
+        if (ends_with(input_files[i], ".o")) {
+            has_obj_input = 1;
+            break;
+        }
+    }
+
+    if (input_count > 1 || has_obj_input) {
+        // Multi-file mode: compile .w files to .o, then link everything
+        if (!opts.output_file) {
+            fprintf(stderr, "Error: -o <output> required when linking multiple files\n");
+            free(input_files);
+            return 1;
+        }
+
+        // Collect all .o files for linking (existing + compiled from .w)
+        const char** all_objs   = xmalloc(input_count * sizeof(const char*));
+        char**       temp_objs  = xmalloc(input_count * sizeof(char*)); // temp .o files to clean up
+        int          all_count  = 0;
+        int          temp_count = 0;
+        int          result     = 0;
+
+        for (int i = 0; i < input_count && result == 0; i++) {
+            if (ends_with(input_files[i], ".o")) {
+                // Pass .o files directly to linker
+                all_objs[all_count++] = input_files[i];
+            } else if (ends_with(input_files[i], ".w")) {
+                // Compile .w to temp .o
+                char temp_path[] = "/tmp/w0_XXXXXX";
+                int  fd          = mkstemp(temp_path);
+                if (fd < 0) {
+                    fprintf(stderr, "Could not create temp file\n");
+                    result = 1;
+                    break;
+                }
+                // Rename to .o extension
+                char* obj_path = xmalloc(strlen(temp_path) + 3);
+                sprintf(obj_path, "%s.o", temp_path);
+                close(fd);
+                unlink(temp_path);
+
+                result = compile_to_object(input_files[i], obj_path, opts.lib_path, opts.rc_debug,
+                                           0, opts.line_directives);
+                if (result == 0) {
+                    all_objs[all_count++]   = obj_path;
+                    temp_objs[temp_count++] = obj_path;
+                } else {
+                    free(obj_path);
+                }
+            } else {
+                fprintf(stderr, "Error: unrecognized input file: %s\n", input_files[i]);
+                result = 1;
+            }
+        }
+
+        if (result == 0) {
+            result = link_objects(all_objs, all_count, opts.output_file, opts.lib_path);
+        }
+
+        // Clean up temp .o files
+        for (int i = 0; i < temp_count; i++) {
+            unlink(temp_objs[i]);
+            free(temp_objs[i]);
+        }
+        free(all_objs);
+        free(temp_objs);
+        free(input_files);
+        return result;
+    }
+
+    // Single .w file mode (original behavior)
+    const char* source_file = input_files[0];
+    free(input_files);
+
+    char* source = read_file(source_file);
     if (!source) {
         fprintf(stderr, "Could not open file: %s\n", source_file);
         return 1;

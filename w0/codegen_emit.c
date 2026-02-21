@@ -737,8 +737,9 @@ static void emit_func_decl(CodeGen* gen, Node* node) {
         emit(gen, "#line %d \"%s\"\n", node->line, gen->source_file);
     }
 
-    // Emit static for private functions (except main).
-    if (!fdn->is_public && strcmp(fdn->name, "main") != 0) {
+    // Emit static for private functions (except main), and for all non-target module
+    // functions in separate compilation mode.
+    if (gen->force_static || (!fdn->is_public && strcmp(fdn->name, "main") != 0)) {
         emit(gen, "static ");
     }
 
@@ -864,7 +865,7 @@ void emit_decl(CodeGen* gen, Node* node) {
             emit(gen, "#line %d \"%s\"\n", node->line, gen->source_file);
             gen->line_directives = 0;
         }
-        if (!node->as.var_decl.is_public) {
+        if (gen->force_static || !node->as.var_decl.is_public) {
             emit(gen, "static ");
         }
         emit_stmt(gen, node);
@@ -1415,7 +1416,7 @@ static void emit_non_generic_forward_decl(CodeGen* gen, func_decl_node* fdn,
                                           const char* module_prefix) {
     int is_method = (fdn->receiver_type != NULL);
 
-    if (!fdn->is_public && strcmp(fdn->name, "main") != 0) {
+    if (gen->force_static || (!fdn->is_public && strcmp(fdn->name, "main") != 0)) {
         emit(gen, "static ");
     }
 
@@ -1455,6 +1456,10 @@ static void emit_non_generic_function_forward_decls(CodeGen* gen, Node* ast) {
         if (!mod || mod->type != NODE_MODULE)
             continue;
 
+        // In separate compilation mode, force non-target module functions to static
+        gen->force_static =
+            (gen->target_module != NULL && strcmp(mod->as.module.name, gen->target_module) != 0);
+
         const char* module_prefix = module_forward_prefix(mod);
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
@@ -1475,6 +1480,7 @@ static void emit_non_generic_function_forward_decls(CodeGen* gen, Node* ast) {
             free(funcs);
         }
     }
+    gen->force_static = 0;
 }
 
 static int find_generic_type_template(Node* ast, const char* base_name, Node** out_template,
@@ -1532,6 +1538,8 @@ static void emit_single_generic_method_forward_decl(CodeGen* gen, GenericInstanc
     subst_ctx.count             = combined_count;
     gen->generics.subst         = &subst_ctx;
 
+    if (gen->target_module)
+        emit(gen, "static ");
     emit_func_return_type(gen, fdn);
     emit(gen, " %s_%s(", info->mangled_name, fdn->name);
 
@@ -1594,6 +1602,8 @@ static void emit_single_generic_func_forward_decl(CodeGen* gen, GenericFuncInsta
     subst_ctx.count             = inst->type_arg_count;
     gen->generics.subst         = &subst_ctx;
 
+    if (gen->target_module)
+        emit(gen, "static ");
     emit_func_return_type(gen, fdn);
     emit(gen, " %s(", inst->mangled_name);
 
@@ -1628,6 +1638,8 @@ static void emit_single_generic_method_func_forward_decl(CodeGen* gen, GenericFu
     subst_ctx.count             = def->type_param_count;
     gen->generics.subst         = &subst_ctx;
 
+    if (gen->target_module)
+        emit(gen, "static ");
     emit_func_return_type(gen, fdn);
     emit(gen, " %s(", inst->mangled_name);
 
@@ -1704,6 +1716,8 @@ static void emit_vec_user_method_forward_decls(CodeGen* gen, Node* ast) {
             subst_ctx.count             = 1;
             gen->generics.subst         = &subst_ctx;
 
+            if (gen->target_module)
+                emit(gen, "static ");
             emit_func_return_type(gen, fdn);
             emit(gen, " __Vec_%s_%s(__Vec_%s* self", elem_tname, fdn->name, elem_tname);
 
