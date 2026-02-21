@@ -2,6 +2,9 @@
 // Port of w0/main.c command-line option processing.
 
 import std;
+import fs;
+
+include "./lexer.w";
 
 struct MainOptions {
     lex_only: bool,
@@ -21,11 +24,41 @@ struct MainOptions {
 // Each matches a w0 action entry point. They print what they would do
 // and return 0 (success).
 
+func run_lex_mode(source_file: string) -> i32 {
+    var source = fs::read_file(source_file);
+    if (source == "") {
+        std::eprintln($"Could not open file: {source_file}");
+        return 1;
+    }
+
+    std::println("Source:");
+    std::println(source);
+    std::println("Tokens:");
+    std::println("LINE  TYPE          VALUE");
+    std::println("----  ------------  -----");
+
+    var lex = lexer_init(source);
+
+    while (true) {
+        var tok = lexer_next(lex);
+        var line_str = std::to_string(tok.line).pad_left(3, ' ');
+        var col_str = std::to_string(tok.column).pad_right(2, ' ');
+        var type_str = token_type_name(tok.kind).pad_right(12, ' ');
+
+        if (tok.kind == TokenType::EOF) {
+            std::println($"{line_str}:{col_str}  {type_str}");
+            break;
+        } else {
+            std::println($"{line_str}:{col_str}  {type_str}  {tok.value}");
+        }
+    }
+
+    return 0;
+}
+
 func run_debug_pipeline(opts: MainOptions, source_file: string) -> i32 {
     std::println($"[stub] run_debug_pipeline: {source_file}");
-    if (opts.lex_only) {
-        std::println("  mode: lex only");
-    } else if (opts.parse_only) {
+    if (opts.parse_only) {
         std::println("  mode: parse only");
     } else if (opts.check_only) {
         std::println("  mode: check only");
