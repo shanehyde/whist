@@ -730,6 +730,79 @@ static int run_debug_pipeline(const MainOptions* opts, const char* source,
     return 0;
 }
 
+// Collect positional arguments (input files), skipping options.
+static const char** collect_input_files(int argc, char** argv, int start, int* out_count) {
+    const char** files = xmalloc(argc * sizeof(const char*));
+    int          count = 0;
+    for (int i = start; i < argc; i++) {
+        if (is_option_with_value(argv[i]) && i + 1 < argc) {
+            i++; // skip option and its value
+        } else if (argv[i][0] == '-') {
+            // skip standalone flags
+        } else {
+            files[count++] = argv[i];
+        }
+    }
+    *out_count = count;
+    return files;
+}
+
+// Multi-file mode: compile .w files to .o, then link everything together.
+static int compile_and_link(const char** input_files, int input_count, const MainOptions* opts) {
+    if (!opts->output_file) {
+        fprintf(stderr, "Error: -o <output> required when linking multiple files\n");
+        return 1;
+    }
+
+    const char** all_objs   = xmalloc(input_count * sizeof(const char*));
+    char**       temp_objs  = xmalloc(input_count * sizeof(char*));
+    int          all_count  = 0;
+    int          temp_count = 0;
+    int          result     = 0;
+
+    for (int i = 0; i < input_count && result == 0; i++) {
+        if (ends_with(input_files[i], ".o")) {
+            all_objs[all_count++] = input_files[i];
+        } else if (ends_with(input_files[i], ".w")) {
+            char temp_path[] = "/tmp/w0_XXXXXX";
+            int  fd          = mkstemp(temp_path);
+            if (fd < 0) {
+                fprintf(stderr, "Could not create temp file\n");
+                result = 1;
+                break;
+            }
+            char* obj_path = xmalloc(strlen(temp_path) + 3);
+            sprintf(obj_path, "%s.o", temp_path);
+            close(fd);
+            unlink(temp_path);
+
+            result = compile_to_object(input_files[i], obj_path, opts->lib_path, opts->rc_debug, 0,
+                                       opts->line_directives);
+            if (result == 0) {
+                all_objs[all_count++]   = obj_path;
+                temp_objs[temp_count++] = obj_path;
+            } else {
+                free(obj_path);
+            }
+        } else {
+            fprintf(stderr, "Error: unrecognized input file: %s\n", input_files[i]);
+            result = 1;
+        }
+    }
+
+    if (result == 0) {
+        result = link_objects(all_objs, all_count, opts->output_file, opts->lib_path);
+    }
+
+    for (int i = 0; i < temp_count; i++) {
+        unlink(temp_objs[i]);
+        free(temp_objs[i]);
+    }
+    free(all_objs);
+    free(temp_objs);
+    return result;
+}
+
 int main(int argc, char** argv) {
     MainOptions opts = {0};
     prescan_global_options(argc, argv, &opts);
@@ -737,9 +810,8 @@ int main(int argc, char** argv) {
         opts.line_directives = 1;
 
     int subcommand_result = try_handle_subcommand(argc, argv, &opts);
-    if (subcommand_result >= 0) {
+    if (subcommand_result >= 0)
         return subcommand_result;
-    }
 
     int arg_idx = 1;
     parse_main_options(argc, argv, &opts, &arg_idx);
@@ -751,19 +823,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Collect all positional arguments (input files), skipping any remaining options.
-    // Options like -o and --lib-path may appear after the first input file.
-    const char** input_files = xmalloc(argc * sizeof(const char*));
     int          input_count = 0;
-    for (int i = arg_idx; i < argc; i++) {
-        if (is_option_with_value(argv[i]) && i + 1 < argc) {
-            i++; // skip option and its value
-        } else if (argv[i][0] == '-') {
-            // skip standalone flags (--rc-debug, --emit-c, --line-directives, -c)
-        } else {
-            input_files[input_count++] = argv[i];
-        }
-    }
+    const char** input_files = collect_input_files(argc, argv, arg_idx, &input_count);
 
     // -c mode: compile single .w to .o
     if (opts.compile_only) {
@@ -783,7 +844,7 @@ int main(int argc, char** argv) {
         return result;
     }
 
-    // Check if we have multiple inputs or any .o files (multi-file / link mode)
+    // Multi-file / link mode: multiple inputs or any .o files
     int has_obj_input = 0;
     for (int i = 0; i < input_count; i++) {
         if (ends_with(input_files[i], ".o")) {
@@ -791,71 +852,13 @@ int main(int argc, char** argv) {
             break;
         }
     }
-
     if (input_count > 1 || has_obj_input) {
-        // Multi-file mode: compile .w files to .o, then link everything
-        if (!opts.output_file) {
-            fprintf(stderr, "Error: -o <output> required when linking multiple files\n");
-            free(input_files);
-            return 1;
-        }
-
-        // Collect all .o files for linking (existing + compiled from .w)
-        const char** all_objs   = xmalloc(input_count * sizeof(const char*));
-        char**       temp_objs  = xmalloc(input_count * sizeof(char*)); // temp .o files to clean up
-        int          all_count  = 0;
-        int          temp_count = 0;
-        int          result     = 0;
-
-        for (int i = 0; i < input_count && result == 0; i++) {
-            if (ends_with(input_files[i], ".o")) {
-                // Pass .o files directly to linker
-                all_objs[all_count++] = input_files[i];
-            } else if (ends_with(input_files[i], ".w")) {
-                // Compile .w to temp .o
-                char temp_path[] = "/tmp/w0_XXXXXX";
-                int  fd          = mkstemp(temp_path);
-                if (fd < 0) {
-                    fprintf(stderr, "Could not create temp file\n");
-                    result = 1;
-                    break;
-                }
-                // Rename to .o extension
-                char* obj_path = xmalloc(strlen(temp_path) + 3);
-                sprintf(obj_path, "%s.o", temp_path);
-                close(fd);
-                unlink(temp_path);
-
-                result = compile_to_object(input_files[i], obj_path, opts.lib_path, opts.rc_debug,
-                                           0, opts.line_directives);
-                if (result == 0) {
-                    all_objs[all_count++]   = obj_path;
-                    temp_objs[temp_count++] = obj_path;
-                } else {
-                    free(obj_path);
-                }
-            } else {
-                fprintf(stderr, "Error: unrecognized input file: %s\n", input_files[i]);
-                result = 1;
-            }
-        }
-
-        if (result == 0) {
-            result = link_objects(all_objs, all_count, opts.output_file, opts.lib_path);
-        }
-
-        // Clean up temp .o files
-        for (int i = 0; i < temp_count; i++) {
-            unlink(temp_objs[i]);
-            free(temp_objs[i]);
-        }
-        free(all_objs);
-        free(temp_objs);
+        int result = compile_and_link(input_files, input_count, &opts);
         free(input_files);
         return result;
     }
 
-    // Single .w file mode (original behavior)
+    // Single .w file mode
     const char* source_file = input_files[0];
     free(input_files);
 
