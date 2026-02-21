@@ -1532,6 +1532,19 @@ static void emit_string_binary_expr(CodeGen* gen, Node* node) {
     emit(gen, ")%s)", suffix);
 }
 
+// Emit the right side of a short-circuit operator (&&/||) with inline RC temp management.
+// Wraps the right operand in a GCC statement expression that hoists owned temps,
+// evaluates the expression, cleans up temps, and returns the boolean result.
+static void emit_short_circuit_rhs(CodeGen* gen, Node* rhs) {
+    emit(gen, "({ ");
+    int saved = hoist_owned_temps(gen, rhs);
+    emit(gen, "bool __sc = ");
+    emit_expr(gen, rhs);
+    emit(gen, "; ");
+    cleanup_owned_temps(gen, saved);
+    emit(gen, " __sc; })");
+}
+
 // Emit a binary expression, dispatching to specialized string/equality handlers.
 static void emit_binary_expr(CodeGen* gen, Node* node) {
     if (node->as.binary.is_eq_op) {
@@ -1547,7 +1560,14 @@ static void emit_binary_expr(CodeGen* gen, Node* node) {
     emit(gen, "(");
     emit_expr(gen, node->as.binary.left);
     emit(gen, " %s ", binary_op_str(node->as.binary.op));
-    emit_expr(gen, node->as.binary.right);
+    // For short-circuit operators, if the right side has owned temps, wrap it in
+    // a statement expression so temps are only allocated when the right side executes.
+    if ((node->as.binary.op == TOK_AMP_AMP || node->as.binary.op == TOK_PIPE_PIPE) &&
+        has_owned_temps(node->as.binary.right)) {
+        emit_short_circuit_rhs(gen, node->as.binary.right);
+    } else {
+        emit_expr(gen, node->as.binary.right);
+    }
     emit(gen, ")");
 }
 
