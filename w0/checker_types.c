@@ -877,6 +877,95 @@ Type* instantiate_generic_enum(Checker* checker, GenericDef* def, char* mangled,
     return enum_type;
 }
 
+// Lazily ensure generic enum instance methods are fully instantiated.
+// Needed because enum types can be instantiated during Pass 1 (type declarations)
+// before Pass 2 (generic method registration), leaving the enum with no methods.
+void ensure_generic_enum_methods(Checker* checker, Type* enum_type) {
+    if (enum_type->kind != TYPE_ENUM)
+        return;
+
+    GenericInstance* inst = lookup_generic_instance(checker, enum_type->as.enm.name);
+    if (!inst)
+        return;
+
+    GenericDef* def = lookup_generic_def(checker, inst->base_name);
+    if (!def || def->method_count == 0)
+        return;
+
+    // All methods from the GenericDef have been processed?
+    int already_processed = inst->method_body_count;
+    if (already_processed >= def->method_count)
+        return;
+
+    // Reallocate method body storage for the new methods
+    inst->method_bodies =
+        xrealloc(inst->method_bodies, def->method_count * sizeof(Node*));
+    for (int i = already_processed; i < def->method_count; i++) {
+        inst->method_bodies[i] = NULL;
+    }
+    inst->method_body_count = def->method_count;
+
+    // Set up substitution context
+    char** old_params = checker->generics.current_type_params;
+    Type** old_args   = checker->generics.current_type_args;
+    int    old_count  = checker->generics.current_type_param_count;
+
+    checker->generics.current_type_params      = def->type_params;
+    checker->generics.current_type_args        = inst->type_args;
+    checker->generics.current_type_param_count = def->type_param_count;
+
+    for (int m = already_processed; m < def->method_count; m++) {
+        Node*           method_decl = def->methods[m];
+        func_decl_node* mfdn        = &method_decl->as.func_decl;
+
+        char** method_params = NULL;
+        Type** method_args   = NULL;
+        int    method_count  = 0;
+
+        if (!unify_method_pattern(checker, &mfdn->receiver_type_args, inst->type_args,
+                                  inst->type_arg_count, &method_params, &method_args,
+                                  &method_count)) {
+            continue;
+        }
+
+        char** combined_params = NULL;
+        Type** combined_args   = NULL;
+        int    combined_count  = 0;
+        build_combined_method_substitution(def, inst->type_args, method_params, method_args,
+                                           method_count, &combined_params, &combined_args,
+                                           &combined_count);
+
+        checker->generics.current_type_params      = combined_params;
+        checker->generics.current_type_args        = combined_args;
+        checker->generics.current_type_param_count = combined_count;
+
+        Type** param_types = NULL;
+        int    param_count = 0;
+        Type*  return_type = NULL;
+        resolve_method_signature(checker, mfdn, &param_types, &param_count, &return_type);
+
+        check_instantiated_enum_method_body(checker, inst, m, mfdn, enum_type, param_types,
+                                            param_count, return_type);
+
+        checker->generics.current_type_params      = def->type_params;
+        checker->generics.current_type_args        = inst->type_args;
+        checker->generics.current_type_param_count = def->type_param_count;
+
+        free(combined_params);
+        free(combined_args);
+        free_method_pattern_bindings(method_params, method_args, method_count);
+
+        Type* method_type =
+            register_enum_method_type(enum_type, mfdn, param_types, param_count, return_type);
+        register_enum_method_symbol(checker, mfdn, inst->type_args, inst->type_arg_count,
+                                    method_type);
+    }
+
+    checker->generics.current_type_params      = old_params;
+    checker->generics.current_type_args        = old_args;
+    checker->generics.current_type_param_count = old_count;
+}
+
 // Instantiate user-defined methods on a Vec<T> instance from the Vec GenericDef.
 // Called lazily on first member access to ensure all methods have been registered.
 void ensure_vec_user_methods(Checker* checker, VecInstance* inst) {

@@ -20,6 +20,7 @@ Type*        instantiate_generic_enum(Checker* checker, GenericDef* def, char* m
                                       Type** resolved_args, int arg_count);
 VecInstance* lookup_vec_instance_pub(Checker* checker, const char* mangled_name);
 void         ensure_vec_user_methods(Checker* checker, VecInstance* inst);
+void         ensure_generic_enum_methods(Checker* checker, Type* enum_type);
 
 // --- From checker_types.c: generic definition management ---
 void             register_generic_def(Checker* checker, const char* name, char** type_params,
