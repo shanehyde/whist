@@ -167,62 +167,76 @@ Type* type_box(Type* elem) {
     return type;
 }
 
-void type_free(Type* type) {
-    if (!type)
-        return;
-    // Don't free builtins
-    if (type == type_void || type == type_bool || type == type_int64 || type == type_int8 ||
-        type == type_int16 || type == type_int32 || type == type_uint64 || type == type_uint8 ||
-        type == type_uint16 || type == type_uint32 || type == type_f32 || type == type_f64 ||
-        type == type_char || type == type_string || type == type_voidptr ||
-        type == type_stringbuilder || type == type_error || type == type_null) {
-        return;
-    }
+// Return whether this type pointer refers to one of the global builtin singletons.
+static int type_is_builtin(Type* type) {
+    return type == type_void || type == type_bool || type == type_int64 || type == type_int8 ||
+           type == type_int16 || type == type_int32 || type == type_uint64 || type == type_uint8 ||
+           type == type_uint16 || type == type_uint32 || type == type_f32 || type == type_f64 ||
+           type == type_char || type == type_string || type == type_voidptr ||
+           type == type_stringbuilder || type == type_error || type == type_null;
+}
 
+// Free heap-owned members of a struct type definition.
+static void type_free_struct_members(Type* type) {
+    free(type->as.struc.name);
+    for (int i = 0; i < type->as.struc.field_count; i++) {
+        free(type->as.struc.field_names[i]);
+    }
+    free(type->as.struc.field_names);
+    free(type->as.struc.field_types);
+    free(type->as.struc.field_is_const);
+    for (int i = 0; i < type->as.struc.method_count; i++) {
+        free(type->as.struc.method_names[i]);
+    }
+    free(type->as.struc.method_names);
+    free(type->as.struc.method_types);
+    free(type->as.struc.method_is_const);
+}
+
+// Free heap-owned members of an enum type definition.
+static void type_free_enum_members(Type* type) {
+    free(type->as.enm.name);
+    for (int i = 0; i < type->as.enm.value_count; i++) {
+        free(type->as.enm.value_names[i]);
+    }
+    free(type->as.enm.value_names);
+    if (type->as.enm.variant_types) {
+        for (int i = 0; i < type->as.enm.value_count; i++) {
+            free(type->as.enm.variant_types[i]);
+        }
+        free(type->as.enm.variant_types);
+    }
+    free(type->as.enm.variant_type_counts);
+    for (int i = 0; i < type->as.enm.method_count; i++) {
+        free(type->as.enm.method_names[i]);
+    }
+    free(type->as.enm.method_names);
+    free(type->as.enm.method_types);
+    free(type->as.enm.method_is_const);
+}
+
+// Free heap-owned members of a trait type definition.
+static void type_free_trait_members(Type* type) {
+    free(type->as.trait.name);
+    for (int i = 0; i < type->as.trait.method_count; i++) {
+        free(type->as.trait.method_names[i]);
+    }
+    free(type->as.trait.method_names);
+    free(type->as.trait.method_types);
+    free(type->as.trait.method_is_const);
+}
+
+// Free kind-specific heap members before freeing the Type node itself.
+static void type_free_members(Type* type) {
     switch (type->kind) {
     case TYPE_STRUCT:
-        free(type->as.struc.name);
-        for (int i = 0; i < type->as.struc.field_count; i++) {
-            free(type->as.struc.field_names[i]);
-        }
-        free(type->as.struc.field_names);
-        free(type->as.struc.field_types);
-        free(type->as.struc.field_is_const);
-        for (int i = 0; i < type->as.struc.method_count; i++) {
-            free(type->as.struc.method_names[i]);
-        }
-        free(type->as.struc.method_names);
-        free(type->as.struc.method_types);
-        free(type->as.struc.method_is_const);
+        type_free_struct_members(type);
         break;
     case TYPE_ENUM:
-        free(type->as.enm.name);
-        for (int i = 0; i < type->as.enm.value_count; i++) {
-            free(type->as.enm.value_names[i]);
-        }
-        free(type->as.enm.value_names);
-        if (type->as.enm.variant_types) {
-            for (int i = 0; i < type->as.enm.value_count; i++) {
-                free(type->as.enm.variant_types[i]);
-            }
-            free(type->as.enm.variant_types);
-        }
-        free(type->as.enm.variant_type_counts);
-        for (int i = 0; i < type->as.enm.method_count; i++) {
-            free(type->as.enm.method_names[i]);
-        }
-        free(type->as.enm.method_names);
-        free(type->as.enm.method_types);
-        free(type->as.enm.method_is_const);
+        type_free_enum_members(type);
         break;
     case TYPE_TRAIT:
-        free(type->as.trait.name);
-        for (int i = 0; i < type->as.trait.method_count; i++) {
-            free(type->as.trait.method_names[i]);
-        }
-        free(type->as.trait.method_names);
-        free(type->as.trait.method_types);
-        free(type->as.trait.method_is_const);
+        type_free_trait_members(type);
         break;
     case TYPE_FUNC:
         free(type->as.func.param_types);
@@ -236,7 +250,50 @@ void type_free(Type* type) {
     default:
         break;
     }
+}
+
+void type_free(Type* type) {
+    if (!type || type_is_builtin(type))
+        return;
+    type_free_members(type);
     free(type);
+}
+
+// Compare two optional type-name strings for equality.
+static int type_name_equals(const char* a, const char* b) {
+    if (a == b)
+        return 1;
+    if (!a || !b)
+        return 0;
+    return strcmp(a, b) == 0;
+}
+
+// Compare two function types including params, varargs, and return type.
+static int type_equals_func(Type* a, Type* b) {
+    if (a->as.func.param_count != b->as.func.param_count)
+        return 0;
+    if (a->as.func.is_varargs != b->as.func.is_varargs)
+        return 0;
+    if (!type_equals(a->as.func.return_type, b->as.func.return_type))
+        return 0;
+    for (int i = 0; i < a->as.func.param_count; i++) {
+        if (!type_equals(a->as.func.param_types[i], b->as.func.param_types[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// Compare two tuple types by element count and element types.
+static int type_equals_tuple(Type* a, Type* b) {
+    if (a->as.tuple.elem_count != b->as.tuple.elem_count)
+        return 0;
+    for (int i = 0; i < a->as.tuple.elem_count; i++) {
+        if (!type_equals(a->as.tuple.elem_types[i], b->as.tuple.elem_types[i])) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 int type_equals(Type* a, Type* b) {
@@ -258,35 +315,17 @@ int type_equals(Type* a, Type* b) {
     case TYPE_BOX:
         return type_equals(a->as.box.elem, b->as.box.elem);
     case TYPE_STRUCT:
-        return strcmp(a->as.struc.name, b->as.struc.name) == 0;
+        return type_name_equals(a->as.struc.name, b->as.struc.name);
     case TYPE_ENUM:
-        return strcmp(a->as.enm.name, b->as.enm.name) == 0;
+        return type_name_equals(a->as.enm.name, b->as.enm.name);
     case TYPE_TRAIT:
-        return strcmp(a->as.trait.name, b->as.trait.name) == 0;
+        return type_name_equals(a->as.trait.name, b->as.trait.name);
     case TYPE_FUNC:
-        if (a->as.func.param_count != b->as.func.param_count)
-            return 0;
-        if (a->as.func.is_varargs != b->as.func.is_varargs)
-            return 0;
-        if (!type_equals(a->as.func.return_type, b->as.func.return_type))
-            return 0;
-        for (int i = 0; i < a->as.func.param_count; i++) {
-            if (!type_equals(a->as.func.param_types[i], b->as.func.param_types[i])) {
-                return 0;
-            }
-        }
-        return 1;
+        return type_equals_func(a, b);
     case TYPE_TUPLE:
-        if (a->as.tuple.elem_count != b->as.tuple.elem_count)
-            return 0;
-        for (int i = 0; i < a->as.tuple.elem_count; i++) {
-            if (!type_equals(a->as.tuple.elem_types[i], b->as.tuple.elem_types[i])) {
-                return 0;
-            }
-        }
-        return 1;
+        return type_equals_tuple(a, b);
     case TYPE_GENERIC_PARAM:
-        return strcmp(a->as.generic_param.name, b->as.generic_param.name) == 0;
+        return type_name_equals(a->as.generic_param.name, b->as.generic_param.name);
     default:
         return 1; // For primitives, kind equality is enough
     }
@@ -497,10 +536,8 @@ static char* next_type_name_buf(void) {
     return buf;
 }
 
-const char* type_name(Type* type) {
-    if (!type)
-        return "(null)";
-
+// Return the display name for non-composite type kinds, or NULL if formatting is needed.
+static const char* type_name_leaf(Type* type) {
     switch (type->kind) {
     case TYPE_VOID:
         return "void";
@@ -538,76 +575,102 @@ const char* type_name(Type* type) {
         return "<error>";
     case TYPE_NULL:
         return "null";
-    case TYPE_ARRAY: {
-        char* buf = next_type_name_buf();
-        if (type->as.array.size >= 0) {
-            snprintf(buf, 256, "[%d]%s", type->as.array.size, type_name(type->as.array.elem));
-        } else {
-            snprintf(buf, 256, "[]%s", type_name(type->as.array.elem));
-        }
-        return buf;
-    }
-    case TYPE_SPAN: {
-        char* buf = next_type_name_buf();
-        snprintf(buf, 256, "Span<%s>", type_name(type->as.span.elem));
-        return buf;
-    }
-    case TYPE_VEC: {
-        char* buf = next_type_name_buf();
-        snprintf(buf, 256, "Vec<%s>", type_name(type->as.vec.elem));
-        return buf;
-    }
-    case TYPE_BOX: {
-        char* buf = next_type_name_buf();
-        snprintf(buf, 256, "Box<%s>", type_name(type->as.box.elem));
-        return buf;
-    }
     case TYPE_STRUCT:
         return type->as.struc.name;
     case TYPE_ENUM:
         return type->as.enm.name;
     case TYPE_TRAIT:
         return type->as.trait.name;
-    case TYPE_FUNC: {
-        char* buf = next_type_name_buf();
-        int   n   = snprintf(buf, 256, "func(");
-        for (int i = 0; i < type->as.func.param_count && n < 255; i++) {
-            if (i > 0)
-                n += snprintf(buf + n, 256 - n, ", ");
-            n += snprintf(buf + n, 256 - n, "%s", type_name(type->as.func.param_types[i]));
-        }
-        n += snprintf(buf + n, 256 - n, ")");
-        if (type->as.func.return_type && type->as.func.return_type->kind != TYPE_VOID) {
-            snprintf(buf + n, 256 - n, " -> %s", type_name(type->as.func.return_type));
-        }
-        return buf;
-    }
-    case TYPE_TUPLE: {
-        char* buf = next_type_name_buf();
-        char* p   = buf;
-        char* end = buf + 256 - 1;
-        *p++      = '(';
-        for (int i = 0; i < type->as.tuple.elem_count && p < end; i++) {
-            if (i > 0) {
-                if (p + 2 < end) {
-                    *p++ = ',';
-                    *p++ = ' ';
-                }
-            }
-            const char* elem_name = type_name(type->as.tuple.elem_types[i]);
-            while (*elem_name && p < end) {
-                *p++ = *elem_name++;
-            }
-        }
-        if (p < end)
-            *p++ = ')';
-        *p = '\0';
-        return buf;
-    }
     case TYPE_GENERIC_PARAM:
         return type->as.generic_param.name;
+    default:
+        return NULL;
     }
-    return "<unknown>";
+}
+
+// Format an array type name into the rotating type_name buffer.
+static const char* type_name_array(Type* type) {
+    char* buf = next_type_name_buf();
+    if (type->as.array.size >= 0) {
+        snprintf(buf, 256, "[%d]%s", type->as.array.size, type_name(type->as.array.elem));
+    } else {
+        snprintf(buf, 256, "[]%s", type_name(type->as.array.elem));
+    }
+    return buf;
+}
+
+// Format a single-parameter generic wrapper like Span<T>, Vec<T>, or Box<T>.
+static const char* type_name_wrapped_elem(const char* wrapper, Type* elem_type) {
+    char* buf = next_type_name_buf();
+    snprintf(buf, 256, "%s<%s>", wrapper, type_name(elem_type));
+    return buf;
+}
+
+// Format a function signature type like func(A, B) -> C.
+static const char* type_name_func(Type* type) {
+    char* buf = next_type_name_buf();
+    int   n   = snprintf(buf, 256, "func(");
+    for (int i = 0; i < type->as.func.param_count && n < 255; i++) {
+        if (i > 0)
+            n += snprintf(buf + n, 256 - n, ", ");
+        n += snprintf(buf + n, 256 - n, "%s", type_name(type->as.func.param_types[i]));
+    }
+    n += snprintf(buf + n, 256 - n, ")");
+    if (type->as.func.return_type && type->as.func.return_type->kind != TYPE_VOID) {
+        snprintf(buf + n, 256 - n, " -> %s", type_name(type->as.func.return_type));
+    }
+    return buf;
+}
+
+// Format a tuple type name like (A, B, C).
+static const char* type_name_tuple(Type* type) {
+    char* buf = next_type_name_buf();
+    char* p   = buf;
+    char* end = buf + 256 - 1;
+    *p++      = '(';
+    for (int i = 0; i < type->as.tuple.elem_count && p < end; i++) {
+        if (i > 0) {
+            if (p + 2 < end) {
+                *p++ = ',';
+                *p++ = ' ';
+            }
+        }
+        const char* elem_name = type_name(type->as.tuple.elem_types[i]);
+        while (*elem_name && p < end) {
+            *p++ = *elem_name++;
+        }
+    }
+    if (p < end)
+        *p++ = ')';
+    *p = '\0';
+    return buf;
+}
+
+const char* type_name(Type* type) {
+    if (!type)
+        return "(null)";
+
+    const char* leaf_name = type_name_leaf(type);
+    if (leaf_name) {
+        return leaf_name;
+    }
+
+    switch (type->kind) {
+    case TYPE_ARRAY:
+        return type_name_array(type);
+    case TYPE_SPAN:
+        return type_name_wrapped_elem("Span", type->as.span.elem);
+    case TYPE_VEC:
+        return type_name_wrapped_elem("Vec", type->as.vec.elem);
+    case TYPE_BOX:
+        return type_name_wrapped_elem("Box", type->as.box.elem);
+    case TYPE_FUNC:
+        return type_name_func(type);
+    case TYPE_TUPLE:
+        return type_name_tuple(type);
+    default:
+        return "<unknown>";
+    }
 }
 
 // Builtin type lookup table
@@ -668,11 +731,8 @@ static char* next_type_mangle_buf(void) {
     return buf;
 }
 
-// Get a C-identifier-safe name for a type (no angle brackets or special chars)
-const char* type_mangle_name(Type* type) {
-    if (!type)
-        return "void";
-
+// Return the mangled name for non-composite type kinds, or NULL if formatting is needed.
+static const char* type_mangle_leaf(Type* type) {
     switch (type->kind) {
     case TYPE_VOID:
         return "void";
@@ -706,21 +766,6 @@ const char* type_mangle_name(Type* type) {
         return "voidptr";
     case TYPE_STRINGBUILDER:
         return "StringBuilder";
-    case TYPE_SPAN: {
-        char* buf = next_type_mangle_buf();
-        snprintf(buf, 256, "Span_%s", type_mangle_name(type->as.span.elem));
-        return buf;
-    }
-    case TYPE_VEC: {
-        char* buf = next_type_mangle_buf();
-        snprintf(buf, 256, "Vec_%s", type_mangle_name(type->as.vec.elem));
-        return buf;
-    }
-    case TYPE_BOX: {
-        char* buf = next_type_mangle_buf();
-        snprintf(buf, 256, "Box_%s", type_mangle_name(type->as.box.elem));
-        return buf;
-    }
     case TYPE_STRUCT:
         return type->as.struc.name;
     case TYPE_ENUM:
@@ -729,33 +774,73 @@ const char* type_mangle_name(Type* type) {
         return type->as.trait.name;
     case TYPE_GENERIC_PARAM:
         return type->as.generic_param.name;
-    case TYPE_ARRAY: {
-        char* buf = next_type_mangle_buf();
-        snprintf(buf, 256, "arr%d_%s", type->as.array.size, type_mangle_name(type->as.array.elem));
-        return buf;
+    default:
+        return NULL;
     }
-    case TYPE_TUPLE: {
-        char* buf = next_type_mangle_buf();
-        int   pos = snprintf(buf, 256, "tup");
-        for (int i = 0; i < type->as.tuple.elem_count && pos < 255; i++) {
-            pos += snprintf(buf + pos, 256 - pos, "_%s",
-                            type_mangle_name(type->as.tuple.elem_types[i]));
-        }
-        return buf;
+}
+
+// Format a single-parameter wrapper like Span_T, Vec_T, or Box_T.
+static const char* type_mangle_wrapped_elem(const char* wrapper, Type* elem_type) {
+    char* buf = next_type_mangle_buf();
+    snprintf(buf, 256, "%s_%s", wrapper, type_mangle_name(elem_type));
+    return buf;
+}
+
+// Format an array mangled name as arrN_Elem.
+static const char* type_mangle_array(Type* type) {
+    char* buf = next_type_mangle_buf();
+    snprintf(buf, 256, "arr%d_%s", type->as.array.size, type_mangle_name(type->as.array.elem));
+    return buf;
+}
+
+// Format a tuple mangled name as tup_E0_E1_....
+static const char* type_mangle_tuple(Type* type) {
+    char* buf = next_type_mangle_buf();
+    int   pos = snprintf(buf, 256, "tup");
+    for (int i = 0; i < type->as.tuple.elem_count && pos < 255; i++) {
+        pos +=
+            snprintf(buf + pos, 256 - pos, "_%s", type_mangle_name(type->as.tuple.elem_types[i]));
     }
-    case TYPE_FUNC: {
-        char* buf = next_type_mangle_buf();
-        int   pos = snprintf(buf, 256, "fn");
-        for (int i = 0; i < type->as.func.param_count && pos < 255; i++) {
-            pos += snprintf(buf + pos, 256 - pos, "_%s",
-                            type_mangle_name(type->as.func.param_types[i]));
-        }
-        if (type->as.func.return_type) {
-            pos += snprintf(buf + pos, 256 - pos, "_r_%s",
-                            type_mangle_name(type->as.func.return_type));
-        }
-        return buf;
+    return buf;
+}
+
+// Format a function mangled name as fn_P0_P1_..._r_Ret.
+static const char* type_mangle_func(Type* type) {
+    char* buf = next_type_mangle_buf();
+    int   pos = snprintf(buf, 256, "fn");
+    for (int i = 0; i < type->as.func.param_count && pos < 255; i++) {
+        pos +=
+            snprintf(buf + pos, 256 - pos, "_%s", type_mangle_name(type->as.func.param_types[i]));
     }
+    if (type->as.func.return_type) {
+        pos += snprintf(buf + pos, 256 - pos, "_r_%s", type_mangle_name(type->as.func.return_type));
+    }
+    return buf;
+}
+
+// Get a C-identifier-safe name for a type (no angle brackets or special chars)
+const char* type_mangle_name(Type* type) {
+    if (!type)
+        return "void";
+
+    const char* leaf_name = type_mangle_leaf(type);
+    if (leaf_name) {
+        return leaf_name;
+    }
+
+    switch (type->kind) {
+    case TYPE_SPAN:
+        return type_mangle_wrapped_elem("Span", type->as.span.elem);
+    case TYPE_VEC:
+        return type_mangle_wrapped_elem("Vec", type->as.vec.elem);
+    case TYPE_BOX:
+        return type_mangle_wrapped_elem("Box", type->as.box.elem);
+    case TYPE_ARRAY:
+        return type_mangle_array(type);
+    case TYPE_TUPLE:
+        return type_mangle_tuple(type);
+    case TYPE_FUNC:
+        return type_mangle_func(type);
     default:
         return "unknown";
     }
