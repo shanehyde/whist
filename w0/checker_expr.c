@@ -585,6 +585,9 @@ static Type* check_member_span(Checker* checker, Node* node) {
 static Type* check_member_enum(Checker* checker, Node* node, Type* object) {
     const char* member_name = node->as.member.name;
     sem_info_set_member_is_ref(checker->sem, node, 0); // Enums are value types, use . not ->
+    // Ensure generic enum methods are instantiated (needed when enum was resolved
+    // during Pass 1 before generic methods were registered in Pass 2)
+    ensure_generic_enum_methods(checker, object);
     if (object->as.enm.has_data && strcmp(member_name, "tag") == 0) {
         return type_int32;
     }

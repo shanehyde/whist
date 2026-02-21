@@ -344,7 +344,7 @@ static int collect_rc_field_info(CodeGen* gen, Node* struct_decl, RcFieldInfo** 
             info->type_name =
                 type_mangle_generic(gtype->as.generic_type.base_name, args, arg_count);
             free(args);
-            info->is_enum = 0;
+            info->is_enum = is_enum_type_name(gen, info->type_name);
         } else {
             info->type_name = NULL;
             info->is_enum   = 0;
