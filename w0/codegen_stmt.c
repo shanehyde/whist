@@ -86,7 +86,11 @@ static void collect_owned_temps_children(Node* node, Node*** temps, int* count, 
         break;
     case NODE_BINARY:
         collect_owned_temps(node->as.binary.left, temps, count, cap);
-        collect_owned_temps(node->as.binary.right, temps, count, cap);
+        // Don't hoist temps from the right side of short-circuit operators (&&, ||).
+        // The right side may not execute, so its temps must be handled inline.
+        if (node->as.binary.op != TOK_AMP_AMP && node->as.binary.op != TOK_PIPE_PIPE) {
+            collect_owned_temps(node->as.binary.right, temps, count, cap);
+        }
         break;
     case NODE_UNARY:
         collect_owned_temps(node->as.unary.operand, temps, count, cap);
