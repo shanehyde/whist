@@ -239,6 +239,43 @@ void type_free(Type* type) {
     free(type);
 }
 
+// Compare two optional type-name strings for equality.
+static int type_name_equals(const char* a, const char* b) {
+    if (a == b)
+        return 1;
+    if (!a || !b)
+        return 0;
+    return strcmp(a, b) == 0;
+}
+
+// Compare two function types including params, varargs, and return type.
+static int type_equals_func(Type* a, Type* b) {
+    if (a->as.func.param_count != b->as.func.param_count)
+        return 0;
+    if (a->as.func.is_varargs != b->as.func.is_varargs)
+        return 0;
+    if (!type_equals(a->as.func.return_type, b->as.func.return_type))
+        return 0;
+    for (int i = 0; i < a->as.func.param_count; i++) {
+        if (!type_equals(a->as.func.param_types[i], b->as.func.param_types[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// Compare two tuple types by element count and element types.
+static int type_equals_tuple(Type* a, Type* b) {
+    if (a->as.tuple.elem_count != b->as.tuple.elem_count)
+        return 0;
+    for (int i = 0; i < a->as.tuple.elem_count; i++) {
+        if (!type_equals(a->as.tuple.elem_types[i], b->as.tuple.elem_types[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 int type_equals(Type* a, Type* b) {
     if (a == b)
         return 1;
@@ -258,35 +295,17 @@ int type_equals(Type* a, Type* b) {
     case TYPE_BOX:
         return type_equals(a->as.box.elem, b->as.box.elem);
     case TYPE_STRUCT:
-        return strcmp(a->as.struc.name, b->as.struc.name) == 0;
+        return type_name_equals(a->as.struc.name, b->as.struc.name);
     case TYPE_ENUM:
-        return strcmp(a->as.enm.name, b->as.enm.name) == 0;
+        return type_name_equals(a->as.enm.name, b->as.enm.name);
     case TYPE_TRAIT:
-        return strcmp(a->as.trait.name, b->as.trait.name) == 0;
+        return type_name_equals(a->as.trait.name, b->as.trait.name);
     case TYPE_FUNC:
-        if (a->as.func.param_count != b->as.func.param_count)
-            return 0;
-        if (a->as.func.is_varargs != b->as.func.is_varargs)
-            return 0;
-        if (!type_equals(a->as.func.return_type, b->as.func.return_type))
-            return 0;
-        for (int i = 0; i < a->as.func.param_count; i++) {
-            if (!type_equals(a->as.func.param_types[i], b->as.func.param_types[i])) {
-                return 0;
-            }
-        }
-        return 1;
+        return type_equals_func(a, b);
     case TYPE_TUPLE:
-        if (a->as.tuple.elem_count != b->as.tuple.elem_count)
-            return 0;
-        for (int i = 0; i < a->as.tuple.elem_count; i++) {
-            if (!type_equals(a->as.tuple.elem_types[i], b->as.tuple.elem_types[i])) {
-                return 0;
-            }
-        }
-        return 1;
+        return type_equals_tuple(a, b);
     case TYPE_GENERIC_PARAM:
-        return strcmp(a->as.generic_param.name, b->as.generic_param.name) == 0;
+        return type_name_equals(a->as.generic_param.name, b->as.generic_param.name);
     default:
         return 1; // For primitives, kind equality is enough
     }
