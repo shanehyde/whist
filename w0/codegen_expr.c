@@ -207,29 +207,42 @@ static void emit_enum_value(CodeGen* gen, Node* node) {
              node->as.enum_value.value_name_length, node->as.enum_value.value_name);
     } else {
         // Data enum with args: (EnumName){.tag = EnumName_ValueName, .ValueName = {.f0 = ..}}
+        // Use resolved type info to determine which args need __rc_inc.
+        Type* enum_type   = node->as.enum_value.resolved_type;
+        int   variant_idx = -1;
+        if (enum_type) {
+            variant_idx = type_enum_variant_index(enum_type, node->as.enum_value.value_name);
+        }
+
         int needs_rc_inc = 0;
-        for (int i = 0; i < node->as.enum_value.args.count; i++) {
-            Node* arg = node->as.enum_value.args.nodes[i];
-            if (arg->type == NODE_IDENT && rc_is_tracked(gen, arg->as.ident.name)) {
-                needs_rc_inc = 1;
-                break;
+        if (variant_idx >= 0) {
+            for (int i = 0; i < node->as.enum_value.args.count; i++) {
+                if (i < enum_type->as.enm.variant_type_counts[variant_idx] &&
+                    type_is_rc_managed(enum_type->as.enm.variant_types[variant_idx][i])) {
+                    needs_rc_inc = 1;
+                    break;
+                }
             }
         }
 
         if (needs_rc_inc) {
             emit(gen, "({ ");
+            // Emit temp variables and __rc_inc for each RC-managed arg.
             for (int i = 0; i < node->as.enum_value.args.count; i++) {
-                Node* arg = node->as.enum_value.args.nodes[i];
-                if (arg->type == NODE_IDENT && rc_is_tracked(gen, arg->as.ident.name)) {
-                    Type*       arg_type = rc_get_var_type(gen, arg->as.ident.name);
-                    const char* inc_fn   = get_inc_func_for_type(arg_type);
-                    if (arg_type && arg_type->kind == TYPE_STRING) {
-                        emit(gen, "%s((void*)%s); ", inc_fn, arg->as.ident.name);
-                    } else {
-                        emit(gen, "%s(%s); ", inc_fn, arg->as.ident.name);
-                    }
-                    free((char*)inc_fn);
+                Type* ftype = enum_type->as.enm.variant_types[variant_idx][i];
+                if (!type_is_rc_managed(ftype))
+                    continue;
+                emit_resolved_type(gen, ftype);
+                emit(gen, " __ev_f%d = ", i);
+                emit_expr(gen, node->as.enum_value.args.nodes[i]);
+                emit(gen, "; ");
+                const char* inc_fn = get_inc_func_for_type(ftype);
+                if (ftype->kind == TYPE_STRING) {
+                    emit(gen, "%s((void*)__ev_f%d); ", inc_fn, i);
+                } else {
+                    emit(gen, "%s(__ev_f%d); ", inc_fn, i);
                 }
+                free((char*)inc_fn);
             }
         }
 
@@ -240,7 +253,14 @@ static void emit_enum_value(CodeGen* gen, Node* node) {
             if (i > 0)
                 emit(gen, ", ");
             emit(gen, ".f%d = ", i);
-            emit_expr(gen, node->as.enum_value.args.nodes[i]);
+            Type* ftype = (variant_idx >= 0 && i < enum_type->as.enm.variant_type_counts[variant_idx])
+                              ? enum_type->as.enm.variant_types[variant_idx][i]
+                              : NULL;
+            if (needs_rc_inc && ftype && type_is_rc_managed(ftype)) {
+                emit(gen, "__ev_f%d", i);
+            } else {
+                emit_expr(gen, node->as.enum_value.args.nodes[i]);
+            }
         }
         emit(gen, "}}");
 
