@@ -692,11 +692,8 @@ static char* next_type_mangle_buf(void) {
     return buf;
 }
 
-// Get a C-identifier-safe name for a type (no angle brackets or special chars)
-const char* type_mangle_name(Type* type) {
-    if (!type)
-        return "void";
-
+// Return the mangled name for non-composite type kinds, or NULL if formatting is needed.
+static const char* type_mangle_leaf(Type* type) {
     switch (type->kind) {
     case TYPE_VOID:
         return "void";
@@ -730,21 +727,6 @@ const char* type_mangle_name(Type* type) {
         return "voidptr";
     case TYPE_STRINGBUILDER:
         return "StringBuilder";
-    case TYPE_SPAN: {
-        char* buf = next_type_mangle_buf();
-        snprintf(buf, 256, "Span_%s", type_mangle_name(type->as.span.elem));
-        return buf;
-    }
-    case TYPE_VEC: {
-        char* buf = next_type_mangle_buf();
-        snprintf(buf, 256, "Vec_%s", type_mangle_name(type->as.vec.elem));
-        return buf;
-    }
-    case TYPE_BOX: {
-        char* buf = next_type_mangle_buf();
-        snprintf(buf, 256, "Box_%s", type_mangle_name(type->as.box.elem));
-        return buf;
-    }
     case TYPE_STRUCT:
         return type->as.struc.name;
     case TYPE_ENUM:
@@ -753,33 +735,73 @@ const char* type_mangle_name(Type* type) {
         return type->as.trait.name;
     case TYPE_GENERIC_PARAM:
         return type->as.generic_param.name;
-    case TYPE_ARRAY: {
-        char* buf = next_type_mangle_buf();
-        snprintf(buf, 256, "arr%d_%s", type->as.array.size, type_mangle_name(type->as.array.elem));
-        return buf;
+    default:
+        return NULL;
     }
-    case TYPE_TUPLE: {
-        char* buf = next_type_mangle_buf();
-        int   pos = snprintf(buf, 256, "tup");
-        for (int i = 0; i < type->as.tuple.elem_count && pos < 255; i++) {
-            pos += snprintf(buf + pos, 256 - pos, "_%s",
-                            type_mangle_name(type->as.tuple.elem_types[i]));
-        }
-        return buf;
+}
+
+// Format a single-parameter wrapper like Span_T, Vec_T, or Box_T.
+static const char* type_mangle_wrapped_elem(const char* wrapper, Type* elem_type) {
+    char* buf = next_type_mangle_buf();
+    snprintf(buf, 256, "%s_%s", wrapper, type_mangle_name(elem_type));
+    return buf;
+}
+
+// Format an array mangled name as arrN_Elem.
+static const char* type_mangle_array(Type* type) {
+    char* buf = next_type_mangle_buf();
+    snprintf(buf, 256, "arr%d_%s", type->as.array.size, type_mangle_name(type->as.array.elem));
+    return buf;
+}
+
+// Format a tuple mangled name as tup_E0_E1_....
+static const char* type_mangle_tuple(Type* type) {
+    char* buf = next_type_mangle_buf();
+    int   pos = snprintf(buf, 256, "tup");
+    for (int i = 0; i < type->as.tuple.elem_count && pos < 255; i++) {
+        pos +=
+            snprintf(buf + pos, 256 - pos, "_%s", type_mangle_name(type->as.tuple.elem_types[i]));
     }
-    case TYPE_FUNC: {
-        char* buf = next_type_mangle_buf();
-        int   pos = snprintf(buf, 256, "fn");
-        for (int i = 0; i < type->as.func.param_count && pos < 255; i++) {
-            pos += snprintf(buf + pos, 256 - pos, "_%s",
-                            type_mangle_name(type->as.func.param_types[i]));
-        }
-        if (type->as.func.return_type) {
-            pos += snprintf(buf + pos, 256 - pos, "_r_%s",
-                            type_mangle_name(type->as.func.return_type));
-        }
-        return buf;
+    return buf;
+}
+
+// Format a function mangled name as fn_P0_P1_..._r_Ret.
+static const char* type_mangle_func(Type* type) {
+    char* buf = next_type_mangle_buf();
+    int   pos = snprintf(buf, 256, "fn");
+    for (int i = 0; i < type->as.func.param_count && pos < 255; i++) {
+        pos +=
+            snprintf(buf + pos, 256 - pos, "_%s", type_mangle_name(type->as.func.param_types[i]));
     }
+    if (type->as.func.return_type) {
+        pos += snprintf(buf + pos, 256 - pos, "_r_%s", type_mangle_name(type->as.func.return_type));
+    }
+    return buf;
+}
+
+// Get a C-identifier-safe name for a type (no angle brackets or special chars)
+const char* type_mangle_name(Type* type) {
+    if (!type)
+        return "void";
+
+    const char* leaf_name = type_mangle_leaf(type);
+    if (leaf_name) {
+        return leaf_name;
+    }
+
+    switch (type->kind) {
+    case TYPE_SPAN:
+        return type_mangle_wrapped_elem("Span", type->as.span.elem);
+    case TYPE_VEC:
+        return type_mangle_wrapped_elem("Vec", type->as.vec.elem);
+    case TYPE_BOX:
+        return type_mangle_wrapped_elem("Box", type->as.box.elem);
+    case TYPE_ARRAY:
+        return type_mangle_array(type);
+    case TYPE_TUPLE:
+        return type_mangle_tuple(type);
+    case TYPE_FUNC:
+        return type_mangle_func(type);
     default:
         return "unknown";
     }
