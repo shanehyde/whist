@@ -35,10 +35,12 @@ struct SemInfo {
     int               enum_value_capacity;
 };
 
+// Allocate and zero-initialize a new SemInfo table.
 SemInfo* sem_info_new(void) {
     return xcalloc(1, sizeof(SemInfo));
 }
 
+// Free a SemInfo table and all owned strings within its entries.
 void sem_info_free(SemInfo* info) {
     if (!info) {
         return;
@@ -58,6 +60,8 @@ void sem_info_free(SemInfo* info) {
     free(info);
 }
 
+// Look up the SemMemberInfo entry for a member access node.
+// If create_if_missing is set, appends a new entry when not found.
 static SemMemberInfo* get_member_info(SemInfo* info, Node* member, int create_if_missing) {
     if (!info || !member) {
         return NULL;
@@ -78,6 +82,8 @@ static SemMemberInfo* get_member_info(SemInfo* info, Node* member, int create_if
     return out;
 }
 
+// Look up the SemEnumValueInfo entry for an enum value node.
+// If create_if_missing is set, appends a new entry when not found.
 static SemEnumValueInfo* get_enum_value_info(SemInfo* info, Node* enum_value,
                                              int create_if_missing) {
     if (!info || !enum_value) {
@@ -99,6 +105,7 @@ static SemEnumValueInfo* get_enum_value_info(SemInfo* info, Node* enum_value,
     return out;
 }
 
+// Record whether a member access node is a reference (pointer dereference).
 void sem_info_set_member_is_ref(SemInfo* info, Node* member, int is_ref) {
     SemMemberInfo* m = get_member_info(info, member, 1);
     if (!m) {
@@ -108,6 +115,7 @@ void sem_info_set_member_is_ref(SemInfo* info, Node* member, int is_ref) {
     m->is_ref     = is_ref != 0;
 }
 
+// Return whether a member access is a reference, or fallback if not recorded.
 int sem_info_get_member_is_ref(SemInfo* info, Node* member, int fallback) {
     SemMemberInfo* m = get_member_info(info, member, 0);
     if (!m || !m->has_is_ref) {
@@ -116,6 +124,7 @@ int sem_info_get_member_is_ref(SemInfo* info, Node* member, int fallback) {
     return m->is_ref;
 }
 
+// Record whether a member access node is accessing a const field.
 void sem_info_set_member_is_const_access(SemInfo* info, Node* member, int is_const_access) {
     SemMemberInfo* m = get_member_info(info, member, 1);
     if (!m) {
@@ -125,6 +134,7 @@ void sem_info_set_member_is_const_access(SemInfo* info, Node* member, int is_con
     m->is_const_access     = is_const_access != 0;
 }
 
+// Return whether a member access is const, or fallback if not recorded.
 int sem_info_get_member_is_const_access(SemInfo* info, Node* member, int fallback) {
     SemMemberInfo* m = get_member_info(info, member, 0);
     if (!m || !m->has_is_const_access) {
@@ -133,6 +143,7 @@ int sem_info_get_member_is_const_access(SemInfo* info, Node* member, int fallbac
     return m->is_const_access;
 }
 
+// Record the resolved struct type name for a member access node (e.g. "Point").
 void sem_info_set_member_struct_name(SemInfo* info, Node* member, const char* struct_name) {
     SemMemberInfo* m = get_member_info(info, member, 1);
     if (!m) {
@@ -143,6 +154,7 @@ void sem_info_set_member_struct_name(SemInfo* info, Node* member, const char* st
     m->struct_name = struct_name ? xstrdup(struct_name) : NULL;
 }
 
+// Return the resolved struct name for a member access, or fallback if not recorded.
 const char* sem_info_get_member_struct_name(SemInfo* info, Node* member, const char* fallback) {
     SemMemberInfo* m = get_member_info(info, member, 0);
     if (!m || !m->has_struct_name) {
@@ -151,6 +163,7 @@ const char* sem_info_get_member_struct_name(SemInfo* info, Node* member, const c
     return m->struct_name;
 }
 
+// Record the module name for a member access node (e.g. "std" in std::println).
 void sem_info_set_member_module_name(SemInfo* info, Node* member, const char* module_name) {
     SemMemberInfo* m = get_member_info(info, member, 1);
     if (!m) {
@@ -161,6 +174,7 @@ void sem_info_set_member_module_name(SemInfo* info, Node* member, const char* mo
     m->module_name = module_name ? xstrdup(module_name) : NULL;
 }
 
+// Return the module name for a member access, or fallback if not recorded.
 const char* sem_info_get_member_module_name(SemInfo* info, Node* member, const char* fallback) {
     SemMemberInfo* m = get_member_info(info, member, 0);
     if (!m || !m->has_module_name) {
@@ -169,6 +183,7 @@ const char* sem_info_get_member_module_name(SemInfo* info, Node* member, const c
     return m->module_name;
 }
 
+// Record the resolved enum type name for an enum value node (e.g. "Color" for Color.Red).
 void sem_info_set_enum_value_resolved_name(SemInfo* info, Node* enum_value,
                                            const char* resolved_enum_name) {
     SemEnumValueInfo* e = get_enum_value_info(info, enum_value, 1);
@@ -180,6 +195,7 @@ void sem_info_set_enum_value_resolved_name(SemInfo* info, Node* enum_value,
     e->resolved_enum_name = resolved_enum_name ? xstrdup(resolved_enum_name) : NULL;
 }
 
+// Return the resolved enum type name for an enum value, or fallback if not recorded.
 const char* sem_info_get_enum_value_resolved_name(SemInfo* info, Node* enum_value,
                                                   const char* fallback) {
     SemEnumValueInfo* e = get_enum_value_info(info, enum_value, 0);
@@ -189,6 +205,7 @@ const char* sem_info_get_enum_value_resolved_name(SemInfo* info, Node* enum_valu
     return e->resolved_enum_name;
 }
 
+// Record whether an enum value belongs to a data enum (variants carry payloads).
 void sem_info_set_enum_value_is_data_enum(SemInfo* info, Node* enum_value, int is_data_enum) {
     SemEnumValueInfo* e = get_enum_value_info(info, enum_value, 1);
     if (!e) {
@@ -198,6 +215,7 @@ void sem_info_set_enum_value_is_data_enum(SemInfo* info, Node* enum_value, int i
     e->is_data_enum     = is_data_enum != 0;
 }
 
+// Return whether an enum value is from a data enum, or fallback if not recorded.
 int sem_info_get_enum_value_is_data_enum(SemInfo* info, Node* enum_value, int fallback) {
     SemEnumValueInfo* e = get_enum_value_info(info, enum_value, 0);
     if (!e || !e->has_is_data_enum) {
