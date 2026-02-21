@@ -1,10 +1,5 @@
 // Whist Compiler — Self-hosted
 // Port of w0/main.c command-line option processing.
-//
-// NOTE: output_file and lib_path use "" as "not set" sentinel.
-// Ideally these would be Option<string>, but Option<string> has bugs:
-//   1. Generic enum methods (has_value, value_or) don't resolve for Option<string>
-//   2. RC cleanup for Option<string> struct fields emits __rc_dec on the value type
 
 import std;
 
@@ -18,8 +13,8 @@ struct MainOptions {
     emit_c: bool,
     line_directives: bool,
     compile_only: bool,
-    output_file: string,
-    lib_path: string,
+    output_file: Option<string>,
+    lib_path: Option<string>,
 }
 
 // --- Stub functions ---
@@ -46,8 +41,8 @@ func run_debug_pipeline(opts: MainOptions, source_file: string) -> i32 {
 
 func run_normal_compile(opts: MainOptions, source_file: string) -> i32 {
     std::println($"[stub] run_normal_compile: {source_file}");
-    if (opts.output_file != "") {
-        std::println($"  output: {opts.output_file}");
+    if (opts.output_file is Some(path)) {
+        std::println($"  output: {path}");
     } else {
         std::println("  output: stdout");
     }
@@ -55,12 +50,14 @@ func run_normal_compile(opts: MainOptions, source_file: string) -> i32 {
 }
 
 func compile_to_object(opts: MainOptions, source_file: string) -> i32 {
-    std::println($"[stub] compile_to_object: {source_file} -> {opts.output_file}");
+    var out = opts.output_file.value_or("<stdout>");
+    std::println($"[stub] compile_to_object: {source_file} -> {out}");
     return 0;
 }
 
 func compile_and_link(opts: MainOptions, input_files: Vec<string>) -> i32 {
-    std::println($"[stub] compile_and_link: {input_files.count} file(s) -> {opts.output_file}");
+    var out = opts.output_file.value_or("<stdout>");
+    std::println($"[stub] compile_and_link: {input_files.count} file(s) -> {out}");
     foreach (const f in input_files) {
         std::println($"  input: {f}");
     }
@@ -120,6 +117,7 @@ func print_usage(program: string) {
 
 // First pass: extract global options that affect all modes.
 func prescan_global_options(args: Vec<string>) -> MainOptions {
+    var no_string: Option<string> = Option::None;
     var opts = new MainOptions{
         lex_only: false,
         parse_only: false,
@@ -130,18 +128,18 @@ func prescan_global_options(args: Vec<string>) -> MainOptions {
         emit_c: false,
         line_directives: false,
         compile_only: false,
-        output_file: "",
-        lib_path: "",
+        output_file: no_string,
+        lib_path: no_string,
     };
 
     var i: i64 = 1;
     while (i < args.count) {
         if (args[i] == "--lib-path" && i + 1 < args.count) {
             i += 1;
-            opts.lib_path = args[i];
+            opts.lib_path = Option::Some(args[i]);
         } else if (args[i] == "-o" && i + 1 < args.count) {
             i += 1;
-            opts.output_file = args[i];
+            opts.output_file = Option::Some(args[i]);
         } else if (args[i] == "--rc-debug") {
             opts.rc_debug = true;
         } else if (args[i] == "--emit-c") {
@@ -239,7 +237,7 @@ func parse_main_options(args: Vec<string>, opts: MainOptions) -> i64 {
             opts.print_ast_checked = true;
         } else if (args[i] == "--lib-path" && i + 1 < args.count) {
             i += 1;
-            opts.lib_path = args[i];
+            opts.lib_path = Option::Some(args[i]);
         } else if (args[i] == "--rc-debug") {
             opts.rc_debug = true;
         } else if (args[i] == "--emit-c") {
@@ -250,7 +248,7 @@ func parse_main_options(args: Vec<string>, opts: MainOptions) -> i64 {
             opts.compile_only = true;
         } else if (args[i] == "-o" && i + 1 < args.count) {
             i += 1;
-            opts.output_file = args[i];
+            opts.output_file = Option::Some(args[i]);
         }
         i += 1;
     }
@@ -309,7 +307,7 @@ func main() -> i32 {
             std::eprintln("Error: -c requires exactly one .w source file");
             return 1;
         }
-        if (opts.output_file == "" && !opts.emit_c) {
+        if (opts.output_file is None && !opts.emit_c) {
             std::eprintln("Error: -c requires -o <output.o> (or --emit-c)");
             return 1;
         }
@@ -319,7 +317,7 @@ func main() -> i32 {
     // Multi-file / link mode: multiple inputs or any .o files
     var has_obj_input = input_files.any(|f| f.ends_with(".o"));
     if (input_files.count > 1 || has_obj_input) {
-        if (opts.output_file == "") {
+        if (opts.output_file is None) {
             std::eprintln("Error: -o <output> required when linking multiple files");
             return 1;
         }
