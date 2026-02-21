@@ -1493,8 +1493,9 @@ static Type* check_enum_value_expr(Checker* checker, Node* node) {
         return type_error;
     }
 
-    // Set is_data_enum flag for codegen.
+    // Set is_data_enum flag and resolved type for codegen.
     sem_info_set_enum_value_is_data_enum(checker->sem, node, enum_type->as.enm.has_data);
+    node->as.enum_value.resolved_type = enum_type;
 
     // Validate constructor args for data enums.
     int expected_args = enum_type->as.enm.variant_type_counts[variant_idx];

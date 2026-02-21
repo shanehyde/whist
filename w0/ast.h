@@ -304,6 +304,7 @@ struct Node {
             int      has_parens;     // set by parser: 1 if () was present (even if empty)
             int      is_data_enum;   // set by checker: 1 if parent enum has data variants
             int      is_module_call; // set by checker: 1 if this is module::func access
+            Type*    resolved_type; // set by checker: resolved enum Type* (for RC codegen)
         } enum_value;
 
         // New expression: new Type { fields } or new Type(args)
