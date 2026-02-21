@@ -167,62 +167,76 @@ Type* type_box(Type* elem) {
     return type;
 }
 
-void type_free(Type* type) {
-    if (!type)
-        return;
-    // Don't free builtins
-    if (type == type_void || type == type_bool || type == type_int64 || type == type_int8 ||
-        type == type_int16 || type == type_int32 || type == type_uint64 || type == type_uint8 ||
-        type == type_uint16 || type == type_uint32 || type == type_f32 || type == type_f64 ||
-        type == type_char || type == type_string || type == type_voidptr ||
-        type == type_stringbuilder || type == type_error || type == type_null) {
-        return;
-    }
+// Return whether this type pointer refers to one of the global builtin singletons.
+static int type_is_builtin(Type* type) {
+    return type == type_void || type == type_bool || type == type_int64 || type == type_int8 ||
+           type == type_int16 || type == type_int32 || type == type_uint64 || type == type_uint8 ||
+           type == type_uint16 || type == type_uint32 || type == type_f32 || type == type_f64 ||
+           type == type_char || type == type_string || type == type_voidptr ||
+           type == type_stringbuilder || type == type_error || type == type_null;
+}
 
+// Free heap-owned members of a struct type definition.
+static void type_free_struct_members(Type* type) {
+    free(type->as.struc.name);
+    for (int i = 0; i < type->as.struc.field_count; i++) {
+        free(type->as.struc.field_names[i]);
+    }
+    free(type->as.struc.field_names);
+    free(type->as.struc.field_types);
+    free(type->as.struc.field_is_const);
+    for (int i = 0; i < type->as.struc.method_count; i++) {
+        free(type->as.struc.method_names[i]);
+    }
+    free(type->as.struc.method_names);
+    free(type->as.struc.method_types);
+    free(type->as.struc.method_is_const);
+}
+
+// Free heap-owned members of an enum type definition.
+static void type_free_enum_members(Type* type) {
+    free(type->as.enm.name);
+    for (int i = 0; i < type->as.enm.value_count; i++) {
+        free(type->as.enm.value_names[i]);
+    }
+    free(type->as.enm.value_names);
+    if (type->as.enm.variant_types) {
+        for (int i = 0; i < type->as.enm.value_count; i++) {
+            free(type->as.enm.variant_types[i]);
+        }
+        free(type->as.enm.variant_types);
+    }
+    free(type->as.enm.variant_type_counts);
+    for (int i = 0; i < type->as.enm.method_count; i++) {
+        free(type->as.enm.method_names[i]);
+    }
+    free(type->as.enm.method_names);
+    free(type->as.enm.method_types);
+    free(type->as.enm.method_is_const);
+}
+
+// Free heap-owned members of a trait type definition.
+static void type_free_trait_members(Type* type) {
+    free(type->as.trait.name);
+    for (int i = 0; i < type->as.trait.method_count; i++) {
+        free(type->as.trait.method_names[i]);
+    }
+    free(type->as.trait.method_names);
+    free(type->as.trait.method_types);
+    free(type->as.trait.method_is_const);
+}
+
+// Free kind-specific heap members before freeing the Type node itself.
+static void type_free_members(Type* type) {
     switch (type->kind) {
     case TYPE_STRUCT:
-        free(type->as.struc.name);
-        for (int i = 0; i < type->as.struc.field_count; i++) {
-            free(type->as.struc.field_names[i]);
-        }
-        free(type->as.struc.field_names);
-        free(type->as.struc.field_types);
-        free(type->as.struc.field_is_const);
-        for (int i = 0; i < type->as.struc.method_count; i++) {
-            free(type->as.struc.method_names[i]);
-        }
-        free(type->as.struc.method_names);
-        free(type->as.struc.method_types);
-        free(type->as.struc.method_is_const);
+        type_free_struct_members(type);
         break;
     case TYPE_ENUM:
-        free(type->as.enm.name);
-        for (int i = 0; i < type->as.enm.value_count; i++) {
-            free(type->as.enm.value_names[i]);
-        }
-        free(type->as.enm.value_names);
-        if (type->as.enm.variant_types) {
-            for (int i = 0; i < type->as.enm.value_count; i++) {
-                free(type->as.enm.variant_types[i]);
-            }
-            free(type->as.enm.variant_types);
-        }
-        free(type->as.enm.variant_type_counts);
-        for (int i = 0; i < type->as.enm.method_count; i++) {
-            free(type->as.enm.method_names[i]);
-        }
-        free(type->as.enm.method_names);
-        free(type->as.enm.method_types);
-        free(type->as.enm.method_is_const);
+        type_free_enum_members(type);
         break;
     case TYPE_TRAIT:
-        free(type->as.trait.name);
-        for (int i = 0; i < type->as.trait.method_count; i++) {
-            free(type->as.trait.method_names[i]);
-        }
-        free(type->as.trait.method_names);
-        free(type->as.trait.method_types);
-        free(type->as.trait.method_is_const);
+        type_free_trait_members(type);
         break;
     case TYPE_FUNC:
         free(type->as.func.param_types);
@@ -236,6 +250,12 @@ void type_free(Type* type) {
     default:
         break;
     }
+}
+
+void type_free(Type* type) {
+    if (!type || type_is_builtin(type))
+        return;
+    type_free_members(type);
     free(type);
 }
 
