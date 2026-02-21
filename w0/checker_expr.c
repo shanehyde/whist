@@ -2956,7 +2956,7 @@ static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type) 
         if (field_type->kind == TYPE_ENUM) {
             checker->enum_target_hint = field_type;
         }
-        Type* value_type = check_expression(checker, field->as.field_init.value);
+        Type* value_type          = check_expression(checker, field->as.field_init.value);
         checker->enum_target_hint = old_hint;
 
         if (!type_assignable(field_type, value_type)) {

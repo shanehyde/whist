@@ -26,7 +26,7 @@ clean:
 	rm -rf $(BIN)
 
 $(BIN)/test_runner: $(TARGET) tools/test_runner.w
-	@$(TARGET) --lib-path ../lib tools/test_runner.w | cc -x c -I../lib/include -o $@ - ../lib/whist_runtime.c
+	@$(TARGET) --lib-path ../lib --line-directives tools/test_runner.w | cc -g -x c -I../lib/include -o $@ - ../lib/whist_runtime.c
 
 test: $(BIN)/test_runner
 	@$(BIN)/test_runner $(FILTER)
