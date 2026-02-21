@@ -29,19 +29,19 @@ $(BIN)/test_runner: $(TARGET) tools/test_runner.w
 	@$(TARGET) --lib-path ../lib tools/test_runner.w | cc -x c -I../lib/include -o $@ - ../lib/whist_runtime.c
 
 test: $(BIN)/test_runner
-	@$(BIN)/test_runner
+	@$(BIN)/test_runner $(FILTER)
 
 test-verbose: $(BIN)/test_runner
-	@$(BIN)/test_runner --verbose
+	@$(BIN)/test_runner --verbose $(FILTER)
 
 test-run: $(BIN)/test_runner
-	@$(BIN)/test_runner --run
+	@$(BIN)/test_runner --run $(FILTER)
 
 test-valid: $(BIN)/test_runner
-	@$(BIN)/test_runner --run
+	@$(BIN)/test_runner --run $(FILTER)
 
 test-errors: $(BIN)/test_runner
-	@$(BIN)/test_runner --errors
+	@$(BIN)/test_runner --errors $(FILTER)
 
 format:
 	clang-format -i *.c *.h

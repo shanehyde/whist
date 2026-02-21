@@ -394,15 +394,27 @@ func main() -> i32 {
     var run_errors = args.any(|x| x == "--errors");
     var verbose = args.any(|x| x == "--verbose");
 
+    // Collect non-flag arguments as test name filter
+    var filter = "";
+    foreach (const arg in args) {
+        if (!arg.starts_with("--") && !arg.starts_with("-") && !arg.ends_with("test_runner")) {
+            filter = arg;
+        }
+    }
+
     if (args.any(|x| x == "--help")) {
         std::println("""
-        Usage: test_runner [OPTIONS]
+        Usage: test_runner [OPTIONS] [FILTER]
 
         Options:
           --run       Run only executable program tests (test/run/**)
           --errors    Run only error case tests (test/errors/**)
-          --verbose   Show detailed output on failure
+          --verbose   Show per-test pass/fail and detailed output on failure
           --help      Show this help
+
+        Filter:
+          Optional substring to match against test file paths.
+          Example: test_runner option_struct_field
 
         With no options, runs all tests.
         """);
@@ -441,6 +453,10 @@ func main() -> i32 {
         files.sort();
 
         foreach (const file in files) {
+            if (filter != "" && !file.contains(filter)) {
+                continue;
+            }
+
             var disp = display_path(file);
 
             var has_test_blocks = file_contains(file, "test \"");
@@ -450,6 +466,9 @@ func main() -> i32 {
                 var result = run_test_block_file(file, w0, lib_path, verbose);
                 if (result.is_ok()) {
                     run_passed += 1;
+                    if (verbose) {
+                        std::println($"{disp}:".pad_right(45, ' ') + $" {green("PASS")}");
+                    }
                 } else {
                     std::println($"{disp}:".pad_right(45, ' ') + $" {red("FAIL")} ({result.error()})");
                     run_failed += 1;
@@ -458,6 +477,9 @@ func main() -> i32 {
                 var result = run_program_test(file, w0, lib_path, verbose);
                 if (result.is_ok()) {
                     run_passed += 1;
+                    if (verbose) {
+                        std::println($"{disp}:".pad_right(45, ' ') + $" {green("PASS")}");
+                    }
                 } else {
                     std::println($"{disp}:".pad_right(45, ' ') + $" {red("FAIL")} ({result.error()})");
                     run_failed += 1;
@@ -476,11 +498,18 @@ func main() -> i32 {
         files.sort();
 
         foreach (const file in files) {
+            if (filter != "" && !file.contains(filter)) {
+                continue;
+            }
+
             var disp = display_path(file);
 
             var result = run_error_test(file, w0, lib_path, verbose);
             if (result.is_ok()) {
                 error_passed += 1;
+                if (verbose) {
+                    std::println($"{disp}:".pad_right(45, ' ') + $" {green("PASS")}");
+                }
             } else {
                 std::println($"{disp}:".pad_right(45, ' ') + $" {red("FAIL")} ({result.error()})");
                 error_failed += 1;
