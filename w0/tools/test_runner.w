@@ -395,10 +395,10 @@ func main() -> i32 {
     var verbose = args.any(|x| x == "--verbose");
 
     // Collect non-flag arguments as test name filter
-    var filter = "";
+    var filter: Option<string>;
     foreach (const arg in args) {
         if (!arg.starts_with("--") && !arg.starts_with("-") && !arg.ends_with("test_runner")) {
-            filter = arg;
+            filter = Option::Some(arg);
         }
     }
 
@@ -448,12 +448,11 @@ func main() -> i32 {
     if (run_valid) {
         std::println($"{cyan("=== Run Tests (test/run/**) ===")}");
 
-
         var files = fs::walk_dir("test/run").filter(|f| f.ends_with(".w"));
         files.sort();
 
         foreach (const file in files) {
-            if (filter != "" && !file.contains(filter)) {
+            if (filter.has_value() && !file.contains(filter.value())) {
                 continue;
             }
 
@@ -498,7 +497,7 @@ func main() -> i32 {
         files.sort();
 
         foreach (const file in files) {
-            if (filter != "" && !file.contains(filter)) {
+            if (filter.has_value() && !file.contains(filter.value())) {
                 continue;
             }
 

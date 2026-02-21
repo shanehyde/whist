@@ -187,7 +187,7 @@ int         type_is_rc_managed(Type* type);             // Is this an RC-managed
 int         type_is_signed_integer(Type* type);         // Is this a signed integer type?
 int         type_is_unsigned_integer(Type* type);       // Is this an unsigned integer type?
 int         type_enum_variant_index(Type* enum_type, const char* variant_name);
-int         type_is_option(Type* type);              // Is this an Option type (has Some+None)?
+int         type_is_option(Type* type); // Is this an Option type (has Some+None)?
 int         type_find_field_index(Type* type, const char* field_name);
 int         type_supports_vec_contains(Type* type); // Can Vec<T>.contains compare this type?
 int         type_supports_vec_sort(Type* type);     // Is this type sortable by Vec<T>.sort?

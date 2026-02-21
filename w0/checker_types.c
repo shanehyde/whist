@@ -898,8 +898,7 @@ void ensure_generic_enum_methods(Checker* checker, Type* enum_type) {
         return;
 
     // Reallocate method body storage for the new methods
-    inst->method_bodies =
-        xrealloc(inst->method_bodies, def->method_count * sizeof(Node*));
+    inst->method_bodies = xrealloc(inst->method_bodies, def->method_count * sizeof(Node*));
     for (int i = already_processed; i < def->method_count; i++) {
         inst->method_bodies[i] = NULL;
     }

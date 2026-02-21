@@ -253,9 +253,10 @@ static void emit_enum_value(CodeGen* gen, Node* node) {
             if (i > 0)
                 emit(gen, ", ");
             emit(gen, ".f%d = ", i);
-            Type* ftype = (variant_idx >= 0 && i < enum_type->as.enm.variant_type_counts[variant_idx])
-                              ? enum_type->as.enm.variant_types[variant_idx][i]
-                              : NULL;
+            Type* ftype =
+                (variant_idx >= 0 && i < enum_type->as.enm.variant_type_counts[variant_idx])
+                    ? enum_type->as.enm.variant_types[variant_idx][i]
+                    : NULL;
             if (needs_rc_inc && ftype && type_is_rc_managed(ftype)) {
                 emit(gen, "__ev_f%d", i);
             } else {
