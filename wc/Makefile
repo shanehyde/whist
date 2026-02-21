@@ -10,7 +10,7 @@ TARGET = $(BIN)/wc
 all: $(TARGET)
 
 %.o: %.w
-	$(W0) -c $< -o $@ --lib-path $(LIB)
+	$(W0) -c $< -o $@ --rc-debug --lib-path $(LIB)
 
 $(TARGET): $(OBJ) | $(BIN)
 	$(W0) $(OBJ) -o $@ --lib-path $(LIB)

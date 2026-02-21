@@ -55,6 +55,67 @@ RC_FREE: 0x600003a04010 at program.w:15
 
 This also auto-enables `#line` directives so that RC trace messages reference Whist source lines. Allocations inside runtime helpers (string concat, format, etc.) will show `whist_runtime.h` as their source.
 
+## C → Whist Porting Reference
+
+When porting C code to Whist, consult `docs/whist-features.md` for full language reference. Key mappings:
+
+### Types
+| C | Whist |
+|---|-------|
+| `int` / `int32_t` | `i32` |
+| `int64_t` / `long long` | `i64` |
+| `const char*` / `char*` | `string` (RC-managed) |
+| `bool` / `int` (flag) | `bool` |
+| `NULL` pointer | `Option<T>` with `Option::None` / `Option::Some(v)` |
+| `void*` | `voidptr` |
+| `struct Foo*` (heap) | `Foo` (structs are heap-allocated RC pointers) |
+| `T[]` / `T*` (dynamic) | `Vec<T>` |
+| `T[n]` (fixed) | `[n]T` |
+
+### Patterns
+| C Pattern | Whist Equivalent |
+|-----------|-----------------|
+| `argc, argv` | `std::args()` → `Vec<string>` |
+| `strcmp(a, b) == 0` | `a == b` |
+| `fprintf(stderr, ...)` | `std::eprintln(...)` |
+| `printf(...)` | `std::println(...)` |
+| Out-parameter `int* result` | Tuple return `-> (T1, T2)` |
+| `struct Foo opts = {0}` | `new MainOptions{ field: val, ... }` (all fields required) |
+| `NULL` / sentinel check | `if (opt is Some(v)) { ... }` or `opt.has_value()` |
+| `for (int i = 0; ...)` | `while (i < n) { ...; i += 1; }` or `for (var i = 0; i < n; i += 1)` |
+| `strstr(s, sub) != NULL` | `s.contains(sub)` |
+| `strncmp(s, prefix, n) == 0` | `s.starts_with(prefix)` |
+| `free(ptr)` | Automatic (RC cleanup at scope exit) |
+| `snprintf(buf, ...)` | `$"interpolation {var}"` or `std::format(...)` |
+| `system(cmd)` | `std::exec(cmd)` → `{exit_code, output, error_output}` |
+| `exit(n)` | `std::exit(n)` or `return n` from `main` |
+| `strtol(s, ...)` | `std::parse_i64(s)` |
+
+### Destructuring
+```whist
+// Tuple destructuring
+var (source, index) = find_source(args, idx);
+var (_, unused) = func_returning_pair();  // discard with _
+
+// Struct destructuring
+var {output, error_output, exit_code} = std::exec(cmd);
+```
+
+### Lambdas (for Vec operations)
+```whist
+var evens = nums.filter(|x| x % 2 == 0);
+var doubled = nums.map(|x| x * 2);
+var has_big = nums.any(|x| x > 100);
+var all_ok = nums.all(|x| x >= 0);
+nums.each(|x| std::println($"{x}"));
+nums.sort();
+```
+
+### Known Limitations (see issues)
+- `Option<string>` as struct field: method resolution + RC cleanup bugs (#301)
+- Struct field default values not supported (all fields must be initialized)
+- No `break`/`continue` with labels
+
 ## Whist Language
 
 Types: `void`, `bool`, `i8`-`i64`, `u8`-`u64`, `f32`, `f64`, `char`, `string`, `voidptr`, `*T`, `[n]T`, `struct`, `enum`
