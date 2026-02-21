@@ -11,16 +11,16 @@ wc: w0
 	$(MAKE) -C wc
 
 test:
-	$(MAKE) -C w0 test
+	$(MAKE) -C w0 test FILTER=$(FILTER)
 
 test-verbose:
-	$(MAKE) -C w0 test-verbose
+	$(MAKE) -C w0 test-verbose FILTER=$(FILTER)
 
 test-run:
-	$(MAKE) -C w0 test-run
+	$(MAKE) -C w0 test-run FILTER=$(FILTER)
 
 test-errors:
-	$(MAKE) -C w0 test-errors
+	$(MAKE) -C w0 test-errors FILTER=$(FILTER)
 
 clean:
 	$(MAKE) -C w0 clean
