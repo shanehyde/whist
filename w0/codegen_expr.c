@@ -865,7 +865,7 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
                  tname, tmp, tname, tname, tmp, tname);
         }
         free(cleanup);
-        emit_struct_init(gen, node->as.new_expr.init);
+        emit_struct_init(gen, node->as.new_expr.init, rtype);
         emit(gen, ";");
         // Increment refcount for any RC-tracked idents stored in struct fields
         Node* rc_init = node->as.new_expr.init;
@@ -1000,7 +1000,7 @@ static void emit_hoisted_new_struct_init_expr(CodeGen* gen, Node* node, Type* rt
     free(cleanup);
     emit_indent(gen);
     emit(gen, "*%s = (%s)", temp_name, tname);
-    emit_struct_init(gen, node->as.new_expr.init);
+    emit_struct_init(gen, node->as.new_expr.init, rtype);
     emit(gen, ";\n");
     emit_hoisted_new_field_rc_incs(gen, node->as.new_expr.init);
 }
@@ -1745,7 +1745,7 @@ static void emit_complex_expr(CodeGen* gen, Node* node) {
         emit_assign_expr(gen, node);
         break;
     case NODE_STRUCT_INIT:
-        emit_struct_init(gen, node);
+        emit_struct_init(gen, node, NULL);
         break;
     case NODE_TUPLE_LIT:
         emit_tuple_lit_expr(gen, node);
@@ -1798,19 +1798,50 @@ void emit_expr(CodeGen* gen, Node* node) {
     emit_complex_expr(gen, node);
 }
 
+// Check if a struct field name is present in the struct init AST node.
+static int struct_init_has_field(Node* init_node, const char* field_name) {
+    for (int i = 0; i < init_node->as.struct_init.fields.count; i++) {
+        Node* field = init_node->as.struct_init.fields.nodes[i];
+        if (field && field->type == NODE_FIELD_INIT &&
+            strcmp(field->as.field_init.name, field_name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 // Emit a struct initializer as a C designated initializer: {.field = value, ...}
-void emit_struct_init(CodeGen* gen, Node* node) {
+// If struct_type is provided, missing Option<T> fields are defaulted to None.
+void emit_struct_init(CodeGen* gen, Node* node, Type* struct_type) {
     emit(gen, "{");
+    int emitted = 0;
     for (int i = 0; i < node->as.struct_init.fields.count; i++) {
         Node* field = node->as.struct_init.fields.nodes[i];
         if (!field || field->type != NODE_FIELD_INIT) {
             continue;
         }
-        if (i > 0) {
+        if (emitted > 0) {
             emit(gen, ", ");
         }
         emit(gen, ".%s = ", field->as.field_init.name);
         emit_expr(gen, field->as.field_init.value);
+        emitted++;
+    }
+    // Emit default None for missing Option<T> fields
+    if (struct_type && struct_type->kind == TYPE_STRUCT) {
+        for (int i = 0; i < struct_type->as.struc.field_count; i++) {
+            Type* ft = struct_type->as.struc.field_types[i];
+            if (type_is_option(ft) &&
+                !struct_init_has_field(node, struct_type->as.struc.field_names[i])) {
+                if (emitted > 0) {
+                    emit(gen, ", ");
+                }
+                int none_idx = type_enum_variant_index(ft, "None");
+                emit(gen, ".%s = (%s){.tag = %s_%s}", struct_type->as.struc.field_names[i],
+                     ft->as.enm.name, ft->as.enm.name, ft->as.enm.value_names[none_idx]);
+                emitted++;
+            }
+        }
     }
     emit(gen, "}");
 }

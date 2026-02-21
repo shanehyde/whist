@@ -385,6 +385,14 @@ int type_enum_variant_index(Type* enum_type, const char* variant_name) {
     return -1;
 }
 
+// Return whether this type is an Option type (has Some and None variants).
+int type_is_option(Type* type) {
+    if (!type || type->kind != TYPE_ENUM) {
+        return 0;
+    }
+    return type_enum_variant_index(type, "Some") >= 0 && type_enum_variant_index(type, "None") >= 0;
+}
+
 // Return whether this element type supports Vec.contains (requires ==).
 int type_supports_vec_contains(Type* type) {
     if (!type)

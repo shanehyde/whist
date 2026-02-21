@@ -878,6 +878,16 @@ static void check_normal_var_decl_stmt(Checker* checker, Node* node) {
     record_inferred_var_decl_type(node, init_type);
     maybe_mark_var_decl_rc_from_init(checker, node, sym, var_type);
     maybe_mark_string_var_decl_rc(node, sym, var_type);
+
+    // Option<T> without initializer defaults to None
+    if (!node->as.var_decl.init && type_is_option(var_type)) {
+        // Store resolved type for codegen to emit default None
+        node->as.var_decl.resolved_type = var_type;
+        // Mark RC if type has RC fields (for scope cleanup)
+        if (var_type->as.enm.has_rc_fields) {
+            mark_var_decl_rc(node, sym, var_type);
+        }
+    }
 }
 
 // Type-check a variable declaration: handles destructuring, type inference, and RC tracking

@@ -36,7 +36,7 @@ int         rc_is_tracked(CodeGen* gen, const char* name);
 
 // --- From codegen_expr.c: expression emission ---
 void  emit_expr(CodeGen* gen, Node* node);
-void  emit_struct_init(CodeGen* gen, Node* node);
+void  emit_struct_init(CodeGen* gen, Node* node, Type* struct_type);
 void  emit_hoisted_new_expr(CodeGen* gen, Node* node, const char* temp_name);
 void  emit_hoisted_owned_temp(CodeGen* gen, Node* node, const char* temp_name);
 void  emit_destruct_pattern(CodeGen* gen, DestructPattern* pattern, const char* temp_prefix,
