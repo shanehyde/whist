@@ -2949,8 +2949,15 @@ static Type* check_struct_init(Checker* checker, Node* init, Type* struct_type) 
 
         seen[field_index] = 1;
 
-        Type* value_type = check_expression(checker, field->as.field_init.value);
         Type* field_type = struct_type->as.struc.field_types[field_index];
+
+        // Set enum_target_hint for generic enum inference (e.g., new Config{ name: Option::None })
+        Type* old_hint = checker->enum_target_hint;
+        if (field_type->kind == TYPE_ENUM) {
+            checker->enum_target_hint = field_type;
+        }
+        Type* value_type = check_expression(checker, field->as.field_init.value);
+        checker->enum_target_hint = old_hint;
 
         if (!type_assignable(field_type, value_type)) {
             check_error_type(checker, field->line, field->column, field_name, field_type,
