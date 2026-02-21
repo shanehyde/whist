@@ -386,6 +386,8 @@ void codegen_init(CodeGen* gen, FILE* out, CodeGenChecker checker_data, int rc_d
     gen->test_index          = 0;
     gen->source_file         = source_file;
     gen->line_directives     = line_directives;
+    gen->target_module       = NULL;
+    gen->force_static        = 0;
 }
 
 void codegen_free(CodeGen* gen) {
@@ -1435,11 +1437,18 @@ static void emit_declarations(CodeGen* gen, Node* ast) {
             continue;
         // Set current module context (NULL for "main", module name for library imports)
         gen->current_module = strcmp(mod->as.module.name, "main") == 0 ? NULL : mod->as.module.name;
+
+        // In separate compilation mode, force non-target module functions to static
+        // so each .o has its own private copy (avoids duplicate symbols at link time).
+        gen->force_static =
+            (gen->target_module != NULL && strcmp(mod->as.module.name, gen->target_module) != 0);
+
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             emit_decl(gen, mod->as.module.decls.nodes[i]);
         }
     }
     gen->current_module = NULL;
+    gen->force_static   = 0;
 }
 
 typedef struct {
@@ -1554,6 +1563,8 @@ static void setup_generic_method_subst(CodeGen* gen, GenericInstance* info,
 
 static void emit_generic_method_signature(CodeGen* gen, GenericInstance* info,
                                           func_decl_node* fdn) {
+    if (gen->target_module)
+        emit(gen, "static ");
     emit_func_return_type(gen, fdn);
     emit(gen, " %s_%s(", info->mangled_name, fdn->name);
 
@@ -1715,6 +1726,8 @@ static void emit_generic_method_func_impl(CodeGen* gen, Node* ast, GenericFuncIn
     int is_void = codegen_return_type_is_void(fdn->return_type);
 
     // Return type
+    if (gen->target_module)
+        emit(gen, "static ");
     emit_func_return_type(gen, fdn);
 
     // Function name + self parameter
@@ -1806,6 +1819,8 @@ static void emit_generic_func_impls(CodeGen* gen, Node* ast) {
         int is_void = codegen_return_type_is_void(fdn->return_type);
 
         // Return type
+        if (gen->target_module)
+            emit(gen, "static ");
         emit_func_return_type(gen, fdn);
 
         // Function name

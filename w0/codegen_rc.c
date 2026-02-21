@@ -738,6 +738,8 @@ void emit_vec_user_methods(CodeGen* gen, Node* ast) {
             gen->generics.subst   = &subst_ctx;
 
             // Emit return type
+            if (gen->target_module)
+                emit(gen, "static ");
             if (fdn->return_is_const && fdn->return_type) {
                 emit(gen, "const ");
             }
