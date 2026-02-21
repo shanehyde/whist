@@ -23,9 +23,8 @@ test "option_struct_field" {
         None => assert(false);
     }
 
-    // Test with None variant
-    var none: Option<string> = Option::None;
-    var cfg2 = new Config{ name: none, count: 0 };
+    // Test with None variant (direct inference from field type)
+    var cfg2 = new Config{ name: Option::None, count: 0 };
     assert(!cfg2.name.has_value());
     assert(cfg2.name.value_or("default") == "default");
 
