@@ -2203,7 +2203,8 @@ static Type* check_new_vec_literal_expr(Checker* checker, Node* node, Type* reso
             continue;
         }
 
-        // Set enum_target_hint for generic enum inference (e.g., new Vec<Option<i64>>{Option::None})
+        // Set enum_target_hint for generic enum inference (e.g., new
+        // Vec<Option<i64>>{Option::None})
         Type* old_hint = checker->enum_target_hint;
         if (elem_type->kind == TYPE_ENUM) {
             checker->enum_target_hint = elem_type;
@@ -2828,6 +2829,54 @@ static Type* check_contextless_struct_init_expr(Checker* checker, Node* node) {
     return type_error;
 }
 
+// Validate an `is` expression used as a general expression (not in if/while condition).
+// Returns TYPE_BOOL. Bindings are NOT allowed in this context.
+static Type* check_is_expr(Checker* checker, Node* node) {
+    Type* expr_type = check_expression(checker, node->as.is_expr.expr);
+    if (expr_type->kind == TYPE_ERROR)
+        return type_error;
+
+    if (expr_type->kind != TYPE_ENUM) {
+        check_error(checker, node->line, node->column,
+                    "'is' pattern requires an enum type, got '%s'", type_name(expr_type));
+        return type_error;
+    }
+
+    node->as.is_expr.resolved_type = expr_type;
+
+    // Validate variant exists
+    const char* variant_name = node->as.is_expr.variant_name;
+    int         variant_idx  = type_enum_variant_index(expr_type, variant_name);
+    if (variant_idx < 0) {
+        check_error(checker, node->line, node->column, "'%s' is not a variant of enum '%s'",
+                    variant_name, expr_type->as.enm.name);
+        return type_error;
+    }
+
+    // Validate qualified enum name if present (allow generic base name)
+    if (node->as.is_expr.enum_name) {
+        const char* user_name   = node->as.is_expr.enum_name;
+        const char* actual_name = expr_type->as.enm.name;
+        int         user_len    = node->as.is_expr.enum_name_length;
+        if (strcmp(user_name, actual_name) != 0 &&
+            !(strncmp(user_name, actual_name, user_len) == 0 && actual_name[user_len] == '_')) {
+            check_error(checker, node->line, node->column,
+                        "Enum name '%s' does not match expression type '%s'", user_name,
+                        actual_name);
+            return type_error;
+        }
+    }
+
+    // Bindings are only allowed in if/while condition context
+    if (node->as.is_expr.binding_count > 0) {
+        check_error(checker, node->line, node->column,
+                    "'is' pattern with bindings only allowed in if/while conditions");
+        return type_error;
+    }
+
+    return type_bool;
+}
+
 // Dispatch non-literal expression nodes to their dedicated type-checking routines.
 static Type* check_non_literal_expression(Checker* checker, Node* node) {
     switch (node->type) {
@@ -2884,6 +2933,9 @@ static Type* check_non_literal_expression(Checker* checker, Node* node) {
 
     case NODE_LAMBDA:
         return check_lambda_expr(checker, node);
+
+    case NODE_IS_EXPR:
+        return check_is_expr(checker, node);
 
     default:
         check_error(checker, node->line, node->column, "Unknown expression type %d", node->type);

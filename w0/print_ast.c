@@ -501,6 +501,21 @@ void print_ast(Node* node, int depth) {
         printf("StringInterp (%d parts)\n", node->as.string_interp.parts.count);
         print_node_list(NULL, &node->as.string_interp.parts, depth);
         break;
+    case NODE_IS_EXPR:
+        printf("IsExpr: %s%s%s", node->as.is_expr.enum_name ? node->as.is_expr.enum_name : "",
+               node->as.is_expr.enum_name ? "::" : "", node->as.is_expr.variant_name);
+        if (node->as.is_expr.binding_count > 0) {
+            printf("(");
+            for (int i = 0; i < node->as.is_expr.binding_count; i++) {
+                if (i > 0)
+                    printf(", ");
+                printf("%s", node->as.is_expr.bindings[i]);
+            }
+            printf(")");
+        }
+        printf("\n");
+        print_labeled_child("Expr", node->as.is_expr.expr, depth + 1);
+        break;
 
     // Literals
     case NODE_INT_LIT:
@@ -1124,6 +1139,24 @@ void print_ast_checked(Node* node, int depth) {
     case NODE_STRING_INTERP:
         printf("StringInterp (%d parts)\n", node->as.string_interp.parts.count);
         print_checked_node_list(NULL, &node->as.string_interp.parts, depth);
+        break;
+    case NODE_IS_EXPR:
+        printf("IsExpr: %s%s%s", node->as.is_expr.enum_name ? node->as.is_expr.enum_name : "",
+               node->as.is_expr.enum_name ? "::" : "", node->as.is_expr.variant_name);
+        if (node->as.is_expr.binding_count > 0) {
+            printf("(");
+            for (int i = 0; i < node->as.is_expr.binding_count; i++) {
+                if (i > 0)
+                    printf(", ");
+                printf("%s", node->as.is_expr.bindings[i]);
+            }
+            printf(")");
+        }
+        if (node->as.is_expr.has_bindings)
+            printf(" [has_bindings]");
+        print_checker_flags(node);
+        printf("\n");
+        print_checked_labeled_child("Expr", node->as.is_expr.expr, depth + 1);
         break;
 
     // Literals

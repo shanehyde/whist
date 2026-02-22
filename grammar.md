@@ -272,7 +272,6 @@ Create vecs: `var v = new Vec<i64>{};` or `var v = new Vec<i64>{1, 2, 3};`
 ```bnf
 <statement> ::= <var-decl>
              | <if-stmt>
-             | <if-is-stmt>
              | <while-stmt>
              | <for-stmt>
              | <foreach-stmt>
@@ -286,12 +285,7 @@ Create vecs: `var v = new Vec<i64>{};` or `var v = new Vec<i64>{1, 2, 3};`
 
 <block> ::= '{' { <statement> } '}'
 
-<if-stmt> ::= 'if' '(' <expression> ')' <block> [ 'else' ( <if-stmt> | <if-is-stmt> | <block> ) ]
-
-<if-is-stmt> ::= 'if' '(' <expression> 'is' <variant-pattern> [ '&&' <expression> ] ')' <block>
-                 [ 'else' ( <if-stmt> | <if-is-stmt> | <block> ) ]
-
-<variant-pattern> ::= [ <identifier> '::' ] <identifier> [ '(' <identifier> { ',' <identifier> } ')' ]
+<if-stmt> ::= 'if' '(' <expression> ')' <block> [ 'else' ( <if-stmt> | <block> ) ]
 
 <while-stmt> ::= 'while' '(' <expression> ')' <block>
 
@@ -330,7 +324,7 @@ The second form iterates over a collection. Currently supported: `Vec<T>`, `Span
                     | '-' <integer-literal> | '-' <float-literal>
 ```
 
-`if ... is` statements conditionally test and destructure enum variants. The expression is evaluated, then tested against a variant pattern. If the variant matches, any bindings are available in the then-block. Bare checks without bindings are allowed (e.g., `if (opt is None)`). An optional `&&` condition can follow the pattern to add a guard (e.g., `if (opt is Some(v) && v > 0)`). The guard expression can use the bindings. Chains like `if (x is A) { } else if (x is B) { } else { }` are supported.
+The `is` operator is an expression that tests enum variant membership (see Expressions below). When used with bindings in `if`/`while` conditions, multiple `is` patterns can be chained along the `&&` spine: `if (x is Ok(r) && r is Happy(s) && s > 10)`. Bindings from earlier `is` patterns are available to later expressions and the body block. Bare checks without bindings (e.g., `var b: bool = opt is None`) work anywhere as general boolean expressions.
 
 Match statements destructure enum values by variant, or match on scalar/string values using literal patterns. When matching on an enum type, each arm matches a variant pattern and binds payload fields to local variables. Variant names can be unqualified (`Some(v)`) or qualified (`Option::Some(v)`). When matching on integers, floats, strings, chars, or bools, each arm uses a literal pattern. The wildcard pattern `_` matches any value. Match expressions (used as values) require a `_` arm. Commas between arms are optional.
 
@@ -374,8 +368,18 @@ Match statements destructure enum values by variant, or match on scalar/string v
 
 <term-expr> ::= <factor-expr> { ( '+' | '-' ) <factor-expr> }
 
-<factor-expr> ::= <cast-expr> { ( '*' | '/' | '%' ) <cast-expr> }
+<factor-expr> ::= <is-expr> { ( '*' | '/' | '%' ) <is-expr> }
 ```
+
+### Is Expressions
+
+```bnf
+<is-expr> ::= <cast-expr> { 'is' <variant-pattern> }
+
+<variant-pattern> ::= [ <identifier> '::' ] <identifier> [ '(' <identifier> { ',' <identifier> } ')' ]
+```
+
+The `is` operator tests whether an enum value matches a specific variant, returning `bool`. Without bindings (e.g., `opt is Some`), it works anywhere as a general expression. With bindings (e.g., `opt is Some(v)`), it is only allowed on the `&&` spine of `if`/`while` conditions, where bindings are scoped to the then-block or loop body.
 
 ### Cast Expressions
 
@@ -606,6 +610,6 @@ From lowest to highest precedence:
 | 9          | `<<` `>>`                                                | Left          |
 | 10         | `+` `-`                                                  | Left          |
 | 11         | `*` `/` `%`                                              | Left          |
-| 12         | `as` (type cast)                                         | Left          |
+| 12         | `as` (type cast), `is` (variant test)                    | Left          |
 | 13         | `!` `-` `~` (unary prefix)                               | Right         |
 | 14         | `()` `[]` `.` `?` (postfix)                              | Left          |

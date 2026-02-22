@@ -73,15 +73,14 @@ typedef enum {
     NODE_CAST,
     NODE_TRY_EXPR,
     NODE_LAMBDA,
+    NODE_IS_EXPR,
 
     // Statements
     NODE_EXPR_STMT,
     NODE_VAR_DECL,
     NODE_BLOCK,
     NODE_IF,
-    NODE_IF_LET,
     NODE_WHILE,
-    NODE_WHILE_LET,
     NODE_FOR,
     NODE_FOREACH,
     NODE_RETURN,
@@ -359,6 +358,19 @@ struct Node {
             } captures;
         } lambda;
 
+        // Is expression: expr is [Enum::]Variant[(bindings)]
+        struct {
+            Node*  expr;         // LHS being matched
+            char*  variant_name; // "Ok", "Some", etc.
+            int    variant_name_length;
+            char*  enum_name; // Qualified enum name (NULL if inferred)
+            int    enum_name_length;
+            char** bindings; // Binding names [f0, f1, ...]
+            int    binding_count;
+            Type*  resolved_type; // Set by checker: enum type of expr
+            int    has_bindings;  // Set by checker: 1 if valid bindings present
+        } is_expr;
+
         // Tuple type: (T1, T2, ...)
         struct {
             NodeList elem_types;
@@ -415,40 +427,11 @@ struct Node {
             Node* else_block;
         } if_stmt;
 
-        // If-is statement: if (expr is Variant(bindings) [&& cond]) { ... } else { ... }
-        struct {
-            Node*  expr;         // Expression being matched
-            char*  variant_name; // Variant to match (e.g., "Ok")
-            int    variant_name_length;
-            char*  enum_name; // Qualified enum name (NULL if inferred)
-            int    enum_name_length;
-            char** bindings; // Binding names [f0, f1, ...]
-            int    binding_count;
-            Node*  then_block;
-            Node*  else_block;    // NODE_IF, NODE_IF_LET, or NODE_BLOCK
-            Node*  extra_cond;    // Optional && condition after pattern (NULL if none)
-            Type*  resolved_type; // Set by checker: enum type of expr
-        } if_let_stmt;
-
         // While statement
         struct {
             Node* cond;
             Node* body;
         } while_stmt;
-
-        // While-is statement: while (expr is Variant(bindings) [&& cond]) { ... }
-        struct {
-            Node*  expr;         // Expression being matched (re-evaluated each iteration)
-            char*  variant_name; // Variant to match (e.g., "Some")
-            int    variant_name_length;
-            char*  enum_name; // Qualified enum name (NULL if inferred)
-            int    enum_name_length;
-            char** bindings; // Binding names [f0, f1, ...]
-            int    binding_count;
-            Node*  body;          // Loop body
-            Node*  extra_cond;    // Optional && condition after pattern (NULL if none)
-            Type*  resolved_type; // Set by checker: enum type of expr
-        } while_let_stmt;
 
         // For statement
         struct {

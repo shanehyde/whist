@@ -590,11 +590,8 @@ static int collect_string_literals_stmt_node(CodeGen* gen, Node* node) {
         collect_string_literals_node(gen, node->as.if_stmt.then_block);
         collect_string_literals_node(gen, node->as.if_stmt.else_block);
         return 1;
-    case NODE_IF_LET:
-        collect_string_literals_node(gen, node->as.if_let_stmt.expr);
-        collect_string_literals_node(gen, node->as.if_let_stmt.extra_cond);
-        collect_string_literals_node(gen, node->as.if_let_stmt.then_block);
-        collect_string_literals_node(gen, node->as.if_let_stmt.else_block);
+    case NODE_IS_EXPR:
+        collect_string_literals_node(gen, node->as.is_expr.expr);
         return 1;
     case NODE_FOR:
         collect_string_literals_node(gen, node->as.for_stmt.init);
@@ -611,11 +608,6 @@ static int collect_string_literals_stmt_node(CodeGen* gen, Node* node) {
     case NODE_WHILE:
         collect_string_literals_node(gen, node->as.while_stmt.cond);
         collect_string_literals_node(gen, node->as.while_stmt.body);
-        return 1;
-    case NODE_WHILE_LET:
-        collect_string_literals_node(gen, node->as.while_let_stmt.expr);
-        collect_string_literals_node(gen, node->as.while_let_stmt.extra_cond);
-        collect_string_literals_node(gen, node->as.while_let_stmt.body);
         return 1;
     case NODE_EXPR_STMT:
         collect_string_literals_node(gen, node->as.expr_stmt.expr);
@@ -1953,9 +1945,9 @@ static void collect_use_aliases(CodeGen* gen, Node* ast) {
             if (decl->type != NODE_USE_DECL)
                 continue;
 
-            const char* mod_name = decl->as.use_decl.module_name;
-            Node* target_mod = find_module_in_ast(ast, mod_name);
-            int is_sibling = target_mod ? target_mod->as.module.is_sibling : 0;
+            const char* mod_name   = decl->as.use_decl.module_name;
+            Node*       target_mod = find_module_in_ast(ast, mod_name);
+            int         is_sibling = target_mod ? target_mod->as.module.is_sibling : 0;
 
             if (decl->as.use_decl.is_wildcard) {
                 if (target_mod) {
@@ -1963,8 +1955,8 @@ static void collect_use_aliases(CodeGen* gen, Node* ast) {
                         Node* target_decl = target_mod->as.module.decls.nodes[d];
                         if (target_decl->type == NODE_FUNC_DECL &&
                             target_decl->as.func_decl.is_public) {
-                            register_use_alias(gen, mod_name,
-                                               target_decl->as.func_decl.name, is_sibling);
+                            register_use_alias(gen, mod_name, target_decl->as.func_decl.name,
+                                               is_sibling);
                         }
                     }
                 }
