@@ -795,7 +795,7 @@ static void register_enum_method_symbol(Checker* checker, func_decl_node* mfdn,
 // Returns the instantiated enum type or type_error.
 Type* instantiate_generic_enum(Checker* checker, GenericDef* def, char* mangled,
                                Type** resolved_args, int arg_count) {
-    Type* enum_type = type_enum(mangled);
+    Type* enum_type             = type_enum(mangled);
     enum_type->as.enm.base_name = xstrdup(def->name);
 
     // Register early to handle recursive types

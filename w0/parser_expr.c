@@ -980,6 +980,69 @@ static Node* parse_binary(Parser* parser, Precedence min_prec) {
         left                             = cast;
     }
 
+    // Is expressions: expr is [Enum::]Variant[(bindings)]
+    // Binds tighter than all binary operators (like 'as')
+    while (check_token(parser, TOK_IS)) {
+        advance_token(parser); // consume 'is'
+        int is_line = parser->previous.line;
+        int is_col  = parser->previous.column;
+
+        // Parse pattern: VariantName or EnumName::VariantName
+        consume_token(parser, TOK_IDENT, "Expected variant name after 'is'");
+        Token first_ident = parser->previous;
+
+        char* enum_name     = NULL;
+        int   enum_name_len = 0;
+        char* variant_name;
+        int   variant_name_len;
+
+        if (check_token(parser, TOK_COLON_COLON)) {
+            advance_token(parser); // consume ::
+            Token variant = parser->current;
+            consume_token(parser, TOK_IDENT, "Expected variant name after '::'");
+            enum_name        = copy_token_string(&first_ident);
+            enum_name_len    = first_ident.length;
+            variant_name     = copy_token_string(&variant);
+            variant_name_len = variant.length;
+        } else {
+            variant_name     = copy_token_string(&first_ident);
+            variant_name_len = first_ident.length;
+        }
+
+        // Optional bindings: (a, b, ...)
+        char** bindings      = NULL;
+        int    binding_count = 0;
+        if (match_token(parser, TOK_LPAREN)) {
+            int capacity = 4;
+            bindings     = xmalloc(capacity * sizeof(char*));
+            while (!check_token(parser, TOK_RPAREN) && !check_token(parser, TOK_EOF)) {
+                Token binding = parser->current;
+                consume_token(parser, TOK_IDENT, "Expected binding name in 'is' pattern");
+                if (binding_count >= capacity) {
+                    capacity *= 2;
+                    bindings = xrealloc(bindings, capacity * sizeof(char*));
+                }
+                bindings[binding_count++] = copy_token_string(&binding);
+                if (!check_token(parser, TOK_RPAREN)) {
+                    consume_token(parser, TOK_COMMA, "Expected ',' or ')' after binding name");
+                }
+            }
+            consume_token(parser, TOK_RPAREN, "Expected ')' after bindings");
+        }
+
+        Node* is_node                           = node_new(NODE_IS_EXPR, is_line, is_col);
+        is_node->as.is_expr.expr                = left;
+        is_node->as.is_expr.variant_name        = variant_name;
+        is_node->as.is_expr.variant_name_length = variant_name_len;
+        is_node->as.is_expr.enum_name           = enum_name;
+        is_node->as.is_expr.enum_name_length    = enum_name_len;
+        is_node->as.is_expr.bindings            = bindings;
+        is_node->as.is_expr.binding_count       = binding_count;
+        is_node->as.is_expr.resolved_type       = NULL;
+        is_node->as.is_expr.has_bindings        = 0;
+        left                                    = is_node;
+    }
+
     while (get_precedence(parser->current.type) >= min_prec &&
            get_precedence(parser->current.type) != PREC_NONE) {
         Token op = parser->current;

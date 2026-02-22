@@ -1741,6 +1741,22 @@ static int emit_simple_expr(CodeGen* gen, Node* node) {
     }
 }
 
+// Emit a standalone `is` expression (no bindings): (expr.tag == Enum_Variant)
+static void emit_is_expr(CodeGen* gen, Node* node) {
+    Type*       enum_type = node->as.is_expr.resolved_type;
+    const char* enum_name = enum_type->as.enm.name;
+    const char* variant   = node->as.is_expr.variant_name;
+    int         is_data   = enum_type->as.enm.has_data;
+
+    emit(gen, "(");
+    emit_expr(gen, node->as.is_expr.expr);
+    if (is_data)
+        emit(gen, ".tag == %s_%s", enum_name, variant);
+    else
+        emit(gen, " == %s_%s", enum_name, variant);
+    emit(gen, ")");
+}
+
 // Emit complex expressions that recurse into child expressions.
 static void emit_complex_expr(CodeGen* gen, Node* node) {
     switch (node->type) {
@@ -1791,6 +1807,9 @@ static void emit_complex_expr(CodeGen* gen, Node* node) {
         break;
     case NODE_LAMBDA:
         emit_lambda_expr(gen, node);
+        break;
+    case NODE_IS_EXPR:
+        emit_is_expr(gen, node);
         break;
     default:
         emit(gen, "/* unknown expr %d */", node->type);
