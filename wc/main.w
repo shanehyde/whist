@@ -40,7 +40,7 @@ func run_lex_mode(source_file: string) -> i32 {
     var lex = new Lexer(source);
 
     while (true) {
-        var tok = lexer_next(lex);
+        var tok = lex.next();
         var line_str = std::to_string(tok.line).pad_left(3, ' ');
         var col_str = std::to_string(tok.column).pad_right(2, ' ');
         var type_str = tok.kind.name().pad_right(12, ' ');
