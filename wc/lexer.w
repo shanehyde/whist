@@ -122,6 +122,11 @@ public struct Lexer {
     error_message: string,
 }
 
+enum LexerCharacter {
+    Char(char),
+    EOF,
+}
+
 // --- Character classification helpers ---
 
 func (char) is_alpha() -> bool {
@@ -161,7 +166,10 @@ func (Lexer) is_at_end() -> bool {
     return self.pos >= self.source.length();
 }
 
-func (Lexer) advance() -> char {
+func (Lexer) advance() -> LexerCharacter {
+    if (self.is_at_end()) {
+        return LexerCharacter::EOF;
+    }
     var ch = self.source[self.pos];
     self.pos += 1;
     match (ch) {
@@ -171,21 +179,25 @@ func (Lexer) advance() -> char {
         }
         _ => self.column += 1;
     }
-    return ch;
+    return LexerCharacter::Char(ch);
 }
 
-func (Lexer) peek() -> char {
+func (Lexer) peek() -> LexerCharacter {
     if (self.is_at_end()) {
-        return '\0';
+        return LexerCharacter::EOF;
     }
-    return self.source[self.pos];
+    return LexerCharacter::Char(self.source[self.pos]);
 }
 
-func (Lexer) peek_next() -> char {
-    if (self.pos + 1 >= self.source.length()) {
-        return '\0';
+func (Lexer) peek_ahead(n: i64) -> LexerCharacter {
+    if (self.pos + n >= self.source.length()) {
+        return LexerCharacter::EOF;
     }
-    return self.source[self.pos + 1];
+    return LexerCharacter::Char(self.source[self.pos + n]);
+}
+
+func (Lexer) peek_next() -> LexerCharacter {
+    return self.peek_ahead(1);
 }
 
 func (Lexer) match_next(expected: char) -> bool {
@@ -221,41 +233,60 @@ func (Lexer) error_token(message: string) -> Token {
 
 // --- Whitespace and comment skipping ---
 
-func (Lexer) skip_whitespace() -> Option<bool> {
-    while (true) {
-        if (self.is_at_end()) {
-            return Option::None;
-        }
-        var ch = self.peek();
-        if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
-            self.advance();
-        } else if (ch == '/') {
-            if (self.peek_next() == '/') {
-                // Line comment
-                while (self.peek() != '\n' && !self.is_at_end()) {
-                    self.advance();
-                }
-            } else if (self.peek_next() == '*') {
-                // Block comment
-                self.advance(); // consume /
+func (char) is_whitespace() -> bool {
+    return self == ' ' || self == '\t' || self == '\r' || self == '\n';
+}
+
+func (Lexer) skip_linecomment() -> void {
+    self.advance(); // consume first /
+    self.advance(); // consume second /
+    while (self.peek() is LexerCharacter::Char(ch) && ch != '\n') {
+        self.advance();
+    }
+}
+
+func (Lexer) skip_blockcomment() -> void {
+    self.advance(); // consume first /
+    self.advance(); // consume *
+    while (self.peek() is LexerCharacter::Char(ch)) {
+        if(ch == '*') {
+            if (self.peek_next() is LexerCharacter::Char(n) && n == '/') {
                 self.advance(); // consume *
-                while (!self.is_at_end()) {
-                    if (self.peek() == '*' && self.peek_next() == '/') {
-                        self.advance(); // consume *
-                        self.advance(); // consume /
-                        break;
-                    }
-                    self.advance();
-                }
-                if (self.is_at_end()) {
-                    self.error_message = "Unterminated block comment";
-                    return Option::None;
-                }
-            } else {
-                return Option::Some(true);
+                self.advance(); // consume /
+                return;
             }
-        } else {
-            return Option::Some(true);
+        }
+        self.advance();
+    }
+
+    // If we reach here, the block comment was unterminated. Defer the error until next token.
+    self.error_message = "Unterminated block comment";
+}
+
+func (Lexer) skip_whitespace() -> void {
+    while (true) {
+        match (self.peek()) {
+            LexerCharacter::EOF => return;
+            LexerCharacter::Char(ch) => {
+                if (ch.is_whitespace()) {
+                    self.advance();
+                    continue;
+                }
+                if (ch == '/') {
+                    match (self.peek_next()) {
+                         LexerCharacter::EOF => return;
+                         LexerCharacter::Char(next) => {
+                            match (next) {
+                                '/' => { self.skip_linecomment();}
+                                '*' => { self.skip_blockcomment();}
+                                _ => return;
+                            }
+                         }
+                    }
+                } else {
+                    return;
+                }
+            }
         }
     }
 }
@@ -303,7 +334,7 @@ func identifier_type(text: string) -> TokenType {
 // --- Identifier scanning ---
 
 func (Lexer) identifier() -> Token {
-    while (!self.is_at_end() && self.peek().is_alnum()) {
+    while (self.peek() is LexerCharacter::Char(ch) && ch.is_alnum()) {
         self.advance();
     }
     var text = self.source[self.start:self.pos];
@@ -312,36 +343,53 @@ func (Lexer) identifier() -> Token {
 
 // --- Number scanning ---
 
-func (Lexer) number() -> Token {
+func (Lexer) number(start_char: char) -> Token {
     var kind = TokenType::Int;
 
     // Handle hex, octal, binary prefixes
-    if (self.source[self.start] == '0' && !self.is_at_end()) {
+    if (start_char == '0') {
         var next = self.peek();
-        if (next == 'x' || next == 'X') {
+        if(self.peek() is LexerCharacter::Char(ch) && (ch == 'x' || ch == 'X')) {
             self.advance();
-            if (self.is_at_end() || !self.peek().is_hex_digit()) {
-                return self.error_token("Invalid hexadecimal literal");
+            match(self.peek()) {
+                LexerCharacter::EOF => return self.error_token("Invalid hexadecimal literal");
+                LexerCharacter::Char(ch) => {
+                    if (!ch.is_hex_digit()) {
+                        return self.error_token("Invalid hexadecimal literal");
+                    }
+                }
             }
-            while (!self.is_at_end() && self.peek().is_hex_digit()) {
+            while (self.peek() is LexerCharacter::Char(ch) && ch.is_hex_digit()) {
                 self.advance();
             }
             return self.make_token(TokenType::Int);
-        } else if (next == 'b' || next == 'B') {
+        }
+        if(self.peek() is LexerCharacter::Char(ch) && (ch == 'b' || ch == 'B')) {
             self.advance();
-            if (self.is_at_end() || (self.peek() != '0' && self.peek() != '1')) {
-                return self.error_token("Invalid binary literal");
+            match(self.peek()) {
+                LexerCharacter::EOF => return self.error_token("Invalid binary literal");
+                LexerCharacter::Char(ch) => {
+                    if (ch != '0' && ch != '1') {
+                        return self.error_token("Invalid binary literal");
+                    }
+                }
             }
-            while (!self.is_at_end() && (self.peek() == '0' || self.peek() == '1')) {
+            while (self.peek() is LexerCharacter::Char(ch) && (ch == '0' || ch == '1')) {
                 self.advance();
             }
             return self.make_token(TokenType::Int);
-        } else if (next == 'o' || next == 'O') {
+        }
+        if(self.peek() is LexerCharacter::Char(ch) && (ch == 'o' || ch == 'O')) {
             self.advance();
-            if (self.is_at_end() || !self.peek().is_octal_digit()) {
-                return self.error_token("Invalid octal literal");
+            match(self.peek()) {
+                LexerCharacter::EOF => return self.error_token("Invalid octal literal");
+                LexerCharacter::Char(ch) => {
+                    if (!ch.is_octal_digit()) {
+                        return self.error_token("Invalid octal literal");
+                    }
+                }
             }
-            while (!self.is_at_end() && self.peek().is_octal_digit()) {
+            while (self.peek() is LexerCharacter::Char(ch) && ch.is_octal_digit()) {
                 self.advance();
             }
             return self.make_token(TokenType::Int);
@@ -349,28 +397,28 @@ func (Lexer) number() -> Token {
     }
 
     // Decimal digits
-    while (!self.is_at_end() && self.peek().is_digit()) {
+    while (self.peek() is LexerCharacter::Char(ch) && ch.is_digit()) {
         self.advance();
     }
 
     // Decimal point
-    if (!self.is_at_end() && self.peek() == '.' &&
+    if (self.peek() is LexerCharacter::Char(ch) && ch == '.' &&
         self.pos + 1 < self.source.length() && self.source[self.pos + 1].is_digit()) {
         kind = TokenType::Float;
         self.advance(); // consume '.'
-        while (!self.is_at_end() && self.peek().is_digit()) {
+        while (self.peek() is LexerCharacter::Char(ch) && ch.is_digit()) {
             self.advance();
         }
     }
 
     // Exponent
-    if (!self.is_at_end() && (self.peek() == 'e' || self.peek() == 'E')) {
+    if (self.peek() is LexerCharacter::Char(ch) && (ch == 'e' || ch == 'E')) {
         kind = TokenType::Float;
         self.advance();
-        if (!self.is_at_end() && (self.peek() == '+' || self.peek() == '-')) {
+        if (self.peek() is LexerCharacter::Char(ch) && (ch == '+' || ch == '-')) {
             self.advance();
         }
-        while (!self.is_at_end() && self.peek().is_digit()) {
+        while (self.peek() is LexerCharacter::Char(ch) && ch.is_digit()) {
             self.advance();
         }
     }
@@ -380,56 +428,72 @@ func (Lexer) number() -> Token {
 
 // --- Escape sequence handling ---
 
+func (Lexer) advance_octal_value() -> Result<string, string> {
+    foreach(const i in 0..3) {
+        match(self.peek()) {
+            LexerCharacter::EOF => return Result::Err("Unterminated octal escape sequence");
+            LexerCharacter::Char(ch) => {
+                if (!ch.is_octal_digit()) {
+                    return Result::Err("Invalid octal escape sequence");
+                }
+                self.advance();
+            }
+        }
+    }
+    return Result::Ok("");
+}
+
+func (Lexer) advance_hex_value() -> Result<string, string> {
+    foreach(const i in 0..3) {
+        match(self.peek()) {
+            LexerCharacter::EOF => return Result::Err("Unterminated hex escape sequence");
+            LexerCharacter::Char(ch) => {
+                if (!ch.is_hex_digit()) {
+                    return Result::Err("Invalid hex escape sequence");
+                }
+                self.advance();
+            }
+        }
+    }
+    return Result::Ok("");
+}
+
 // Skip escape sequence after the backslash.
 // Returns "" on success, error message on failure.
-func (Lexer) skip_escape() -> string {
+func (Lexer) skip_escape() -> Result<string, string> {
     if (self.is_at_end()) {
-        return "Unterminated escape sequence";
+        return Result::Err("Unterminated escape sequence");
     }
     var escaped = self.peek();
-    if (escaped == 'x') {
+    if (escaped == LexerCharacter::Char('x')) {
         // Hex escape: \xNN
         self.advance();
-        var i: i64 = 0;
-        while (i < 2) {
-            if (self.is_at_end() || !self.peek().is_hex_digit()) {
-                return "Invalid hex escape in string literal";
-            }
-            self.advance();
-            i += 1;
-        }
-        return "";
-    } else if (escaped.is_octal_digit()) {
-        // Octal escape: up to 3 digits
-        var i: i64 = 0;
-        while (i < 3 && !self.is_at_end() && self.peek().is_octal_digit()) {
-            self.advance();
-            i += 1;
-        }
-        return "";
-    } else {
-        // Simple escape: \n, \t, \r, \\, \', \", \e, \0, etc.
-        self.advance();
-        return "";
+        return self.advance_hex_value();
     }
+    if (escaped is LexerCharacter::Char(ch) && ch.is_octal_digit()) {
+        return self.advance_octal_value();
+    }
+    // Simple escape: \n, \t, \r, \\, \', \", \e, \0, etc.
+    self.advance();
+    return Result::Ok("");
 }
 
 // --- String scanning ---
 
 func (Lexer) scan_string() -> Token {
-    while (!self.is_at_end() && self.peek() != '"') {
-        if (self.peek() == '\\' && self.peek_next() != '\0') {
+    while (self.peek() is LexerCharacter::Char(ch) && ch != '"') {
+        if (ch == '\\' && self.peek_next() != LexerCharacter::EOF) {
             self.advance(); // skip backslash
-            var err = self.skip_escape();
-            if (err != "") {
-                return self.error_token(err);
+            match (self.skip_escape()) {
+                Result::Ok(x) => {continue;}
+                Result::Err(msg) => return self.error_token(msg);
             }
             continue;
         }
         self.advance();
     }
 
-    if (self.is_at_end()) {
+    if (self.peek() is LexerCharacter::EOF) {
         return self.error_token("Unterminated string");
     }
 
@@ -439,19 +503,20 @@ func (Lexer) scan_string() -> Token {
 
 func (Lexer) scan_triple_string() -> Token {
     // Opening """ already consumed. Scan until closing """.
-    while (!self.is_at_end()) {
-        if (self.peek() == '"' && self.peek_next() == '"' &&
-            self.pos + 2 < self.source.length() && self.source[self.pos + 2] == '"') {
+    while (self.peek() is LexerCharacter::Char(ch)) {
+        if (ch == '"' &&
+            self.peek_next() == LexerCharacter::Char('"') &&
+            self.peek_ahead(2) == LexerCharacter::Char('"')) {
             self.advance(); // first "
             self.advance(); // second "
             self.advance(); // third "
             return self.make_token(TokenType::String);
         }
-        if (self.peek() == '\\' && self.peek_next() != '\0') {
+        if (ch == '\\' && self.peek_next() != LexerCharacter::EOF) {
             self.advance(); // skip backslash
             var err = self.skip_escape();
-            if (err != "") {
-                return self.error_token(err);
+            if (err is Result::Err(msg)) {
+                return self.error_token(msg);
             }
             continue;
         }
@@ -463,15 +528,14 @@ func (Lexer) scan_triple_string() -> Token {
 func (Lexer) scan_interp_string() -> Token {
     // Scan from after $" to closing ", tracking brace depth for {expr} regions
     var brace_depth: i64 = 0;
-    while (!self.is_at_end()) {
-        var ch = self.peek();
+    while (self.peek() is LexerCharacter::Char(ch)) {
         if (brace_depth == 0) {
             if (ch == '"') {
                 self.advance(); // closing quote
                 return self.make_token(TokenType::InterpString);
             }
             if (ch == '{') {
-                if (self.peek_next() == '{') {
+                if (self.peek_next() == LexerCharacter::Char('{')) {
                     self.advance(); // skip first {
                     self.advance(); // skip second {
                     continue;
@@ -480,16 +544,16 @@ func (Lexer) scan_interp_string() -> Token {
                 self.advance();
                 continue;
             }
-            if (ch == '}' && self.peek_next() == '}') {
+            if (ch == '}' && self.peek_next() == LexerCharacter::Char('}')) {
                 self.advance(); // skip first }
                 self.advance(); // skip second }
                 continue;
             }
-            if (ch == '\\' && self.peek_next() != '\0') {
+            if (ch == '\\' && self.peek_next() != LexerCharacter::EOF) {
                 self.advance(); // skip backslash
                 var err = self.skip_escape();
-                if (err != "") {
-                    return self.error_token(err);
+                if (err is Result::Err(msg)) {
+                    return self.error_token(msg);
                 }
                 continue;
             }
@@ -503,8 +567,8 @@ func (Lexer) scan_interp_string() -> Token {
             } else if (ch == '"') {
                 // String literal inside expression - skip it
                 self.advance(); // opening quote
-                while (!self.is_at_end() && self.peek() != '"') {
-                    if (self.peek() == '\\' && self.peek_next() != '\0') {
+                while (self.peek() is LexerCharacter::Char(ch) && ch != '"') {
+                    if (ch == '\\' && self.peek_next() != LexerCharacter::EOF) {
                         self.advance();
                     }
                     self.advance();
@@ -527,30 +591,27 @@ func (Lexer) scan_char() -> Token {
         return self.error_token("Unterminated character literal");
     }
 
-    if (self.peek() == '\\') {
+    if (self.peek() == LexerCharacter::Char('\\')) {
         self.advance(); // skip backslash
         if (self.is_at_end()) {
             return self.error_token("Unterminated character literal");
         }
         var escaped = self.peek();
-        if (escaped == 'x') {
+        if (escaped == LexerCharacter::Char('x')) {
             // Hex escape: \xNN
             self.advance();
-            var i: i64 = 0;
-            while (i < 2) {
-                if (self.is_at_end() || !self.peek().is_hex_digit()) {
-                    return self.error_token("Invalid hex escape in character literal");
-                }
-                self.advance();
-                i += 1;
+            match(self.advance_hex_value()) {
+                Result::Ok(x) => { /* continue */ }
+                Result::Err(msg) => return self.error_token(msg);
             }
-        } else if (escaped.is_octal_digit()) {
-            // Octal escape: \NNN (up to 3 digits)
-            var i: i64 = 0;
-            while (i < 3 && !self.is_at_end() && self.peek().is_octal_digit()) {
-                self.advance();
-                i += 1;
+
+            // return self.advance_hex_value().unwrap_or_else(|msg: string| self.error_token(msg));
+        } else if (escaped is LexerCharacter::Char(ch) && ch.is_octal_digit()) {
+            match(self.advance_octal_value()) {
+                Result::Ok(x) => { /* continue */ }
+                Result::Err(msg) => return self.error_token(msg);
             }
+            // return self.advance_octal_value().unwrap_or_else(|msg: string| self.error_token(msg));
         } else {
             // Simple escape
             self.advance();
@@ -559,7 +620,7 @@ func (Lexer) scan_char() -> Token {
         self.advance(); // regular character
     }
 
-    if (self.is_at_end() || self.peek() != '\'') {
+    if (self.peek() is LexerCharacter::Char(ch) && ch != '\'') {
         return self.error_token("Unterminated character literal");
     }
     self.advance(); // closing quote
@@ -581,17 +642,25 @@ public func (Lexer) next() -> Token {
         return self.error_token(msg);
     }
 
-    if (self.is_at_end()) {
-        return self.make_token(TokenType::EOF);
-    }
+    // if (self.is_at_end()) {
+    //     return self.make_token(TokenType::EOF);
+    // }
 
-    var ch = self.advance();
+    // var c = self.advance();
+    // if (c is LexerCharacter::EOF) {
+    //     return self.make_token(TokenType::EOF);
+    // }
+    var ch : char;
+    match (self.advance()) {
+        LexerCharacter::EOF => return self.make_token(TokenType::EOF);
+        LexerCharacter::Char(c) => ch = c;
+    }
 
     if (ch.is_alpha()) {
         return self.identifier();
     }
     if (ch.is_digit()) {
-        return self.number();
+        return self.number(ch);
     }
 
     // Operators and punctuation
@@ -732,7 +801,7 @@ public func (Lexer) next() -> Token {
     }
 
     if (ch == '"') {
-        if (self.peek() == '"' && self.peek_next() == '"') {
+        if (self.peek() == LexerCharacter::Char('"') && self.peek_next() == LexerCharacter::Char('"')) {
             self.advance(); // second "
             self.advance(); // third "
             return self.scan_triple_string();
