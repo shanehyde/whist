@@ -220,6 +220,19 @@ static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
 
     const char* var_name = expr->as.assign.target->as.ident.name;
     Type*       var_type = rc_get_var_type(gen, var_name);
+
+    // Hoist owned temps in the value expression (e.g. nested string concats).
+    // Exclude the value node itself — its ownership transfers to the variable.
+    Node* val             = expr->as.assign.value;
+    int   val_orig_owned  = val->is_owned_temp;
+    val->is_owned_temp    = 0;
+    int   owned_saved     = 0;
+    int   has_owned       = has_owned_temps(val);
+    if (has_owned) {
+        owned_saved = hoist_owned_temps(gen, val);
+    }
+    val->is_owned_temp = val_orig_owned;
+
     if (var_type && var_type->kind == TYPE_ENUM && var_type->as.enm.has_rc_fields) {
         // Enum value reassignment: dec old payload, then assign, then inc if copying
         int temp_id = gen->out.temp_count++;
@@ -239,6 +252,7 @@ static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
         emit(gen, "__rc_dec_%s(%s);\n", var_type->as.enm.name, var_name);
         emit_indent(gen);
         emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
+        if (has_owned) cleanup_owned_temps(gen, owned_saved);
         return 1;
     }
 
@@ -266,6 +280,7 @@ static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
     }
     emit_indent(gen);
     emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
+    if (has_owned) cleanup_owned_temps(gen, owned_saved);
     return 1;
 }
 
