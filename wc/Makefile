@@ -21,3 +21,5 @@ $(BIN):
 clean:
 	rm -f $(OBJ)
 	rm -rf $(BIN)
+
+main.w: lexer.w

@@ -124,79 +124,78 @@ struct Lexer {
 
 // --- Character classification helpers ---
 
-func is_alpha(ch: char) -> bool {
-    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_';
+func (char) is_alpha() -> bool {
+    return (self >= 'a' && self <= 'z') || (self >= 'A' && self <= 'Z') || self == '_';
 }
 
-func is_digit(ch: char) -> bool {
-    return ch >= '0' && ch <= '9';
+func (char) is_digit() -> bool {
+    return self >= '0' && self <= '9';
 }
 
-func is_alnum(ch: char) -> bool {
-    return is_alpha(ch) || is_digit(ch);
+func (char) is_alnum() -> bool {
+    return self.is_alpha() || self.is_digit();
 }
 
-func is_hex_digit(ch: char) -> bool {
-    return is_digit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+func (char) is_hex_digit() -> bool {
+    return self.is_digit() || (self >= 'a' && self <= 'f') || (self >= 'A' && self <= 'F');
 }
 
-func is_octal_digit(ch: char) -> bool {
-    return ch >= '0' && ch <= '7';
+func (char) is_octal_digit() -> bool {
+    return self >= '0' && self <= '7';
 }
 
 // --- Lexer core functions ---
-
-func lexer_init(source: string) -> Lexer {
-    var lex = new Lexer{
-        source: source,
-        pos: 0,
-        start: 0,
-        line: 1,
-        column: 1,
-        start_column: 1,
-        error_message: "",
-    };
-    return lex;
+impl Lexer {
+    func init(source: string) {
+        self.source = source;
+        self.pos = 0;
+        self.start = 0;
+        self.line = 1;
+        self.column = 1;
+        self.start_column = 1;
+        self.error_message = "";
+    }
 }
 
-func lexer_is_at_end(lex: Lexer) -> bool {
-    return lex.pos >= lex.source.length();
+func (Lexer) is_at_end() -> bool {
+    return self.pos >= self.source.length();
 }
 
-func lexer_advance(lex: Lexer) -> char {
-    var ch = lex.source[lex.pos];
-    lex.pos += 1;
-    if (ch == '\n') {
-        lex.line += 1;
-        lex.column = 1;
-    } else {
-        lex.column += 1;
+func (Lexer) advance() -> char {
+    var ch = self.source[self.pos];
+    self.pos += 1;
+    match (ch) {
+        '\n' => {
+            self.line += 1;
+            self.column = 1;
+        }
+        _ => self.column += 1;
     }
     return ch;
 }
 
-func lexer_peek(lex: Lexer) -> char {
-    if (lexer_is_at_end(lex)) {
+func (Lexer) peek() -> char {
+    if (self.is_at_end()) {
         return '\0';
     }
-    return lex.source[lex.pos];
+    return self.source[self.pos];
 }
 
-func lexer_peek_next(lex: Lexer) -> char {
-    if (lex.pos + 1 >= lex.source.length()) {
+func (Lexer) peek_next() -> char {
+    if (self.pos + 1 >= self.source.length()) {
         return '\0';
     }
-    return lex.source[lex.pos + 1];
+    return self.source[self.pos + 1];
 }
 
 func lexer_match(lex: Lexer, expected: char) -> bool {
-    if (lexer_is_at_end(lex)) {
+    if (lex.is_at_end()) {
         return false;
     }
     if (lex.source[lex.pos] != expected) {
         return false;
     }
-    lexer_advance(lex);
+    lex.advance();
     return true;
 }
 
@@ -222,41 +221,41 @@ func lexer_error_token(lex: Lexer, message: string) -> Token {
 
 // --- Whitespace and comment skipping ---
 
-func lexer_skip_whitespace(lex: Lexer) {
+func (Lexer) skip_whitespace() -> Option<bool> {
     while (true) {
-        if (lexer_is_at_end(lex)) {
-            return;
+        if (self.is_at_end()) {
+            return Option::None;
         }
-        var ch = lexer_peek(lex);
+        var ch = self.peek();
         if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
-            lexer_advance(lex);
+            self.advance();
         } else if (ch == '/') {
-            if (lexer_peek_next(lex) == '/') {
+            if (self.peek_next() == '/') {
                 // Line comment
-                while (lexer_peek(lex) != '\n' && !lexer_is_at_end(lex)) {
-                    lexer_advance(lex);
+                while (self.peek() != '\n' && !self.is_at_end()) {
+                    self.advance();
                 }
-            } else if (lexer_peek_next(lex) == '*') {
+            } else if (self.peek_next() == '*') {
                 // Block comment
-                lexer_advance(lex); // consume /
-                lexer_advance(lex); // consume *
-                while (!lexer_is_at_end(lex)) {
-                    if (lexer_peek(lex) == '*' && lexer_peek_next(lex) == '/') {
-                        lexer_advance(lex); // consume *
-                        lexer_advance(lex); // consume /
+                self.advance(); // consume /
+                self.advance(); // consume *
+                while (!self.is_at_end()) {
+                    if (self.peek() == '*' && self.peek_next() == '/') {
+                        self.advance(); // consume *
+                        self.advance(); // consume /
                         break;
                     }
-                    lexer_advance(lex);
+                    self.advance();
                 }
-                if (lexer_is_at_end(lex)) {
-                    lex.error_message = "Unterminated block comment";
-                    return;
+                if (self.is_at_end()) {
+                    self.error_message = "Unterminated block comment";
+                    return Option::None;
                 }
             } else {
-                return;
+                return Option::Some(true);
             }
         } else {
-            return;
+            return Option::Some(true);
         }
     }
 }
@@ -303,12 +302,12 @@ func identifier_type(text: string) -> TokenType {
 
 // --- Identifier scanning ---
 
-func lex_identifier(lex: Lexer) -> Token {
-    while (!lexer_is_at_end(lex) && is_alnum(lexer_peek(lex))) {
-        lexer_advance(lex);
+func  (Lexer) identifier() -> Token {
+    while (!self.is_at_end() && self.peek().is_alnum()) {
+        self.advance();
     }
-    var text = lex.source[lex.start:lex.pos];
-    return lexer_make_token(lex, identifier_type(text));
+    var text = self.source[self.start:self.pos];
+    return lexer_make_token(self,identifier_type(text));
 }
 
 // --- Number scanning ---
@@ -317,62 +316,62 @@ func lex_number(lex: Lexer) -> Token {
     var kind = TokenType::Int;
 
     // Handle hex, octal, binary prefixes
-    if (lex.source[lex.start] == '0' && !lexer_is_at_end(lex)) {
-        var next = lexer_peek(lex);
+    if (lex.source[lex.start] == '0' && !lex.is_at_end()) {
+        var next = lex.peek();
         if (next == 'x' || next == 'X') {
-            lexer_advance(lex);
-            if (lexer_is_at_end(lex) || !is_hex_digit(lexer_peek(lex))) {
+            lex.advance();
+            if (lex.is_at_end() || !lex.peek().is_hex_digit()) {
                 return lexer_error_token(lex, "Invalid hexadecimal literal");
             }
-            while (!lexer_is_at_end(lex) && is_hex_digit(lexer_peek(lex))) {
-                lexer_advance(lex);
+            while (!lex.is_at_end() && lex.peek().is_hex_digit()) {
+                lex.advance();
             }
             return lexer_make_token(lex, TokenType::Int);
         } else if (next == 'b' || next == 'B') {
-            lexer_advance(lex);
-            if (lexer_is_at_end(lex) || (lexer_peek(lex) != '0' && lexer_peek(lex) != '1')) {
+            lex.advance();
+            if (lex.is_at_end() || (lex.peek() != '0' && lex.peek() != '1')) {
                 return lexer_error_token(lex, "Invalid binary literal");
             }
-            while (!lexer_is_at_end(lex) && (lexer_peek(lex) == '0' || lexer_peek(lex) == '1')) {
-                lexer_advance(lex);
+            while (!lex.is_at_end() && (lex.peek() == '0' || lex.peek() == '1')) {
+                lex.advance();
             }
             return lexer_make_token(lex, TokenType::Int);
         } else if (next == 'o' || next == 'O') {
-            lexer_advance(lex);
-            if (lexer_is_at_end(lex) || !is_octal_digit(lexer_peek(lex))) {
+            lex.advance();
+            if (lex.is_at_end() || !lex.peek().is_octal_digit()) {
                 return lexer_error_token(lex, "Invalid octal literal");
             }
-            while (!lexer_is_at_end(lex) && is_octal_digit(lexer_peek(lex))) {
-                lexer_advance(lex);
+            while (!lex.is_at_end() && lex.peek().is_octal_digit()) {
+                lex.advance();
             }
             return lexer_make_token(lex, TokenType::Int);
         }
     }
 
     // Decimal digits
-    while (!lexer_is_at_end(lex) && is_digit(lexer_peek(lex))) {
-        lexer_advance(lex);
+    while (!lex.is_at_end() && lex.peek().is_digit()) {
+        lex.advance();
     }
 
     // Decimal point
-    if (!lexer_is_at_end(lex) && lexer_peek(lex) == '.' &&
-        lex.pos + 1 < lex.source.length() && is_digit(lex.source[lex.pos + 1])) {
+    if (!lex.is_at_end() && lex.peek() == '.' &&
+        lex.pos + 1 < lex.source.length() && lex.source[lex.pos + 1].is_digit()) {
         kind = TokenType::Float;
-        lexer_advance(lex); // consume '.'
-        while (!lexer_is_at_end(lex) && is_digit(lexer_peek(lex))) {
-            lexer_advance(lex);
+        lex.advance(); // consume '.'
+        while (!lex.is_at_end() && lex.peek().is_digit()) {
+            lex.advance();
         }
     }
 
     // Exponent
-    if (!lexer_is_at_end(lex) && (lexer_peek(lex) == 'e' || lexer_peek(lex) == 'E')) {
+    if (!lex.is_at_end() && (lex.peek() == 'e' || lex.peek() == 'E')) {
         kind = TokenType::Float;
-        lexer_advance(lex);
-        if (!lexer_is_at_end(lex) && (lexer_peek(lex) == '+' || lexer_peek(lex) == '-')) {
-            lexer_advance(lex);
+        lex.advance();
+        if (!lex.is_at_end() && (lex.peek() == '+' || lex.peek() == '-')) {
+            lex.advance();
         }
-        while (!lexer_is_at_end(lex) && is_digit(lexer_peek(lex))) {
-            lexer_advance(lex);
+        while (!lex.is_at_end() && lex.peek().is_digit()) {
+            lex.advance();
         }
     }
 
@@ -384,33 +383,33 @@ func lex_number(lex: Lexer) -> Token {
 // Skip escape sequence after the backslash.
 // Returns "" on success, error message on failure.
 func skip_escape(lex: Lexer) -> string {
-    if (lexer_is_at_end(lex)) {
+    if (lex.is_at_end()) {
         return "Unterminated escape sequence";
     }
-    var escaped = lexer_peek(lex);
+    var escaped = lex.peek();
     if (escaped == 'x') {
         // Hex escape: \xNN
-        lexer_advance(lex);
+        lex.advance();
         var i: i64 = 0;
         while (i < 2) {
-            if (lexer_is_at_end(lex) || !is_hex_digit(lexer_peek(lex))) {
+            if (lex.is_at_end() || !lex.peek().is_hex_digit()) {
                 return "Invalid hex escape in string literal";
             }
-            lexer_advance(lex);
+            lex.advance();
             i += 1;
         }
         return "";
-    } else if (is_octal_digit(escaped)) {
+    } else if (escaped.is_octal_digit()) {
         // Octal escape: up to 3 digits
         var i: i64 = 0;
-        while (i < 3 && !lexer_is_at_end(lex) && is_octal_digit(lexer_peek(lex))) {
-            lexer_advance(lex);
+        while (i < 3 && !lex.is_at_end() && lex.peek().is_octal_digit()) {
+            lex.advance();
             i += 1;
         }
         return "";
     } else {
         // Simple escape: \n, \t, \r, \\, \', \", \e, \0, etc.
-        lexer_advance(lex);
+        lex.advance();
         return "";
     }
 }
@@ -418,45 +417,45 @@ func skip_escape(lex: Lexer) -> string {
 // --- String scanning ---
 
 func lex_string(lex: Lexer) -> Token {
-    while (!lexer_is_at_end(lex) && lexer_peek(lex) != '"') {
-        if (lexer_peek(lex) == '\\' && lexer_peek_next(lex) != '\0') {
-            lexer_advance(lex); // skip backslash
+    while (!lex.is_at_end() && lex.peek() != '"') {
+        if (lex.peek() == '\\' && lex.peek_next() != '\0') {
+            lex.advance(); // skip backslash
             var err = skip_escape(lex);
             if (err != "") {
                 return lexer_error_token(lex, err);
             }
             continue;
         }
-        lexer_advance(lex);
+        lex.advance();
     }
 
-    if (lexer_is_at_end(lex)) {
+    if (lex.is_at_end()) {
         return lexer_error_token(lex, "Unterminated string");
     }
 
-    lexer_advance(lex); // closing quote
+    lex.advance(); // closing quote
     return lexer_make_token(lex, TokenType::String);
 }
 
 func lex_triple_string(lex: Lexer) -> Token {
     // Opening """ already consumed. Scan until closing """.
-    while (!lexer_is_at_end(lex)) {
-        if (lexer_peek(lex) == '"' && lexer_peek_next(lex) == '"' &&
+    while (!lex.is_at_end()) {
+        if (lex.peek() == '"' && lex.peek_next() == '"' &&
             lex.pos + 2 < lex.source.length() && lex.source[lex.pos + 2] == '"') {
-            lexer_advance(lex); // first "
-            lexer_advance(lex); // second "
-            lexer_advance(lex); // third "
+            lex.advance(); // first "
+            lex.advance(); // second "
+            lex.advance(); // third "
             return lexer_make_token(lex, TokenType::String);
         }
-        if (lexer_peek(lex) == '\\' && lexer_peek_next(lex) != '\0') {
-            lexer_advance(lex); // skip backslash
+        if (lex.peek() == '\\' && lex.peek_next() != '\0') {
+            lex.advance(); // skip backslash
             var err = skip_escape(lex);
             if (err != "") {
                 return lexer_error_token(lex, err);
             }
             continue;
         }
-        lexer_advance(lex);
+        lex.advance();
     }
     return lexer_error_token(lex, "Unterminated triple-quoted string");
 }
@@ -464,37 +463,37 @@ func lex_triple_string(lex: Lexer) -> Token {
 func lex_interp_string(lex: Lexer) -> Token {
     // Scan from after $" to closing ", tracking brace depth for {expr} regions
     var brace_depth: i64 = 0;
-    while (!lexer_is_at_end(lex)) {
-        var ch = lexer_peek(lex);
+    while (!lex.is_at_end()) {
+        var ch = lex.peek();
         if (brace_depth == 0) {
             if (ch == '"') {
-                lexer_advance(lex); // closing quote
+                lex.advance(); // closing quote
                 return lexer_make_token(lex, TokenType::InterpString);
             }
             if (ch == '{') {
-                if (lexer_peek_next(lex) == '{') {
-                    lexer_advance(lex); // skip first {
-                    lexer_advance(lex); // skip second {
+                if (lex.peek_next() == '{') {
+                    lex.advance(); // skip first {
+                    lex.advance(); // skip second {
                     continue;
                 }
                 brace_depth += 1;
-                lexer_advance(lex);
+                lex.advance();
                 continue;
             }
-            if (ch == '}' && lexer_peek_next(lex) == '}') {
-                lexer_advance(lex); // skip first }
-                lexer_advance(lex); // skip second }
+            if (ch == '}' && lex.peek_next() == '}') {
+                lex.advance(); // skip first }
+                lex.advance(); // skip second }
                 continue;
             }
-            if (ch == '\\' && lexer_peek_next(lex) != '\0') {
-                lexer_advance(lex); // skip backslash
+            if (ch == '\\' && lex.peek_next() != '\0') {
+                lex.advance(); // skip backslash
                 var err = skip_escape(lex);
                 if (err != "") {
                     return lexer_error_token(lex, err);
                 }
                 continue;
             }
-            lexer_advance(lex);
+            lex.advance();
         } else {
             // Inside {expr} region
             if (ch == '{') {
@@ -503,19 +502,19 @@ func lex_interp_string(lex: Lexer) -> Token {
                 brace_depth -= 1;
             } else if (ch == '"') {
                 // String literal inside expression - skip it
-                lexer_advance(lex); // opening quote
-                while (!lexer_is_at_end(lex) && lexer_peek(lex) != '"') {
-                    if (lexer_peek(lex) == '\\' && lexer_peek_next(lex) != '\0') {
-                        lexer_advance(lex);
+                lex.advance(); // opening quote
+                while (!lex.is_at_end() && lex.peek() != '"') {
+                    if (lex.peek() == '\\' && lex.peek_next() != '\0') {
+                        lex.advance();
                     }
-                    lexer_advance(lex);
+                    lex.advance();
                 }
-                if (!lexer_is_at_end(lex)) {
-                    lexer_advance(lex); // closing quote
+                if (!lex.is_at_end()) {
+                    lex.advance(); // closing quote
                 }
                 continue;
             }
-            lexer_advance(lex);
+            lex.advance();
         }
     }
     return lexer_error_token(lex, "Unterminated interpolated string");
@@ -524,53 +523,53 @@ func lex_interp_string(lex: Lexer) -> Token {
 // --- Character literal scanning ---
 
 func lex_character(lex: Lexer) -> Token {
-    if (lexer_is_at_end(lex)) {
+    if (lex.is_at_end()) {
         return lexer_error_token(lex, "Unterminated character literal");
     }
 
-    if (lexer_peek(lex) == '\\') {
-        lexer_advance(lex); // skip backslash
-        if (lexer_is_at_end(lex)) {
+    if (lex.peek() == '\\') {
+        lex.advance(); // skip backslash
+        if (lex.is_at_end()) {
             return lexer_error_token(lex, "Unterminated character literal");
         }
-        var escaped = lexer_peek(lex);
+        var escaped = lex.peek();
         if (escaped == 'x') {
             // Hex escape: \xNN
-            lexer_advance(lex);
+            lex.advance();
             var i: i64 = 0;
             while (i < 2) {
-                if (lexer_is_at_end(lex) || !is_hex_digit(lexer_peek(lex))) {
+                if (lex.is_at_end() || !lex.peek().is_hex_digit()) {
                     return lexer_error_token(lex, "Invalid hex escape in character literal");
                 }
-                lexer_advance(lex);
+                lex.advance();
                 i += 1;
             }
-        } else if (is_octal_digit(escaped)) {
+        } else if (escaped.is_octal_digit()) {
             // Octal escape: \NNN (up to 3 digits)
             var i: i64 = 0;
-            while (i < 3 && !lexer_is_at_end(lex) && is_octal_digit(lexer_peek(lex))) {
-                lexer_advance(lex);
+            while (i < 3 && !lex.is_at_end() && lex.peek().is_octal_digit()) {
+                lex.advance();
                 i += 1;
             }
         } else {
             // Simple escape
-            lexer_advance(lex);
+            lex.advance();
         }
     } else {
-        lexer_advance(lex); // regular character
+        lex.advance(); // regular character
     }
 
-    if (lexer_is_at_end(lex) || lexer_peek(lex) != '\'') {
+    if (lex.is_at_end() || lex.peek() != '\'') {
         return lexer_error_token(lex, "Unterminated character literal");
     }
-    lexer_advance(lex); // closing quote
+    lex.advance(); // closing quote
     return lexer_make_token(lex, TokenType::Char);
 }
 
 // --- Main lexer function ---
 
 func lexer_next(lex: Lexer) -> Token {
-    lexer_skip_whitespace(lex);
+    lex.skip_whitespace();
 
     lex.start = lex.pos;
     lex.start_column = lex.column;
@@ -582,16 +581,16 @@ func lexer_next(lex: Lexer) -> Token {
         return lexer_error_token(lex, msg);
     }
 
-    if (lexer_is_at_end(lex)) {
+    if (lex.is_at_end()) {
         return lexer_make_token(lex, TokenType::EOF);
     }
 
-    var ch = lexer_advance(lex);
+    var ch = lex.advance();
 
-    if (is_alpha(ch)) {
-        return lex_identifier(lex);
+    if (ch.is_alpha()) {
+        return lex.identifier();
     }
-    if (is_digit(ch)) {
+    if (ch.is_digit()) {
         return lex_number(lex);
     }
 
@@ -733,9 +732,9 @@ func lexer_next(lex: Lexer) -> Token {
     }
 
     if (ch == '"') {
-        if (lexer_peek(lex) == '"' && lexer_peek_next(lex) == '"') {
-            lexer_advance(lex); // second "
-            lexer_advance(lex); // third "
+        if (lex.peek() == '"' && lex.peek_next() == '"') {
+            lex.advance(); // second "
+            lex.advance(); // third "
             return lex_triple_string(lex);
         }
         return lex_string(lex);
@@ -757,8 +756,8 @@ func lexer_next(lex: Lexer) -> Token {
 
 // --- Token type name ---
 
-func token_type_name(tt: TokenType) -> string {
-    match (tt) {
+func (TokenType) name() -> string {
+    match (self) {
         EOF => return "EOF";
         Ident => return "IDENT";
         Int => return "INT";
