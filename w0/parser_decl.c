@@ -395,8 +395,8 @@ static Node* parse_impl_decl(Parser* parser) {
     consume_token(parser, TOK_LBRACE, "Expected '{' after type name in impl block");
 
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
-        // Parse optional visibility modifier (default: public)
-        int method_is_public = 1;
+        // Parse optional visibility modifier (default: private)
+        int method_is_public = 0;
         if (match_token(parser, TOK_PUBLIC)) {
             method_is_public = 1;
         } else if (match_token(parser, TOK_PRIVATE)) {
@@ -861,7 +861,7 @@ Node* parse_declaration(Parser* parser) {
 
     if (!is_public) {
         has_visibility = match_token(parser, TOK_PRIVATE);
-        is_public      = !has_visibility; // default to public if no modifier
+        is_public      = 0; // default to private if no modifier
     }
 
     // Error if visibility modifier used with test

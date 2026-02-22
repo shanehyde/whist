@@ -29,7 +29,7 @@ This document describes the grammar of the Whist language in BNF (Backus-Naur Fo
                | <test-decl>
 ```
 
-**Visibility:** Top-level declarations are public by default (module-exported scope). Use `private` for file-local linkage. In generated C code, private declarations are prefixed with `static`. The `main` function is always treated as having external linkage regardless of the `private` modifier.
+**Visibility:** Top-level declarations are private by default (file-local linkage). Use `public` to export declarations for cross-module access. In generated C code, private declarations are prefixed with `static`. The `main` function is always treated as having external linkage regardless of visibility.
 
 ---
 

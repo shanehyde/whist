@@ -13,7 +13,7 @@ impl Foo {
         return self.x * 2;
     }
 
-    func default_public() -> i64 {
+    func default_private() -> i64 {
         return self.x;
     }
 }
