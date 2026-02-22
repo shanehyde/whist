@@ -379,8 +379,16 @@ static Type* check_binary_op_by_token(Checker* checker, Node* node, Type* left, 
 
 // Type-check a binary expression: dispatch to operator-specific helpers
 static Type* check_binary_expr(Checker* checker, Node* node) {
-    Type* left  = check_expression(checker, node->as.binary.left);
-    Type* right = check_expression(checker, node->as.binary.right);
+    Type* left = check_expression(checker, node->as.binary.left);
+
+    // Set enum_target_hint so the right side can infer generic enum params from the left
+    // (e.g., v[i] == Option::None where v is Vec<Option<i64>>)
+    Type* old_hint = checker->enum_target_hint;
+    if (left->kind == TYPE_ENUM) {
+        checker->enum_target_hint = left;
+    }
+    Type* right               = check_expression(checker, node->as.binary.right);
+    checker->enum_target_hint = old_hint;
 
     if (left->kind == TYPE_ERROR || right->kind == TYPE_ERROR) {
         return type_error;
@@ -2195,7 +2203,13 @@ static Type* check_new_vec_literal_expr(Checker* checker, Node* node, Type* reso
             continue;
         }
 
-        Type* val_type = check_expression(checker, field->as.field_init.value);
+        // Set enum_target_hint for generic enum inference (e.g., new Vec<Option<i64>>{Option::None})
+        Type* old_hint = checker->enum_target_hint;
+        if (elem_type->kind == TYPE_ENUM) {
+            checker->enum_target_hint = elem_type;
+        }
+        Type* val_type            = check_expression(checker, field->as.field_init.value);
+        checker->enum_target_hint = old_hint;
         if (val_type->kind != TYPE_ERROR && !type_assignable(elem_type, val_type)) {
             check_error_type(checker, field->line, field->column, "Vec element", elem_type,
                              val_type);

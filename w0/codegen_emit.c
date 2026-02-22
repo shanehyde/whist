@@ -909,12 +909,17 @@ void emit_struct_forward_decls(CodeGen* gen, Node* ast) {
             }
         }
     }
-    // Forward declarations for instantiated generic structs (skip enum instances)
+    // Forward declarations for instantiated generic structs and data enums
     for (int i = 0; i < gen->checker.instance_count; i++) {
-        if (gen->checker.instances[i].type->kind == TYPE_ENUM)
+        GenericInstance* inst = &gen->checker.instances[i];
+        if (inst->type->kind == TYPE_ENUM) {
+            // Forward-declare data enums so Vec/Span typedefs can reference them
+            if (inst->type->as.enm.has_data) {
+                emit(gen, "typedef struct %s %s;\n", inst->mangled_name, inst->mangled_name);
+            }
             continue;
-        emit(gen, "typedef struct %s %s;\n", gen->checker.instances[i].mangled_name,
-             gen->checker.instances[i].mangled_name);
+        }
+        emit(gen, "typedef struct %s %s;\n", inst->mangled_name, inst->mangled_name);
     }
     emit(gen, "\n");
 }
