@@ -7,6 +7,7 @@
 // Expected: PASS: if_is_bare_check
 // Expected: PASS: if_is_extra_cond
 // Expected: PASS: while_is
+// Expected: PASS: while_is2
 
 enum Shape {
     Circle(f64),
@@ -223,4 +224,15 @@ test "while_is" {
         ran = true;
     }
     assert(!ran);
+}
+test "while_is2" {
+    var list = new Vec<Option<i64>>{Option::Some(1), Option::Some(2), Option::Some(0), Option::Some(3), Option::None};
+    var sum = 0;
+
+    var i = 0;
+    while (list[i] is Option::Some(v) && v > 0) {
+        sum += v;
+        i += 1;
+    }
+    assert(sum == 3);
 }
