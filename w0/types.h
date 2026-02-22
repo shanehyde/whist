@@ -96,6 +96,7 @@ struct Type {
         // Enum
         struct {
             char*   name;
+            char*   base_name; // For generic instances: base type name (e.g. "Result" for "Result_i64_string")
             char**  value_names;
             int     value_count;
             int     has_data;            // 1 if any variant carries payload

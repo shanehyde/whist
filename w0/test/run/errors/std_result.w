@@ -1,4 +1,5 @@
 // Expected: PASS: std_result
+// Expected: PASS: mismatched_result
 // Test Result<T, E> from prelude — return Ok and Err, match on both
 
 func parse_number(s: string) -> Result<i64, string> {
@@ -28,6 +29,20 @@ test "std_result" {
         },
         Err(msg) => {
             assert(msg == "not a number");
+        },
+    }
+}
+
+test "mismatched_result" {
+
+    var res: Result<string, string> = Result::Ok("hello");
+
+    match (res) {
+        Result::Ok(val) => {
+            assert(val == "hello");
+        },
+        Result::Err(msg) => {
+            assert(false);
         },
     }
 }

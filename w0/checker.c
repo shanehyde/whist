@@ -1144,8 +1144,14 @@ static Type* check_match_enum(Checker* checker, Node* node, Type* expr_type, int
         }
 
         // If qualified name given, verify it matches the enum type
+        // Accept both the mangled name (e.g. "Result_string_string") and the base
+        // generic name (e.g. "Result") for generic enum instances.
         if (arm->as.match_arm.enum_name) {
-            if (strcmp(arm->as.match_arm.enum_name, expr_type->as.enm.name) != 0) {
+            const char* arm_name = arm->as.match_arm.enum_name;
+            int match = strcmp(arm_name, expr_type->as.enm.name) == 0 ||
+                        (expr_type->as.enm.base_name &&
+                         strcmp(arm_name, expr_type->as.enm.base_name) == 0);
+            if (!match) {
                 check_error(checker, arm->line, arm->column,
                             "Enum name '%s' does not match match expression type '%s'",
                             arm->as.match_arm.enum_name, expr_type->as.enm.name);

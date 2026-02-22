@@ -111,6 +111,7 @@ Type* type_struct(const char* name) {
 Type* type_enum(const char* name) {
     Type* type                       = type_new(TYPE_ENUM);
     type->as.enm.name                = xstrdup(name);
+    type->as.enm.base_name           = NULL;
     type->as.enm.value_names         = NULL;
     type->as.enm.value_count         = 0;
     type->as.enm.has_data            = 0;
@@ -210,6 +211,7 @@ static void type_free_struct_members(Type* type) {
 // Free heap-owned members of an enum type definition.
 static void type_free_enum_members(Type* type) {
     free(type->as.enm.name);
+    free(type->as.enm.base_name);
     for (int i = 0; i < type->as.enm.value_count; i++) {
         free(type->as.enm.value_names[i]);
     }

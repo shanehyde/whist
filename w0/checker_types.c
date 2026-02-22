@@ -796,6 +796,7 @@ static void register_enum_method_symbol(Checker* checker, func_decl_node* mfdn,
 Type* instantiate_generic_enum(Checker* checker, GenericDef* def, char* mangled,
                                Type** resolved_args, int arg_count) {
     Type* enum_type = type_enum(mangled);
+    enum_type->as.enm.base_name = xstrdup(def->name);
 
     // Register early to handle recursive types
     register_generic_instance(checker, mangled, def->name, enum_type, resolved_args, arg_count);
