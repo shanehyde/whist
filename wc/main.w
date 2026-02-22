@@ -37,13 +37,13 @@ func run_lex_mode(source_file: string) -> i32 {
     std::println("LINE  TYPE          VALUE");
     std::println("----  ------------  -----");
 
-    var lex = lexer_init(source);
+    var lex = new Lexer(source);
 
     while (true) {
-        var tok = lexer_next(lex);
+        var tok = lex.next();
         var line_str = std::to_string(tok.line).pad_left(3, ' ');
         var col_str = std::to_string(tok.column).pad_right(2, ' ');
-        var type_str = token_type_name(tok.kind).pad_right(12, ' ');
+        var type_str = tok.kind.name().pad_right(12, ' ');
 
         if (tok.kind == TokenType::EOF) {
             std::println($"{line_str}:{col_str}  {type_str}");
@@ -361,7 +361,7 @@ func main() -> i32 {
     var source_file = input_files[0];
 
     if (opts.lex_only) {
-        return run_debug_pipeline(opts, source_file);
+        return run_lex_mode(source_file);
     } else if (!opts.parse_only && !opts.check_only && !opts.print_ast && !opts.print_ast_checked) {
         return run_normal_compile(opts, source_file);
     } else {

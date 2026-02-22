@@ -301,3 +301,10 @@ test "vec_user_method_nested" {
     var v = new Vec<i64>{2,4,6,8,10};
     assert(v.all(a10));
 }
+
+test "vec_option_issue" {
+    var v = new Vec<Option<i64>>{Option::Some(1), Option::None, Option::Some(3)};
+    assert(v[0] == Option::Some(1));
+    assert(v[1] == Option::None);
+    assert(v[2] == Option::Some(3));
+}

@@ -81,6 +81,7 @@ typedef enum {
     NODE_IF,
     NODE_IF_LET,
     NODE_WHILE,
+    NODE_WHILE_LET,
     NODE_FOR,
     NODE_FOREACH,
     NODE_RETURN,
@@ -434,6 +435,20 @@ struct Node {
             Node* cond;
             Node* body;
         } while_stmt;
+
+        // While-is statement: while (expr is Variant(bindings) [&& cond]) { ... }
+        struct {
+            Node*  expr;         // Expression being matched (re-evaluated each iteration)
+            char*  variant_name; // Variant to match (e.g., "Some")
+            int    variant_name_length;
+            char*  enum_name; // Qualified enum name (NULL if inferred)
+            int    enum_name_length;
+            char** bindings; // Binding names [f0, f1, ...]
+            int    binding_count;
+            Node*  body;          // Loop body
+            Node*  extra_cond;    // Optional && condition after pattern (NULL if none)
+            Type*  resolved_type; // Set by checker: enum type of expr
+        } while_let_stmt;
 
         // For statement
         struct {

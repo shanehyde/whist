@@ -122,141 +122,171 @@ public struct Lexer {
     error_message: string,
 }
 
+enum LexerCharacter {
+    Char(char),
+    EOF,
+}
+
 // --- Character classification helpers ---
 
-func is_alpha(ch: char) -> bool {
-    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_';
+func (char) is_alpha() -> bool {
+    return (self >= 'a' && self <= 'z') || (self >= 'A' && self <= 'Z') || self == '_';
 }
 
-func is_digit(ch: char) -> bool {
-    return ch >= '0' && ch <= '9';
+func (char) is_digit() -> bool {
+    return self >= '0' && self <= '9';
 }
 
-func is_alnum(ch: char) -> bool {
-    return is_alpha(ch) || is_digit(ch);
+func (char) is_alnum() -> bool {
+    return self.is_alpha() || self.is_digit();
 }
 
-func is_hex_digit(ch: char) -> bool {
-    return is_digit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
+func (char) is_hex_digit() -> bool {
+    return self.is_digit() || (self >= 'a' && self <= 'f') || (self >= 'A' && self <= 'F');
 }
 
-func is_octal_digit(ch: char) -> bool {
-    return ch >= '0' && ch <= '7';
+func (char) is_octal_digit() -> bool {
+    return self >= '0' && self <= '7';
 }
 
 // --- Lexer core functions ---
-
-public func lexer_init(source: string) -> Lexer {
-    var lex = new Lexer{
-        source: source,
-        pos: 0,
-        start: 0,
-        line: 1,
-        column: 1,
-        start_column: 1,
-        error_message: "",
-    };
-    return lex;
-}
-
-func lexer_is_at_end(lex: Lexer) -> bool {
-    return lex.pos >= lex.source.length();
-}
-
-func lexer_advance(lex: Lexer) -> char {
-    var ch = lex.source[lex.pos];
-    lex.pos += 1;
-    if (ch == '\n') {
-        lex.line += 1;
-        lex.column = 1;
-    } else {
-        lex.column += 1;
+impl Lexer {
+    public func init(source: string) {
+        self.source = source;
+        self.pos = 0;
+        self.start = 0;
+        self.line = 1;
+        self.column = 1;
+        self.start_column = 1;
+        self.error_message = "";
     }
-    return ch;
 }
 
-func lexer_peek(lex: Lexer) -> char {
-    if (lexer_is_at_end(lex)) {
-        return '\0';
+func (Lexer) is_at_end() -> bool {
+    return self.pos >= self.source.length();
+}
+
+func (Lexer) advance() -> LexerCharacter {
+    if (self.is_at_end()) {
+        return LexerCharacter::EOF;
     }
-    return lex.source[lex.pos];
-}
-
-func lexer_peek_next(lex: Lexer) -> char {
-    if (lex.pos + 1 >= lex.source.length()) {
-        return '\0';
+    var ch = self.source[self.pos];
+    self.pos += 1;
+    match (ch) {
+        '\n' => {
+            self.line += 1;
+            self.column = 1;
+        }
+        _ => self.column += 1;
     }
-    return lex.source[lex.pos + 1];
+    return LexerCharacter::Char(ch);
 }
 
-func lexer_match(lex: Lexer, expected: char) -> bool {
-    if (lexer_is_at_end(lex)) {
+func (Lexer) peek() -> LexerCharacter {
+    if (self.is_at_end()) {
+        return LexerCharacter::EOF;
+    }
+    return LexerCharacter::Char(self.source[self.pos]);
+}
+
+func (Lexer) peek_ahead(n: i64) -> LexerCharacter {
+    if (self.pos + n >= self.source.length()) {
+        return LexerCharacter::EOF;
+    }
+    return LexerCharacter::Char(self.source[self.pos + n]);
+}
+
+func (Lexer) peek_next() -> LexerCharacter {
+    return self.peek_ahead(1);
+}
+
+func (Lexer) match_next(expected: char) -> bool {
+    if (self.is_at_end()) {
         return false;
     }
-    if (lex.source[lex.pos] != expected) {
+    if (self.source[self.pos] != expected) {
         return false;
     }
-    lexer_advance(lex);
+    self.advance();
     return true;
 }
 
-func lexer_make_token(lex: Lexer, kind: TokenType) -> Token {
+func (Lexer) make_token(kind: TokenType) -> Token {
     var tok = new Token{
         kind: kind,
-        value: lex.source[lex.start:lex.pos],
-        line: lex.line,
-        column: lex.start_column,
+        value: self.source[self.start:self.pos],
+        line: self.line,
+        column: self.start_column,
     };
     return tok;
 }
 
-func lexer_error_token(lex: Lexer, message: string) -> Token {
+func (Lexer) error_token(message: string) -> Token {
     var tok = new Token{
         kind: TokenType::Error,
         value: message,
-        line: lex.line,
-        column: lex.start_column,
+        line: self.line,
+        column: self.start_column,
     };
     return tok;
 }
 
 // --- Whitespace and comment skipping ---
 
-func lexer_skip_whitespace(lex: Lexer) {
-    while (true) {
-        if (lexer_is_at_end(lex)) {
-            return;
-        }
-        var ch = lexer_peek(lex);
-        if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
-            lexer_advance(lex);
-        } else if (ch == '/') {
-            if (lexer_peek_next(lex) == '/') {
-                // Line comment
-                while (lexer_peek(lex) != '\n' && !lexer_is_at_end(lex)) {
-                    lexer_advance(lex);
-                }
-            } else if (lexer_peek_next(lex) == '*') {
-                // Block comment
-                lexer_advance(lex); // consume /
-                lexer_advance(lex); // consume *
-                while (!lexer_is_at_end(lex)) {
-                    if (lexer_peek(lex) == '*' && lexer_peek_next(lex) == '/') {
-                        lexer_advance(lex); // consume *
-                        lexer_advance(lex); // consume /
-                        break;
-                    }
-                    lexer_advance(lex);
-                }
-                if (lexer_is_at_end(lex)) {
-                    lex.error_message = "Unterminated block comment";
-                    return;
-                }
-            } else {
+func (char) is_whitespace() -> bool {
+    return self == ' ' || self == '\t' || self == '\r' || self == '\n';
+}
+
+func (Lexer) skip_linecomment() -> void {
+    self.advance(); // consume first /
+    self.advance(); // consume second /
+    while (self.peek() is LexerCharacter::Char(ch) && ch != '\n') {
+        self.advance();
+    }
+}
+
+func (Lexer) skip_blockcomment() -> void {
+    self.advance(); // consume first /
+    self.advance(); // consume *
+    while (self.peek() is LexerCharacter::Char(ch)) {
+        if(ch == '*') {
+            if (self.peek_next() is LexerCharacter::Char(n) && n == '/') {
+                self.advance(); // consume *
+                self.advance(); // consume /
                 return;
             }
-        } else {
-            return;
+        }
+        self.advance();
+    }
+
+    // If we reach here, the block comment was unterminated. Defer the error until next token.
+    self.error_message = "Unterminated block comment";
+}
+
+func (Lexer) skip_whitespace() -> void {
+    while (true) {
+        match (self.peek()) {
+            LexerCharacter::EOF => return;
+            LexerCharacter::Char(ch) => {
+                if (ch.is_whitespace()) {
+                    self.advance();
+                    continue;
+                }
+                if (ch == '/') {
+                    match (self.peek_next()) {
+                         LexerCharacter::EOF => return;
+                         LexerCharacter::Char(next) => {
+                            match (next) {
+                                '/' => { self.skip_linecomment();}
+                                '*' => { self.skip_blockcomment();}
+                                _ => return;
+                            }
+                         }
+                    }
+                } else {
+                    return;
+                }
+            }
         }
     }
 }
@@ -303,198 +333,231 @@ func identifier_type(text: string) -> TokenType {
 
 // --- Identifier scanning ---
 
-func lex_identifier(lex: Lexer) -> Token {
-    while (!lexer_is_at_end(lex) && is_alnum(lexer_peek(lex))) {
-        lexer_advance(lex);
+func (Lexer) identifier() -> Token {
+    while (self.peek() is LexerCharacter::Char(ch) && ch.is_alnum()) {
+        self.advance();
     }
-    var text = lex.source[lex.start:lex.pos];
-    return lexer_make_token(lex, identifier_type(text));
+    var text = self.source[self.start:self.pos];
+    return self.make_token(identifier_type(text));
 }
 
 // --- Number scanning ---
 
-func lex_number(lex: Lexer) -> Token {
+func (Lexer) number(start_char: char) -> Token {
     var kind = TokenType::Int;
 
     // Handle hex, octal, binary prefixes
-    if (lex.source[lex.start] == '0' && !lexer_is_at_end(lex)) {
-        var next = lexer_peek(lex);
-        if (next == 'x' || next == 'X') {
-            lexer_advance(lex);
-            if (lexer_is_at_end(lex) || !is_hex_digit(lexer_peek(lex))) {
-                return lexer_error_token(lex, "Invalid hexadecimal literal");
+    if (start_char == '0') {
+        var next = self.peek();
+        if(self.peek() is LexerCharacter::Char(ch) && (ch == 'x' || ch == 'X')) {
+            self.advance();
+            match(self.peek()) {
+                LexerCharacter::EOF => return self.error_token("Invalid hexadecimal literal");
+                LexerCharacter::Char(ch) => {
+                    if (!ch.is_hex_digit()) {
+                        return self.error_token("Invalid hexadecimal literal");
+                    }
+                }
             }
-            while (!lexer_is_at_end(lex) && is_hex_digit(lexer_peek(lex))) {
-                lexer_advance(lex);
+            while (self.peek() is LexerCharacter::Char(ch) && ch.is_hex_digit()) {
+                self.advance();
             }
-            return lexer_make_token(lex, TokenType::Int);
-        } else if (next == 'b' || next == 'B') {
-            lexer_advance(lex);
-            if (lexer_is_at_end(lex) || (lexer_peek(lex) != '0' && lexer_peek(lex) != '1')) {
-                return lexer_error_token(lex, "Invalid binary literal");
+            return self.make_token(TokenType::Int);
+        }
+        if(self.peek() is LexerCharacter::Char(ch) && (ch == 'b' || ch == 'B')) {
+            self.advance();
+            match(self.peek()) {
+                LexerCharacter::EOF => return self.error_token("Invalid binary literal");
+                LexerCharacter::Char(ch) => {
+                    if (ch != '0' && ch != '1') {
+                        return self.error_token("Invalid binary literal");
+                    }
+                }
             }
-            while (!lexer_is_at_end(lex) && (lexer_peek(lex) == '0' || lexer_peek(lex) == '1')) {
-                lexer_advance(lex);
+            while (self.peek() is LexerCharacter::Char(ch) && (ch == '0' || ch == '1')) {
+                self.advance();
             }
-            return lexer_make_token(lex, TokenType::Int);
-        } else if (next == 'o' || next == 'O') {
-            lexer_advance(lex);
-            if (lexer_is_at_end(lex) || !is_octal_digit(lexer_peek(lex))) {
-                return lexer_error_token(lex, "Invalid octal literal");
+            return self.make_token(TokenType::Int);
+        }
+        if(self.peek() is LexerCharacter::Char(ch) && (ch == 'o' || ch == 'O')) {
+            self.advance();
+            match(self.peek()) {
+                LexerCharacter::EOF => return self.error_token("Invalid octal literal");
+                LexerCharacter::Char(ch) => {
+                    if (!ch.is_octal_digit()) {
+                        return self.error_token("Invalid octal literal");
+                    }
+                }
             }
-            while (!lexer_is_at_end(lex) && is_octal_digit(lexer_peek(lex))) {
-                lexer_advance(lex);
+            while (self.peek() is LexerCharacter::Char(ch) && ch.is_octal_digit()) {
+                self.advance();
             }
-            return lexer_make_token(lex, TokenType::Int);
+            return self.make_token(TokenType::Int);
         }
     }
 
     // Decimal digits
-    while (!lexer_is_at_end(lex) && is_digit(lexer_peek(lex))) {
-        lexer_advance(lex);
+    while (self.peek() is LexerCharacter::Char(ch) && ch.is_digit()) {
+        self.advance();
     }
 
     // Decimal point
-    if (!lexer_is_at_end(lex) && lexer_peek(lex) == '.' &&
-        lex.pos + 1 < lex.source.length() && is_digit(lex.source[lex.pos + 1])) {
+    if (self.peek() is LexerCharacter::Char(ch) && ch == '.' &&
+        self.pos + 1 < self.source.length() && self.source[self.pos + 1].is_digit()) {
         kind = TokenType::Float;
-        lexer_advance(lex); // consume '.'
-        while (!lexer_is_at_end(lex) && is_digit(lexer_peek(lex))) {
-            lexer_advance(lex);
+        self.advance(); // consume '.'
+        while (self.peek() is LexerCharacter::Char(ch) && ch.is_digit()) {
+            self.advance();
         }
     }
 
     // Exponent
-    if (!lexer_is_at_end(lex) && (lexer_peek(lex) == 'e' || lexer_peek(lex) == 'E')) {
+    if (self.peek() is LexerCharacter::Char(ch) && (ch == 'e' || ch == 'E')) {
         kind = TokenType::Float;
-        lexer_advance(lex);
-        if (!lexer_is_at_end(lex) && (lexer_peek(lex) == '+' || lexer_peek(lex) == '-')) {
-            lexer_advance(lex);
+        self.advance();
+        if (self.peek() is LexerCharacter::Char(ch) && (ch == '+' || ch == '-')) {
+            self.advance();
         }
-        while (!lexer_is_at_end(lex) && is_digit(lexer_peek(lex))) {
-            lexer_advance(lex);
+        while (self.peek() is LexerCharacter::Char(ch) && ch.is_digit()) {
+            self.advance();
         }
     }
 
-    return lexer_make_token(lex, kind);
+    return self.make_token(kind);
 }
 
 // --- Escape sequence handling ---
 
+func (Lexer) advance_octal_value() -> Result<string, string> {
+    foreach(const i in 0..3) {
+        match(self.peek()) {
+            LexerCharacter::EOF => return Result::Err("Unterminated octal escape sequence");
+            LexerCharacter::Char(ch) => {
+                if (!ch.is_octal_digit()) {
+                    return Result::Err("Invalid octal escape sequence");
+                }
+                self.advance();
+            }
+        }
+    }
+    return Result::Ok("");
+}
+
+func (Lexer) advance_hex_value() -> Result<string, string> {
+    foreach(const i in 0..3) {
+        match(self.peek()) {
+            LexerCharacter::EOF => return Result::Err("Unterminated hex escape sequence");
+            LexerCharacter::Char(ch) => {
+                if (!ch.is_hex_digit()) {
+                    return Result::Err("Invalid hex escape sequence");
+                }
+                self.advance();
+            }
+        }
+    }
+    return Result::Ok("");
+}
+
 // Skip escape sequence after the backslash.
 // Returns "" on success, error message on failure.
-func skip_escape(lex: Lexer) -> string {
-    if (lexer_is_at_end(lex)) {
-        return "Unterminated escape sequence";
+func (Lexer) skip_escape() -> Result<string, string> {
+    if (self.is_at_end()) {
+        return Result::Err("Unterminated escape sequence");
     }
-    var escaped = lexer_peek(lex);
-    if (escaped == 'x') {
+    var escaped = self.peek();
+    if (escaped == LexerCharacter::Char('x')) {
         // Hex escape: \xNN
-        lexer_advance(lex);
-        var i: i64 = 0;
-        while (i < 2) {
-            if (lexer_is_at_end(lex) || !is_hex_digit(lexer_peek(lex))) {
-                return "Invalid hex escape in string literal";
-            }
-            lexer_advance(lex);
-            i += 1;
-        }
-        return "";
-    } else if (is_octal_digit(escaped)) {
-        // Octal escape: up to 3 digits
-        var i: i64 = 0;
-        while (i < 3 && !lexer_is_at_end(lex) && is_octal_digit(lexer_peek(lex))) {
-            lexer_advance(lex);
-            i += 1;
-        }
-        return "";
-    } else {
-        // Simple escape: \n, \t, \r, \\, \', \", \e, \0, etc.
-        lexer_advance(lex);
-        return "";
+        self.advance();
+        return self.advance_hex_value();
     }
+    if (escaped is LexerCharacter::Char(ch) && ch.is_octal_digit()) {
+        return self.advance_octal_value();
+    }
+    // Simple escape: \n, \t, \r, \\, \', \", \e, \0, etc.
+    self.advance();
+    return Result::Ok("");
 }
 
 // --- String scanning ---
 
-func lex_string(lex: Lexer) -> Token {
-    while (!lexer_is_at_end(lex) && lexer_peek(lex) != '"') {
-        if (lexer_peek(lex) == '\\' && lexer_peek_next(lex) != '\0') {
-            lexer_advance(lex); // skip backslash
-            var err = skip_escape(lex);
-            if (err != "") {
-                return lexer_error_token(lex, err);
+func (Lexer) scan_string() -> Token {
+    while (self.peek() is LexerCharacter::Char(ch) && ch != '"') {
+        if (ch == '\\' && self.peek_next() != LexerCharacter::EOF) {
+            self.advance(); // skip backslash
+            match (self.skip_escape()) {
+                Result::Ok(x) => {continue;}
+                Result::Err(msg) => return self.error_token(msg);
             }
             continue;
         }
-        lexer_advance(lex);
+        self.advance();
     }
 
-    if (lexer_is_at_end(lex)) {
-        return lexer_error_token(lex, "Unterminated string");
+    if (self.peek() is LexerCharacter::EOF) {
+        return self.error_token("Unterminated string");
     }
 
-    lexer_advance(lex); // closing quote
-    return lexer_make_token(lex, TokenType::String);
+    self.advance(); // closing quote
+    return self.make_token(TokenType::String);
 }
 
-func lex_triple_string(lex: Lexer) -> Token {
+func (Lexer) scan_triple_string() -> Token {
     // Opening """ already consumed. Scan until closing """.
-    while (!lexer_is_at_end(lex)) {
-        if (lexer_peek(lex) == '"' && lexer_peek_next(lex) == '"' &&
-            lex.pos + 2 < lex.source.length() && lex.source[lex.pos + 2] == '"') {
-            lexer_advance(lex); // first "
-            lexer_advance(lex); // second "
-            lexer_advance(lex); // third "
-            return lexer_make_token(lex, TokenType::String);
+    while (self.peek() is LexerCharacter::Char(ch)) {
+        if (ch == '"' &&
+            self.peek_next() == LexerCharacter::Char('"') &&
+            self.peek_ahead(2) == LexerCharacter::Char('"')) {
+            self.advance(); // first "
+            self.advance(); // second "
+            self.advance(); // third "
+            return self.make_token(TokenType::String);
         }
-        if (lexer_peek(lex) == '\\' && lexer_peek_next(lex) != '\0') {
-            lexer_advance(lex); // skip backslash
-            var err = skip_escape(lex);
-            if (err != "") {
-                return lexer_error_token(lex, err);
+        if (ch == '\\' && self.peek_next() != LexerCharacter::EOF) {
+            self.advance(); // skip backslash
+            var err = self.skip_escape();
+            if (err is Result::Err(msg)) {
+                return self.error_token(msg);
             }
             continue;
         }
-        lexer_advance(lex);
+        self.advance();
     }
-    return lexer_error_token(lex, "Unterminated triple-quoted string");
+    return self.error_token("Unterminated triple-quoted string");
 }
 
-func lex_interp_string(lex: Lexer) -> Token {
+func (Lexer) scan_interp_string() -> Token {
     // Scan from after $" to closing ", tracking brace depth for {expr} regions
     var brace_depth: i64 = 0;
-    while (!lexer_is_at_end(lex)) {
-        var ch = lexer_peek(lex);
+    while (self.peek() is LexerCharacter::Char(ch)) {
         if (brace_depth == 0) {
             if (ch == '"') {
-                lexer_advance(lex); // closing quote
-                return lexer_make_token(lex, TokenType::InterpString);
+                self.advance(); // closing quote
+                return self.make_token(TokenType::InterpString);
             }
             if (ch == '{') {
-                if (lexer_peek_next(lex) == '{') {
-                    lexer_advance(lex); // skip first {
-                    lexer_advance(lex); // skip second {
+                if (self.peek_next() == LexerCharacter::Char('{')) {
+                    self.advance(); // skip first {
+                    self.advance(); // skip second {
                     continue;
                 }
                 brace_depth += 1;
-                lexer_advance(lex);
+                self.advance();
                 continue;
             }
-            if (ch == '}' && lexer_peek_next(lex) == '}') {
-                lexer_advance(lex); // skip first }
-                lexer_advance(lex); // skip second }
+            if (ch == '}' && self.peek_next() == LexerCharacter::Char('}')) {
+                self.advance(); // skip first }
+                self.advance(); // skip second }
                 continue;
             }
-            if (ch == '\\' && lexer_peek_next(lex) != '\0') {
-                lexer_advance(lex); // skip backslash
-                var err = skip_escape(lex);
-                if (err != "") {
-                    return lexer_error_token(lex, err);
+            if (ch == '\\' && self.peek_next() != LexerCharacter::EOF) {
+                self.advance(); // skip backslash
+                var err = self.skip_escape();
+                if (err is Result::Err(msg)) {
+                    return self.error_token(msg);
                 }
                 continue;
             }
-            lexer_advance(lex);
+            self.advance();
         } else {
             // Inside {expr} region
             if (ch == '{') {
@@ -503,262 +566,267 @@ func lex_interp_string(lex: Lexer) -> Token {
                 brace_depth -= 1;
             } else if (ch == '"') {
                 // String literal inside expression - skip it
-                lexer_advance(lex); // opening quote
-                while (!lexer_is_at_end(lex) && lexer_peek(lex) != '"') {
-                    if (lexer_peek(lex) == '\\' && lexer_peek_next(lex) != '\0') {
-                        lexer_advance(lex);
+                self.advance(); // opening quote
+                while (self.peek() is LexerCharacter::Char(ch) && ch != '"') {
+                    if (ch == '\\' && self.peek_next() != LexerCharacter::EOF) {
+                        self.advance();
                     }
-                    lexer_advance(lex);
+                    self.advance();
                 }
-                if (!lexer_is_at_end(lex)) {
-                    lexer_advance(lex); // closing quote
+                if (!self.is_at_end()) {
+                    self.advance(); // closing quote
                 }
                 continue;
             }
-            lexer_advance(lex);
+            self.advance();
         }
     }
-    return lexer_error_token(lex, "Unterminated interpolated string");
+    return self.error_token("Unterminated interpolated string");
 }
 
 // --- Character literal scanning ---
 
-func lex_character(lex: Lexer) -> Token {
-    if (lexer_is_at_end(lex)) {
-        return lexer_error_token(lex, "Unterminated character literal");
+func (Lexer) scan_char() -> Token {
+    if (self.is_at_end()) {
+        return self.error_token("Unterminated character literal");
     }
 
-    if (lexer_peek(lex) == '\\') {
-        lexer_advance(lex); // skip backslash
-        if (lexer_is_at_end(lex)) {
-            return lexer_error_token(lex, "Unterminated character literal");
+    if (self.peek() == LexerCharacter::Char('\\')) {
+        self.advance(); // skip backslash
+        if (self.is_at_end()) {
+            return self.error_token("Unterminated character literal");
         }
-        var escaped = lexer_peek(lex);
-        if (escaped == 'x') {
+        var escaped = self.peek();
+        if (escaped == LexerCharacter::Char('x')) {
             // Hex escape: \xNN
-            lexer_advance(lex);
-            var i: i64 = 0;
-            while (i < 2) {
-                if (lexer_is_at_end(lex) || !is_hex_digit(lexer_peek(lex))) {
-                    return lexer_error_token(lex, "Invalid hex escape in character literal");
-                }
-                lexer_advance(lex);
-                i += 1;
+            self.advance();
+            match(self.advance_hex_value()) {
+                Result::Ok(x) => { /* continue */ }
+                Result::Err(msg) => return self.error_token(msg);
             }
-        } else if (is_octal_digit(escaped)) {
-            // Octal escape: \NNN (up to 3 digits)
-            var i: i64 = 0;
-            while (i < 3 && !lexer_is_at_end(lex) && is_octal_digit(lexer_peek(lex))) {
-                lexer_advance(lex);
-                i += 1;
+
+            // return self.advance_hex_value().unwrap_or_else(|msg: string| self.error_token(msg));
+        } else if (escaped is LexerCharacter::Char(ch) && ch.is_octal_digit()) {
+            match(self.advance_octal_value()) {
+                Result::Ok(x) => { /* continue */ }
+                Result::Err(msg) => return self.error_token(msg);
             }
+            // return self.advance_octal_value().unwrap_or_else(|msg: string| self.error_token(msg));
         } else {
             // Simple escape
-            lexer_advance(lex);
+            self.advance();
         }
     } else {
-        lexer_advance(lex); // regular character
+        self.advance(); // regular character
     }
 
-    if (lexer_is_at_end(lex) || lexer_peek(lex) != '\'') {
-        return lexer_error_token(lex, "Unterminated character literal");
+    if (self.peek() is LexerCharacter::Char(ch) && ch != '\'') {
+        return self.error_token("Unterminated character literal");
     }
-    lexer_advance(lex); // closing quote
-    return lexer_make_token(lex, TokenType::Char);
+    self.advance(); // closing quote
+    return self.make_token(TokenType::Char);
 }
 
 // --- Main lexer function ---
 
-public func lexer_next(lex: Lexer) -> Token {
-    lexer_skip_whitespace(lex);
+public func (Lexer) next() -> Token {
+    self.skip_whitespace();
 
-    lex.start = lex.pos;
-    lex.start_column = lex.column;
+    self.start = self.pos;
+    self.start_column = self.column;
 
     // Check for deferred error from block comment
-    if (lex.error_message != "") {
-        var msg = lex.error_message;
-        lex.error_message = "";
-        return lexer_error_token(lex, msg);
+    if (self.error_message != "") {
+        var msg = self.error_message;
+        self.error_message = "";
+        return self.error_token(msg);
     }
 
-    if (lexer_is_at_end(lex)) {
-        return lexer_make_token(lex, TokenType::EOF);
+    // if (self.is_at_end()) {
+    //     return self.make_token(TokenType::EOF);
+    // }
+
+    // var c = self.advance();
+    // if (c is LexerCharacter::EOF) {
+    //     return self.make_token(TokenType::EOF);
+    // }
+    var ch : char;
+    match (self.advance()) {
+        LexerCharacter::EOF => return self.make_token(TokenType::EOF);
+        LexerCharacter::Char(c) => ch = c;
     }
 
-    var ch = lexer_advance(lex);
-
-    if (is_alpha(ch)) {
-        return lex_identifier(lex);
+    if (ch.is_alpha()) {
+        return self.identifier();
     }
-    if (is_digit(ch)) {
-        return lex_number(lex);
+    if (ch.is_digit()) {
+        return self.number(ch);
     }
 
     // Operators and punctuation
-    if (ch == '(') { return lexer_make_token(lex, TokenType::LParen); }
-    if (ch == ')') { return lexer_make_token(lex, TokenType::RParen); }
-    if (ch == '{') { return lexer_make_token(lex, TokenType::LBrace); }
-    if (ch == '}') { return lexer_make_token(lex, TokenType::RBrace); }
-    if (ch == '[') { return lexer_make_token(lex, TokenType::LBracket); }
-    if (ch == ']') { return lexer_make_token(lex, TokenType::RBracket); }
-    if (ch == ';') { return lexer_make_token(lex, TokenType::Semicolon); }
-    if (ch == ',') { return lexer_make_token(lex, TokenType::Comma); }
-    if (ch == '~') { return lexer_make_token(lex, TokenType::Tilde); }
-    if (ch == '?') { return lexer_make_token(lex, TokenType::Question); }
+    if (ch == '(') { return self.make_token(TokenType::LParen); }
+    if (ch == ')') { return self.make_token(TokenType::RParen); }
+    if (ch == '{') { return self.make_token(TokenType::LBrace); }
+    if (ch == '}') { return self.make_token(TokenType::RBrace); }
+    if (ch == '[') { return self.make_token(TokenType::LBracket); }
+    if (ch == ']') { return self.make_token(TokenType::RBracket); }
+    if (ch == ';') { return self.make_token(TokenType::Semicolon); }
+    if (ch == ',') { return self.make_token(TokenType::Comma); }
+    if (ch == '~') { return self.make_token(TokenType::Tilde); }
+    if (ch == '?') { return self.make_token(TokenType::Question); }
 
     if (ch == ':') {
-        if (lexer_match(lex, ':')) {
-            return lexer_make_token(lex, TokenType::ColonColon);
+        if (self.match_next(':')) {
+            return self.make_token(TokenType::ColonColon);
         }
-        return lexer_make_token(lex, TokenType::Colon);
+        return self.make_token(TokenType::Colon);
     }
 
     if (ch == '.') {
-        if (lexer_match(lex, '.')) {
-            if (lexer_match(lex, '.')) {
-                return lexer_make_token(lex, TokenType::Ellipsis);
+        if (self.match_next('.')) {
+            if (self.match_next('.')) {
+                return self.make_token(TokenType::Ellipsis);
             }
-            return lexer_make_token(lex, TokenType::DotDot);
+            return self.make_token(TokenType::DotDot);
         }
-        return lexer_make_token(lex, TokenType::Dot);
+        return self.make_token(TokenType::Dot);
     }
 
     if (ch == '+') {
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::PlusEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::PlusEq);
         }
-        return lexer_make_token(lex, TokenType::Plus);
+        return self.make_token(TokenType::Plus);
     }
 
     if (ch == '-') {
-        if (lexer_match(lex, '>')) {
-            return lexer_make_token(lex, TokenType::Arrow);
+        if (self.match_next('>')) {
+            return self.make_token(TokenType::Arrow);
         }
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::MinusEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::MinusEq);
         }
-        return lexer_make_token(lex, TokenType::Minus);
+        return self.make_token(TokenType::Minus);
     }
 
     if (ch == '*') {
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::StarEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::StarEq);
         }
-        return lexer_make_token(lex, TokenType::Star);
+        return self.make_token(TokenType::Star);
     }
 
     if (ch == '/') {
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::SlashEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::SlashEq);
         }
-        return lexer_make_token(lex, TokenType::Slash);
+        return self.make_token(TokenType::Slash);
     }
 
     if (ch == '%') {
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::PercentEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::PercentEq);
         }
-        return lexer_make_token(lex, TokenType::Percent);
+        return self.make_token(TokenType::Percent);
     }
 
     if (ch == '^') {
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::CaretEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::CaretEq);
         }
-        return lexer_make_token(lex, TokenType::Caret);
+        return self.make_token(TokenType::Caret);
     }
 
     if (ch == '&') {
-        if (lexer_match(lex, '&')) {
-            return lexer_make_token(lex, TokenType::AmpAmp);
+        if (self.match_next('&')) {
+            return self.make_token(TokenType::AmpAmp);
         }
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::AmpEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::AmpEq);
         }
-        return lexer_make_token(lex, TokenType::Amp);
+        return self.make_token(TokenType::Amp);
     }
 
     if (ch == '|') {
-        if (lexer_match(lex, '|')) {
-            return lexer_make_token(lex, TokenType::PipePipe);
+        if (self.match_next('|')) {
+            return self.make_token(TokenType::PipePipe);
         }
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::PipeEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::PipeEq);
         }
-        return lexer_make_token(lex, TokenType::Pipe);
+        return self.make_token(TokenType::Pipe);
     }
 
     if (ch == '!') {
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::BangEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::BangEq);
         }
-        return lexer_make_token(lex, TokenType::Bang);
+        return self.make_token(TokenType::Bang);
     }
 
     if (ch == '=') {
-        if (lexer_match(lex, '>')) {
-            return lexer_make_token(lex, TokenType::FatArrow);
+        if (self.match_next('>')) {
+            return self.make_token(TokenType::FatArrow);
         }
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::EqEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::EqEq);
         }
-        return lexer_make_token(lex, TokenType::Eq);
+        return self.make_token(TokenType::Eq);
     }
 
     if (ch == '<') {
-        if (lexer_match(lex, '<')) {
-            if (lexer_match(lex, '=')) {
-                return lexer_make_token(lex, TokenType::LtLtEq);
+        if (self.match_next('<')) {
+            if (self.match_next('=')) {
+                return self.make_token(TokenType::LtLtEq);
             }
-            return lexer_make_token(lex, TokenType::LtLt);
+            return self.make_token(TokenType::LtLt);
         }
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::LtEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::LtEq);
         }
-        return lexer_make_token(lex, TokenType::Lt);
+        return self.make_token(TokenType::Lt);
     }
 
     if (ch == '>') {
-        if (lexer_match(lex, '>')) {
-            if (lexer_match(lex, '=')) {
-                return lexer_make_token(lex, TokenType::GtGtEq);
+        if (self.match_next('>')) {
+            if (self.match_next('=')) {
+                return self.make_token(TokenType::GtGtEq);
             }
-            return lexer_make_token(lex, TokenType::GtGt);
+            return self.make_token(TokenType::GtGt);
         }
-        if (lexer_match(lex, '=')) {
-            return lexer_make_token(lex, TokenType::GtEq);
+        if (self.match_next('=')) {
+            return self.make_token(TokenType::GtEq);
         }
-        return lexer_make_token(lex, TokenType::Gt);
+        return self.make_token(TokenType::Gt);
     }
 
     if (ch == '"') {
-        if (lexer_peek(lex) == '"' && lexer_peek_next(lex) == '"') {
-            lexer_advance(lex); // second "
-            lexer_advance(lex); // third "
-            return lex_triple_string(lex);
+        if (self.peek() == LexerCharacter::Char('"') && self.peek_next() == LexerCharacter::Char('"')) {
+            self.advance(); // second "
+            self.advance(); // third "
+            return self.scan_triple_string();
         }
-        return lex_string(lex);
+        return self.scan_string();
     }
 
     if (ch == '\'') {
-        return lex_character(lex);
+        return self.scan_char();
     }
 
     if (ch == '$') {
-        if (lexer_match(lex, '"')) {
-            return lex_interp_string(lex);
+        if (self.match_next('"')) {
+            return self.scan_interp_string();
         }
-        return lexer_error_token(lex, "Unexpected character '$'");
+        return self.error_token("Unexpected character '$'");
     }
 
-    return lexer_error_token(lex, "Unexpected character");
+    return self.error_token("Unexpected character");
 }
 
 // --- Token type name ---
 
-public func token_type_name(tt: TokenType) -> string {
-    match (tt) {
+public func (TokenType) name() -> string {
+    match (self) {
         EOF => return "EOF";
         Ident => return "IDENT";
         Int => return "INT";

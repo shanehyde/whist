@@ -1,6 +1,6 @@
 MAKE=/usr/bin/make
 
-.PHONY: all w0 wc test test-verbose test-run test-errors clean format metrics complexity
+.PHONY: all w0 wc test test-verbose test-run test-errors compare clean format metrics complexity
 
 all: w0 wc
 
@@ -21,6 +21,9 @@ test-run:
 
 test-errors:
 	$(MAKE) -C w0 test-errors FILTER=$(FILTER)
+
+compare: w0 wc
+	tools/compare_output.sh $(if $(FILTER),$(FILTER))
 
 clean:
 	$(MAKE) -C w0 clean

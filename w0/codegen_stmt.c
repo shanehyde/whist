@@ -2001,6 +2001,87 @@ static void emit_if_let_stmt(CodeGen* gen, Node* node) {
     cleanup_if_let_owned_temps(gen, subject, has_temps, saved, subject_is_owned, let_id);
 }
 
+// Emit a while-is loop: while (expr is Variant(bindings) [&& cond]) { body }
+// Generates: for(;;) { EnumType tmp = expr; if (tmp.tag != Variant) break; bindings; body; }
+static void emit_while_let_stmt(CodeGen* gen, Node* node) {
+    Type* enum_type = node->as.while_let_stmt.resolved_type;
+    if (!enum_type)
+        return;
+
+    const char* enum_name  = enum_type->as.enm.name;
+    const char* variant    = node->as.while_let_stmt.variant_name;
+    int         is_data    = enum_type->as.enm.has_data;
+    Node*       extra_cond = node->as.while_let_stmt.extra_cond;
+    int         let_id     = gen->out.temp_count++;
+
+    emit_indent(gen);
+    emit(gen, "for (;;) {\n");
+    gen->out.indent++;
+
+    // Handle owned temps in the expression
+    Node* subject          = node->as.while_let_stmt.expr;
+    int   subject_is_owned = subject->is_owned_temp;
+    if (subject_is_owned)
+        subject->is_owned_temp = 0;
+
+    int saved     = 0;
+    int has_temps = has_owned_temps(subject);
+    if (has_temps) {
+        saved = hoist_owned_temps(gen, subject);
+    }
+
+    // Emit: EnumType __while_letN = <expr>;
+    emit_indent(gen);
+    emit(gen, "%s __while_let%d = ", enum_name, let_id);
+    emit_expr(gen, node->as.while_let_stmt.expr);
+    emit(gen, ";\n");
+
+    // Emit: if (__while_letN.tag != EnumType_Variant) break;
+    emit_indent(gen);
+    if (is_data) {
+        emit(gen, "if (__while_let%d.tag != %s_%s) break;\n", let_id, enum_name, variant);
+    } else {
+        emit(gen, "if (__while_let%d != %s_%s) break;\n", let_id, enum_name, variant);
+    }
+
+    // Extract bindings
+    if (is_data && node->as.while_let_stmt.binding_count > 0) {
+        int variant_idx = type_enum_variant_index(enum_type, variant);
+        for (int j = 0; j < node->as.while_let_stmt.binding_count; j++) {
+            emit_indent(gen);
+            emit_resolved_type(gen, enum_type->as.enm.variant_types[variant_idx][j]);
+            emit(gen, " %s = __while_let%d.%s.f%d;\n", node->as.while_let_stmt.bindings[j], let_id,
+                 variant, j);
+        }
+    }
+
+    // Optional extra condition: if (!(cond)) break;
+    if (extra_cond) {
+        emit_indent(gen);
+        emit(gen, "if (!(");
+        emit_expr(gen, extra_cond);
+        emit(gen, ")) break;\n");
+    }
+
+    // Emit loop body
+    emit_stmt_body(gen, node->as.while_let_stmt.body);
+
+    // Cleanup owned temps at end of each iteration
+    if (has_temps) {
+        cleanup_owned_temps(gen, saved);
+    }
+    if (subject_is_owned) {
+        subject->is_owned_temp = 1;
+        char name[32];
+        snprintf(name, sizeof(name), "__while_let%d", let_id);
+        emit_owned_temp_dec(gen, subject, name);
+    }
+
+    gen->out.indent--;
+    emit_indent(gen);
+    emit(gen, "}\n");
+}
+
 // Emit a placeholder for unsupported or unknown statement node kinds.
 static void emit_unknown_stmt(CodeGen* gen, Node* node) {
     emit_indent(gen);
@@ -2013,6 +2094,7 @@ static const StmtEmitter stmt_emitters[NODE_PROGRAM + 1] = {
     [NODE_EXPR_STMT] = emit_expr_stmt,    [NODE_VAR_DECL] = emit_var_decl_stmt,
     [NODE_BLOCK] = emit_block_stmt,       [NODE_IF] = emit_if_stmt,
     [NODE_IF_LET] = emit_if_let_stmt,     [NODE_WHILE] = emit_while_stmt,
+    [NODE_WHILE_LET] = emit_while_let_stmt,
     [NODE_FOR] = emit_for_stmt,           [NODE_FOREACH] = emit_foreach_stmt,
     [NODE_RETURN] = emit_return_stmt,     [NODE_BREAK] = emit_break_stmt,
     [NODE_CONTINUE] = emit_continue_stmt, [NODE_DEFER] = emit_defer_stmt,

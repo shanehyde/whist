@@ -395,6 +395,14 @@ static Node* parse_impl_decl(Parser* parser) {
     consume_token(parser, TOK_LBRACE, "Expected '{' after type name in impl block");
 
     while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
+        // Parse optional visibility modifier (default: private)
+        int method_is_public = 0;
+        if (match_token(parser, TOK_PUBLIC)) {
+            method_is_public = 1;
+        } else if (match_token(parser, TOK_PRIVATE)) {
+            method_is_public = 0;
+        }
+
         // Check for 'const func' (immutable receiver) or 'func' (mutable receiver)
         int method_is_const = 0;
         if (check_token(parser, TOK_CONST)) {
@@ -410,7 +418,7 @@ static Node* parse_impl_decl(Parser* parser) {
         }
 
         // Parse the function without a receiver (no `(Type)` prefix)
-        Node* method = parse_func_decl(parser, 0);
+        Node* method = parse_func_decl(parser, method_is_public);
         if (method) {
             // Fill in receiver from the impl block context
             func_decl_node* fdn    = &method->as.func_decl;
@@ -853,7 +861,7 @@ Node* parse_declaration(Parser* parser) {
 
     if (!is_public) {
         has_visibility = match_token(parser, TOK_PRIVATE);
-        is_public      = !has_visibility; // default to public if no modifier
+        is_public      = 0; // default to private if no modifier
     }
 
     // Error if visibility modifier used with test

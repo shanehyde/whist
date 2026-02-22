@@ -20,31 +20,31 @@ private extern std_io {
     func std__eprintln(s: string) -> void;
 }
 
-func print(s: string) -> void {
+public func print(s: string) -> void {
     printf("%s", s);
 }
 
-func println(s: string) -> void {
+public func println(s: string) -> void {
     printf("%s\n", s);
 }
 
-func eprint(s: string) -> void {
+public func eprint(s: string) -> void {
     std__eprint(s);
 }
 
-func eprintln(s: string) -> void {
+public func eprintln(s: string) -> void {
     std__eprintln(s);
 }
 
-func exit(status: i32) -> void {
+public func exit(status: i32) -> void {
     _exit(status);
 }
 
-func system(cmd: string) -> i32 {
+public func system(cmd: string) -> i32 {
     return _system(cmd);
 }
 
-func args() -> Vec<string> {
+public func args() -> Vec<string> {
     var args = new Vec<string>{};
 
     var count = std__argc();
@@ -57,26 +57,26 @@ func args() -> Vec<string> {
     return args;
 }
 
-func panic(s: string) -> void {
+public func panic(s: string) -> void {
     println($"Panic: {s}");
     exit(1);
 }
 
-func abs_i64(x: i64) -> i64 {
+public func abs_i64(x: i64) -> i64 {
     if (x < 0) {
         return -x;
     }
     return x;
 }
 
-func max_i64(a: i64, b: i64) -> i64 {
+public func max_i64(a: i64, b: i64) -> i64 {
     if (a > b) {
         return a;
     }
     return b;
 }
 
-func min_i64(a: i64, b: i64) -> i64 {
+public func min_i64(a: i64, b: i64) -> i64 {
     if (a < b) {
         return a;
     }
@@ -89,16 +89,16 @@ private extern std_str {
     func std__to_string(n: i64) -> string;
 }
 
-func parse_i64(s: string) -> i64 {
+public func parse_i64(s: string) -> i64 {
     return std__parse_i64(s);
 }
 
-func to_string(n: i64) -> string {
+public func to_string(n: i64) -> string {
     return std__to_string(n);
 }
 
 // Command execution with output capture
-struct ExecResult {
+public struct ExecResult {
     exit_code: i32,
     output: string,
     error_output: string
@@ -112,7 +112,7 @@ private extern std_exec {
     func std__exec_free(handle: voidptr) -> void;
 }
 
-func exec(cmd: string) -> ExecResult {
+public func exec(cmd: string) -> ExecResult {
     var handle = std__exec(cmd);
     var result = new ExecResult {
         exit_code: std__exec_exit_code(handle),

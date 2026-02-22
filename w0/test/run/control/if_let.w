@@ -6,6 +6,8 @@
 // Expected: PASS: if_let_multi_bind
 // Expected: PASS: if_is_bare_check
 // Expected: PASS: if_is_extra_cond
+// Expected: PASS: while_is
+// Expected: PASS: while_is2
 
 enum Shape {
     Circle(f64),
@@ -188,4 +190,49 @@ test "if_is_extra_cond" {
         result = 99;
     }
     assert(result == 99);
+}
+
+test "while_is" {
+    // Simple while-is with extra condition
+    var opt: Option<i64> = Option::Some(3);
+    var sum = 0;
+    while (opt is Some(v) && v > 0) {
+        sum += v;
+        opt = Option::Some(v - 1);
+    }
+    // Iterations: v=3 (sum=3), v=2 (sum=5), v=1 (sum=6), v=0 (fails v>0)
+    assert(sum == 6);
+
+    // while-is without extra condition (stops on variant mismatch)
+    var shape: Shape = Shape::Circle(3.0);
+    var total: f64 = 0.0;
+    while (shape is Circle(r)) {
+        total += r;
+        if (r <= 1.0) {
+            shape = Shape::None;
+        } else {
+            shape = Shape::Circle(r - 1.0);
+        }
+    }
+    // Iterations: r=3 (total=3), r=2 (total=5), r=1 (total=6, set None), stops
+    assert(total == 6.0);
+
+    // while-is on non-matching variant — body never executes
+    var s: Shape = Shape::None;
+    var ran = false;
+    while (s is Circle(r)) {
+        ran = true;
+    }
+    assert(!ran);
+}
+test "while_is2" {
+    var list = new Vec<Option<i64>>{Option::Some(1), Option::Some(2), Option::Some(0), Option::Some(3), Option::None};
+    var sum = 0;
+
+    var i = 0;
+    while (list[i] is Option::Some(v) && v > 0) {
+        sum += v;
+        i += 1;
+    }
+    assert(sum == 3);
 }

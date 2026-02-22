@@ -316,6 +316,17 @@ void node_free(Node* node) {
         node_free(node->as.while_stmt.cond);
         node_free(node->as.while_stmt.body);
         break;
+    case NODE_WHILE_LET:
+        node_free(node->as.while_let_stmt.expr);
+        free(node->as.while_let_stmt.variant_name);
+        free(node->as.while_let_stmt.enum_name);
+        for (int i = 0; i < node->as.while_let_stmt.binding_count; i++) {
+            free(node->as.while_let_stmt.bindings[i]);
+        }
+        free(node->as.while_let_stmt.bindings);
+        node_free(node->as.while_let_stmt.body);
+        node_free(node->as.while_let_stmt.extra_cond);
+        break;
     case NODE_FOR:
         node_free(node->as.for_stmt.init);
         node_free(node->as.for_stmt.cond);
@@ -566,6 +577,9 @@ static void node_reset_checker_flags(Node* node) {
     case NODE_IF_LET:
         node->as.if_let_stmt.resolved_type = NULL;
         break;
+    case NODE_WHILE_LET:
+        node->as.while_let_stmt.resolved_type = NULL;
+        break;
     case NODE_LAMBDA:
         node->as.lambda.lambda_id     = 0;
         node->as.lambda.resolved_type = NULL;
@@ -759,6 +773,24 @@ Node* node_clone(Node* node) {
     case NODE_WHILE:
         c->as.while_stmt.cond = node_clone(node->as.while_stmt.cond);
         c->as.while_stmt.body = node_clone(node->as.while_stmt.body);
+        break;
+    case NODE_WHILE_LET:
+        c->as.while_let_stmt.expr                = node_clone(node->as.while_let_stmt.expr);
+        c->as.while_let_stmt.variant_name        = xstrdup(node->as.while_let_stmt.variant_name);
+        c->as.while_let_stmt.variant_name_length = node->as.while_let_stmt.variant_name_length;
+        c->as.while_let_stmt.enum_name =
+            node->as.while_let_stmt.enum_name ? xstrdup(node->as.while_let_stmt.enum_name) : NULL;
+        c->as.while_let_stmt.enum_name_length = node->as.while_let_stmt.enum_name_length;
+        c->as.while_let_stmt.binding_count    = node->as.while_let_stmt.binding_count;
+        if (node->as.while_let_stmt.binding_count > 0) {
+            c->as.while_let_stmt.bindings =
+                xmalloc(node->as.while_let_stmt.binding_count * sizeof(char*));
+            for (int i = 0; i < node->as.while_let_stmt.binding_count; i++) {
+                c->as.while_let_stmt.bindings[i] = xstrdup(node->as.while_let_stmt.bindings[i]);
+            }
+        }
+        c->as.while_let_stmt.body       = node_clone(node->as.while_let_stmt.body);
+        c->as.while_let_stmt.extra_cond = node_clone(node->as.while_let_stmt.extra_cond);
         break;
     case NODE_FOR:
         c->as.for_stmt.init = node_clone(node->as.for_stmt.init);
