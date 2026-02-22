@@ -590,6 +590,12 @@ static int collect_string_literals_stmt_node(CodeGen* gen, Node* node) {
         collect_string_literals_node(gen, node->as.if_stmt.then_block);
         collect_string_literals_node(gen, node->as.if_stmt.else_block);
         return 1;
+    case NODE_IF_LET:
+        collect_string_literals_node(gen, node->as.if_let_stmt.expr);
+        collect_string_literals_node(gen, node->as.if_let_stmt.extra_cond);
+        collect_string_literals_node(gen, node->as.if_let_stmt.then_block);
+        collect_string_literals_node(gen, node->as.if_let_stmt.else_block);
+        return 1;
     case NODE_FOR:
         collect_string_literals_node(gen, node->as.for_stmt.init);
         collect_string_literals_node(gen, node->as.for_stmt.cond);
@@ -605,6 +611,11 @@ static int collect_string_literals_stmt_node(CodeGen* gen, Node* node) {
     case NODE_WHILE:
         collect_string_literals_node(gen, node->as.while_stmt.cond);
         collect_string_literals_node(gen, node->as.while_stmt.body);
+        return 1;
+    case NODE_WHILE_LET:
+        collect_string_literals_node(gen, node->as.while_let_stmt.expr);
+        collect_string_literals_node(gen, node->as.while_let_stmt.extra_cond);
+        collect_string_literals_node(gen, node->as.while_let_stmt.body);
         return 1;
     case NODE_EXPR_STMT:
         collect_string_literals_node(gen, node->as.expr_stmt.expr);

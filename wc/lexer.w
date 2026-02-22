@@ -428,28 +428,25 @@ func (Lexer) number(start_char: char) -> Token {
 
 // --- Escape sequence handling ---
 
-func (Lexer) advance_octal_value() -> Result<string, string> {
-    foreach(const i in 0..3) {
-        match(self.peek()) {
-            LexerCharacter::EOF => return Result::Err("Unterminated octal escape sequence");
-            LexerCharacter::Char(ch) => {
-                if (!ch.is_octal_digit()) {
-                    return Result::Err("Invalid octal escape sequence");
-                }
-                self.advance();
-            }
+func (Lexer) advance_octal_value() {
+    // Consume 1-3 octal digits greedily (like C's \NNN)
+    for (var i: i64 = 0; i < 3; i += 1) {
+        if (self.peek() is LexerCharacter::Char(ch) && ch.is_octal_digit()) {
+            self.advance();
+        } else {
+            return;
         }
     }
-    return Result::Ok("");
 }
 
-func (Lexer) advance_hex_value() -> Result<string, string> {
-    foreach(const i in 0..3) {
+func (Lexer) advance_hex_value(error_msg: string) -> Result<string, string> {
+    // Exactly 2 hex digits required for \xNN
+    foreach(const i in 0..2) {
         match(self.peek()) {
-            LexerCharacter::EOF => return Result::Err("Unterminated hex escape sequence");
+            LexerCharacter::EOF => return Result::Err(error_msg);
             LexerCharacter::Char(ch) => {
                 if (!ch.is_hex_digit()) {
-                    return Result::Err("Invalid hex escape sequence");
+                    return Result::Err(error_msg);
                 }
                 self.advance();
             }
@@ -468,10 +465,12 @@ func (Lexer) skip_escape() -> Result<string, string> {
     if (escaped == LexerCharacter::Char('x')) {
         // Hex escape: \xNN
         self.advance();
-        return self.advance_hex_value();
+        return self.advance_hex_value("Invalid hex escape in string literal");
     }
     if (escaped is LexerCharacter::Char(ch) && ch.is_octal_digit()) {
-        return self.advance_octal_value();
+        // Octal escape: 1-3 digits
+        self.advance_octal_value();
+        return Result::Ok("");
     }
     // Simple escape: \n, \t, \r, \\, \', \", \e, \0, etc.
     self.advance();
@@ -600,18 +599,13 @@ func (Lexer) scan_char() -> Token {
         if (escaped == LexerCharacter::Char('x')) {
             // Hex escape: \xNN
             self.advance();
-            match(self.advance_hex_value()) {
+            match(self.advance_hex_value("Invalid hex escape in character literal")) {
                 Result::Ok(x) => { /* continue */ }
                 Result::Err(msg) => return self.error_token(msg);
             }
-
-            // return self.advance_hex_value().unwrap_or_else(|msg: string| self.error_token(msg));
         } else if (escaped is LexerCharacter::Char(ch) && ch.is_octal_digit()) {
-            match(self.advance_octal_value()) {
-                Result::Ok(x) => { /* continue */ }
-                Result::Err(msg) => return self.error_token(msg);
-            }
-            // return self.advance_octal_value().unwrap_or_else(|msg: string| self.error_token(msg));
+            // Octal escape: 1-3 digits
+            self.advance_octal_value();
         } else {
             // Simple escape
             self.advance();
