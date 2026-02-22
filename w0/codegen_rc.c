@@ -97,6 +97,19 @@ void rc_cleanup_scope(CodeGen* gen, int depth) {
     gen->rc.count = dst;
 }
 
+// Emit dec for vars at scope_depth >= target_depth. Does NOT modify list.
+// Used by break/continue to clean up all loop-body scopes without removing
+// vars from tracking (the normal scope-exit cleanup handles removal).
+void rc_cleanup_to_depth(CodeGen* gen, int target_depth) {
+    for (int i = 0; i < gen->rc.count; i++) {
+        if (gen->rc.vars[i].scope_depth >= target_depth) {
+            emit_indent(gen);
+            emit_rc_dec_var(gen, &gen->rc.vars[i]);
+            emit(gen, ";\n");
+        }
+    }
+}
+
 // Emit dec for ALL remaining vars (skip one by name). Does NOT modify list.
 void rc_cleanup_all(CodeGen* gen, const char* skip_name) {
     for (int i = 0; i < gen->rc.count; i++) {

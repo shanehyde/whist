@@ -85,7 +85,15 @@ done < <(find "$TEST_DIR" -name '*.w' -type f -print0 | sort -z)
 
 PASS=0
 FAIL=0
+LEAK=0
 FAIL_LIST=()
+LEAK_LIST=()
+
+# Known RC baseline: net alloc−free count.  This is −3 because whist_runtime.c
+# (compiled without WHIST_RC_DEBUG) allocates 3 argv strings via __rc_strdup
+# whose RC_ALLOC traces are invisible, but whose RC_FREE traces are visible.
+# Real RC balance is 0; visible balance = 0 − 3 = −3.
+KNOWN_LEAKS=-3
 
 echo -e "${BOLD}Comparing w0 vs wc output (stage: $STAGE)${RESET}"
 echo "---"
@@ -105,19 +113,18 @@ for FILE in "${TEST_FILES[@]}"; do
     W0_EXIT=0
     "$W0" $W0_FLAGS "$FILE" > "$W0_OUT" 2>/dev/null || W0_EXIT=$?
 
+    WC_RC=$(mktemp)
     WC_EXIT=0
-    "$WC" $WC_FLAGS "$FILE" > "$WC_OUT" 2>/dev/null || WC_EXIT=$?
+    "$WC" $WC_FLAGS "$FILE" > "$WC_OUT" 2>"$WC_RC" || WC_EXIT=$?
 
     # Normalize: strip trailing whitespace from each line
     sed -i '' 's/[[:space:]]*$//' "$W0_OUT" 2>/dev/null || sed -i 's/[[:space:]]*$//' "$W0_OUT"
     sed -i '' 's/[[:space:]]*$//' "$WC_OUT" 2>/dev/null || sed -i 's/[[:space:]]*$//' "$WC_OUT"
 
-    if diff -q "$W0_OUT" "$WC_OUT" > /dev/null 2>&1; then
-        PASS=$((PASS + 1))
-        if [[ $VERBOSE -eq 1 ]]; then
-            echo -e "  ${GREEN}PASS${RESET}  $REL_PATH"
-        fi
-    else
+    # Check output match
+    MATCH=1
+    if ! diff -q "$W0_OUT" "$WC_OUT" > /dev/null 2>&1; then
+        MATCH=0
         FAIL=$((FAIL + 1))
         FAIL_LIST+=("$REL_PATH")
         echo -e "  ${RED}FAIL${RESET}  $REL_PATH"
@@ -127,7 +134,35 @@ for FILE in "${TEST_FILES[@]}"; do
         fi
     fi
 
-    rm -f "$W0_OUT" "$WC_OUT"
+    # Check for RC leaks beyond the known baseline.
+    # Use net alloc-free count (address-based tracking is unreliable due to
+    # malloc address reuse).
+    LEAK_COUNT=$(awk '/^RC_ALLOC:/{a++} /^RC_FREE:/{f++} END{print (a+0)-(f+0)}' "$WC_RC")
+    if [[ "$LEAK_COUNT" -ne "$KNOWN_LEAKS" ]]; then
+        DELTA=$((LEAK_COUNT - KNOWN_LEAKS))
+        LEAK=$((LEAK + 1))
+        LEAK_LIST+=("$REL_PATH (delta=$DELTA)")
+        echo -e "  ${YELLOW}LEAK${RESET}  $REL_PATH  (net=$LEAK_COUNT, expected=$KNOWN_LEAKS, delta=$DELTA)"
+        if [[ $VERBOSE -eq 1 ]]; then
+            # Show per-address details for debugging
+            awk '/^RC_ALLOC:/{alloc[$2]++} /^RC_FREE:/{free[$2]++} END{
+                for(a in alloc) {
+                    f = (a in free ? free[a] : 0);
+                    if(alloc[a] > f) print a ": alloc=" alloc[a] " free=" f " net=+" (alloc[a]-f)
+                }
+            }' "$WC_RC"
+            echo ""
+        fi
+    fi
+
+    if [[ $MATCH -eq 1 && "$LEAK_COUNT" -eq "$KNOWN_LEAKS" ]]; then
+        PASS=$((PASS + 1))
+        if [[ $VERBOSE -eq 1 ]]; then
+            echo -e "  ${GREEN}PASS${RESET}  $REL_PATH"
+        fi
+    fi
+
+    rm -f "$W0_OUT" "$WC_OUT" "$WC_RC"
 done
 
 TOTAL=$((PASS + FAIL))
@@ -135,16 +170,37 @@ echo "---"
 echo -e "${BOLD}Results:${RESET} $TOTAL files compared"
 echo -e "  ${GREEN}PASS: $PASS${RESET}"
 
+EXIT_CODE=0
+
 if [[ $FAIL -gt 0 ]]; then
     echo -e "  ${RED}FAIL: $FAIL${RESET}"
+    EXIT_CODE=1
+fi
+
+if [[ $LEAK -gt 0 ]]; then
+    echo -e "  ${YELLOW}LEAK: $LEAK${RESET}"
+    EXIT_CODE=1
+fi
+
+if [[ $FAIL -gt 0 ]]; then
     echo ""
     echo -e "${RED}Failed files:${RESET}"
     for F in "${FAIL_LIST[@]}"; do
         echo "  $F"
     done
-    exit 1
-else
-    echo ""
-    echo -e "${GREEN}All outputs match!${RESET}"
-    exit 0
 fi
+
+if [[ $LEAK -gt 0 ]]; then
+    echo ""
+    echo -e "${YELLOW}Files with RC imbalance (expected net=$KNOWN_LEAKS):${RESET}"
+    for F in "${LEAK_LIST[@]}"; do
+        echo "  $F"
+    done
+fi
+
+if [[ $EXIT_CODE -eq 0 ]]; then
+    echo ""
+    echo -e "${GREEN}All outputs match, no extra leaks!${RESET}"
+fi
+
+exit $EXIT_CODE

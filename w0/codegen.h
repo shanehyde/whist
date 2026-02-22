@@ -47,6 +47,7 @@ typedef struct {
     int    count;
     int    capacity;
     int    depth;
+    int    loop_depth; // scope depth of innermost loop body (for break/continue cleanup)
     int    debug;
 } CodeGenRc;
 
