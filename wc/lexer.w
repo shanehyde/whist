@@ -1,6 +1,6 @@
 // Whist Lexer — Self-hosted port of w0/lexer.c
 
-enum TokenType {
+public enum TokenType {
     // End of file
     EOF,
 
@@ -105,14 +105,14 @@ enum TokenType {
     Error,
 }
 
-struct Token {
+public struct Token {
     kind: TokenType,
     value: string,
     line: i64,
     column: i64,
 }
 
-struct Lexer {
+public struct Lexer {
     source: string,
     pos: i64,
     start: i64,
@@ -568,7 +568,7 @@ func lex_character(lex: Lexer) -> Token {
 
 // --- Main lexer function ---
 
-func lexer_next(lex: Lexer) -> Token {
+public func lexer_next(lex: Lexer) -> Token {
     lex.skip_whitespace();
 
     lex.start = lex.pos;
@@ -756,7 +756,7 @@ func lexer_next(lex: Lexer) -> Token {
 
 // --- Token type name ---
 
-func (TokenType) name() -> string {
+public func (TokenType) name() -> string {
     match (self) {
         EOF => return "EOF";
         Ident => return "IDENT";

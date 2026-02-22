@@ -577,13 +577,14 @@ struct Node {
             int    type_param_count;
         } type_alias;
 
-        // Use declaration: use module.symbol or use module.{sym1, sym2}
+        // Use declaration: use module::symbol; or use module::{sym1, sym2}; or use module::*;
         struct {
             char*  module_name;
             int    module_name_length;
             char** symbol_names;
             int*   symbol_name_lengths;
             int    symbol_count;
+            int    is_wildcard; // 1 for use module::*;
         } use_decl;
 
         // Test block: test "name" { body }
@@ -604,6 +605,7 @@ struct Node {
             char*    name;
             int      name_length;
             NodeList decls;
+            int      is_sibling; // 1 if from sibling import (not lib-path)
         } module;
 
         // Program
