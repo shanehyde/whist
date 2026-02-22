@@ -3,8 +3,8 @@
 
 import std;
 import fs;
-
-include "./lexer.w";
+import lexer;
+use lexer::*;
 
 struct MainOptions {
     lex_only: bool,

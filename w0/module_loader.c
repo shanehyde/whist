@@ -29,6 +29,10 @@ void module_loader_init(ModuleLoader* loader, const char* lib_path) {
     loader->file_imports_count    = 0;
     loader->file_imports_capacity = 0;
 
+    loader->sibling_modules          = NULL;
+    loader->sibling_modules_count    = 0;
+    loader->sibling_modules_capacity = 0;
+
     loader->import_depth = 0;
 }
 
@@ -52,6 +56,11 @@ void module_loader_free(ModuleLoader* loader) {
         free(loader->file_imports[i]);
     }
     free(loader->file_imports);
+
+    for (int i = 0; i < loader->sibling_modules_count; i++) {
+        free(loader->sibling_modules[i]);
+    }
+    free(loader->sibling_modules);
 }
 
 int module_loader_is_imported(ModuleLoader* loader, const char* name, size_t len) {
@@ -98,6 +107,26 @@ static void add_file_import(ModuleLoader* loader, const char* name, size_t len) 
     loader->file_imports[loader->file_imports_count++] = name_copy;
 }
 
+static void add_sibling_module(ModuleLoader* loader, const char* name, size_t len) {
+    VEC_GROW(loader->sibling_modules, loader->sibling_modules_count,
+             loader->sibling_modules_capacity);
+
+    char* name_copy = xmalloc(len + 1);
+    memcpy(name_copy, name, len);
+    name_copy[len]                                           = '\0';
+    loader->sibling_modules[loader->sibling_modules_count++] = name_copy;
+}
+
+int module_loader_is_sibling(ModuleLoader* loader, const char* name, size_t len) {
+    for (int i = 0; i < loader->sibling_modules_count; i++) {
+        if (strlen(loader->sibling_modules[i]) == len &&
+            strncmp(loader->sibling_modules[i], name, len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int module_loader_file_exists(const char* path) {
     FILE* f = fopen(path, "r");
     if (f) {
@@ -135,6 +164,17 @@ void module_loader_build_path(ModuleLoader* loader, const char* source_path, cha
     // Standard library import: try lib/ directories
     if (loader->lib_path) {
         snprintf(path, path_size, "%s/%.*s.w", loader->lib_path, (int)module_length, module_name);
+        if (module_loader_file_exists(path)) {
+            return;
+        }
+    }
+
+    // Sibling import: try source directory
+    if (source_path) {
+        char* path_copy = xstrdup(source_path);
+        char* dir       = dirname(path_copy);
+        snprintf(path, path_size, "%s/%.*s.w", dir, (int)module_length, module_name);
+        free(path_copy);
         if (module_loader_file_exists(path)) {
             return;
         }
@@ -259,7 +299,22 @@ int module_loader_import(ModuleLoader* loader, Parser* parser, Node* program, No
             }
             import_ast->as.program.modules.count = 0;
         } else {
-            // Library import: rename main module to library name
+            // Named import: rename main module to library name.
+            // Detect sibling imports (not found in lib-path).
+            int is_sibling_import = 0;
+            if (loader->lib_path) {
+                char lib_check[1024];
+                snprintf(lib_check, sizeof(lib_check), "%s/%.*s.w", loader->lib_path,
+                         (int)module_length, module_name);
+                is_sibling_import = !module_loader_file_exists(lib_check);
+            } else {
+                is_sibling_import = 1;
+            }
+
+            if (is_sibling_import) {
+                add_sibling_module(loader, module_name, module_length);
+            }
+
             for (int m = 0; m < import_ast->as.program.modules.count; m++) {
                 Node* imported_module = import_ast->as.program.modules.nodes[m];
                 if (imported_module && imported_module->type == NODE_MODULE) {
@@ -269,6 +324,7 @@ int module_loader_import(ModuleLoader* loader, Parser* parser, Node* program, No
                         memcpy(imported_module->as.module.name, module_name, module_length);
                         imported_module->as.module.name[module_length] = '\0';
                         imported_module->as.module.name_length         = (int)module_length;
+                        imported_module->as.module.is_sibling          = is_sibling_import;
                     }
                     nodelist_push(&program->as.program.modules, imported_module);
                 }

@@ -712,7 +712,7 @@ static Node* parse_extern_decls(Parser* parser, int is_public) {
 // Import Handling
 // ============================================================================
 
-// Parse a use statement: use module.symbol; or use module.{sym1, sym2};
+// Parse a use statement: use module::symbol; or use module::{sym1, sym2}; or use module::*;
 Node* parse_use_stmt(Parser* parser) {
     Token module_token = parser->current;
     consume_token(parser, TOK_IDENT, "Expected module name after 'use'");
@@ -724,9 +724,13 @@ Node* parse_use_stmt(Parser* parser) {
     char** symbol_names = xmalloc(capacity * sizeof(char*));
     int*   name_lengths = xmalloc(capacity * sizeof(int));
     int    count        = 0;
+    int    is_wildcard  = 0;
 
-    if (match_token(parser, TOK_LBRACE)) {
-        // Grouped: use module.{sym1, sym2}
+    if (match_token(parser, TOK_STAR)) {
+        // Wildcard: use module::*
+        is_wildcard = 1;
+    } else if (match_token(parser, TOK_LBRACE)) {
+        // Grouped: use module::{sym1, sym2}
         while (!check_token(parser, TOK_RBRACE) && !check_token(parser, TOK_EOF)) {
             Token sym = parser->current;
             consume_token(parser, TOK_IDENT, "Expected symbol name in use group");
@@ -744,9 +748,9 @@ Node* parse_use_stmt(Parser* parser) {
         }
         consume_token(parser, TOK_RBRACE, "Expected '}' after use group");
     } else {
-        // Single: use module.symbol
+        // Single: use module::symbol
         Token sym = parser->current;
-        consume_token(parser, TOK_IDENT, "Expected symbol name after '.'");
+        consume_token(parser, TOK_IDENT, "Expected symbol name after '::'");
         symbol_names[0] = copy_token_string(&sym);
         name_lengths[0] = sym.length;
         count           = 1;
@@ -760,6 +764,7 @@ Node* parse_use_stmt(Parser* parser) {
     node->as.use_decl.symbol_names        = symbol_names;
     node->as.use_decl.symbol_name_lengths = name_lengths;
     node->as.use_decl.symbol_count        = count;
+    node->as.use_decl.is_wildcard         = is_wildcard;
     return node;
 }
 

@@ -812,26 +812,8 @@ void emit_decl(CodeGen* gen, Node* node) {
         break;
 
     case NODE_USE_DECL:
-        // Register use aliases for function calls (types don't need aliases since
-        // struct/enum names in generated C are bare, not module-prefixed)
-        for (int i = 0; i < node->as.use_decl.symbol_count; i++) {
-            char* sym_name = node->as.use_decl.symbol_names[i];
-            char* mod_name = node->as.use_decl.module_name;
-
-            // Build the C function name: module_symbolname
-            // Special case: std.format -> __std_format (compiler builtin)
-            char c_name[256];
-            if (strcmp(mod_name, "std") == 0 && strcmp(sym_name, "format") == 0) {
-                snprintf(c_name, sizeof(c_name), "__std_format");
-            } else {
-                snprintf(c_name, sizeof(c_name), "%s_%s", mod_name, sym_name);
-            }
-
-            VEC_GROW(gen->aliases.uses, gen->aliases.use_count, gen->aliases.use_capacity);
-            gen->aliases.uses[gen->aliases.use_count].whist_name = xstrdup(sym_name);
-            gen->aliases.uses[gen->aliases.use_count].c_name     = xstrdup(c_name);
-            gen->aliases.use_count++;
-        }
+        // Use aliases are pre-collected in collect_use_aliases() before declarations
+        // are emitted, so no work needed here.
         break;
 
     case NODE_IMPL_DECL:
@@ -1456,11 +1438,23 @@ static void emit_non_generic_function_forward_decls(CodeGen* gen, Node* ast) {
         if (!mod || mod->type != NODE_MODULE)
             continue;
 
-        // In separate compilation mode, force non-target module functions to static
-        gen->force_static =
+        int is_non_target =
             (gen->target_module != NULL && strcmp(mod->as.module.name, gen->target_module) != 0);
 
-        const char* module_prefix = module_forward_prefix(mod);
+        // For sibling modules in separate compilation mode, emit extern prototypes
+        // for public functions only (private functions are not needed in this .o).
+        // For library modules, force everything to static (each .o gets its own copy).
+        if (is_non_target && mod->as.module.is_sibling) {
+            gen->force_static = 0; // Public functions get implicit extern linkage
+        } else {
+            gen->force_static = is_non_target;
+        }
+
+        int skip_private = is_non_target && mod->as.module.is_sibling;
+
+        // For sibling modules, use no prefix (their .o defines bare names)
+        const char* module_prefix =
+            (is_non_target && mod->as.module.is_sibling) ? NULL : module_forward_prefix(mod);
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             Node* decl = mod->as.module.decls.nodes[i];
 
@@ -1472,6 +1466,10 @@ static void emit_non_generic_function_forward_decls(CodeGen* gen, Node* ast) {
             for (int fi = 0; fi < func_count; fi++) {
                 func_decl_node* fdn = &funcs[fi]->as.func_decl;
                 if (!should_emit_non_generic_forward_decl(gen, fdn)) {
+                    continue;
+                }
+                // Skip private functions from sibling modules (they're in the other .o)
+                if (skip_private && !fdn->is_public) {
                     continue;
                 }
                 emit_non_generic_forward_decl(gen, fdn, module_prefix);
