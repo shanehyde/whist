@@ -138,7 +138,7 @@ Traits define a set of required method signatures that types can implement. Trai
                | 'impl' <identifier> [ '<' <type-arg-list> '>' ]
                    '{' { <impl-method> } '}'
 
-<impl-method> ::= [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ '->' <return-type> ] <block>
+<impl-method> ::= [ 'public' | 'private' ] [ 'const' ] 'func' <identifier> '(' [ <param-list> ] ')' [ '->' <return-type> ] <block>
 ```
 
 **Trait impl:** `impl Trait for Type { ... }` provides concrete method implementations for a trait on a specific type. Methods inside `impl` blocks do not specify a receiver — it is inferred from the `for Type` clause. Use `const func` for immutable-receiver methods. For generic target types, specify the type parameters on the impl header (e.g., `impl Drop for Box<T>`). All trait methods must be implemented.
