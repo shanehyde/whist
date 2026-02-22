@@ -1870,14 +1870,40 @@ static void flatten_and_chain(Node* node, Node*** out, int* count, int* cap) {
     }
 }
 
-// Emit an is_expr's bindings: save expr to temp, check tag, extract fields.
-// Returns the temp ID used. Emits opening `if` brace — caller must close.
-static int emit_is_binding_check(CodeGen* gen, Node* is_node) {
+// Deferred cleanup info for an is_expr's owned temp.
+typedef struct {
+    int   let_id;
+    Node* subject;
+    int   subject_is_owned;
+    int   has_temps;
+    int   saved;
+} IsBindingCleanup;
+
+// Emit deferred cleanup for an is_expr's owned temp.
+static void emit_is_binding_cleanup(CodeGen* gen, IsBindingCleanup* info) {
+    if (info->has_temps) {
+        cleanup_owned_temps(gen, info->saved);
+    }
+    if (info->subject_is_owned) {
+        info->subject->is_owned_temp = 1;
+        char name[32];
+        snprintf(name, sizeof(name), "__is_tmp%d", info->let_id);
+        emit_owned_temp_dec(gen, info->subject, name);
+    }
+}
+
+// Emit an is_expr's bindings: assign expr to temp, check tag, extract fields.
+// If pre_let_id >= 0, uses that as the temp ID (caller already declared the temp).
+// Otherwise allocates a new temp ID and emits a declaration.
+// Populates cleanup_out for deferred cleanup by the caller.
+// Emits opening `if` brace — caller must close.
+static void emit_is_binding_check(CodeGen* gen, Node* is_node, IsBindingCleanup* cleanup_out,
+                                  int pre_let_id) {
     Type*       enum_type = is_node->as.is_expr.resolved_type;
     const char* enum_name = enum_type->as.enm.name;
     const char* variant   = is_node->as.is_expr.variant_name;
     int         is_data   = enum_type->as.enm.has_data;
-    int         let_id    = gen->out.temp_count++;
+    int         let_id    = pre_let_id >= 0 ? pre_let_id : gen->out.temp_count++;
 
     // Handle owned temps in the subject expression
     Node* subject          = is_node->as.is_expr.expr;
@@ -1891,9 +1917,13 @@ static int emit_is_binding_check(CodeGen* gen, Node* is_node) {
         saved = hoist_owned_temps(gen, subject);
     }
 
-    // Emit: EnumType __is_tmpN = <expr>;
+    // Emit temp assignment (or declaration if not pre-declared)
     emit_indent(gen);
-    emit(gen, "%s __is_tmp%d = ", enum_name, let_id);
+    if (pre_let_id >= 0) {
+        emit(gen, "__is_tmp%d = ", let_id);
+    } else {
+        emit(gen, "%s __is_tmp%d = ", enum_name, let_id);
+    }
     emit_expr(gen, is_node->as.is_expr.expr);
     emit(gen, ";\n");
 
@@ -1917,22 +1947,17 @@ static int emit_is_binding_check(CodeGen* gen, Node* is_node) {
         }
     }
 
-    // Cleanup owned temps (inside the if block, after binding extraction)
-    if (has_temps) {
-        cleanup_owned_temps(gen, saved);
-    }
-    if (subject_is_owned) {
-        subject->is_owned_temp = 1;
-        char name[32];
-        snprintf(name, sizeof(name), "__is_tmp%d", let_id);
-        emit_owned_temp_dec(gen, subject, name);
-    }
-
-    return let_id;
+    // Populate cleanup info — caller is responsible for emitting cleanup
+    cleanup_out->let_id           = let_id;
+    cleanup_out->subject          = subject;
+    cleanup_out->subject_is_owned = subject_is_owned;
+    cleanup_out->has_temps        = has_temps;
+    cleanup_out->saved            = saved;
 }
 
 // Emit an if statement whose condition contains is_expr with bindings.
 // Flattens the && chain and generates nested ifs for each is_expr with bindings.
+// Cleanup of owned temps is deferred until after all nesting closes (unconditionally).
 static void emit_if_stmt_with_is_bindings(CodeGen* gen, Node* node) {
     Node** chain     = NULL;
     int    chain_len = 0;
@@ -1947,13 +1972,36 @@ static void emit_if_stmt_with_is_bindings(CodeGen* gen, Node* node) {
         emit(gen, "int __matched%d = 0;\n", flag_id);
     }
 
-    // Track nesting depth so we can close all braces
-    int nesting = 0;
+    // Track nesting depth and deferred cleanups
+    int               nesting     = 0;
+    IsBindingCleanup* cleanups    = NULL;
+    int               cleanup_len = 0;
+    int               cleanup_cap = 0;
 
+    // Pre-declare all is_expr temps at outer scope so they're visible for cleanup
+    int* pre_let_ids  = NULL;
+    int  pre_count    = 0;
+    int  pre_cap      = 0;
     for (int i = 0; i < chain_len; i++) {
         Node* part = chain[i];
         if (part->type == NODE_IS_EXPR && part->as.is_expr.has_bindings) {
-            emit_is_binding_check(gen, part);
+            Type*       enum_type = part->as.is_expr.resolved_type;
+            const char* enum_name = enum_type->as.enm.name;
+            int         let_id    = gen->out.temp_count++;
+            VEC_GROW(pre_let_ids, pre_count, pre_cap);
+            pre_let_ids[pre_count++] = let_id;
+            emit_indent(gen);
+            emit(gen, "%s __is_tmp%d;\n", enum_name, let_id);
+        }
+    }
+
+    int pre_idx = 0;
+    for (int i = 0; i < chain_len; i++) {
+        Node* part = chain[i];
+        if (part->type == NODE_IS_EXPR && part->as.is_expr.has_bindings) {
+            VEC_GROW(cleanups, cleanup_len, cleanup_cap);
+            emit_is_binding_check(gen, part, &cleanups[cleanup_len], pre_let_ids[pre_idx++]);
+            cleanup_len++;
             nesting++;
         } else {
             // Regular bool condition
@@ -1980,6 +2028,11 @@ static void emit_if_stmt_with_is_bindings(CodeGen* gen, Node* node) {
         emit(gen, "}\n");
     }
 
+    // Cleanup all owned temps unconditionally (covers both match and non-match paths)
+    for (int i = 0; i < cleanup_len; i++) {
+        emit_is_binding_cleanup(gen, &cleanups[i]);
+    }
+
     // Emit else block using matched flag
     if (has_else) {
         emit_indent(gen);
@@ -1994,11 +2047,13 @@ static void emit_if_stmt_with_is_bindings(CodeGen* gen, Node* node) {
         emit_indent(gen);
         emit(gen, "}\n");
     }
+    free(cleanups);
+    free(pre_let_ids);
     free(chain);
 }
 
 // Emit a while statement whose condition contains is_expr with bindings.
-// Generates: for(;;) { <check each part, break on failure> <body> }
+// Generates: for(;;) { <alloc temps, break+cleanup on mismatch, bindings, body, cleanup> }
 static void emit_while_stmt_with_is_bindings(CodeGen* gen, Node* node) {
     Node** chain     = NULL;
     int    chain_len = 0;
@@ -2008,6 +2063,11 @@ static void emit_while_stmt_with_is_bindings(CodeGen* gen, Node* node) {
     emit_indent(gen);
     emit(gen, "for (;;) {\n");
     gen->out.indent++;
+
+    // Collect cleanup info for all is_expr parts
+    IsBindingCleanup* cleanups   = NULL;
+    int               cleanup_len = 0;
+    int               cleanup_cap = 0;
 
     for (int i = 0; i < chain_len; i++) {
         Node* part = chain[i];
@@ -2024,9 +2084,9 @@ static void emit_while_stmt_with_is_bindings(CodeGen* gen, Node* node) {
             if (subject_is_owned)
                 subject->is_owned_temp = 0;
 
-            int saved      = 0;
-            int has_temps2 = has_owned_temps(subject);
-            if (has_temps2) {
+            int saved     = 0;
+            int has_temps = has_owned_temps(subject);
+            if (has_temps) {
                 saved = hoist_owned_temps(gen, subject);
             }
 
@@ -2036,13 +2096,31 @@ static void emit_while_stmt_with_is_bindings(CodeGen* gen, Node* node) {
             emit_expr(gen, part->as.is_expr.expr);
             emit(gen, ";\n");
 
-            // Emit: if (__is_tmpN.tag != Enum_Variant) break;
+            // Record cleanup info before the break check
+            VEC_GROW(cleanups, cleanup_len, cleanup_cap);
+            cleanups[cleanup_len].let_id           = let_id;
+            cleanups[cleanup_len].subject          = subject;
+            cleanups[cleanup_len].subject_is_owned = subject_is_owned;
+            cleanups[cleanup_len].has_temps        = has_temps;
+            cleanups[cleanup_len].saved            = saved;
+            cleanup_len++;
+
+            // Emit: if (__is_tmpN.tag != Enum_Variant) { cleanup temps 0..i; break; }
             emit_indent(gen);
             if (is_data) {
-                emit(gen, "if (__is_tmp%d.tag != %s_%s) break;\n", let_id, enum_name, variant);
+                emit(gen, "if (__is_tmp%d.tag != %s_%s) {\n", let_id, enum_name, variant);
             } else {
-                emit(gen, "if (__is_tmp%d != %s_%s) break;\n", let_id, enum_name, variant);
+                emit(gen, "if (__is_tmp%d != %s_%s) {\n", let_id, enum_name, variant);
             }
+            gen->out.indent++;
+            for (int j = 0; j < cleanup_len; j++) {
+                emit_is_binding_cleanup(gen, &cleanups[j]);
+            }
+            emit_indent(gen);
+            emit(gen, "break;\n");
+            gen->out.indent--;
+            emit_indent(gen);
+            emit(gen, "}\n");
 
             // Extract bindings
             if (is_data && part->as.is_expr.binding_count > 0) {
@@ -2053,17 +2131,6 @@ static void emit_while_stmt_with_is_bindings(CodeGen* gen, Node* node) {
                     emit(gen, " %s = __is_tmp%d.%s.f%d;\n", part->as.is_expr.bindings[j], let_id,
                          variant, j);
                 }
-            }
-
-            // Cleanup owned temps
-            if (has_temps2) {
-                cleanup_owned_temps(gen, saved);
-            }
-            if (subject_is_owned) {
-                subject->is_owned_temp = 1;
-                char name[32];
-                snprintf(name, sizeof(name), "__is_tmp%d", let_id);
-                emit_owned_temp_dec(gen, subject, name);
             }
         } else {
             // Regular bool condition: if (!(expr)) break;
@@ -2077,9 +2144,15 @@ static void emit_while_stmt_with_is_bindings(CodeGen* gen, Node* node) {
     // Emit loop body
     emit_stmt_body(gen, node->as.while_stmt.body);
 
+    // End-of-iteration cleanup for all is_expr temps
+    for (int i = 0; i < cleanup_len; i++) {
+        emit_is_binding_cleanup(gen, &cleanups[i]);
+    }
+
     gen->out.indent--;
     emit_indent(gen);
     emit(gen, "}\n");
+    free(cleanups);
     free(chain);
 }
 
