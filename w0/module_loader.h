@@ -31,6 +31,11 @@ typedef struct {
     int    file_imports_count;
     int    file_imports_capacity;
 
+    // Sibling modules (imported from same directory, not lib-path)
+    char** sibling_modules;
+    int    sibling_modules_count;
+    int    sibling_modules_capacity;
+
     // 0 = root file, >0 = transitive import
     int import_depth;
 } ModuleLoader;
@@ -48,6 +53,7 @@ void module_loader_add_direct_import(ModuleLoader* loader, const char* name, siz
 // Path utilities
 int  module_loader_file_exists(const char* path);
 int  module_loader_is_relative_path(const char* path, size_t len);
+int  module_loader_is_sibling(ModuleLoader* loader, const char* name, size_t len);
 void module_loader_build_path(ModuleLoader* loader, const char* source_path, char* path,
                               size_t path_size, const char* module_name, size_t module_length,
                               int is_relative);

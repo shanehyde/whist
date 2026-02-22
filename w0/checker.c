@@ -2458,6 +2458,22 @@ static void check_impl_decl(Checker* checker, Node* node) {
     checker->self_type = NULL;
 }
 
+// Insert an unqualified alias for a module symbol into the current scope.
+static void insert_use_alias(Checker* checker, Symbol* sym, const char* sym_name) {
+    Scope*       scope = checker->scope;
+    unsigned int index = hash_string(sym_name) % scope->size;
+
+    Symbol* alias         = xcalloc(1, sizeof(Symbol));
+    alias->kind           = sym->kind;
+    alias->name           = xstrdup(sym_name);
+    alias->type           = sym->type;
+    alias->is_const       = sym->is_const;
+    alias->is_public      = sym->is_public;
+    alias->source_module  = NULL; // NULL = accessible without qualification
+    alias->next           = scope->symbols[index];
+    scope->symbols[index] = alias;
+}
+
 // Check a use declaration: validate module, look up each symbol, and register unqualified alias
 static void check_use_decl(Checker* checker, Node* node) {
     const char* mod_name = node->as.use_decl.module_name;
@@ -2465,6 +2481,28 @@ static void check_use_decl(Checker* checker, Node* node) {
     // Verify module is imported
     if (!is_imported_module(checker, mod_name)) {
         check_error(checker, node->line, node->column, "Module '%s' is not imported", mod_name);
+        return;
+    }
+
+    if (node->as.use_decl.is_wildcard) {
+        // Wildcard: import all public symbols from the module
+        for (Scope* scope = checker->scope; scope; scope = scope->parent) {
+            for (int b = 0; b < scope->size; b++) {
+                for (Symbol* sym = scope->symbols[b]; sym; sym = sym->next) {
+                    if (!sym->source_module || strcmp(sym->source_module, mod_name) != 0) {
+                        continue;
+                    }
+                    if (!sym->is_public) {
+                        continue;
+                    }
+                    // Skip if already defined unqualified (e.g., prelude symbol with same name)
+                    if (checker_lookup(checker, sym->name)) {
+                        continue;
+                    }
+                    insert_use_alias(checker, sym, sym->name);
+                }
+            }
+        }
         return;
     }
 
@@ -2485,21 +2523,7 @@ static void check_use_decl(Checker* checker, Node* node) {
             continue;
         }
 
-        // Insert an unqualified alias directly into the scope.
-        // We can't use checker_define because it would find the existing module-qualified
-        // symbol with the same name and reject it as a redefinition.
-        Scope*       scope = checker->scope;
-        unsigned int index = hash_string(sym_name) % scope->size;
-
-        Symbol* alias         = xcalloc(1, sizeof(Symbol));
-        alias->kind           = sym->kind;
-        alias->name           = xstrdup(sym_name);
-        alias->type           = sym->type;
-        alias->is_const       = sym->is_const;
-        alias->is_public      = sym->is_public;
-        alias->source_module  = NULL; // NULL = accessible without qualification
-        alias->next           = scope->symbols[index];
-        scope->symbols[index] = alias;
+        insert_use_alias(checker, sym, sym_name);
     }
 }
 

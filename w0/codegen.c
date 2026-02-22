@@ -1435,13 +1435,23 @@ static void emit_declarations(CodeGen* gen, Node* ast) {
         Node* mod = ast->as.program.modules.nodes[m];
         if (!mod || mod->type != NODE_MODULE)
             continue;
+
+        int is_non_target =
+            (gen->target_module != NULL && strcmp(mod->as.module.name, gen->target_module) != 0);
+
+        // In separate compilation mode, skip sibling module bodies entirely.
+        // Their symbols are resolved at link time via extern prototypes emitted
+        // in the forward declaration pass.
+        if (is_non_target && mod->as.module.is_sibling) {
+            continue;
+        }
+
         // Set current module context (NULL for "main", module name for library imports)
         gen->current_module = strcmp(mod->as.module.name, "main") == 0 ? NULL : mod->as.module.name;
 
         // In separate compilation mode, force non-target module functions to static
         // so each .o has its own private copy (avoids duplicate symbols at link time).
-        gen->force_static =
-            (gen->target_module != NULL && strcmp(mod->as.module.name, gen->target_module) != 0);
+        gen->force_static = is_non_target;
 
         for (int i = 0; i < mod->as.module.decls.count; i++) {
             emit_decl(gen, mod->as.module.decls.nodes[i]);
@@ -1892,6 +1902,71 @@ static void emit_generic_func_impls(CodeGen* gen, Node* ast) {
     }
 }
 
+static void register_use_alias(CodeGen* gen, const char* mod_name, const char* sym_name,
+                               int is_sibling) {
+    char c_name[256];
+    if (is_sibling) {
+        // Sibling modules compile with bare names (no module prefix)
+        snprintf(c_name, sizeof(c_name), "%s", sym_name);
+    } else if (strcmp(mod_name, "std") == 0 && strcmp(sym_name, "format") == 0) {
+        snprintf(c_name, sizeof(c_name), "__std_format");
+    } else {
+        snprintf(c_name, sizeof(c_name), "%s_%s", mod_name, sym_name);
+    }
+
+    VEC_GROW(gen->aliases.uses, gen->aliases.use_count, gen->aliases.use_capacity);
+    gen->aliases.uses[gen->aliases.use_count].whist_name = xstrdup(sym_name);
+    gen->aliases.uses[gen->aliases.use_count].c_name     = xstrdup(c_name);
+    gen->aliases.use_count++;
+}
+
+// Find a module node in the AST by name
+static Node* find_module_in_ast(Node* ast, const char* name) {
+    for (int i = 0; i < ast->as.program.modules.count; i++) {
+        Node* mod = ast->as.program.modules.nodes[i];
+        if (mod && mod->type == NODE_MODULE && strcmp(mod->as.module.name, name) == 0)
+            return mod;
+    }
+    return NULL;
+}
+
+// Pre-collect use aliases for all use declarations, including wildcard (use module::*).
+// This must run before emit_declarations so aliases are available for function call emission.
+static void collect_use_aliases(CodeGen* gen, Node* ast) {
+    for (int m = 0; m < ast->as.program.modules.count; m++) {
+        Node* mod = ast->as.program.modules.nodes[m];
+        if (!mod || mod->type != NODE_MODULE)
+            continue;
+        for (int i = 0; i < mod->as.module.decls.count; i++) {
+            Node* decl = mod->as.module.decls.nodes[i];
+            if (decl->type != NODE_USE_DECL)
+                continue;
+
+            const char* mod_name = decl->as.use_decl.module_name;
+            Node* target_mod = find_module_in_ast(ast, mod_name);
+            int is_sibling = target_mod ? target_mod->as.module.is_sibling : 0;
+
+            if (decl->as.use_decl.is_wildcard) {
+                if (target_mod) {
+                    for (int d = 0; d < target_mod->as.module.decls.count; d++) {
+                        Node* target_decl = target_mod->as.module.decls.nodes[d];
+                        if (target_decl->type == NODE_FUNC_DECL &&
+                            target_decl->as.func_decl.is_public) {
+                            register_use_alias(gen, mod_name,
+                                               target_decl->as.func_decl.name, is_sibling);
+                        }
+                    }
+                }
+            } else {
+                for (int s = 0; s < decl->as.use_decl.symbol_count; s++) {
+                    register_use_alias(gen, mod_name, decl->as.use_decl.symbol_names[s],
+                                       is_sibling);
+                }
+            }
+        }
+    }
+}
+
 // Main codegen entry point: emit all C code for a program AST
 void codegen_emit(CodeGen* gen, Node* ast) {
     if (!ast || ast->type != NODE_PROGRAM)
@@ -1900,6 +1975,7 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     int has_user_main = program_has_user_main(ast);
 
     collect_types_and_aliases(gen, ast);
+    collect_use_aliases(gen, ast);
     collect_string_literals(gen, ast);
     emit_c_headers(gen);
     emit_rc_runtime(gen);

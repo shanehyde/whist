@@ -1,7 +1,7 @@
 W0 = ../w0/bin/w0
 LIB = ../lib
 BIN = bin
-SRC = main.w
+SRC = main.w lexer.w
 OBJ = $(SRC:.w=.o)
 TARGET = $(BIN)/wc
 
