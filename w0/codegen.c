@@ -2002,12 +2002,13 @@ void codegen_emit(CodeGen* gen, Node* ast) {
     compute_enum_eq_flags(gen, ast);
     emit_struct_forward_decls(gen, ast);
     emit_vec_typedefs(gen);
-    emit_box_typedefs(gen);
+    emit_box_forward_decls(gen);
     emit_span_typedefs(gen);
     emit_enum_typedefs(gen, ast);
     emit_generic_enum_typedefs(gen, ast);
     emit_enum_rc_helpers(gen, ast);
     emit_struct_body_typedefs(gen, ast);
+    emit_box_typedefs(gen);
     emit_function_forward_decls(gen, ast);
     collect_lambdas(gen, ast);
     emit_lambda_env_typedefs(gen);
