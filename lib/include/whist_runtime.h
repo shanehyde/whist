@@ -8,7 +8,8 @@
  * Type-specific helpers (__rc_dec_TypeName, __Vec_T_push, etc.) are
  * still emitted per-program by codegen.
  *
- * Define WHIST_RC_DEBUG before including to get fprintf-based RC tracing.
+ * Define WHIST_RC_DEBUG before including to enable RC tracing support.
+ * Tracing output is controlled at runtime by the WHIST_RC_TRACE env var.
  */
 
 #ifndef WHIST_RUNTIME_H
@@ -41,6 +42,16 @@ typedef struct {
 
 #ifdef WHIST_RC_DEBUG
 
+static inline int __rc_trace_enabled(void) {
+    static int checked = 0;
+    static int enabled = 0;
+    if (!checked) {
+        enabled = getenv("WHIST_RC_TRACE") != NULL;
+        checked = 1;
+    }
+    return enabled;
+}
+
 static inline void* __rc_alloc_impl(size_t size, void (*cleanup)(void*),
                                      const char* file, int line) {
     __RcHeader* h = (__RcHeader*)malloc(sizeof(__RcHeader) + size);
@@ -51,7 +62,8 @@ static inline void* __rc_alloc_impl(size_t size, void (*cleanup)(void*),
     h->refcount = 1;
     h->cleanup  = cleanup;
     void* ptr   = (void*)(h + 1);
-    fprintf(stderr, "RC_ALLOC: %p (size=%zu, rc=1) at %s:%d\n", ptr, size, file, line);
+    if (__rc_trace_enabled())
+        fprintf(stderr, "RC_ALLOC: %p (size=%zu, rc=1) at %s:%d\n", ptr, size, file, line);
     return ptr;
 }
 
@@ -62,7 +74,8 @@ static inline void __rc_inc_impl(void* ptr, const char* file, int line) {
     if (h->refcount == SIZE_MAX)
         return; /* immortal string literal */
     h->refcount++;
-    fprintf(stderr, "RC_INC: %p (rc=%zu) at %s:%d\n", ptr, h->refcount, file, line);
+    if (__rc_trace_enabled())
+        fprintf(stderr, "RC_INC: %p (rc=%zu) at %s:%d\n", ptr, h->refcount, file, line);
 }
 
 static inline void __rc_dec_impl(void* ptr, const char* file, int line) {
@@ -74,10 +87,12 @@ static inline void __rc_dec_impl(void* ptr, const char* file, int line) {
     if (--h->refcount == 0) {
         if (h->cleanup)
             h->cleanup(ptr);
-        fprintf(stderr, "RC_FREE: %p at %s:%d\n", ptr, file, line);
+        if (__rc_trace_enabled())
+            fprintf(stderr, "RC_FREE: %p at %s:%d\n", ptr, file, line);
         free(h);
     } else {
-        fprintf(stderr, "RC_DEC: %p (rc=%zu) at %s:%d\n", ptr, h->refcount, file, line);
+        if (__rc_trace_enabled())
+            fprintf(stderr, "RC_DEC: %p (rc=%zu) at %s:%d\n", ptr, h->refcount, file, line);
     }
 }
 
