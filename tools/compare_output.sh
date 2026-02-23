@@ -89,11 +89,10 @@ LEAK=0
 FAIL_LIST=()
 LEAK_LIST=()
 
-# Known RC baseline: net alloc−free count.  This is −3 because whist_runtime.c
-# (compiled without WHIST_RC_DEBUG) allocates 3 argv strings via __rc_strdup
-# whose RC_ALLOC traces are invisible, but whose RC_FREE traces are visible.
-# Real RC balance is 0; visible balance = 0 − 3 = −3.
-KNOWN_LEAKS=-3
+# Known RC baseline: net alloc−free count.  With the debug library
+# (lib/debug/libwhist.a), all RC operations are traced including those
+# in whist_runtime.c and stdlib modules, so the expected balance is 0.
+KNOWN_LEAKS=0
 
 echo -e "${BOLD}Comparing w0 vs wc output (stage: $STAGE)${RESET}"
 echo "---"
@@ -115,7 +114,7 @@ for FILE in "${TEST_FILES[@]}"; do
 
     WC_RC=$(mktemp)
     WC_EXIT=0
-    "$WC" $WC_FLAGS "$FILE" > "$WC_OUT" 2>"$WC_RC" || WC_EXIT=$?
+    WHIST_RC_TRACE=1 "$WC" $WC_FLAGS "$FILE" > "$WC_OUT" 2>"$WC_RC" || WC_EXIT=$?
 
     # Normalize: strip trailing whitespace from each line
     sed -i '' 's/[[:space:]]*$//' "$W0_OUT" 2>/dev/null || sed -i 's/[[:space:]]*$//' "$W0_OUT"

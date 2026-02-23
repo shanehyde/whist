@@ -1555,7 +1555,8 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
 
 // Return whether a condition expression already emits outer parentheses.
 static int stmt_cond_has_outer_parens(Node* cond) {
-    return cond && (cond->type == NODE_BINARY || cond->type == NODE_UNARY);
+    return cond && (cond->type == NODE_BINARY || cond->type == NODE_UNARY ||
+                    cond->type == NODE_IS_EXPR);
 }
 
 // Emit a statement body, handling block and single-statement forms.
@@ -2038,9 +2039,15 @@ static void emit_if_stmt_with_is_bindings(CodeGen* gen, Node* node) {
         } else {
             // Regular bool condition
             emit_indent(gen);
-            emit(gen, "if (");
-            emit_expr(gen, part);
-            emit(gen, ") {\n");
+            if (stmt_cond_has_outer_parens(part)) {
+                emit(gen, "if ");
+                emit_expr(gen, part);
+                emit(gen, " {\n");
+            } else {
+                emit(gen, "if (");
+                emit_expr(gen, part);
+                emit(gen, ") {\n");
+            }
             gen->out.indent++;
             nesting++;
         }
@@ -2167,9 +2174,15 @@ static void emit_while_stmt_with_is_bindings(CodeGen* gen, Node* node) {
         } else {
             // Regular bool condition: if (!(expr)) break;
             emit_indent(gen);
-            emit(gen, "if (!(");
-            emit_expr(gen, part);
-            emit(gen, ")) break;\n");
+            if (stmt_cond_has_outer_parens(part)) {
+                emit(gen, "if (!");
+                emit_expr(gen, part);
+                emit(gen, ") break;\n");
+            } else {
+                emit(gen, "if (!(");
+                emit_expr(gen, part);
+                emit(gen, ")) break;\n");
+            }
         }
     }
 
