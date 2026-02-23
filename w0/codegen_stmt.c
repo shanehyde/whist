@@ -223,11 +223,11 @@ static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
 
     // Hoist owned temps in the value expression (e.g. nested string concats).
     // Exclude the value node itself — its ownership transfers to the variable.
-    Node* val             = expr->as.assign.value;
-    int   val_orig_owned  = val->is_owned_temp;
-    val->is_owned_temp    = 0;
-    int   owned_saved     = 0;
-    int   has_owned       = has_owned_temps(val);
+    Node* val            = expr->as.assign.value;
+    int   val_orig_owned = val->is_owned_temp;
+    val->is_owned_temp   = 0;
+    int owned_saved      = 0;
+    int has_owned        = has_owned_temps(val);
     if (has_owned) {
         owned_saved = hoist_owned_temps(gen, val);
     }
@@ -252,7 +252,8 @@ static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
         emit(gen, "__rc_dec_%s(%s);\n", var_type->as.enm.name, var_name);
         emit_indent(gen);
         emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
-        if (has_owned) cleanup_owned_temps(gen, owned_saved);
+        if (has_owned)
+            cleanup_owned_temps(gen, owned_saved);
         return 1;
     }
 
@@ -280,7 +281,8 @@ static int emit_rc_ident_assign_stmt(CodeGen* gen, Node* expr) {
     }
     emit_indent(gen);
     emit(gen, "%s = __rc_tmp%d;\n", var_name, temp_id);
-    if (has_owned) cleanup_owned_temps(gen, owned_saved);
+    if (has_owned)
+        cleanup_owned_temps(gen, owned_saved);
     return 1;
 }
 
@@ -1555,8 +1557,8 @@ static void emit_match_stmt(CodeGen* gen, Node* node) {
 
 // Return whether a condition expression already emits outer parentheses.
 static int stmt_cond_has_outer_parens(Node* cond) {
-    return cond && (cond->type == NODE_BINARY || cond->type == NODE_UNARY ||
-                    cond->type == NODE_IS_EXPR);
+    return cond &&
+           (cond->type == NODE_BINARY || cond->type == NODE_UNARY || cond->type == NODE_IS_EXPR);
 }
 
 // Emit a statement body, handling block and single-statement forms.
@@ -1702,7 +1704,7 @@ static void emit_while_stmt(CodeGen* gen, Node* node) {
         emit(gen, "if (!__while_cond%d) break;\n", cond_id);
 
         // Emit loop body
-        int saved_ld = gen->rc.loop_depth;
+        int saved_ld       = gen->rc.loop_depth;
         gen->rc.loop_depth = gen->rc.depth + 1;
         emit_stmt_body(gen, node->as.while_stmt.body);
         gen->rc.loop_depth = saved_ld;
@@ -1724,7 +1726,7 @@ static void emit_while_stmt(CodeGen* gen, Node* node) {
     }
 
     gen->out.indent++;
-    int saved_ld = gen->rc.loop_depth;
+    int saved_ld       = gen->rc.loop_depth;
     gen->rc.loop_depth = gen->rc.depth + 1;
     emit_stmt_body(gen, node->as.while_stmt.body);
     gen->rc.loop_depth = saved_ld;
@@ -1766,7 +1768,7 @@ static void emit_for_stmt(CodeGen* gen, Node* node) {
     emit(gen, ") {\n");
 
     gen->out.indent++;
-    int saved_ld = gen->rc.loop_depth;
+    int saved_ld       = gen->rc.loop_depth;
     gen->rc.loop_depth = gen->rc.depth + 1;
     emit_stmt_body(gen, node->as.for_stmt.body);
     gen->rc.loop_depth = saved_ld;
@@ -1810,7 +1812,7 @@ static void emit_foreach_collection_stmt(CodeGen* gen, Node* node) {
         emit(gen, "%sdata[__foreach_%d];\n", access, idx_id);
     }
 
-    int saved_ld = gen->rc.loop_depth;
+    int saved_ld       = gen->rc.loop_depth;
     gen->rc.loop_depth = gen->rc.depth + 1;
     emit_stmt_body(gen, node->as.foreach_stmt.body);
     gen->rc.loop_depth = saved_ld;
@@ -1839,7 +1841,7 @@ static void emit_foreach_range_stmt(CodeGen* gen, Node* node) {
     emit_expr(gen, node->as.foreach_stmt.step);
     emit(gen, ") {\n");
     gen->out.indent++;
-    int saved_ld = gen->rc.loop_depth;
+    int saved_ld       = gen->rc.loop_depth;
     gen->rc.loop_depth = gen->rc.depth + 1;
     emit_stmt_body(gen, node->as.foreach_stmt.body);
     gen->rc.loop_depth = saved_ld;
@@ -2012,9 +2014,9 @@ static void emit_if_stmt_with_is_bindings(CodeGen* gen, Node* node) {
     int               cleanup_cap = 0;
 
     // Pre-declare all is_expr temps at outer scope so they're visible for cleanup
-    int* pre_let_ids  = NULL;
-    int  pre_count    = 0;
-    int  pre_cap      = 0;
+    int* pre_let_ids = NULL;
+    int  pre_count   = 0;
+    int  pre_cap     = 0;
     for (int i = 0; i < chain_len; i++) {
         Node* part = chain[i];
         if (part->type == NODE_IS_EXPR && part->as.is_expr.has_bindings) {
@@ -2104,7 +2106,7 @@ static void emit_while_stmt_with_is_bindings(CodeGen* gen, Node* node) {
     gen->out.indent++;
 
     // Collect cleanup info for all is_expr parts
-    IsBindingCleanup* cleanups   = NULL;
+    IsBindingCleanup* cleanups    = NULL;
     int               cleanup_len = 0;
     int               cleanup_cap = 0;
 
@@ -2187,7 +2189,7 @@ static void emit_while_stmt_with_is_bindings(CodeGen* gen, Node* node) {
     }
 
     // Emit loop body
-    int saved_ld = gen->rc.loop_depth;
+    int saved_ld       = gen->rc.loop_depth;
     gen->rc.loop_depth = gen->rc.depth + 1;
     emit_stmt_body(gen, node->as.while_stmt.body);
     gen->rc.loop_depth = saved_ld;

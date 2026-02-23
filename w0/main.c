@@ -89,7 +89,8 @@ static CodeGenChecker make_codegen_checker(Checker* checker) {
 
 // Check if lib_path contains a pre-compiled libwhist.a archive.
 static int lib_archive_exists(const char* lib_path) {
-    if (!lib_path) return 0;
+    if (!lib_path)
+        return 0;
     char path[1024];
     snprintf(path, sizeof(path), "%s/libwhist.a", lib_path);
     return access(path, F_OK) == 0;
@@ -146,8 +147,8 @@ static int compile_to_c_targeted(const char* source, const char* source_path, co
     CodeGen gen;
     codegen_init(&gen, out, make_codegen_checker(&checker), rc_debug, test_mode, source_path,
                  line_directives);
-    gen.target_module    = effective_target;
-    gen.use_lib_archive  = use_lib_archive;
+    gen.target_module   = effective_target;
+    gen.use_lib_archive = use_lib_archive;
     codegen_emit(&gen, ast);
     codegen_free(&gen);
 
@@ -174,9 +175,9 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
 
     // --emit-c: just dump generated C to stdout and exit
     if (emit_c) {
-        int result = compile_to_c_targeted(source, source_path, lib_path, rc_debug, 0,
-                                           line_directives, stdout, NULL, NULL,
-                                           lib_archive_exists(lib_path));
+        int result =
+            compile_to_c_targeted(source, source_path, lib_path, rc_debug, 0, line_directives,
+                                  stdout, NULL, NULL, lib_archive_exists(lib_path));
         free(source);
         return result;
     }
@@ -288,9 +289,9 @@ static int compile_and_test(const char* source_path, const char* lib_path, int r
 
     // --emit-c: just dump generated C to stdout and exit
     if (emit_c) {
-        int result = compile_to_c_targeted(source, source_path, lib_path, rc_debug, 1,
-                                           line_directives, stdout, NULL, NULL,
-                                           lib_archive_exists(lib_path));
+        int result =
+            compile_to_c_targeted(source, source_path, lib_path, rc_debug, 1, line_directives,
+                                  stdout, NULL, NULL, lib_archive_exists(lib_path));
         free(source);
         return result;
     }
@@ -890,9 +891,9 @@ int main(int argc, char** argv) {
             free(input_files);
             return 1;
         }
-        int result = compile_to_object(input_files[0], opts.output_file, opts.lib_path,
-                                       opts.rc_debug, opts.emit_c, opts.line_directives,
-                                       opts.module_name);
+        int result =
+            compile_to_object(input_files[0], opts.output_file, opts.lib_path, opts.rc_debug,
+                              opts.emit_c, opts.line_directives, opts.module_name);
         free(input_files);
         return result;
     }
