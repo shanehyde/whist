@@ -218,8 +218,8 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
         return Result::Err("compile");
     }
 
-    // Step 2: Run the compiled binary
-    var run_result = std::exec(tmp_bin);
+    // Step 2: Run the compiled binary (with RC tracing enabled)
+    var run_result = std::exec($"WHIST_RC_TRACE=1 {tmp_bin}");
     fs::remove_file(tmp_bin);
 
     // Check expected exit code
@@ -297,7 +297,7 @@ func run_program_test(file: string, w0: string, lib_path: string, verbose: bool)
 }
 
 func run_test_block_file(file: string, w0: string, lib_path: string, verbose: bool) -> Result<bool, string> {
-    var cmd = $"{w0} --rc-debug --lib-path {lib_path} test {file}";
+    var cmd = $"WHIST_RC_TRACE=1 {w0} --rc-debug --lib-path {lib_path} test {file}";
     var {output, error_output, exit_code} = std::exec(cmd);
 
     // Build combined output with RC lines filtered from stderr
