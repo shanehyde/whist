@@ -868,18 +868,38 @@ static void emit_new_expr(CodeGen* gen, Node* node) {
         free(cleanup);
         emit_struct_init(gen, node->as.new_expr.init, rtype);
         emit(gen, ";");
-        // Increment refcount for any RC-tracked idents stored in struct fields
+        // Increment refcount for any RC values stored in struct fields
         Node* rc_init = node->as.new_expr.init;
         for (int i = 0; i < rc_init->as.struct_init.fields.count; i++) {
             Node* field = rc_init->as.struct_init.fields.nodes[i];
-            if (field && field->type == NODE_FIELD_INIT &&
-                field->as.field_init.value->type == NODE_IDENT &&
-                rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
-                const char* vname  = field->as.field_init.value->as.ident.name;
-                Type*       vtype  = rc_get_var_type(gen, vname);
-                const char* inc_fn = get_inc_func_for_type(vtype);
-                emit(gen, " %s(%s);", inc_fn, vname);
-                free((char*)inc_fn);
+            if (field && field->type == NODE_FIELD_INIT) {
+                Node* val = field->as.field_init.value;
+                if (val->type == NODE_IDENT && rc_is_tracked(gen, val->as.ident.name)) {
+                    const char* vname  = val->as.ident.name;
+                    Type*       vtype  = rc_get_var_type(gen, vname);
+                    const char* inc_fn = get_inc_func_for_type(vtype);
+                    emit(gen, " %s(%s);", inc_fn, vname);
+                    free((char*)inc_fn);
+                } else if (val->type == NODE_INDEX && val->as.index.is_rc_elem) {
+                    emit(gen, " __rc_inc(__rc_tmp%d->%s);", tmp, field->as.field_init.name);
+                } else if (val->type == NODE_IDENT && !rc_is_tracked(gen, val->as.ident.name)) {
+                    const char* fname = field->as.field_init.name;
+                    for (int j = 0; j < rtype->as.struc.field_count; j++) {
+                        if (strcmp(rtype->as.struc.field_names[j], fname) == 0) {
+                            Type* ftype = rtype->as.struc.field_types[j];
+                            if (type_is_rc_managed(ftype)) {
+                                const char* inc_fn = get_inc_func_for_type(ftype);
+                                if (ftype->kind == TYPE_STRING) {
+                                    emit(gen, " %s((void*)__rc_tmp%d->%s);", inc_fn, tmp, fname);
+                                } else {
+                                    emit(gen, " %s(__rc_tmp%d->%s);", inc_fn, tmp, fname);
+                                }
+                                free((char*)inc_fn);
+                            }
+                            break;
+                        }
+                    }
+                }
             }
         }
         emit(gen, " __rc_tmp%d; })", tmp);
@@ -900,19 +920,42 @@ static void emit_hoisted_new_arg_rc_incs(CodeGen* gen, Node* node) {
     }
 }
 
-// Emit refcount increments for tracked identifier values used in struct field init.
-static void emit_hoisted_new_field_rc_incs(CodeGen* gen, Node* init) {
+// Emit refcount increments for RC values used in struct field init.
+static void emit_hoisted_new_field_rc_incs(CodeGen* gen, Node* init, Type* rtype,
+                                           const char* temp_name) {
     for (int i = 0; i < init->as.struct_init.fields.count; i++) {
         Node* field = init->as.struct_init.fields.nodes[i];
-        if (field && field->type == NODE_FIELD_INIT &&
-            field->as.field_init.value->type == NODE_IDENT &&
-            rc_is_tracked(gen, field->as.field_init.value->as.ident.name)) {
-            const char* vname  = field->as.field_init.value->as.ident.name;
-            Type*       vtype  = rc_get_var_type(gen, vname);
-            const char* inc_fn = get_inc_func_for_type(vtype);
-            emit_indent(gen);
-            emit(gen, "%s(%s);\n", inc_fn, vname);
-            free((char*)inc_fn);
+        if (field && field->type == NODE_FIELD_INIT) {
+            Node* val = field->as.field_init.value;
+            if (val->type == NODE_IDENT && rc_is_tracked(gen, val->as.ident.name)) {
+                const char* vname  = val->as.ident.name;
+                Type*       vtype  = rc_get_var_type(gen, vname);
+                const char* inc_fn = get_inc_func_for_type(vtype);
+                emit_indent(gen);
+                emit(gen, "%s(%s);\n", inc_fn, vname);
+                free((char*)inc_fn);
+            } else if (val->type == NODE_INDEX && val->as.index.is_rc_elem) {
+                emit_indent(gen);
+                emit(gen, "__rc_inc(%s->%s);\n", temp_name, field->as.field_init.name);
+            } else if (val->type == NODE_IDENT && !rc_is_tracked(gen, val->as.ident.name)) {
+                const char* fname = field->as.field_init.name;
+                for (int j = 0; j < rtype->as.struc.field_count; j++) {
+                    if (strcmp(rtype->as.struc.field_names[j], fname) == 0) {
+                        Type* ftype = rtype->as.struc.field_types[j];
+                        if (type_is_rc_managed(ftype)) {
+                            const char* inc_fn = get_inc_func_for_type(ftype);
+                            emit_indent(gen);
+                            if (ftype->kind == TYPE_STRING) {
+                                emit(gen, "%s((void*)%s->%s);\n", inc_fn, temp_name, fname);
+                            } else {
+                                emit(gen, "%s(%s->%s);\n", inc_fn, temp_name, fname);
+                            }
+                            free((char*)inc_fn);
+                        }
+                        break;
+                    }
+                }
+            }
         }
     }
 }
@@ -1003,7 +1046,7 @@ static void emit_hoisted_new_struct_init_expr(CodeGen* gen, Node* node, Type* rt
     emit(gen, "*%s = (%s)", temp_name, tname);
     emit_struct_init(gen, node->as.new_expr.init, rtype);
     emit(gen, ";\n");
-    emit_hoisted_new_field_rc_incs(gen, node->as.new_expr.init);
+    emit_hoisted_new_field_rc_incs(gen, node->as.new_expr.init, rtype, temp_name);
 }
 
 // Emit a `new` expression as standalone statements with a given temp name.
