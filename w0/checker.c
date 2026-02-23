@@ -1967,25 +1967,35 @@ static int is_prelude_symbol(Symbol* sym) {
 static void check_struct_decl(Checker* checker, Node* node) {
     const char* name = node->as.struct_decl.name;
 
-    // Check for redefinition (allow shadowing prelude symbols)
-    Symbol* existing = checker_lookup(checker, name);
-    if (existing && !is_prelude_symbol(existing)) {
-        check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+    // Phase 1a: register type name only (no field resolution)
+    if (checker->registering_type_names) {
+        Symbol* existing = checker_lookup(checker, name);
+        if (existing && !is_prelude_symbol(existing)) {
+            check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+            return;
+        }
+
+        if (node->as.struct_decl.type_param_count > 0) {
+            register_generic_def(checker, name, node->as.struct_decl.type_params,
+                                 node->as.struct_decl.type_param_bounds,
+                                 node->as.struct_decl.type_param_count, node);
+            return;
+        }
+
+        Type* struct_type = type_struct(name);
+        checker_define(checker, name, SYM_TYPE, struct_type, 0, node->as.struct_decl.is_public,
+                       checker->modules.current_module);
         return;
     }
 
-    // Check if this is a generic struct definition
+    // Phase 1b: resolve field types (all type names are now registered)
     if (node->as.struct_decl.type_param_count > 0) {
-        // Register as generic template - don't create concrete type yet
-        register_generic_def(checker, name, node->as.struct_decl.type_params,
-                             node->as.struct_decl.type_param_bounds,
-                             node->as.struct_decl.type_param_count, node);
-        return;
+        return; // Generic templates resolve fields during instantiation
     }
 
-    // Non-generic struct: create concrete type as before
-    Type* struct_type = type_struct(name);
-    int   field_count = node->as.struct_decl.fields.count;
+    Symbol* sym         = checker_lookup(checker, name);
+    Type*   struct_type = sym->type;
+    int     field_count = node->as.struct_decl.fields.count;
 
     struct_type->as.struc.field_count      = field_count;
     struct_type->as.struc.field_names      = xmalloc(field_count * sizeof(char*));
@@ -2000,18 +2010,7 @@ static void check_struct_decl(Checker* checker, Node* node) {
         struct_type->as.struc.field_is_const[i]   = field->as.field.is_const;
         struct_type->as.struc.field_is_private[i] = field->as.field.is_private;
     }
-
-    // Check if any field is an RC-managed type (struct, Vec, or enum with RC fields)
-    for (int i = 0; i < field_count; i++) {
-        Type* ftype = struct_type->as.struc.field_types[i];
-        if (type_is_rc_managed(ftype)) {
-            struct_type->as.struc.has_rc_fields = 1;
-            break;
-        }
-    }
-
-    checker_define(checker, name, SYM_TYPE, struct_type, 0, node->as.struct_decl.is_public,
-                   checker->modules.current_module);
+    // has_rc_fields is computed in a separate pass after all types are resolved
 }
 
 // Type-check an enum declaration: resolve variant types or register generic template
@@ -2019,11 +2018,30 @@ static void check_enum_decl(Checker* checker, Node* node) {
     const char* name        = node->as.enum_decl.name;
     int         value_count = node->as.enum_decl.values.count;
 
-    // Check for redefinition (allow shadowing prelude symbols)
-    Symbol* existing = checker_lookup(checker, name);
-    if (existing && !is_prelude_symbol(existing)) {
-        check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+    // Phase 1a: register type name only (no variant type resolution)
+    if (checker->registering_type_names) {
+        Symbol* existing = checker_lookup(checker, name);
+        if (existing && !is_prelude_symbol(existing)) {
+            check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+            return;
+        }
+
+        if (node->as.enum_decl.type_param_count > 0) {
+            register_generic_def(checker, name, node->as.enum_decl.type_params,
+                                 node->as.enum_decl.type_param_bounds,
+                                 node->as.enum_decl.type_param_count, node);
+            return;
+        }
+
+        Type* enum_type = type_enum(name);
+        checker_define(checker, name, SYM_TYPE, enum_type, 0, node->as.enum_decl.is_public,
+                       checker->modules.current_module);
         return;
+    }
+
+    // Phase 1b: resolve variant types (all type names are now registered)
+    if (node->as.enum_decl.type_param_count > 0) {
+        return; // Generic templates resolve variants during instantiation
     }
 
     // Data enums (any payload variant) do not support explicit integer assignments.
@@ -2042,23 +2060,13 @@ static void check_enum_decl(Checker* checker, Node* node) {
         return;
     }
 
-    // Check if this is a generic enum definition
-    if (node->as.enum_decl.type_param_count > 0) {
-        register_generic_def(checker, name, node->as.enum_decl.type_params,
-                             node->as.enum_decl.type_param_bounds,
-                             node->as.enum_decl.type_param_count, node);
-        return;
-    }
-
-    Type* enum_type = type_enum(name);
+    Symbol* sym       = checker_lookup(checker, name);
+    Type*   enum_type = sym->type;
 
     enum_type->as.enm.value_count         = value_count;
     enum_type->as.enm.value_names         = xmalloc(value_count * sizeof(char*));
     enum_type->as.enm.variant_types       = xmalloc(value_count * sizeof(Type**));
     enum_type->as.enm.variant_type_counts = xmalloc(value_count * sizeof(int));
-
-    checker_define(checker, name, SYM_TYPE, enum_type, 0, node->as.enum_decl.is_public,
-                   checker->modules.current_module);
 
     // Process enum variants
     for (int i = 0; i < value_count; i++) {
@@ -2072,12 +2080,10 @@ static void check_enum_decl(Checker* checker, Node* node) {
             enum_type->as.enm.has_data         = 1;
             enum_type->as.enm.variant_types[i] = xmalloc(type_count * sizeof(Type*));
             for (int j = 0; j < type_count; j++) {
-                Type* resolved = resolve_type(checker, val->as.enum_variant.types.nodes[j]);
-                enum_type->as.enm.variant_types[i][j] = resolved;
-                if (type_is_rc_managed(resolved)) {
-                    enum_type->as.enm.has_rc_fields = 1;
-                }
+                enum_type->as.enm.variant_types[i][j] =
+                    resolve_type(checker, val->as.enum_variant.types.nodes[j]);
             }
+            // has_rc_fields is computed in a separate pass after all types are resolved
         } else {
             enum_type->as.enm.variant_types[i] = NULL;
         }
@@ -2088,16 +2094,24 @@ static void check_enum_decl(Checker* checker, Node* node) {
 static void check_trait_decl(Checker* checker, Node* node) {
     const char* name = node->as.trait_decl.name;
 
-    // Check for redefinition (allow shadowing prelude symbols)
-    Symbol* existing = checker_lookup(checker, name);
-    if (existing && !is_prelude_symbol(existing)) {
-        check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+    // Phase 1a: register trait name only (no method signature resolution)
+    if (checker->registering_type_names) {
+        Symbol* existing = checker_lookup(checker, name);
+        if (existing && !is_prelude_symbol(existing)) {
+            check_error(checker, node->line, node->column, "Redefinition of type '%s'", name);
+            return;
+        }
+
+        Type* trait_type = type_trait(name);
+        checker_define(checker, name, SYM_TYPE, trait_type, 0, node->as.trait_decl.is_public,
+                       checker->modules.current_module);
         return;
     }
 
-    // Create TYPE_TRAIT with method signatures
-    Type* trait_type   = type_trait(name);
-    int   method_count = node->as.trait_decl.methods.count;
+    // Phase 1b: resolve method signatures (all type names are now registered)
+    Symbol* sym          = checker_lookup(checker, name);
+    Type*   trait_type   = sym->type;
+    int     method_count = node->as.trait_decl.methods.count;
 
     trait_type->as.trait.method_count    = method_count;
     trait_type->as.trait.method_names    = xmalloc(method_count * sizeof(char*));
@@ -2116,9 +2130,6 @@ static void check_trait_decl(Checker* checker, Node* node) {
     }
 
     checker->self_type = NULL;
-
-    checker_define(checker, name, SYM_TYPE, trait_type, 0, node->as.trait_decl.is_public,
-                   checker->modules.current_module);
 }
 
 // Type-check a type alias: resolve target type or register generic alias template
@@ -2869,14 +2880,75 @@ static void verify_deferred_trait_checks(Checker* checker) {
     }
 }
 
-// Type-check an entire program AST using four sequential passes.
+// Compute has_rc_fields for all struct/enum types after all fields and variant
+// types have been resolved. Uses a fixed-point loop because the flag depends
+// on other types' flags (e.g., enum A contains enum B which contains a struct —
+// B must be flagged before A can detect it as RC-managed).
+static void compute_has_rc_fields(Checker* checker, Node* ast) {
+    int changed;
+    do {
+        changed = 0;
+        for (int m = 0; m < ast->as.program.modules.count; m++) {
+            Node* mod = ast->as.program.modules.nodes[m];
+            if (!mod || mod->type != NODE_MODULE)
+                continue;
+
+            checker->modules.current_module =
+                (mod->as.module.name && strcmp(mod->as.module.name, "main") == 0)
+                    ? NULL
+                    : mod->as.module.name;
+
+            for (int i = 0; i < mod->as.module.decls.count; i++) {
+                Node* decl = mod->as.module.decls.nodes[i];
+                if (!decl)
+                    continue;
+
+                if (decl->type == NODE_STRUCT_DECL && decl->as.struct_decl.type_param_count == 0) {
+                    Symbol* sym = checker_lookup(checker, decl->as.struct_decl.name);
+                    if (!sym || sym->kind != SYM_TYPE || sym->type->as.struc.has_rc_fields)
+                        continue;
+                    Type* st = sym->type;
+                    for (int f = 0; f < st->as.struc.field_count; f++) {
+                        if (type_is_rc_managed(st->as.struc.field_types[f])) {
+                            st->as.struc.has_rc_fields = 1;
+                            changed                    = 1;
+                            break;
+                        }
+                    }
+                } else if (decl->type == NODE_ENUM_DECL &&
+                           decl->as.enum_decl.type_param_count == 0) {
+                    Symbol* sym = checker_lookup(checker, decl->as.enum_decl.name);
+                    if (!sym || sym->kind != SYM_TYPE || sym->type->as.enm.has_rc_fields)
+                        continue;
+                    Type* et = sym->type;
+                    for (int v = 0; v < et->as.enm.value_count; v++) {
+                        for (int t = 0; t < et->as.enm.variant_type_counts[v]; t++) {
+                            if (type_is_rc_managed(et->as.enm.variant_types[v][t])) {
+                                et->as.enm.has_rc_fields = 1;
+                                changed                  = 1;
+                                goto next_decl;
+                            }
+                        }
+                    }
+                next_decl:;
+                }
+            }
+        }
+    } while (changed);
+}
+
+// Type-check an entire program AST using sequential passes.
 //
 // The multi-pass design is required because declarations can reference each
 // other out of order (forward references). The passes are:
 //
-//   Pass 1: Forward-declare all types (structs, enums, traits) so that
-//           fields, function signatures, and type aliases can reference
-//           any type regardless of declaration order.
+//   Pre-pass: Register all type names (structs, enums, traits) as known
+//             symbols without resolving field types. This enables forward
+//             references and recursive/mutually-recursive types.
+//
+//   Pass 1: Resolve field types, variant types, and trait method signatures
+//           for all type declarations. All type names are now registered,
+//           so forward references and self-references work.
 //
 //   Pass 2: Register generic methods and trait impls on their GenericDef
 //           entries. This must happen before passes 3-4 because type aliases
@@ -2921,8 +2993,20 @@ int checker_check(Checker* checker, Node* ast) {
         checker->modules.current_module = saved_module;
     }
 
+    // Pre-pass: register all type names before resolving fields.
+    // This enables forward references and recursive/mutually-recursive types.
+    checker->registering_type_names = 1;
+    run_checker_pass(checker, ast, &k_checker_pass_specs[0]);
+    checker->registering_type_names = 0;
+
     for (size_t i = 0; i < sizeof(k_checker_pass_specs) / sizeof(k_checker_pass_specs[0]); i++) {
         run_checker_pass(checker, ast, &k_checker_pass_specs[i]);
+        // After pass 1 (field resolution), compute has_rc_fields for all types.
+        // This must happen after ALL fields/variants are resolved because the flag
+        // depends on other types' flags being set correctly.
+        if (i == 0) {
+            compute_has_rc_fields(checker, ast);
+        }
     }
 
     verify_deferred_trait_checks(checker);

@@ -219,6 +219,10 @@ struct Checker {
     // Type alias cycle detection
     int alias_depth;
 
+    // Forward reference support: when set, type decl functions only register
+    // the type name (no field/variant resolution). Cleared before the full pass.
+    int registering_type_names;
+
     // Hint for generic enum type inference (set by var_decl when declared type is known)
     Type* enum_target_hint;
 
