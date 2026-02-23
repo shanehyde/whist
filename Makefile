@@ -1,13 +1,16 @@
 MAKE=/usr/bin/make
 
-.PHONY: all w0 wc test test-verbose test-run test-errors compare clean format metrics complexity
+.PHONY: all w0 lib wc test test-verbose test-run test-errors compare clean format metrics complexity
 
-all: w0 wc
+all: w0 lib wc
 
 w0:
 	$(MAKE) -C w0
 
-wc: w0
+lib: w0
+	$(MAKE) -C lib
+
+wc: lib
 	$(MAKE) -C wc
 
 test:
@@ -27,6 +30,7 @@ compare: w0 wc
 
 clean:
 	$(MAKE) -C w0 clean
+	$(MAKE) -C lib clean
 	$(MAKE) -C wc clean
 
 format:

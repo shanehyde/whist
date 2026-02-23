@@ -1442,10 +1442,21 @@ static void emit_declarations(CodeGen* gen, Node* ast) {
         int is_non_target =
             (gen->target_module != NULL && strcmp(mod->as.module.name, gen->target_module) != 0);
 
-        // In separate compilation mode, skip sibling module bodies entirely.
+        // In separate compilation mode, skip sibling and library module bodies.
         // Their symbols are resolved at link time via extern prototypes emitted
         // in the forward declaration pass.
-        if (is_non_target && mod->as.module.is_sibling) {
+        int skip_body = (is_non_target && mod->as.module.is_sibling) ||
+                        ((is_non_target || gen->use_lib_archive) && mod->as.module.is_library);
+        if (skip_body) {
+            // Still process extern module declarations from skipped modules — they
+            // register function aliases (e.g., panic → __whist_panic) and emit
+            // #include directives needed by generic instantiations in this unit.
+            for (int i = 0; i < mod->as.module.decls.count; i++) {
+                Node* decl = mod->as.module.decls.nodes[i];
+                if (decl->type == NODE_EXTERN_MODULE) {
+                    emit_decl(gen, decl);
+                }
+            }
             continue;
         }
 

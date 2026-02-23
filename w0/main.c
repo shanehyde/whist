@@ -26,6 +26,7 @@ typedef struct {
     int         compile_only; // -c flag: compile to .o without linking
     const char* output_file;
     const char* lib_path;
+    const char* module_name; // --module-name: rename main module (for lib compilation)
 } MainOptions;
 
 // Run a program directly via fork/exec, bypassing the shell.
@@ -86,9 +87,18 @@ static CodeGenChecker make_codegen_checker(Checker* checker) {
     };
 }
 
+// Check if lib_path contains a pre-compiled libwhist.a archive.
+static int lib_archive_exists(const char* lib_path) {
+    if (!lib_path) return 0;
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/libwhist.a", lib_path);
+    return access(path, F_OK) == 0;
+}
+
 static int compile_to_c_targeted(const char* source, const char* source_path, const char* lib_path,
                                  int rc_debug, int test_mode, int line_directives, FILE* out,
-                                 const char* target_module) {
+                                 const char* target_module, const char* module_name,
+                                 int use_lib_archive) {
     ModuleLoader loader;
     module_loader_init(&loader, lib_path);
 
@@ -102,6 +112,21 @@ static int compile_to_c_targeted(const char* source, const char* source_path, co
         parser_free(&parser);
         module_loader_free(&loader);
         return 1;
+    }
+
+    // If --module-name is set, rename the main module and use it as target
+    const char* effective_target = target_module;
+    if (module_name) {
+        for (int m = 0; m < ast->as.program.modules.count; m++) {
+            Node* mod = ast->as.program.modules.nodes[m];
+            if (mod && mod->type == NODE_MODULE && strcmp(mod->as.module.name, "main") == 0) {
+                free(mod->as.module.name);
+                mod->as.module.name        = xstrdup(module_name);
+                mod->as.module.name_length = (int)strlen(module_name);
+                break;
+            }
+        }
+        effective_target = module_name;
     }
 
     Checker checker;
@@ -121,7 +146,8 @@ static int compile_to_c_targeted(const char* source, const char* source_path, co
     CodeGen gen;
     codegen_init(&gen, out, make_codegen_checker(&checker), rc_debug, test_mode, source_path,
                  line_directives);
-    gen.target_module = target_module;
+    gen.target_module    = effective_target;
+    gen.use_lib_archive  = use_lib_archive;
     codegen_emit(&gen, ast);
     codegen_free(&gen);
 
@@ -135,7 +161,7 @@ static int compile_to_c_targeted(const char* source, const char* source_path, co
 static int compile_to_c(const char* source, const char* source_path, const char* lib_path,
                         int rc_debug, int test_mode, int line_directives, FILE* out) {
     return compile_to_c_targeted(source, source_path, lib_path, rc_debug, test_mode,
-                                 line_directives, out, NULL);
+                                 line_directives, out, NULL, NULL, 0);
 }
 
 static int compile_and_run(const char* source_path, int argc, char** argv, const char* lib_path,
@@ -148,8 +174,9 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
 
     // --emit-c: just dump generated C to stdout and exit
     if (emit_c) {
-        int result =
-            compile_to_c(source, source_path, lib_path, rc_debug, 0, line_directives, stdout);
+        int result = compile_to_c_targeted(source, source_path, lib_path, rc_debug, 0,
+                                           line_directives, stdout, NULL, NULL,
+                                           lib_archive_exists(lib_path));
         free(source);
         return result;
     }
@@ -193,7 +220,9 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
         return 1;
     }
 
-    int result = compile_to_c(source, source_path, lib_path, rc_debug, 0, line_directives, c_file);
+    int has_lib_archive = lib_archive_exists(lib_path);
+    int result = compile_to_c_targeted(source, source_path, lib_path, rc_debug, 0, line_directives,
+                                       c_file, NULL, NULL, has_lib_archive);
     fclose(c_file);
     free(source);
 
@@ -205,7 +234,10 @@ static int compile_and_run(const char* source_path, int argc, char** argv, const
 
     // Compile with cc
     char cmd[1024];
-    if (lib_path) {
+    if (lib_path && has_lib_archive) {
+        snprintf(cmd, sizeof(cmd), "cc -o %s %s -I%s/include -L%s -lwhist", exe_path, c_path,
+                 lib_path, lib_path);
+    } else if (lib_path) {
         snprintf(cmd, sizeof(cmd), "cc -o %s %s -I%s/include %s/whist_runtime.c", exe_path, c_path,
                  lib_path, lib_path);
     } else {
@@ -256,8 +288,9 @@ static int compile_and_test(const char* source_path, const char* lib_path, int r
 
     // --emit-c: just dump generated C to stdout and exit
     if (emit_c) {
-        int result =
-            compile_to_c(source, source_path, lib_path, rc_debug, 1, line_directives, stdout);
+        int result = compile_to_c_targeted(source, source_path, lib_path, rc_debug, 1,
+                                           line_directives, stdout, NULL, NULL,
+                                           lib_archive_exists(lib_path));
         free(source);
         return result;
     }
@@ -301,7 +334,9 @@ static int compile_and_test(const char* source_path, const char* lib_path, int r
         return 1;
     }
 
-    int result = compile_to_c(source, source_path, lib_path, rc_debug, 1, line_directives, c_file);
+    int has_lib_archive = lib_archive_exists(lib_path);
+    int result = compile_to_c_targeted(source, source_path, lib_path, rc_debug, 1, line_directives,
+                                       c_file, NULL, NULL, has_lib_archive);
     fclose(c_file);
     free(source);
 
@@ -313,7 +348,10 @@ static int compile_and_test(const char* source_path, const char* lib_path, int r
 
     // Compile with cc
     char cmd[1024];
-    if (lib_path) {
+    if (lib_path && has_lib_archive) {
+        snprintf(cmd, sizeof(cmd), "cc -o %s %s -I%s/include -L%s -lwhist", exe_path, c_path,
+                 lib_path, lib_path);
+    } else if (lib_path) {
         snprintf(cmd, sizeof(cmd), "cc -o %s %s -I%s/include %s/whist_runtime.c", exe_path, c_path,
                  lib_path, lib_path);
     } else {
@@ -357,17 +395,20 @@ static int ends_with(const char* str, const char* suffix) {
 // Compile a .w file to a .o object file (separate compilation mode).
 // Emits C for the target file only, then invokes cc -c.
 static int compile_to_object(const char* source_path, const char* output_path, const char* lib_path,
-                             int rc_debug, int emit_c, int line_directives) {
+                             int rc_debug, int emit_c, int line_directives,
+                             const char* module_name) {
     char* source = read_file(source_path);
     if (!source) {
         fprintf(stderr, "Could not open file: %s\n", source_path);
         return 1;
     }
 
+    const char* target = module_name ? module_name : "main";
+
     // --emit-c: dump filtered C to stdout and exit
     if (emit_c) {
         int result = compile_to_c_targeted(source, source_path, lib_path, rc_debug, 0,
-                                           line_directives, stdout, "main");
+                                           line_directives, stdout, target, module_name, 0);
         free(source);
         return result;
     }
@@ -400,7 +441,7 @@ static int compile_to_object(const char* source_path, const char* output_path, c
     }
 
     int result = compile_to_c_targeted(source, source_path, lib_path, rc_debug, 0, line_directives,
-                                       c_file, "main");
+                                       c_file, target, module_name, 0);
     fclose(c_file);
     free(source);
 
@@ -441,7 +482,10 @@ static int link_objects(const char** obj_files, int obj_count, const char* outpu
         pos += snprintf(cmd + pos, sizeof(cmd) - pos, " %s", obj_files[i]);
     }
 
-    if (lib_path) {
+    if (lib_path && lib_archive_exists(lib_path)) {
+        pos += snprintf(cmd + pos, sizeof(cmd) - pos, " -I%s/include -L%s -lwhist", lib_path,
+                        lib_path);
+    } else if (lib_path) {
         pos += snprintf(cmd + pos, sizeof(cmd) - pos, " -I%s/include %s/whist_runtime.c", lib_path,
                         lib_path);
     }
@@ -474,6 +518,8 @@ static void print_usage(const char* program) {
     fprintf(stderr, "  --rc-debug\n");
     fprintf(stderr, "            Emit RC tracking debug output to stderr\n");
     fprintf(stderr, "  --emit-c  Dump generated C to stdout (works with run/test/-c)\n");
+    fprintf(stderr, "  --module-name <name>\n");
+    fprintf(stderr, "            Rename main module (for library compilation)\n");
     fprintf(stderr, "  --line-directives\n");
     fprintf(stderr, "            Emit #line directives in generated C\n");
     fprintf(stderr, "  -o <file> Output file\n");
@@ -486,7 +532,8 @@ static void print_usage(const char* program) {
 }
 
 static int is_option_with_value(const char* arg) {
-    return strcmp(arg, "--lib-path") == 0 || strcmp(arg, "-o") == 0;
+    return strcmp(arg, "--lib-path") == 0 || strcmp(arg, "-o") == 0 ||
+           strcmp(arg, "--module-name") == 0;
 }
 
 static void prescan_global_options(int argc, char** argv, MainOptions* opts) {
@@ -503,6 +550,8 @@ static void prescan_global_options(int argc, char** argv, MainOptions* opts) {
             opts->line_directives = 1;
         } else if (strcmp(argv[i], "-c") == 0) {
             opts->compile_only = 1;
+        } else if (strcmp(argv[i], "--module-name") == 0 && i + 1 < argc) {
+            opts->module_name = argv[++i];
         }
     }
 }
@@ -588,6 +637,9 @@ static void parse_main_options(int argc, char** argv, MainOptions* opts, int* ar
             opts->print_ast_checked = 1;
         } else if (strcmp(argv[*arg_idx], "-c") == 0) {
             opts->compile_only = 1;
+        } else if (strcmp(argv[*arg_idx], "--module-name") == 0 && *arg_idx + 1 < argc) {
+            (*arg_idx)++;
+            opts->module_name = argv[*arg_idx];
         } else if (strcmp(argv[*arg_idx], "-o") == 0 && *arg_idx + 1 < argc) {
             (*arg_idx)++;
             opts->output_file = argv[*arg_idx];
@@ -777,7 +829,7 @@ static int compile_and_link(const char** input_files, int input_count, const Mai
             unlink(temp_path);
 
             result = compile_to_object(input_files[i], obj_path, opts->lib_path, opts->rc_debug, 0,
-                                       opts->line_directives);
+                                       opts->line_directives, NULL);
             if (result == 0) {
                 all_objs[all_count++]   = obj_path;
                 temp_objs[temp_count++] = obj_path;
@@ -839,7 +891,8 @@ int main(int argc, char** argv) {
             return 1;
         }
         int result = compile_to_object(input_files[0], opts.output_file, opts.lib_path,
-                                       opts.rc_debug, opts.emit_c, opts.line_directives);
+                                       opts.rc_debug, opts.emit_c, opts.line_directives,
+                                       opts.module_name);
         free(input_files);
         return result;
     }

@@ -604,6 +604,7 @@ struct Node {
             int      name_length;
             NodeList decls;
             int      is_sibling; // 1 if from sibling import (not lib-path)
+            int      is_library; // 1 if from lib-path import (not sibling)
         } module;
 
         // Program

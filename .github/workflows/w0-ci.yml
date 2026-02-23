@@ -3,8 +3,8 @@ name: W0 Compiler CI
 on:
   pull_request:
     paths:
-      - 'w0/**'
-      - 'lib/**'
+      - "w0/**"
+      - "lib/**"
 
 jobs:
   build-and-test:
@@ -15,7 +15,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build compiler
-        working-directory: w0
         run: make
 
       - name: Build test runner
