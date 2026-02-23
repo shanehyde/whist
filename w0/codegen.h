@@ -164,6 +164,8 @@ typedef struct {
     const char* target_module;
     // 1 when emitting non-target module declarations (forces static linkage)
     int force_static;
+    // 1 when libwhist.a exists: skip library module bodies, emit extern declarations
+    int use_lib_archive;
 } CodeGen;
 
 // Codegen lifecycle:

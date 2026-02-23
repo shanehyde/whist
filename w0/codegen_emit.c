@@ -1446,18 +1446,21 @@ static void emit_non_generic_function_forward_decls(CodeGen* gen, Node* ast) {
         int is_non_target =
             (gen->target_module != NULL && strcmp(mod->as.module.name, gen->target_module) != 0);
 
-        // For sibling modules in separate compilation mode, emit extern prototypes
+        // For separately compiled modules (sibling or library), emit extern prototypes
         // for public functions only (private functions are not needed in this .o).
-        // For library modules, force everything to static (each .o gets its own copy).
-        if (is_non_target && mod->as.module.is_sibling) {
+        // For non-separate non-target modules, force everything to static.
+        int is_separate = (is_non_target && mod->as.module.is_sibling) ||
+                          ((is_non_target || gen->use_lib_archive) && mod->as.module.is_library);
+        if (is_separate) {
             gen->force_static = 0; // Public functions get implicit extern linkage
         } else {
             gen->force_static = is_non_target;
         }
 
-        int skip_private = is_non_target && mod->as.module.is_sibling;
+        int skip_private = is_separate;
 
-        // For sibling modules, use no prefix (their .o defines bare names)
+        // For sibling modules, use no prefix (their .o defines bare names).
+        // For library modules, keep the module prefix (their .o uses prefixed names).
         const char* module_prefix =
             (is_non_target && mod->as.module.is_sibling) ? NULL : module_forward_prefix(mod);
         for (int i = 0; i < mod->as.module.decls.count; i++) {
@@ -1473,7 +1476,7 @@ static void emit_non_generic_function_forward_decls(CodeGen* gen, Node* ast) {
                 if (!should_emit_non_generic_forward_decl(gen, fdn)) {
                     continue;
                 }
-                // Skip private functions from sibling modules (they're in the other .o)
+                // Skip private functions from separately compiled modules
                 if (skip_private && !fdn->is_public) {
                     continue;
                 }

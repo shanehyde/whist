@@ -325,6 +325,7 @@ int module_loader_import(ModuleLoader* loader, Parser* parser, Node* program, No
                         imported_module->as.module.name[module_length] = '\0';
                         imported_module->as.module.name_length         = (int)module_length;
                         imported_module->as.module.is_sibling          = is_sibling_import;
+                        imported_module->as.module.is_library          = !is_sibling_import;
                     }
                     nodelist_push(&program->as.program.modules, imported_module);
                 }
