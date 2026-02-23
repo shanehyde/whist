@@ -960,18 +960,32 @@ void emit_vec_typedefs(CodeGen* gen) {
     }
 }
 
-// Emit struct typedefs for each instantiated Box type (__Box_T)
+// Emit forward declarations for each instantiated Box type (__Box_T)
+// These must come early so that pointer types (__Box_T*) can be used
+// in enum/struct definitions before the full Box typedef is emitted.
+void emit_box_forward_decls(CodeGen* gen) {
+    for (int i = 0; i < gen->checker.box_count; i++) {
+        BoxInstance* inst       = &gen->checker.boxes[i];
+        const char*  elem_tname = type_mangle_name(inst->elem_type);
+        emit(gen, "typedef struct __Box_%s __Box_%s;\n", elem_tname, elem_tname);
+    }
+    if (gen->checker.box_count > 0)
+        emit(gen, "\n");
+}
+
+// Emit full struct definitions for each instantiated Box type (__Box_T)
+// Must come after enum and struct typedefs since Box embeds its element by value.
 void emit_box_typedefs(CodeGen* gen) {
     for (int i = 0; i < gen->checker.box_count; i++) {
         BoxInstance* inst       = &gen->checker.boxes[i];
         Type*        elem_type  = inst->elem_type;
         const char*  elem_tname = type_mangle_name(elem_type);
 
-        emit(gen, "typedef struct {\n");
+        emit(gen, "struct __Box_%s {\n", elem_tname);
         emit(gen, "    ");
         emit_resolved_type(gen, elem_type);
         emit(gen, " value;\n");
-        emit(gen, "} __Box_%s;\n\n", elem_tname);
+        emit(gen, "};\n\n");
     }
 }
 

@@ -31,6 +31,7 @@ void emit_tuple_typedefs(CodeGen* gen);
 void emit_struct_forward_decls(CodeGen* gen, Node* ast);
 void emit_span_typedefs(CodeGen* gen);
 void emit_vec_typedefs(CodeGen* gen);
+void emit_box_forward_decls(CodeGen* gen);
 void emit_box_typedefs(CodeGen* gen);
 void emit_enum_typedefs(CodeGen* gen, Node* ast);
 void emit_generic_enum_typedefs(CodeGen* gen, Node* ast);
