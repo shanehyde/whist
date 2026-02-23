@@ -1701,7 +1701,10 @@ static void emit_while_stmt(CodeGen* gen, Node* node) {
         emit(gen, "if (!__while_cond%d) break;\n", cond_id);
 
         // Emit loop body
+        int saved_ld = gen->rc.loop_depth;
+        gen->rc.loop_depth = gen->rc.depth + 1;
         emit_stmt_body(gen, node->as.while_stmt.body);
+        gen->rc.loop_depth = saved_ld;
         gen->out.indent--;
         emit_indent(gen);
         emit(gen, "}\n");
@@ -1720,7 +1723,10 @@ static void emit_while_stmt(CodeGen* gen, Node* node) {
     }
 
     gen->out.indent++;
+    int saved_ld = gen->rc.loop_depth;
+    gen->rc.loop_depth = gen->rc.depth + 1;
     emit_stmt_body(gen, node->as.while_stmt.body);
+    gen->rc.loop_depth = saved_ld;
     gen->out.indent--;
     emit_indent(gen);
     emit(gen, "}\n");
@@ -1759,7 +1765,10 @@ static void emit_for_stmt(CodeGen* gen, Node* node) {
     emit(gen, ") {\n");
 
     gen->out.indent++;
+    int saved_ld = gen->rc.loop_depth;
+    gen->rc.loop_depth = gen->rc.depth + 1;
     emit_stmt_body(gen, node->as.for_stmt.body);
+    gen->rc.loop_depth = saved_ld;
     gen->out.indent--;
     emit_indent(gen);
     emit(gen, "}\n");
@@ -1800,7 +1809,10 @@ static void emit_foreach_collection_stmt(CodeGen* gen, Node* node) {
         emit(gen, "%sdata[__foreach_%d];\n", access, idx_id);
     }
 
+    int saved_ld = gen->rc.loop_depth;
+    gen->rc.loop_depth = gen->rc.depth + 1;
     emit_stmt_body(gen, node->as.foreach_stmt.body);
+    gen->rc.loop_depth = saved_ld;
     gen->out.indent--;
     emit_indent(gen);
     emit(gen, "}\n");
@@ -1826,7 +1838,10 @@ static void emit_foreach_range_stmt(CodeGen* gen, Node* node) {
     emit_expr(gen, node->as.foreach_stmt.step);
     emit(gen, ") {\n");
     gen->out.indent++;
+    int saved_ld = gen->rc.loop_depth;
+    gen->rc.loop_depth = gen->rc.depth + 1;
     emit_stmt_body(gen, node->as.foreach_stmt.body);
+    gen->rc.loop_depth = saved_ld;
     gen->out.indent--;
     emit_indent(gen);
     emit(gen, "}\n");
@@ -1846,18 +1861,20 @@ static void emit_defer_stmt(CodeGen* gen, Node* node) {
     defer_push(gen, node->as.defer_stmt.stmt);
 }
 
-// Emit a break statement with RC cleanup for the current scope depth.
+// Emit a break statement with RC cleanup for all loop-body scopes.
+// Uses rc_cleanup_to_depth (emit-only) since break may be in a conditional
+// branch — the normal scope-exit cleanup handles var list removal.
 static void emit_break_stmt(CodeGen* gen, Node* node) {
     (void)node;
-    rc_cleanup_scope(gen, gen->rc.depth);
+    rc_cleanup_to_depth(gen, gen->rc.loop_depth);
     emit_indent(gen);
     emit(gen, "break;\n");
 }
 
-// Emit a continue statement with RC cleanup for the current scope depth.
+// Emit a continue statement with RC cleanup for all loop-body scopes.
 static void emit_continue_stmt(CodeGen* gen, Node* node) {
     (void)node;
-    rc_cleanup_scope(gen, gen->rc.depth);
+    rc_cleanup_to_depth(gen, gen->rc.loop_depth);
     emit_indent(gen);
     emit(gen, "continue;\n");
 }
@@ -2157,7 +2174,10 @@ static void emit_while_stmt_with_is_bindings(CodeGen* gen, Node* node) {
     }
 
     // Emit loop body
+    int saved_ld = gen->rc.loop_depth;
+    gen->rc.loop_depth = gen->rc.depth + 1;
     emit_stmt_body(gen, node->as.while_stmt.body);
+    gen->rc.loop_depth = saved_ld;
 
     // End-of-iteration cleanup for all is_expr temps
     for (int i = 0; i < cleanup_len; i++) {

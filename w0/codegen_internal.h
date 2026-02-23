@@ -31,6 +31,7 @@ const char* get_inc_func_for_type(Type* t);
 void        rc_push_var(CodeGen* gen, const char* name, Type* type);
 void        rc_cleanup_scope(CodeGen* gen, int depth);
 void        rc_cleanup_all(CodeGen* gen, const char* skip_name);
+void        rc_cleanup_to_depth(CodeGen* gen, int target_depth);
 Type*       rc_get_var_type(CodeGen* gen, const char* name);
 int         rc_is_tracked(CodeGen* gen, const char* name);
 
