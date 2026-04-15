@@ -1941,9 +1941,11 @@ static void check_func_decl(Checker* checker, Node* node) {
 
     // For methods, inject 'self' into scope and set private field access context.
     const char* old_receiver = checker->current_method_receiver;
+    int         old_in_init  = checker->in_init;
     if (is_method) {
         define_method_self_symbol(checker, receiver_type, fdn->receiver_is_const);
         checker->current_method_receiver = receiver_type;
+        checker->in_init                 = (strcmp(name, "init") == 0);
     }
 
     define_func_params_in_scope(checker, fdn, func_type);
@@ -1954,6 +1956,7 @@ static void check_func_decl(Checker* checker, Node* node) {
     checker->modules.current_accessible_modules_count = old_accessible_modules_count;
 
     checker->current_method_receiver = old_receiver;
+    checker->in_init                 = old_in_init;
     checker->current_func_return     = old_return;
     checker_pop_scope(checker);
     free(mangled_name);

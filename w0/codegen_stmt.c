@@ -406,7 +406,7 @@ static int emit_rc_member_assign_stmt(CodeGen* gen, Node* expr) {
 
     Node* member    = expr->as.assign.target;
     int   obj_is_rc = member->as.member.object->type == NODE_IDENT &&
-                    rc_is_tracked(gen, member->as.member.object->as.ident.name);
+                      rc_is_tracked(gen, member->as.member.object->as.ident.name);
 
     if (obj_is_rc) {
         const char* obj_name  = member->as.member.object->as.ident.name;
@@ -696,11 +696,11 @@ static void emit_var_decl_rc_copy(CodeGen* gen, Node* node) {
     Type* rc_type  = node->as.var_decl.resolved_type;
     Node* init     = node->as.var_decl.init;
     int   skip_inc = init->type == NODE_CALL || init->type == NODE_STRING_LIT ||
-                   init->type == NODE_STRING_INTERP ||
-                   (init->type == NODE_BINARY && init->as.binary.is_string_op) ||
-                   (init->type == NODE_SLICE && init->as.slice.is_string) ||
-                   (rc_type && rc_type->kind == TYPE_ENUM && init->type == NODE_ENUM_VALUE) ||
-                   (init->type == NODE_ENUM_VALUE && init->as.enum_value.is_module_call);
+                     init->type == NODE_STRING_INTERP ||
+                     (init->type == NODE_BINARY && init->as.binary.is_string_op) ||
+                     (init->type == NODE_SLICE && init->as.slice.is_string) ||
+                     (rc_type && rc_type->kind == TYPE_ENUM && init->type == NODE_ENUM_VALUE) ||
+                     (init->type == NODE_ENUM_VALUE && init->as.enum_value.is_module_call);
     if (!skip_inc && rc_type) {
         const char* inc_fn = get_inc_func_for_type(rc_type);
         emit_indent(gen);

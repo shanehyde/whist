@@ -1108,8 +1108,11 @@ static int check_member_assignment_mutability(Checker* checker, Node* target, in
             return 0;
         }
     }
-    if (sem_info_get_member_is_const_access(checker->sem, target,
-                                            target->as.member.is_const_access)) {
+    // In init(), allow assigning to const fields of self directly.
+    int in_init_self =
+        checker->in_init && obj->type == NODE_IDENT && strcmp(obj->as.ident.name, "self") == 0;
+    if (!in_init_self && sem_info_get_member_is_const_access(checker->sem, target,
+                                                             target->as.member.is_const_access)) {
         check_error(checker, line, column, "Cannot assign to const field '%s'",
                     target->as.member.name);
         return 0;

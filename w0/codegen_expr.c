@@ -192,10 +192,10 @@ static void emit_enum_value(CodeGen* gen, Node* node) {
         return;
     }
 
-    const char* enum_name    = codegen_enum_value_resolved_name(gen, node);
-    int         enum_len     = codegen_enum_value_resolved_name_length(gen, node);
-    int         is_data_enum = sem_info_get_enum_value_is_data_enum(gen->checker.sem, node,
-                                                                    node->as.enum_value.is_data_enum);
+    const char* enum_name = codegen_enum_value_resolved_name(gen, node);
+    int         enum_len  = codegen_enum_value_resolved_name_length(gen, node);
+    int is_data_enum      = sem_info_get_enum_value_is_data_enum(gen->checker.sem, node,
+                                                                 node->as.enum_value.is_data_enum);
 
     if (!is_data_enum) {
         // Simple enum: emit qualified value name (EnumName_ValueName)
