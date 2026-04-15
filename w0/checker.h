@@ -209,6 +209,7 @@ struct Checker {
     Scope* scope;
     Type*  current_func_return; // Return type of current function
     int    in_loop;             // Are we inside a loop?
+    int    in_init;             // Are we inside an init() method?
     int    error_count;
 
     CheckerModules    modules;

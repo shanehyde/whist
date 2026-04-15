@@ -1391,7 +1391,9 @@ static void check_instantiated_struct_method_body(Checker* checker, GenericInsta
 
     // Set private field access context for generic method body.
     const char* old_receiver         = checker->current_method_receiver;
+    int         old_in_init          = checker->in_init;
     checker->current_method_receiver = base_name;
+    checker->in_init                 = (strcmp(mfdn->name, "init") == 0);
 
     // Inject 'self' into scope.
     checker_define(checker, "self", SYM_VAR, struct_type, mfdn->receiver_is_const, 0, NULL);
@@ -1411,6 +1413,7 @@ static void check_instantiated_struct_method_body(Checker* checker, GenericInsta
     checker->modules.current_accessible_modules       = old_accessible_modules;
     checker->modules.current_accessible_modules_count = old_accessible_modules_count;
     checker->current_method_receiver                  = old_receiver;
+    checker->in_init                                  = old_in_init;
     checker->current_func_return                      = old_return;
     checker_pop_scope(checker);
 }

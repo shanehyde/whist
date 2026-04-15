@@ -818,10 +818,10 @@ void emit_vec_user_methods(CodeGen* gen, Node* ast) {
 // Emit __Vec_T_cleanup functions that free Vec elements and data array
 void emit_vec_cleanup(CodeGen* gen) {
     for (int i = 0; i < gen->checker.vec_count; i++) {
-        VecInstance* inst        = &gen->checker.vecs[i];
-        Type*        elem_type   = inst->elem_type;
-        const char*  elem_tname  = type_mangle_name(elem_type);
-        int          elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC ||
+        VecInstance* inst       = &gen->checker.vecs[i];
+        Type*        elem_type  = inst->elem_type;
+        const char*  elem_tname = type_mangle_name(elem_type);
+        int elem_is_ptr = (elem_type->kind == TYPE_STRUCT || elem_type->kind == TYPE_VEC ||
                            elem_type->kind == TYPE_BOX || elem_type->kind == TYPE_STRINGBUILDER);
         int elem_is_rc_enum = (elem_type->kind == TYPE_ENUM && elem_type->as.enm.has_rc_fields);
 

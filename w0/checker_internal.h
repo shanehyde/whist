@@ -30,21 +30,21 @@ GenericDef*      lookup_generic_def(Checker* checker, const char* name);
 GenericInstance* lookup_generic_instance(Checker* checker, const char* mangled_name);
 
 // --- From checker_types.c: generic free function management ---
-void            register_generic_func_def(Checker* checker, const char* name, char** type_params,
-                                          char** type_param_bounds, int type_param_count, Node* decl);
-GenericFuncDef* lookup_generic_func_def(Checker* checker, const char* name);
+void register_generic_func_def(Checker* checker, const char* name, char** type_params,
+                               char** type_param_bounds, int type_param_count, Node* decl);
+GenericFuncDef*      lookup_generic_func_def(Checker* checker, const char* name);
 GenericFuncInstance* lookup_generic_func_instance(Checker* checker, const char* mangled_name);
 GenericFuncInstance* instantiate_generic_func(Checker* checker, GenericFuncDef* def,
                                               Type** type_args, int type_arg_count, int line,
                                               int col);
 
 // --- From checker_types.c: method-level generic function management ---
-void                 register_generic_method_func_def(Checker* checker, const char* receiver_type,
-                                                      const char* method_name, char** combined_params,
-                                                      char** combined_bounds, int combined_count,
-                                                      int receiver_param_count, Node* decl);
-GenericFuncDef*      lookup_generic_method_func_def(Checker* checker, const char* receiver_type,
-                                                    const char* method_name);
+void            register_generic_method_func_def(Checker* checker, const char* receiver_type,
+                                                 const char* method_name, char** combined_params,
+                                                 char** combined_bounds, int combined_count,
+                                                 int receiver_param_count, Node* decl);
+GenericFuncDef* lookup_generic_method_func_def(Checker* checker, const char* receiver_type,
+                                               const char* method_name);
 GenericFuncInstance* instantiate_generic_method_func(Checker* checker, GenericFuncDef* def,
                                                      Type** combined_args, int combined_count,
                                                      Type* receiver_concrete, int line, int col);
